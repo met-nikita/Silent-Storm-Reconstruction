@@ -1,0 +1,48 @@
+#ifndef __GMEMFORMAT_H_
+#define __GMEMFORMAT_H_
+#if _MSC_VER > 1000
+#pragma once
+#endif // _MSC_VER > 1000
+////////////////////////////////////////////////////////////////////////////////////////////////////
+#include "DG.h"
+////////////////////////////////////////////////////////////////////////////////////////////////////
+namespace NGfx
+{
+	class CGeometry;
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
+namespace NGScene
+{
+class CObjectInfo;
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// special class for polylines
+class CMemGeometry: public CPtrFuncBase<NGfx::CGeometry>
+{
+	OBJECT_BASIC_METHODS(CMemGeometry);
+	ZDATA
+	vector<CVec3> points;
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&points); return 0; }
+protected:
+	virtual void Recalc();
+public:
+	CMemGeometry() {}
+	CMemGeometry( const vector<CVec3> &points );
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
+class CMemObjectInfo: public CPtrFuncBase<CObjectInfo>
+{
+	OBJECT_BASIC_METHODS(CMemObjectInfo);
+	ZDATA
+	vector<CVec3> points, normals;
+	vector<STriangle> tris;
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&points); f.Add(3,&normals); f.Add(4,&tris); return 0; }
+protected:
+	virtual void Recalc();
+public:
+	CMemObjectInfo() {}
+	CMemObjectInfo( const vector<STriangle> &tris, const vector<CVec3> &points, const vector<CVec3> &normals );
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
+} // namespace
+////////////////////////////////////////////////////////////////////////////////////////////////////
+#endif

@@ -1,0 +1,28 @@
+#ifndef __aiTerrain_H_
+#define __aiTerrain_H_
+#if _MSC_VER > 1000
+#pragma once
+#endif // _MSC_VER > 1000
+////////////////////////////////////////////////////////////////////////////////////////////////////
+#include "DG.h"
+class CTerrainPart;
+////////////////////////////////////////////////////////////////////////////////////////////////////
+namespace NAI
+{
+////////////////////////////////////////////////////////////////////////////////////////////////////
+class CGeometryInfo;
+class CTerrainGeometry: public CPtrFuncBase<CGeometryInfo>
+{
+	OBJECT_BASIC_METHODS(CTerrainGeometry);
+	ZDATA
+	CDGPtr< CPtrFuncBase<CTerrainPart> > pPart;
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&pPart); return 0; }
+protected:
+	virtual bool NeedUpdate() { return pPart.Refresh(); }
+	virtual void Recalc();
+public:
+	CTerrainGeometry( CPtrFuncBase<CTerrainPart> *_pPart = 0 ): pPart( _pPart ) {}
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
+}
+#endif

@@ -1,0 +1,2401 @@
+[VS]
+;register mapping for vertex shaders 
+;v0 = pos; v1 = packed normal; v3 = tex (packed to shorts); v6 = texLM (packed to shorts)
+;v4 = packed tex u vector, v5 = packed tex v vector
+
+proc PureGeometry
+	m4x4 oPos, v0, c10
+
+func CalcNormal normal
+	mad normal.xyz, v1, c3.xxx, c3.yyy
+
+func CalcVectors normal texU texV
+	CalcNormal normal
+	mad texU.xyz, v4, c3.xxx, c3.yyy
+	mad texV.xyz, v5, c3.xxx, c3.yyy
+
+func MakeRegisterMap resT regScale
+	locals pos, temp
+	m4x4 pos, v0, c10
+	mov oPos, pos
+	mul temp.xy, regScale.zw, pos.w
+	mad pos.xy, pos.xy, regScale.xy, temp.xy
+	mov resT.xyzw, pos.xyww
+
+func MakeRegisterMap2 resT resT2 regScale
+	locals pos, temp
+	m4x4 pos, v0, c10
+	mov oPos, pos
+	mov temp, pos
+	mul temp.xy, regScale.zw, temp.w
+	mad temp.xy, pos.xy, regScale.xy, temp.xy
+	mov resT.xyzw, temp.xyww
+	mov resT2.xyzw, temp.xyww
+
+proc Glow
+	locals pos, normal
+	CalcNormal normal
+	mul pos, normal.xyzz, c14.xxxw
+	add pos, v0, pos
+	m4x4 oPos, pos, c10
+	mov oD0, c15
+
+; color should be stored to texU
+proc TransparentMap
+	m4x4 oPos, v0, c10
+	mov oD0.w, v4
+	mul oD0.xyz, v4.xyz, v4.w
+	mul oT0.xy, v3, c6.xx
+	mad oT1.xy, v6, c6.yy, c6.zz
+
+proc Texture
+	m4x4 oPos, v0, c10
+	mul oT0.xy, v3, c6.xx
+
+proc TextureLM
+	m4x4 oPos, v0, c10
+	mad oT0.xy, v6, c6.yy, c6.zz
+	
+proc TextureTexU
+	m4x4 oPos, v0, c10
+	mul oT0.xy, v3, c6.xx
+	mov oD0, v4.x
+
+proc Render2D
+	m4x4 oPos, v0, c10
+	mul oT0.xy, v3, c16
+	mov oD0, v4
+
+proc Render2D2
+	m4x4 oPos, v0, c10
+	mul oT0.xy, v3, c16
+	mul oT1.xy, v3, c16
+	mov oD0, v4
+
+proc TextureSqrtModulate
+	m4x4 oPos, v0, c10
+	mul oT0.xy, v3, c16
+	mov oD0, c17
+
+proc DrawTexU
+	m4x4 oPos, v0, c10
+	mov oD0, v4
+
+proc ConstLightTexture
+	m4x4 oPos, v0, c10
+	mul oT0.xy, v3, c6.xx
+	mov oD0, c16
+
+proc ConstLight
+	m4x4 oPos, v0, c10
+	mov oD0, c16
+
+func CalcDynamicAmbient outRes normal
+	locals res, dir, dir1
+	max dir.xyz, normal, c0
+	mul res.xyz, c25, dir.x
+	mad res.xyz, c27, dir.y, res
+	mad res.xyz, c29, dir.z, res
+	max dir1.xyz, -normal, c0
+	mad res.xyz, c26, dir1.x, res
+	mad res.xyz, c28, dir1.y, res
+	mad outRes.xyz, c30, dir1.z, res
+
+proc DynamicAmbient
+	m4x4 oPos, v0, c10
+	locals normal
+	CalcNormal normal
+	CalcDynamicAmbient oD0, normal
+
+proc LMPDSolid
+	MakeRegisterMap oT0, c7
+	mov oD0, c16
+
+proc LMPDTexture
+	MakeRegisterMap oT0, c7
+	mul oT1.xy, v3, c6.xx
+
+proc DynLMPDSolid
+	m4x4 oPos, v0, c10
+	locals normal, color
+	CalcNormal normal
+	CalcDynamicAmbient color, normal
+	mul oD0.xyz, color, c16
+
+proc DynLMPDTexture
+	m4x4 oPos, v0, c10
+	locals normal, color
+	CalcNormal normal
+	CalcDynamicAmbient oD0, normal
+	mul oT0.xy, v3, c6.xx
+
+func CalcDirLightD0 color
+	locals light, normal
+	CalcNormal normal
+	dp3 light.x, normal, c15
+	mul oD0, color, light.x
+
+func CalcDirAmbLightDO lightColor ambientColor normal
+	locals light
+	dp3 light.x, normal, c15
+	max light.x, light.x, c0.x
+	mul light, lightColor, light.x
+	add oD0, light, ambientColor
+
+proc Light
+	m4x4 oPos, v0, c10
+	CalcDirLightD0 c16
+
+proc LightPlusAmbient
+	m4x4 oPos, v0, c10
+	locals normal
+	CalcNormal normal
+	CalcDirAmbLightDO c16 c17 normal
+
+proc PerPixelDiffuse
+	m4x4 oPos, v0, c10
+	locals normal
+	CalcNormal normal
+	mov oT0.xyz, normal
+	mov oD0, c16
+
+proc DirectionalLightTexture
+	m4x4 oPos, v0, c10
+	CalcDirLightD0 c14
+	mul oT0.xy, v3, c6.xx
+	
+proc DirectionalLightTexturePP
+	m4x4 oPos, v0, c10
+	mul oT0.xy, v3, c6.xx
+	mad oT1.xyz, v1, c3.xxx, c3.yyy
+	mov oD0, c14
+
+proc CLSkyCheck
+	m4x4 oPos, v0, c10
+	locals rDepth
+	dp4 rDepth, v0, c16
+	add oD0, rDepth, c19       // depth
+	dp4 oT0.x, v0, c17         // depth map projection
+	dp4 oT0.y, v0, c18
+
+proc CLSkyLight
+	m4x4 oPos, v0, c10
+	CalcDirLightD0 c14.x
+
+proc CLSkyLight3
+	m4x4 oPos, v0, c10
+	locals light, normal
+	CalcNormal normal
+	dp3 light.x, normal, c31
+	dp3 light.y, normal, c32
+	dp3 light.z, normal, c33
+	mul oD1, c14, light.xyzz
+	dp4 oD0.x, v0, c16
+	dp4 oT0.x, v0, c17         // depth map projection
+	dp4 oT0.y, v0, c18
+	dp4 oD0.y, v0, c25
+	dp4 oT1.x, v0, c26         // depth map projection
+	dp4 oT1.y, v0, c27
+	dp4 oD0.z, v0, c28
+	dp4 oT2.x, v0, c29         // depth map projection
+	dp4 oT2.y, v0, c30
+	
+proc DirectionalAmbientLightTexture
+	m4x4 oPos, v0, c10
+	locals normal
+	CalcNormal normal
+	CalcDirAmbLightDO c14 c16 normal
+	mul oT0.xy, v3, c6.xx
+
+; res.w holds squared source length
+func Normalize3 res
+	locals rLeng
+	dp3 res.w, res, res
+	rsq rLeng.w, res.w
+	mul res.xyz, res.xyz, rLeng.w
+
+; res.w holds squared source length, leng.w holds length multiplier
+func Normalize3Mul res leng
+	locals rLeng
+	dp3 res.w, res, res
+	rsq rLeng.w, res.w
+	mul rLeng.w, rLeng.w, leng.w
+	mul res.xyz, res.xyz, rLeng.w
+
+// res.w has squared distance between s1 & s2
+func AddNormalize3 res s1 s2
+	locals rLeng
+	add res.xyz, s1.xyz, s2.xyz
+	Normalize3 res
+
+func CalcCameraDir res
+	AddNormalize3 res, c9, -v0
+
+proc NHCalcer
+	m4x4 oPos, v0, c10
+	locals cameraDir, lightDir, halfVector
+	CalcCameraDir cameraDir
+	mad lightDir.xyz, -v0.xyz, c15.www, c15.xyz // r5 = (L),  world space 
+	Normalize3 lightDir
+	add halfVector.xyz, cameraDir.xyz, lightDir.xyz // r2 = not normalised half vector (H)
+	mad oT0.xyz, v1, c3.xxx, c3.yyy // N
+	mov oT1.xyz, halfVector  // H
+	mad oT2.xyz, lightDir, c2.xxx, c2.xxx  // L
+
+func CalcLocalVector res globalVec normal texU texV
+	dp3 res.x, texU, globalVec
+	dp3 res.y, texV, globalVec
+	dp3 res.z, normal, globalVec          // r4 = local space normal
+
+proc NHCalcBumped
+	m4x4 oPos, v0, c10
+	locals cameraDir, lightDir, halfVector, local, normal, texU, texV
+	CalcVectors normal, texU, texV
+	CalcCameraDir cameraDir
+	mad lightDir.xyz, -v0.xyz, c15.www, c15.xyz // r5 = (L),  world space 
+	Normalize3 lightDir
+	add halfVector, lightDir, cameraDir // not normalised half vector (H)
+	CalcLocalVector local halfVector normal texU texV
+	mov oT1.xyz, local // H
+	CalcLocalVector local lightDir normal texU texV
+	Normalize3 local
+	mad oT2.xyz, local, c2.xxx, c2.xxx  // L
+	mul oT0.xy, v3, c6.xx // texture coords
+	mov local.xy, c0
+	mov local.z, c1
+
+// store tex coords to T0&T1, dp3 & color params to D0 & D1
+func CalcFastBump normal, texU, texV
+	locals localLightDir
+	CalcLocalVector localLightDir c15 normal texU texV
+	Normalize3 localLightDir
+	locals rTest
+	dp3 rTest.x, normal, c15
+	sge rTest.x, rTest.x, c0.x
+	mul oD1.xyz, rTest.xxx, c14.xyz
+	mad oD0.xyz, localLightDir.xyz, c2.xxx, c2.xxx
+	mul oT0.xy, v3, c6.xx
+	mul oT1.xy, v3, c6.xx
+
+proc FastDirBumpLight
+	m4x4 oPos, v0, c10
+	locals normal, texU, texV
+	CalcVectors normal, texU, texV
+	CalcFastBump normal, texU, texV
+
+proc FastDirTranspBumpLight
+	m4x4 oPos, v0, c10
+	locals localLightDir, normal, texU, texV
+	CalcVectors normal, texU, texV
+	CalcLocalVector localLightDir c15 normal texU texV
+	Normalize3 localLightDir
+	mov oD1.xyz, c14.xyz
+	mad oD0.xyz, localLightDir.xyz, c2.xxx, c2.xxx
+	mul oT0.xy, v3, c6.xx
+	mul oT1.xy, v3, c6.xx
+
+// oT0 = local light dir, oT1 & oT2 - texture, oD0 - side & color multiplier
+func PreciseDirBumpLightBase normal texU texV
+	locals localLightDir
+	CalcLocalVector localLightDir c15 normal texU texV
+	Normalize3 localLightDir
+	mov oT0.xyz, localLightDir
+	locals rTest
+	dp3 rTest.x, normal, c15
+	sge rTest.x, rTest.x, c0.x
+	mul oD0, rTest.x, c14
+
+proc PreciseDirBumpLightTex
+	m4x4 oPos, v0, c10
+	locals normal, texU, texV
+	CalcVectors normal, texU, texV
+	PreciseDirBumpLightBase normal texU texV
+	mul oT1.xy, v3, c6.xx
+	mul oT2.xy, v3, c6.xx
+
+proc PreciseDirBumpLight
+	m4x4 oPos, v0, c10
+	locals normal, texU, texV
+	CalcVectors normal, texU, texV
+	PreciseDirBumpLightBase normal texU texV
+	mul oT1.xy, v3, c6.xx
+
+proc DirectionalTestSmoothed
+	m4x4 oPos, v0, c10
+	locals rDepth
+	dp4 rDepth, v0, c16           
+	add oD0, rDepth, c19       // depth
+	dp4 oT0.x, v0, c25         // depth map projection
+	dp4 oT0.y, v0, c26
+	dp4 oT0.zw, v0, c28
+	mad oD1.w, -v1.z, c4.y, c4.y
+
+proc DirectionalTest
+	m4x4 oPos, v0, c10
+	locals rDepth
+	dp4 rDepth, v0, c16
+	add oD0, rDepth, c19       // depth
+	dp4 oT0.x, v0, c17         // depth map projection
+	dp4 oT0.y, v0, c18
+
+proc DirectionalTestP
+	m4x4 oPos, v0, c10
+	locals rDepth
+	dp4 rDepth, v0, c16
+	add oD0, rDepth, c19       // depth
+	dp4 oT0.x, v0, c25         // depth map projection
+	dp4 oT0.y, v0, c26
+	dp4 oT0.zw, v0, c28
+
+proc ParticleLMDirectionalTest
+	m4x4 oPos, v6, c10
+	locals rDepth
+	dp4 rDepth, v0, c16
+	add oD0, rDepth, c19       // depth
+	dp4 oT0.x, v0, c25         // depth map projection
+	dp4 oT0.y, v0, c26
+	dp4 oT0.zw, v0, c28
+
+proc Depth
+	m4x4 oPos, v0, c10
+	dp4 oD0, v0, c16
+
+proc DepthTextureMax
+	m4x4 oPos, v0, c10
+	dp4 oD0, v0, c16
+	dp4 oT0.x, v0, c17
+	dp4 oT0.y, v0, c18
+
+; params.x =  - distance to plane
+; alpha = h / (R/4)
+; params.w = fFall / ( 1 + h^2 )
+; params.z = sqrt(1+h^2) - mapping w
+func CalcPointLightMapping lightDir, params normal
+	sub lightDir.xyz, c15, v0       // r0 = dir to light center
+	dp3 params.x, lightDir, normal      // params.x = h(distance to plane)
+	mul params.y, params.x, c21.z
+	mul params.y, params.y, c4.z    // params.y = alpha
+	mul params.y, params.y, params.y // alpha^2
+	add params.w, params.y, c1.x
+	rcp params.w, params.w
+	rsq params.z, params.w
+	mul params.y, params.y, params.y
+	mad params.y, params.y, params.y, c4.w // alpha^8 + 4096
+	rcp params.y, params.y
+	mul params.y, params.y, c4.w
+	mul params.w, params.y, params.w
+
+// params.x = h - distance to plane
+func CalcPointLightTex targetTexOut, lightDir, params, texU, texV
+	locals texCoord
+	dp3 texCoord.x, texU, lightDir
+	dp3 texCoord.y, texV, lightDir
+;	mul texCoord.w, params.x, c4.z
+	mul texCoord.w, params.x, c2.y
+;	mul texCoord.z, texCoord.w, c2.x
+	mul texCoord.z, params.x, c2.x
+
+;	mul texCoord.xy, texCoord.xy, c21.z
+;	mul texCoord.xy, texCoord.xy, c4.z
+	mul texCoord.zw, params.xx, c2.xy
+;	mad texCoord.xy, texCoord.xy, c2.xx, texCoord.zz
+;	mov targetTexOut.xyzw, texCoord.xyww
+
+	mad texCoord.xy, texCoord.xy, c2.xx, texCoord.zz
+	mov targetTexOut.xyzw, texCoord.xyww
+
+proc PointFalloff
+	m4x4 oPos, v0, c10
+	locals lightDir, temp, texCoord, normal, texU, texV
+	CalcVectors normal, texU, texV
+	CalcPointLightMapping lightDir, temp, normal
+	mul oD0, temp.w, c16    // attenutation to diffuse
+	CalcPointLightTex oT0, lightDir, temp, texU, texV
+
+func CalcPointLight mulColor normal texU texV
+	locals lightDir, temp
+	CalcPointLightMapping lightDir, temp, normal
+	sge lightDir.w, temp.x, c0.x       // params.z = h > 0
+	mul lightDir.w, lightDir.w, temp.w   // params.z = final color
+	mul oD0.xyz, lightDir.w, mulColor
+	CalcPointLightTex oT0, lightDir, temp, texU, texV
+
+proc PointLight
+	m4x4 oPos, v0, c10
+	locals normal, texU, texV
+	CalcVectors normal texU, texV
+	CalcPointLight c16, normal, texU, texV
+
+proc PointLightTex
+	m4x4 oPos, v0, c10
+	locals normal, texU, texV
+	CalcVectors normal, texU, texV
+	CalcPointLight c14, normal, texU, texV
+	mul oT1.xy, v3, c6.xx
+
+proc PointBumpLightPreciseTex
+	m4x4 oPos, v0, c10
+;	  calc point light attenuation
+	locals lightDir, temp, texCoord, normal, texU, texV
+	CalcVectors normal, texU, texV
+	CalcPointLightMapping lightDir, temp, normal
+	locals rTest
+	dp3 rTest.x, normal, lightDir
+	sge rTest.x, rTest.x, c0.x
+	mul rTest.x, rTest.x, temp.w // attenutation to diffuse
+	mul oD0, rTest.x, c14
+	CalcPointLightTex oT0, lightDir, temp, texU, texV
+;	  calc bump related parameters
+	locals localLightDir
+	CalcLocalVector localLightDir lightDir normal texU texV
+	Normalize3 localLightDir
+	mov oT1.xyz, localLightDir
+	mul oT2.xy, v3, c6.xx
+	mul oT3.xy, v3, c6.xx
+
+proc PointCubeMapDepth
+	m4x4 oPos, v0, c10
+	locals vDir
+	add vDir, v0, -c15
+	mad oD0.xyz, vDir, c16.yyy, c16.xxx
+	mov oT0.xyz, vDir
+
+proc CLPointLight
+	m4x4 oPos, v0, c10
+	locals normal, texU, texV
+	CalcVectors normal, texU, texV
+	CalcPointLight c14, normal, texU, texV
+	
+proc CLPointDepthCheck
+	m4x4 oPos, v0, c10
+	locals vDir
+	add vDir, v0, -c15
+	mad oD0.xyz, vDir, c16.yyy, c16.xxx
+	mov oT0.xyz, vDir
+	mov oT1.xyz, vDir
+
+proc CLPointLightShadowed
+	m4x4 oPos, v0, c10
+	locals normal, texU, texV
+	CalcVectors normal, texU, texV
+	CalcPointLight c14, normal, texU, texV
+	locals vDir
+	add vDir, v0, -c15
+	mad oD1.xyz, vDir, c16.yyy, c16.xxx
+	mov oT1.xyz, vDir
+	mov oT2.xyz, vDir
+
+proc PerspeciveDepth
+	locals pos
+	m4x4 pos, v0, c10
+	mov oPos, pos
+	rcp pos.w, pos.w
+	mul pos.z, pos.z, pos.w
+	add oD0, c1.x, -pos.z
+
+proc SpotShadow
+	m4x4 oPos, v0, c10
+	locals pos, temp
+	m4x4 pos, v0, c14
+	rcp temp.w, pos.w
+	mul temp.w, pos.z, temp.w
+	add oD0, c1.x, -temp.w
+	//rcp r0.w, r0.w
+	//mul r0.xy, r0.xy, r0.w
+	mov oT0.xyzw, pos.xyzw
+
+func Fog outTex
+	locals pos
+	m4x4 pos, v0, c10
+	mov oPos, pos
+	mov pos.z, v0.z
+	mul outTex.xy, pos.zw, c14.xy
+
+proc JustFog
+	Fog oT0
+	
+proc FoggedParticle
+	Fog oT0
+	mul oT1.xy, v3, c6.xx
+
+proc FoggedLitParticle
+	Fog oT2
+	mov oD0.w, v4
+	mul oD0.xyz, v4.xyz, v4.w
+	mul oT0.xy, v3, c6.xx
+	mad oT1.xy, v6, c6.yy, c6.zz
+
+;proc FoggedDiffuseParticle
+;	Fog oT0
+;	mov oD0, v4
+;	mul oT1.xy, v3, c6.xx
+
+proc TexturedFog
+	locals pos
+	m4x4 pos, v0, c10
+	mov oPos, pos
+	mad oT0.xy, v0.xy, c16.xy, c16.zw
+	mul oT1.xyz, v0.wwz, c15.zwx
+	mul oT2.xyz, pos.www, c14.zzy
+
+proc ProjectTexture
+	m4x4 oPos, v0, c10
+	locals coord
+	dp4 coord.x, v0, c14
+	dp4 coord.y, v0, c15
+	dp4 coord.w, v0, c17
+	mov oT0.xyzw, coord.xyww
+
+proc RegisterMap
+	MakeRegisterMap oT0, c7
+	
+proc RegisterMapTex
+	MakeRegisterMap oT0, c7
+	mul oT1.xy, v3, c6.xx
+
+func DoMirror outTex normal
+	locals cameraDir, vFresnel
+	CalcCameraDir cameraDir
+	// r1 = cameraDir
+	dp3 cameraDir.w, cameraDir, normal
+	add vFresnel.w, c1.x, -cameraDir.w
+	mul vFresnel.w, vFresnel.w, vFresnel.w
+	mul vFresnel.w, vFresnel.w, vFresnel.w
+	mul cameraDir.w, cameraDir.w, c2.z // cameraDir.w = 2 * ( cameraDir dp3 normal )
+	mad oD0.w, vFresnel.w, c14.z, c14.w
+	mad outTex.xyz, cameraDir.w, normal, -cameraDir.xyz
+
+proc TextureAndMirror
+	m4x4 oPos, v0, c10
+	locals normal
+	CalcNormal normal
+	DoMirror oT1 normal
+	mov oD0.xyz, c1
+	mul oT0.xy, v3, c6.xx
+
+proc FoggedTextureAndMirror
+	Fog oT2
+	locals normal
+	CalcNormal normal
+	DoMirror oT1 normal
+	mov oD0.xyz, c1
+	mul oT0.xy, v3, c6.xx
+
+proc Mirror
+	m4x4 oPos, v0, c10
+	locals normal
+	CalcNormal normal
+	DoMirror oT0 normal
+
+proc GlossedMirror
+	Mirror
+	mul oT1.xy, v3, c6.xx
+
+proc BumpedMirror
+	m4x4 oPos, v0, c10
+	locals cameraDir, res, normal, texU, texV
+	CalcVectors normal, texU, texV
+	CalcCameraDir cameraDir
+	mul oT0.xy, v3, c6.xx
+	mov res.x, texU.x
+	mov res.y, texV.x
+	mov res.z, normal.x
+	mov res.w, cameraDir.x
+	mov oT1, res
+	mov res.x, texU.y
+	mov res.y, texV.y
+	mov res.z, normal.y
+	mov res.w, cameraDir.y
+	mov oT2, res
+	mov res.x, texU.z
+	mov res.y, texV.z
+	mov res.z, normal.z
+	mov res.w, cameraDir.z
+	mov oT3, res
+
+proc BumpedFresnel
+	MakeRegisterMap oT1, c7
+	locals cameraDir, normal, texU, texV
+	CalcVectors normal, texU, texV
+	CalcCameraDir cameraDir
+	CalcLocalVector oT2 cameraDir normal texU texV
+	//mad oD0.xyz, localCameraDir, c2.xxx, c2.xxx // premultiplied E*du, E*dv, E*N
+	mul oT0.xy, v3, c6.xx
+
+proc DirPPSpecular
+	MakeRegisterMap oT0, c7
+	mov oD0, c17
+	
+proc DirPPTexSpecular
+	MakeRegisterMap oT0, c7
+	mov oD0, c17
+	mul oT2.xy, v3, c6.xx
+
+func CalcPointPPSpecular vColor normal texU texV
+	MakeRegisterMap oT0, c7
+	locals lightDir, temp, texCoord
+	CalcPointLightMapping lightDir, temp, normal
+	mul oD0, temp.w, vColor    // attenutation to diffuse
+	CalcPointLightTex oT2, lightDir, temp, texU, texV
+
+proc PointPPSpecular
+	locals normal, texU, texV
+	CalcVectors normal, texU, texV
+	CalcPointPPSpecular c17, normal, texU, texV
+
+proc PointPPSpecularTex
+	locals normal, texU, texV
+	CalcVectors normal, texU, texV
+	CalcPointPPSpecular c14, normal, texU, texV
+	mul oT3.xy, v3, c6.xx
+
+proc ShadowBlur
+	m4x4 oPos, v0, c10
+	locals rTex
+	mul rTex.xy, v3, c16
+	mov oT0.xy, rTex
+	add oT1.xy, rTex, c17
+	add oT2.xy, rTex, c18
+	add oT3.xy, rTex, c19
+
+proc FullPerPixel
+	MakeRegisterMap2 oT1, oT2, c7
+	locals normal
+	CalcNormal normal
+	mov oT0.xyz, normal
+
+proc PerPixelFullTex
+	MakeRegisterMap2 oT2, oT3, c7
+	mul oT0.xy, v3, c6.xx
+	mad oT1.xyz, v1, c3.xxx, c3.yyy
+	mov oD0, c14
+
+proc FastFullBumpLight
+	MakeRegisterMap2 oT2, oT3, c7
+	locals localLightDir, normal, texU, texV
+	CalcVectors normal, texU, texV
+	CalcFastBump normal, texU, texV
+
+proc FullPPSpecular
+	MakeRegisterMap2 oT0, oT2, c7
+	mov oD0, c17
+	
+proc FullPPTexSpecular
+	MakeRegisterMap2 oT0, oT3, c7
+	mov oD0, c17
+	mul oT2.xy, v3, c6.xx
+
+proc DynLMPerPixel
+	MakeRegisterMap oT1, c7
+	locals normal
+	CalcNormal normal
+	mov oT0.xyz, normal
+	CalcDynamicAmbient oD0, normal
+
+proc DynLMPerPixelTex
+	MakeRegisterMap oT2, c7
+	mul oT0.xy, v3, c6.xx
+	mad oT1.xyz, v1, c3.xxx, c3.yyy
+	locals normal
+	CalcNormal normal
+	CalcDynamicAmbient oD0, normal
+
+proc DynLMPreciseBumpTex
+	MakeRegisterMap oT3, c7
+	locals normal, texU, texV
+	CalcVectors normal, texU, texV
+	PreciseDirBumpLightBase normal texU texV
+	mul oT1.xy, v3, c6.xx
+	mul oT2.xy, v3, c6.xx
+	CalcDynamicAmbient oD1, normal
+
+proc AlienEffect
+	locals res, ln
+	MakeRegisterMap res, c7
+	locals normal, toCamera
+	CalcNormal normal
+	DoMirror oT1 normal
+	CalcCameraDir toCamera
+	Normalize3 toCamera
+	dp3 ln.z, toCamera, normal
+	mad normal.xyz, toCamera, -ln.z, normal
+	dp3 ln.x, normal, c16
+	dp3 ln.y, normal, c17
+	mad res.xy, ln.xy, res.w, res.xy
+	mov oT0.xyzw, res
+	
+
+[PS] Diffuse
+ps.1.1
+mov r0, v0
+[RS]
+D3DRS_ALPHATESTENABLE FALSE
+[TSS]
+0 D3DTSS_TEXTURETRANSFORMFLAGS D3DTTFF_DISABLE
+1 D3DTSS_TEXTURETRANSFORMFLAGS D3DTTFF_DISABLE
+0 D3DTSS_COLOROP                 D3DTOP_SELECTARG1
+0 D3DTSS_COLORARG1               D3DTA_DIFFUSE
+0 D3DTSS_ALPHAOP                 D3DTOP_SELECTARG1
+0 D3DTSS_ALPHAARG1               D3DTA_DIFFUSE
+1 D3DTSS_ALPHAOP                 D3DTOP_DISABLE
+1 D3DTSS_COLOROP                 D3DTOP_DISABLE
+
+[PS] TFactor
+ps.1.1
+mov r0, c0
+[RS]
+D3DRS_ALPHATESTENABLE FALSE
+[TSS]
+0 D3DTSS_TEXTURETRANSFORMFLAGS D3DTTFF_DISABLE
+1 D3DTSS_TEXTURETRANSFORMFLAGS D3DTTFF_DISABLE
+0 D3DTSS_COLOROP                 D3DTOP_SELECTARG1
+0 D3DTSS_COLORARG1               D3DTA_TFACTOR
+0 D3DTSS_ALPHAOP                 D3DTOP_SELECTARG1
+0 D3DTSS_ALPHAARG1               D3DTA_TFACTOR
+1 D3DTSS_ALPHAOP                 D3DTOP_DISABLE
+1 D3DTSS_COLOROP                 D3DTOP_DISABLE
+
+[PS] TextureCopyAlpha
+ps.1.1
+tex t0
+mov r0, t0
+[RS]
+D3DRS_ALPHATESTENABLE FALSE
+[TSS]
+0 D3DTSS_TEXTURETRANSFORMFLAGS D3DTTFF_DISABLE
+1 D3DTSS_TEXTURETRANSFORMFLAGS D3DTTFF_DISABLE
+0 D3DTSS_COLOROP D3DTOP_SELECTARG1
+0 D3DTSS_COLORARG1 D3DTA_TEXTURE
+0 D3DTSS_ALPHAOP D3DTOP_SELECTARG1
+0 D3DTSS_ALPHAARG1 D3DTA_TEXTURE
+1 D3DTSS_ALPHAOP D3DTOP_DISABLE
+1 D3DTSS_COLOROP D3DTOP_DISABLE
+
+[PS] TextureColor
+ps.1.1
+tex t0
+mov r0.rgb, t0
++add r0.a, t0.a, 1-t0.a
+[RS]
+D3DRS_ALPHATESTENABLE FALSE
+[TSS]
+0 D3DTSS_TEXTURETRANSFORMFLAGS D3DTTFF_DISABLE
+1 D3DTSS_TEXTURETRANSFORMFLAGS D3DTTFF_DISABLE
+0 D3DTSS_COLOROP D3DTOP_SELECTARG1
+0 D3DTSS_COLORARG1 D3DTA_TEXTURE
+0 D3DTSS_ALPHAOP D3DTOP_ADD
+0 D3DTSS_ALPHAARG1 D3DTA_TEXTURE
+0 D3DTSS_ALPHAARG2 D3DTA_TEXTURE|D3DTA_COMPLEMENT
+1 D3DTSS_ALPHAOP D3DTOP_DISABLE
+1 D3DTSS_COLOROP D3DTOP_DISABLE
+
+[PS] TextureAlpha
+ps.1.1
+tex t0
+mov r0, t0.a
+[RS]
+D3DRS_ALPHATESTENABLE FALSE
+[TSS]
+0 D3DTSS_TEXTURETRANSFORMFLAGS D3DTTFF_DISABLE
+1 D3DTSS_TEXTURETRANSFORMFLAGS D3DTTFF_DISABLE
+0 D3DTSS_COLOROP D3DTOP_SELECTARG1
+0 D3DTSS_COLORARG1 D3DTA_TEXTURE|D3DTA_ALPHAREPLICATE
+0 D3DTSS_ALPHAOP D3DTOP_SELECTARG1
+0 D3DTSS_ALPHAARG1 D3DTA_TEXTURE
+1 D3DTSS_ALPHAOP D3DTOP_DISABLE
+1 D3DTSS_COLOROP D3DTOP_DISABLE
+
+[PS] AlphaSqrtModulate
+ps.1.1
+tex t0
+mov r0.rgb, t0
++mad r0.a, t0, 1-t0, t0
+mul r0.a, r0.a, v0.a
+[RS]
+D3DRS_ALPHATESTENABLE FALSE
+[TSS]
+0 D3DTSS_TEXTURETRANSFORMFLAGS D3DTTFF_DISABLE
+1 D3DTSS_TEXTURETRANSFORMFLAGS D3DTTFF_DISABLE
+0 D3DTSS_COLOROP D3DTOP_SELECTARG1
+0 D3DTSS_COLORARG1 D3DTA_TEXTURE
+0 D3DTSS_ALPHAOP D3DTOP_MULTIPLYADD
+0 D3DTSS_ALPHAARG1 D3DTA_TEXTURE
+0 D3DTSS_ALPHAARG2 D3DTA_TEXTURE|D3DTA_COMPLEMENT
+0 D3DTSS_ALPHAARG0 D3DTA_TEXTURE
+1 D3DTSS_COLOROP D3DTOP_SELECTARG1
+1 D3DTSS_COLORARG1 D3DTA_CURRENT
+1 D3DTSS_ALPHAOP D3DTOP_MODULATE
+1 D3DTSS_ALPHAARG1 D3DTA_CURRENT
+1 D3DTSS_ALPHAARG2 D3DTA_DIFFUSE
+
+[PS] DiffuseTFactor4
+ps.1.1
+mul_x4 r0, v0, c0
+[RS]
+D3DRS_ALPHATESTENABLE FALSE
+[TSS]
+0 D3DTSS_TEXTURETRANSFORMFLAGS D3DTTFF_DISABLE
+1 D3DTSS_TEXTURETRANSFORMFLAGS D3DTTFF_DISABLE
+0 D3DTSS_COLOROP                 D3DTOP_MODULATE4X
+0 D3DTSS_COLORARG1               D3DTA_DIFFUSE
+0 D3DTSS_COLORARG2               D3DTA_TFACTOR
+0 D3DTSS_ALPHAOP                 D3DTOP_MODULATE4X
+0 D3DTSS_ALPHAARG1               D3DTA_DIFFUSE
+0 D3DTSS_ALPHAARG2               D3DTA_TFACTOR
+1 D3DTSS_ALPHAOP                 D3DTOP_DISABLE
+1 D3DTSS_COLOROP                 D3DTOP_DISABLE
+
+[PS] DiffuseTexture
+ps.1.1
+tex t0
+mul r0, t0, v0
+[RS]
+D3DRS_ALPHATESTENABLE FALSE
+[TSS]
+0 D3DTSS_TEXTURETRANSFORMFLAGS D3DTTFF_DISABLE
+1 D3DTSS_TEXTURETRANSFORMFLAGS D3DTTFF_DISABLE
+0 D3DTSS_COLOROP D3DTOP_MODULATE
+0 D3DTSS_COLORARG1 D3DTA_TEXTURE
+0 D3DTSS_COLORARG2 D3DTA_DIFFUSE
+0 D3DTSS_ALPHAOP D3DTOP_MODULATE
+0 D3DTSS_ALPHAARG1 D3DTA_TEXTURE
+0 D3DTSS_ALPHAARG2 D3DTA_DIFFUSE
+1 D3DTSS_ALPHAOP D3DTOP_DISABLE
+1 D3DTSS_COLOROP D3DTOP_DISABLE
+
+[PS] DiffuseProjectedTexture
+ps.1.1
+tex t0
+mul r0, t0, v0
+[PS14]
+ps.1.4
+texld r0, t0_dw.xyw
+mul r0, r0, v0
+[RS]
+D3DRS_ALPHATESTENABLE FALSE
+[TSS]
+0 D3DTSS_TEXTURETRANSFORMFLAGS D3DTTFF_PROJECTED
+1 D3DTSS_TEXTURETRANSFORMFLAGS D3DTTFF_DISABLE
+0 D3DTSS_COLOROP D3DTOP_MODULATE
+0 D3DTSS_COLORARG1 D3DTA_TEXTURE
+0 D3DTSS_COLORARG2 D3DTA_DIFFUSE
+0 D3DTSS_ALPHAOP D3DTOP_MODULATE
+0 D3DTSS_ALPHAARG1 D3DTA_TEXTURE
+0 D3DTSS_ALPHAARG2 D3DTA_DIFFUSE
+1 D3DTSS_ALPHAOP D3DTOP_DISABLE
+1 D3DTSS_COLOROP D3DTOP_DISABLE
+
+[PS] DiffuseProjectedTexture4
+ps.1.1
+tex t0
+mul_x4 r0, t0, v0
+[PS14]
+ps.1.4
+texld r0, t0_dw.xyw
+mul_x4 r0, r0, v0
+[RS]
+D3DRS_ALPHATESTENABLE FALSE
+[TSS]
+0 D3DTSS_TEXTURETRANSFORMFLAGS D3DTTFF_PROJECTED
+1 D3DTSS_TEXTURETRANSFORMFLAGS D3DTTFF_DISABLE
+0 D3DTSS_COLOROP D3DTOP_MODULATE4X
+0 D3DTSS_COLORARG1 D3DTA_TEXTURE
+0 D3DTSS_COLORARG2 D3DTA_DIFFUSE
+0 D3DTSS_ALPHAOP D3DTOP_MODULATE4X
+0 D3DTSS_ALPHAARG1 D3DTA_TEXTURE
+0 D3DTSS_ALPHAARG2 D3DTA_DIFFUSE
+1 D3DTSS_ALPHAOP D3DTOP_DISABLE
+1 D3DTSS_COLOROP D3DTOP_DISABLE
+
+[PS] DiffuseProjectedTexture16
+ps.1.1
+tex t0
+mul_x4 r0, t0, v0
+mov_x4 r0, r0
+[PS14]
+ps.1.4
+texld r0, t0_dw.xyw
+mul_x4 r0, r0, v0
+mov_x4 r0, r0
+[RS]
+D3DRS_ALPHATESTENABLE FALSE
+[TSS]
+0 D3DTSS_TEXTURETRANSFORMFLAGS D3DTTFF_PROJECTED
+1 D3DTSS_TEXTURETRANSFORMFLAGS D3DTTFF_DISABLE
+0 D3DTSS_COLOROP D3DTOP_MODULATE4X
+0 D3DTSS_COLORARG1 D3DTA_TEXTURE
+0 D3DTSS_COLORARG2 D3DTA_DIFFUSE
+0 D3DTSS_ALPHAOP D3DTOP_MODULATE4X
+0 D3DTSS_ALPHAARG1 D3DTA_TEXTURE
+0 D3DTSS_ALPHAARG2 D3DTA_DIFFUSE
+1 D3DTSS_COLOROP D3DTOP_MODULATE4X
+1 D3DTSS_COLORARG1 D3DTA_CURRENT
+1 D3DTSS_COLORARG2 D3DTA_TFACTOR
+1 D3DTSS_ALPHAOP D3DTOP_MODULATE4X
+1 D3DTSS_ALPHAARG1 D3DTA_CURRENT
+1 D3DTSS_ALPHAARG2 D3DTA_TFACTOR
+
+[PS] DiffuseProjTextureTex4
+ps.1.1
+tex t0
+tex t1
+mul r0, t0, v0
+mul_x4 r0.rgb, r0, t1
++mov r0.a, t1.a
+[PS14]
+ps.1.4
+texld r0, t0_dw.xyw
+texld r1, t1.xyz
+mul r0, r0, v0
+mul_x4 r0.rgb, r0, r1
++mov r0.a, r1.a
+[RS]
+D3DRS_ALPHATESTENABLE FALSE
+[TSS]
+0 D3DTSS_TEXTURETRANSFORMFLAGS D3DTTFF_PROJECTED
+1 D3DTSS_TEXTURETRANSFORMFLAGS D3DTTFF_DISABLE
+0 D3DTSS_COLOROP D3DTOP_MODULATE
+0 D3DTSS_COLORARG1 D3DTA_TEXTURE
+0 D3DTSS_COLORARG2 D3DTA_DIFFUSE
+0 D3DTSS_ALPHAOP D3DTOP_MODULATE
+0 D3DTSS_ALPHAARG1 D3DTA_TEXTURE
+0 D3DTSS_ALPHAARG2 D3DTA_DIFFUSE
+1 D3DTSS_COLOROP D3DTOP_MODULATE4X
+1 D3DTSS_COLORARG1 D3DTA_TEXTURE
+1 D3DTSS_COLORARG2 D3DTA_CURRENT
+1 D3DTSS_ALPHAOP D3DTOP_SELECTARG1
+1 D3DTSS_ALPHAARG1 D3DTA_TEXTURE
+
+[PS] DiffuseProjTextureTex16
+ps.1.1
+tex t0
+tex t1
+mul r0, t0, v0
+mul_x4 r0.rgb, r0, t1
+mov_x4 r0.rgb, r0
++mov r0.a, t1.a
+[PS14]
+ps.1.4
+texld r0, t0_dw.xyw
+texld r1, t1.xyz
+mul r0, r0, v0
+mul_x4 r0.rgb, r0, r1
+mov_x4 r0.rgb, r0
++mov r0.a, r1.a
+[RS]
+D3DRS_ALPHATESTENABLE FALSE
+[TSS]
+0 D3DTSS_TEXTURETRANSFORMFLAGS D3DTTFF_PROJECTED
+1 D3DTSS_TEXTURETRANSFORMFLAGS D3DTTFF_DISABLE
+0 D3DTSS_COLOROP D3DTOP_MODULATE4X
+0 D3DTSS_COLORARG1 D3DTA_TEXTURE
+0 D3DTSS_COLORARG2 D3DTA_DIFFUSE
+0 D3DTSS_ALPHAOP D3DTOP_MODULATE4X
+0 D3DTSS_ALPHAARG1 D3DTA_TEXTURE
+0 D3DTSS_ALPHAARG2 D3DTA_DIFFUSE
+1 D3DTSS_COLOROP D3DTOP_MODULATE4X
+1 D3DTSS_COLORARG1 D3DTA_TEXTURE
+1 D3DTSS_COLORARG2 D3DTA_CURRENT
+1 D3DTSS_ALPHAOP D3DTOP_SELECTARG1
+1 D3DTSS_ALPHAARG1 D3DTA_TEXTURE
+
+[PS] AlphaTestDiffuseTex2
+ps.1.1
+tex t0
+mul_x2 r0.rgb, t0, v0
++mov r0.a, t0.a
+[RS]
+D3DRS_ALPHATESTENABLE TRUE
+D3DRS_ALPHAREF 120
+D3DRS_ALPHAFUNC D3DCMP_GREATER
+[TSS]		
+0 D3DTSS_TEXTURETRANSFORMFLAGS D3DTTFF_DISABLE
+1 D3DTSS_TEXTURETRANSFORMFLAGS D3DTTFF_DISABLE
+0 D3DTSS_COLOROP D3DTOP_MODULATE2X
+0 D3DTSS_COLORARG1 D3DTA_TEXTURE
+0 D3DTSS_COLORARG2 D3DTA_DIFFUSE
+0 D3DTSS_ALPHAOP D3DTOP_SELECTARG1
+0 D3DTSS_ALPHAARG1 D3DTA_TEXTURE
+1 D3DTSS_ALPHAOP D3DTOP_DISABLE
+1 D3DTSS_COLOROP D3DTOP_DISABLE
+
+[PS] AlphaTestDiffuseTex4
+ps.1.1
+tex t0
+mul_x4 r0.rgb, t0, v0
++mov r0.a, t0.a
+[RS]
+D3DRS_ALPHATESTENABLE TRUE
+D3DRS_ALPHAREF 120
+D3DRS_ALPHAFUNC D3DCMP_GREATER
+[TSS]		
+0 D3DTSS_TEXTURETRANSFORMFLAGS D3DTTFF_DISABLE
+1 D3DTSS_TEXTURETRANSFORMFLAGS D3DTTFF_DISABLE
+0 D3DTSS_COLOROP D3DTOP_MODULATE4X
+0 D3DTSS_COLORARG1 D3DTA_TEXTURE
+0 D3DTSS_COLORARG2 D3DTA_DIFFUSE
+0 D3DTSS_ALPHAOP D3DTOP_SELECTARG1
+0 D3DTSS_ALPHAARG1 D3DTA_TEXTURE
+1 D3DTSS_ALPHAOP D3DTOP_DISABLE
+1 D3DTSS_COLOROP D3DTOP_DISABLE
+
+[PS] AlphaTestTexture
+ps.1.1
+tex t0
+mov r0, t0
+[RS]
+D3DRS_ALPHATESTENABLE TRUE
+D3DRS_ALPHAREF 120
+D3DRS_ALPHAFUNC D3DCMP_GREATER
+[TSS]		
+0 D3DTSS_TEXTURETRANSFORMFLAGS D3DTTFF_DISABLE
+1 D3DTSS_TEXTURETRANSFORMFLAGS D3DTTFF_DISABLE
+0 D3DTSS_COLOROP D3DTOP_SELECTARG1
+0 D3DTSS_COLORARG1 D3DTA_TEXTURE
+0 D3DTSS_ALPHAOP D3DTOP_SELECTARG1
+0 D3DTSS_ALPHAARG1 D3DTA_TEXTURE
+1 D3DTSS_ALPHAOP D3DTOP_DISABLE
+1 D3DTSS_COLOROP D3DTOP_DISABLE
+
+[PS] AlphaTestTextureCons
+ps.1.1
+tex t0
+mov r0, t0
+[RS]
+D3DRS_ALPHATESTENABLE TRUE
+D3DRS_ALPHAREF 20
+D3DRS_ALPHAFUNC D3DCMP_GREATER
+[TSS]		
+0 D3DTSS_TEXTURETRANSFORMFLAGS D3DTTFF_DISABLE
+1 D3DTSS_TEXTURETRANSFORMFLAGS D3DTTFF_DISABLE
+0 D3DTSS_COLOROP D3DTOP_SELECTARG1
+0 D3DTSS_COLORARG1 D3DTA_TEXTURE
+0 D3DTSS_ALPHAOP D3DTOP_SELECTARG1
+0 D3DTSS_ALPHAARG1 D3DTA_TEXTURE
+1 D3DTSS_ALPHAOP D3DTOP_DISABLE
+1 D3DTSS_COLOROP D3DTOP_DISABLE
+
+[PS] AlphaLight
+ps.1.1
+tex t0
+mov r0.rgb, v0
++mov r0.a, t0.a
+[RS]
+D3DRS_ALPHATESTENABLE TRUE
+D3DRS_ALPHAREF 120
+D3DRS_ALPHAFUNC D3DCMP_GREATER
+[TSS]
+0 D3DTSS_TEXTURETRANSFORMFLAGS D3DTTFF_DISABLE
+1 D3DTSS_TEXTURETRANSFORMFLAGS D3DTTFF_DISABLE
+0 D3DTSS_ALPHAOP D3DTOP_SELECTARG1
+0 D3DTSS_ALPHAARG1 D3DTA_TEXTURE
+0 D3DTSS_COLOROP D3DTOP_SELECTARG1
+0 D3DTSS_COLORARG1 D3DTA_DIFFUSE
+1 D3DTSS_ALPHAOP D3DTOP_DISABLE
+1 D3DTSS_COLOROP D3DTOP_DISABLE
+
+[PS] ModulateMultitexture
+ps.1.1
+tex t0
+mul r0.rgb, t0, v0
++mov r0.a, t0.a
+[RS]
+D3DRS_ALPHATESTENABLE FALSE
+[TSS]
+0 D3DTSS_TEXTURETRANSFORMFLAGS D3DTTFF_DISABLE
+1 D3DTSS_TEXTURETRANSFORMFLAGS D3DTTFF_DISABLE
+0 D3DTSS_COLOROP D3DTOP_MODULATE
+0 D3DTSS_COLORARG1 D3DTA_TEXTURE
+0 D3DTSS_COLORARG2 D3DTA_DIFFUSE
+0 D3DTSS_ALPHAOP D3DTOP_SELECTARG1
+0 D3DTSS_ALPHAARG1 D3DTA_TEXTURE
+1 D3DTSS_ALPHAOP D3DTOP_DISABLE
+1 D3DTSS_COLOROP D3DTOP_DISABLE
+
+[PS] PTextureTexture
+ps.1.1
+tex t0
+tex t1
+mul r0, t0, t1
+[PS14]
+ps.1.4
+texld r0, t0_dw.xyw
+texld r1, t1.xyz
+mul r0, r0, r1
+[RS]
+D3DRS_ALPHATESTENABLE FALSE
+[TSS]
+0 D3DTSS_TEXTURETRANSFORMFLAGS D3DTTFF_PROJECTED
+1 D3DTSS_TEXTURETRANSFORMFLAGS D3DTTFF_DISABLE
+0 D3DTSS_COLOROP D3DTOP_SELECTARG1
+0 D3DTSS_COLORARG1 D3DTA_TEXTURE
+0 D3DTSS_ALPHAOP D3DTOP_SELECTARG1
+0 D3DTSS_ALPHAARG1 D3DTA_TEXTURE
+1 D3DTSS_COLOROP D3DTOP_MODULATE
+1 D3DTSS_COLORARG1 D3DTA_TEXTURE
+1 D3DTSS_COLORARG2 D3DTA_CURRENT
+1 D3DTSS_ALPHAOP D3DTOP_MODULATE
+1 D3DTSS_ALPHAARG1 D3DTA_TEXTURE
+1 D3DTSS_ALPHAARG2 D3DTA_CURRENT
+
+[PS] DiffuseTexMax
+ps.1.1
+tex t0
+add_sat r0, t0, -v0
+add_sat r0, r0, v0
+[RS]
+D3DRS_ALPHATESTENABLE FALSE
+[TSS]
+0 D3DTSS_TEXTURETRANSFORMFLAGS D3DTTFF_DISABLE
+1 D3DTSS_TEXTURETRANSFORMFLAGS D3DTTFF_DISABLE
+0 D3DTSS_ALPHAOP D3DTOP_SUBTRACT
+0 D3DTSS_ALPHAARG1 D3DTA_TEXTURE
+0 D3DTSS_ALPHAARG2 D3DTA_DIFFUSE
+0 D3DTSS_COLOROP D3DTOP_SUBTRACT
+0 D3DTSS_COLORARG1 D3DTA_TEXTURE
+0 D3DTSS_COLORARG2 D3DTA_DIFFUSE
+1 D3DTSS_ALPHAOP D3DTOP_ADD
+1 D3DTSS_ALPHAARG1 D3DTA_CURRENT
+1 D3DTSS_ALPHAARG2 D3DTA_DIFFUSE
+1 D3DTSS_COLOROP D3DTOP_ADD
+1 D3DTSS_COLORARG1 D3DTA_CURRENT
+1 D3DTSS_COLORARG2 D3DTA_DIFFUSE
+
+[PS] CLSkyLight3
+ps.1.1
+tex t0
+tex t1
+tex t2
+add_sat r0, t0, -v0
+add_sat r1, t1, -v0
+lrp r0, c0, r0, r1
+add_sat r1, t2, -v0
+lrp_x4 r0, c1, r1, r0
+add_x4_sat r0, r0, r0
+add_x4_sat r0, r0, r0
+dp3 r0, 1-r0, v1
+[RS]
+D3DRS_ALPHATESTENABLE FALSE
+
+[PS] ShadowTest
+ps.1.1
+tex t0
+add_sat r0, t0, -v0
+dp3 r0, r0_bx2, c0_bx2
+[PS14]
+ps.1.4
+texld r0, t0.xyz
+add_sat r0, r0, -v0
+dp3 r0, r0, c0
+[RS]
+D3DRS_ALPHATESTENABLE TRUE
+D3DRS_ALPHAREF 1
+D3DRS_ALPHAFUNC D3DCMP_LESSEQUAL
+[TSS]
+0 D3DTSS_TEXTURETRANSFORMFLAGS D3DTTFF_DISABLE
+1 D3DTSS_TEXTURETRANSFORMFLAGS D3DTTFF_DISABLE
+0 D3DTSS_COLOROP D3DTOP_SUBTRACT
+0 D3DTSS_COLORARG1 D3DTA_TEXTURE
+0 D3DTSS_COLORARG2 D3DTA_DIFFUSE
+0 D3DTSS_ALPHAOP D3DTOP_SUBTRACT
+0 D3DTSS_ALPHAARG1 D3DTA_TEXTURE
+0 D3DTSS_ALPHAARG2 D3DTA_DIFFUSE
+1 D3DTSS_COLOROP D3DTOP_DOTPRODUCT3
+1 D3DTSS_COLORARG1 D3DTA_CURRENT
+1 D3DTSS_COLORARG2 D3DTA_TFACTOR
+1 D3DTSS_ALPHAOP D3DTOP_DOTPRODUCT3
+1 D3DTSS_ALPHAARG1 D3DTA_CURRENT
+1 D3DTSS_ALPHAARG2 D3DTA_TFACTOR
+
+[PS] ShadowTestP
+ps.1.1
+tex t0
+add_sat r0, t0, -v0
+dp3 r0, r0_bx2, c0_bx2
+[PS14]
+ps.1.4
+texld r0, t0_dw.xyw
+add_sat r0, r0, -v0
+dp3 r0, r0, c0
+[RS]
+D3DRS_ALPHATESTENABLE TRUE
+D3DRS_ALPHAREF 1
+D3DRS_ALPHAFUNC D3DCMP_LESSEQUAL
+[TSS]
+0 D3DTSS_TEXTURETRANSFORMFLAGS D3DTTFF_PROJECTED
+1 D3DTSS_TEXTURETRANSFORMFLAGS D3DTTFF_DISABLE
+0 D3DTSS_COLOROP D3DTOP_SUBTRACT
+0 D3DTSS_COLORARG1 D3DTA_TEXTURE
+0 D3DTSS_COLORARG2 D3DTA_DIFFUSE
+0 D3DTSS_ALPHAOP D3DTOP_SUBTRACT
+0 D3DTSS_ALPHAARG1 D3DTA_TEXTURE
+0 D3DTSS_ALPHAARG2 D3DTA_DIFFUSE
+1 D3DTSS_COLOROP D3DTOP_DOTPRODUCT3
+1 D3DTSS_COLORARG1 D3DTA_CURRENT
+1 D3DTSS_COLORARG2 D3DTA_TFACTOR
+1 D3DTSS_ALPHAOP D3DTOP_DOTPRODUCT3
+1 D3DTSS_ALPHAARG1 D3DTA_CURRENT
+1 D3DTSS_ALPHAARG2 D3DTA_TFACTOR
+
+[PS] SoftShadowTest
+ps.1.1
+tex t0
+add_sat r0, t0, -v0
+dp3 r0, r0_bx2, c0_bx2
+mov r0.rgb, c1
++add_x4 r0.a, r0, r0
+mov_x2 r0.a, 1-r0
+[PS14]
+ps.1.4
+texld r0, t0_dw.xyw
+add_sat r0, r0, -v0
+dp3 r0, r0, c0
+mov r0.rgb, c1
++add_x4 r0.a, r0, r0
+mov_x2 r0.a, 1-r0
+[RS]
+D3DRS_ALPHATESTENABLE FALSE
+
+[PS] ShadowTestSmoothed
+ps.1.1
+tex t0
+add_sat r0, t0, -v0
+dp3_x4 r0, r0, c0
+add r0.rgb, r0, 1-r0
++add r0.a, r0, c1
+cnd r0.rgb, r0.a, c1, r0
++add r0.a, v0.a, v1.a
+[PS14]
+ps.1.4
+texld r0, t0_dw.xyw
+add_sat r1, r0, -v0
+dp3_x4 r1, r1, c0
+add r0.rgb, r0, 1-r0
++add r0.a, r1, c1
+cnd r0.rgb, r0.a, c1, r0
++add r0.a, v0.a, v1.a
+[RS]
+D3DRS_ALPHATESTENABLE FALSE
+
+[PS] PerspectiveShadowTest
+ps.1.1
+tex t0
+mov r0.rgb, v0
++add_sat r0.a, t0.a, -v0.a
+[PS14]
+ps.1.4
+texld r0, t0_dw.xyw
+mov r0.rgb, v0
++add_sat r0.a, r0.a, -v0.a
+[RS]
+D3DRS_ALPHATESTENABLE TRUE
+D3DRS_ALPHAREF 1
+D3DRS_ALPHAFUNC D3DCMP_LESSEQUAL
+[TSS]
+0 D3DTSS_TEXTURETRANSFORMFLAGS D3DTTFF_PROJECTED
+1 D3DTSS_TEXTURETRANSFORMFLAGS D3DTTFF_DISABLE
+0 D3DTSS_ALPHAOP D3DTOP_SUBTRACT
+0 D3DTSS_ALPHAARG1 D3DTA_TEXTURE
+0 D3DTSS_ALPHAARG2 D3DTA_DIFFUSE
+0 D3DTSS_COLOROP D3DTOP_SELECTARG1
+0 D3DTSS_COLORARG1 D3DTA_DIFFUSE
+; 1 D3DTSS_COLORARG1 D3DTA_TEXTURE
+1 D3DTSS_ALPHAOP D3DTOP_DISABLE
+1 D3DTSS_COLOROP D3DTOP_DISABLE
+
+[PS] TransparentDifTex4
+ps.1.1
+tex t0
+tex t1
+mul_x4 r0.rgb, t0, v0
++mul r0.a, t0.a, v0.a
+[RS]
+D3DRS_ALPHATESTENABLE FALSE
+[TSS]
+0 D3DTSS_TEXTURETRANSFORMFLAGS D3DTTFF_DISABLE
+1 D3DTSS_TEXTURETRANSFORMFLAGS D3DTTFF_DISABLE
+0 D3DTSS_COLOROP D3DTOP_MODULATE4X
+0 D3DTSS_COLORARG1 D3DTA_TEXTURE
+0 D3DTSS_COLORARG2 D3DTA_DIFFUSE
+0 D3DTSS_ALPHAOP D3DTOP_MODULATE
+0 D3DTSS_ALPHAARG1 D3DTA_TEXTURE
+0 D3DTSS_ALPHAARG2 D3DTA_DIFFUSE
+1 D3DTSS_COLOROP D3DTOP_DISABLE
+1 D3DTSS_ALPHAOP D3DTOP_DISABLE
+
+[PS] TransparentTexTex4AlphaFirst
+ps.1.1
+tex t0
+tex t1
+mul r0.rgb, t0, v0
++mul r0.a, t0.a, v0.a
+mul_x4 r0.rgb, r0, t1
+[RS]
+D3DRS_ALPHATESTENABLE FALSE
+[TSS]
+0 D3DTSS_TEXTURETRANSFORMFLAGS D3DTTFF_DISABLE
+1 D3DTSS_TEXTURETRANSFORMFLAGS D3DTTFF_DISABLE
+0 D3DTSS_COLOROP D3DTOP_MODULATE
+0 D3DTSS_COLORARG1 D3DTA_TEXTURE
+0 D3DTSS_COLORARG2 D3DTA_DIFFUSE
+0 D3DTSS_ALPHAOP D3DTOP_MODULATE
+0 D3DTSS_ALPHAARG1 D3DTA_TEXTURE
+0 D3DTSS_ALPHAARG2 D3DTA_DIFFUSE
+1 D3DTSS_COLOROP D3DTOP_MODULATE4X
+1 D3DTSS_COLORARG1 D3DTA_CURRENT
+1 D3DTSS_COLORARG2 D3DTA_TEXTURE
+1 D3DTSS_ALPHAOP D3DTOP_SELECTARG1
+1 D3DTSS_ALPHAARG1 D3DTA_CURRENT
+
+[PS] DiffuseTexture2
+ps.1.1
+tex t0
+mul_x2 r0.rgb, t0, v0
++add r0.a, v0.a, 1-v0.a
+[RS]
+D3DRS_ALPHATESTENABLE FALSE
+[TSS]
+0 D3DTSS_TEXTURETRANSFORMFLAGS D3DTTFF_DISABLE
+1 D3DTSS_TEXTURETRANSFORMFLAGS D3DTTFF_DISABLE
+0 D3DTSS_COLOROP D3DTOP_MODULATE2X
+0 D3DTSS_COLORARG1 D3DTA_TEXTURE
+0 D3DTSS_COLORARG2 D3DTA_DIFFUSE
+0 D3DTSS_ALPHAOP D3DTOP_ADD
+0 D3DTSS_ALPHAARG1 D3DTA_DIFFUSE
+0 D3DTSS_ALPHAARG2 D3DTA_DIFFUSE|D3DTA_COMPLEMENT
+1 D3DTSS_ALPHAOP D3DTOP_DISABLE
+1 D3DTSS_COLOROP D3DTOP_DISABLE
+
+[PS] DiffuseTexture4
+ps.1.1
+tex t0
+mul_x4_sat r0.rgb, t0, v0
++add r0.a, v0.a, 1-v0.a
+[RS]
+D3DRS_ALPHATESTENABLE FALSE
+[TSS]
+0 D3DTSS_TEXTURETRANSFORMFLAGS D3DTTFF_DISABLE
+1 D3DTSS_TEXTURETRANSFORMFLAGS D3DTTFF_DISABLE
+0 D3DTSS_COLOROP D3DTOP_MODULATE4X
+0 D3DTSS_COLORARG1 D3DTA_TEXTURE
+0 D3DTSS_COLORARG2 D3DTA_DIFFUSE
+0 D3DTSS_ALPHAOP D3DTOP_ADD
+0 D3DTSS_ALPHAARG1 D3DTA_DIFFUSE
+0 D3DTSS_ALPHAARG2 D3DTA_DIFFUSE|D3DTA_COMPLEMENT
+1 D3DTSS_ALPHAOP D3DTOP_DISABLE
+1 D3DTSS_COLOROP D3DTOP_DISABLE
+
+[PS] DiffuseTexture2CopyAlpha
+ps.1.1
+tex t0
+mul_x2 r0.rgb, t0, v0
++mov r0.a, t0.a
+[RS]
+D3DRS_ALPHATESTENABLE FALSE
+[TSS]
+0 D3DTSS_TEXTURETRANSFORMFLAGS D3DTTFF_DISABLE
+1 D3DTSS_TEXTURETRANSFORMFLAGS D3DTTFF_DISABLE
+0 D3DTSS_COLOROP D3DTOP_MODULATE2X
+0 D3DTSS_COLORARG1 D3DTA_TEXTURE
+0 D3DTSS_COLORARG2 D3DTA_DIFFUSE
+0 D3DTSS_ALPHAOP D3DTOP_SELECTARG1
+0 D3DTSS_ALPHAARG1 D3DTA_TEXTURE
+1 D3DTSS_ALPHAOP D3DTOP_DISABLE
+1 D3DTSS_COLOROP D3DTOP_DISABLE
+
+[PS] DiffuseTexture4CopyAlpha
+ps.1.1
+tex t0
+mul_x4 r0.rgb, t0, v0
++mov r0.a, t0.a
+[RS]
+D3DRS_ALPHATESTENABLE FALSE
+[TSS]
+0 D3DTSS_TEXTURETRANSFORMFLAGS D3DTTFF_DISABLE
+1 D3DTSS_TEXTURETRANSFORMFLAGS D3DTTFF_DISABLE
+0 D3DTSS_COLOROP D3DTOP_MODULATE4X
+0 D3DTSS_COLORARG1 D3DTA_TEXTURE
+0 D3DTSS_COLORARG2 D3DTA_DIFFUSE
+0 D3DTSS_ALPHAOP D3DTOP_SELECTARG1
+0 D3DTSS_ALPHAARG1 D3DTA_TEXTURE
+1 D3DTSS_ALPHAOP D3DTOP_DISABLE
+1 D3DTSS_COLOROP D3DTOP_DISABLE
+
+[PS] TexTexture4
+ps.1.1
+tex t0
+tex t1
+mul_x4_sat r0.rgb, t0, t1
++add r0.a, v0.a, 1-v0.a
+[RS]
+D3DRS_ALPHATESTENABLE FALSE
+[TSS]
+0 D3DTSS_TEXTURETRANSFORMFLAGS D3DTTFF_DISABLE
+1 D3DTSS_TEXTURETRANSFORMFLAGS D3DTTFF_DISABLE
+0 D3DTSS_COLOROP D3DTOP_SELECTARG1
+0 D3DTSS_COLORARG1 D3DTA_TEXTURE
+0 D3DTSS_ALPHAOP D3DTOP_SELECTARG1
+0 D3DTSS_ALPHAARG1 D3DTA_TEXTURE
+1 D3DTSS_COLOROP D3DTOP_MODULATE4X
+1 D3DTSS_COLORARG1 D3DTA_CURRENT
+1 D3DTSS_COLORARG2 D3DTA_TEXTURE
+1 D3DTSS_ALPHAOP D3DTOP_ADD
+1 D3DTSS_ALPHAARG1 D3DTA_DIFFUSE
+1 D3DTSS_ALPHAARG2 D3DTA_DIFFUSE|D3DTA_COMPLEMENT
+
+[PS] CLTexTexture4
+ps.1.1
+tex t0
+tex t1
+mad r0, c0, t0.a, t0
+mul_x4_sat r0.rgb, r0, t1
++add r0.a, r0.a, 1-r0.a
+[RS]
+D3DRS_ALPHATESTENABLE FALSE
+[TSS]
+0 D3DTSS_TEXTURETRANSFORMFLAGS D3DTTFF_DISABLE
+1 D3DTSS_TEXTURETRANSFORMFLAGS D3DTTFF_DISABLE
+0 D3DTSS_COLOROP D3DTOP_MODULATEALPHA_ADDCOLOR 
+0 D3DTSS_COLORARG1 D3DTA_TEXTURE
+0 D3DTSS_COLORARG2 D3DTA_TFACTOR
+0 D3DTSS_ALPHAOP D3DTOP_SELECTARG1
+0 D3DTSS_ALPHAARG1 D3DTA_TEXTURE
+1 D3DTSS_COLOROP D3DTOP_MODULATE4X
+1 D3DTSS_COLORARG1 D3DTA_CURRENT
+1 D3DTSS_COLORARG2 D3DTA_TEXTURE
+1 D3DTSS_ALPHAOP D3DTOP_ADD
+1 D3DTSS_ALPHAARG1 D3DTA_DIFFUSE
+1 D3DTSS_ALPHAARG2 D3DTA_DIFFUSE|D3DTA_COMPLEMENT
+
+[PS] AlphaTestTexTexture4
+ps.1.1
+tex t0
+tex t1
+mul_x4_sat r0.rgb, t0, t1
++mov r0.a, t1.a
+[RS]
+D3DRS_ALPHATESTENABLE TRUE
+D3DRS_ALPHAREF 120
+D3DRS_ALPHAFUNC D3DCMP_GREATER
+[TSS]
+0 D3DTSS_TEXTURETRANSFORMFLAGS D3DTTFF_DISABLE
+1 D3DTSS_TEXTURETRANSFORMFLAGS D3DTTFF_DISABLE
+0 D3DTSS_COLOROP D3DTOP_SELECTARG1
+0 D3DTSS_COLORARG1 D3DTA_TEXTURE
+0 D3DTSS_ALPHAOP D3DTOP_SELECTARG1
+0 D3DTSS_ALPHAARG1 D3DTA_TEXTURE
+1 D3DTSS_COLOROP D3DTOP_MODULATE4X
+1 D3DTSS_COLORARG1 D3DTA_CURRENT
+1 D3DTSS_COLORARG2 D3DTA_TEXTURE
+1 D3DTSS_ALPHAOP D3DTOP_SELECTARG2
+1 D3DTSS_ALPHAARG1 D3DTA_CURRENT
+1 D3DTSS_ALPHAARG2 D3DTA_TEXTURE
+
+[PS] TexTexture4CopyAlpha
+ps.1.1
+tex t0
+tex t1
+mul_x4_sat r0.rgb, t0, t1
++mov r0.a, t1.a
+[RS]
+D3DRS_ALPHATESTENABLE FALSE
+[TSS]
+0 D3DTSS_TEXTURETRANSFORMFLAGS D3DTTFF_DISABLE
+1 D3DTSS_TEXTURETRANSFORMFLAGS D3DTTFF_DISABLE
+0 D3DTSS_COLOROP D3DTOP_SELECTARG1
+0 D3DTSS_COLORARG1 D3DTA_TEXTURE
+0 D3DTSS_ALPHAOP D3DTOP_SELECTARG1
+0 D3DTSS_ALPHAARG1 D3DTA_TEXTURE
+1 D3DTSS_COLOROP D3DTOP_MODULATE4X
+1 D3DTSS_COLORARG1 D3DTA_CURRENT
+1 D3DTSS_COLORARG2 D3DTA_TEXTURE
+1 D3DTSS_ALPHAOP D3DTOP_SELECTARG2
+1 D3DTSS_ALPHAARG1 D3DTA_CURRENT
+1 D3DTSS_ALPHAARG2 D3DTA_TEXTURE
+
+[PS] LMPDSolid
+ps.1.1
+tex t0
+mad r0, c0, t0.a, t0
+mul_x4_sat r0.rgb, r0, v0
++add r0.a, r0, 1-r0
+[PS14]
+ps.1.4
+texld r0, t0_dw.xyw
+mad r0, c0, r0.a, r0
+mul_x4_sat r0.rgb, r0, v0
++add r0.a, r0, 1-r0
+[RS]
+D3DRS_ALPHATESTENABLE FALSE
+[TSS]
+0 D3DTSS_TEXTURETRANSFORMFLAGS D3DTTFF_PROJECTED
+1 D3DTSS_TEXTURETRANSFORMFLAGS D3DTTFF_DISABLE
+0 D3DTSS_COLOROP D3DTOP_MODULATEALPHA_ADDCOLOR 
+0 D3DTSS_COLORARG1 D3DTA_TEXTURE
+0 D3DTSS_COLORARG2 D3DTA_TFACTOR
+0 D3DTSS_ALPHAOP D3DTOP_SELECTARG1
+0 D3DTSS_ALPHAARG1 D3DTA_TEXTURE
+1 D3DTSS_COLOROP D3DTOP_MODULATE4X
+1 D3DTSS_COLORARG1 D3DTA_CURRENT
+1 D3DTSS_COLORARG2 D3DTA_DIFFUSE
+1 D3DTSS_ALPHAOP D3DTOP_ADD
+1 D3DTSS_ALPHAARG1 D3DTA_DIFFUSE
+1 D3DTSS_ALPHAARG2 D3DTA_DIFFUSE|D3DTA_COMPLEMENT
+
+[PS] LMPDTexture
+ps.1.1
+tex t0
+tex t1
+mad r0, c0, t0.a, t0
+mul_x4_sat r0.rgb, r0, t1
++add r0.a, r0.a, 1-r0.a
+[PS14]
+ps.1.4
+texld r0, t0_dw.xyw
+texld r1, t1.xyz
+mad r0, c0, r0.a, r0
+mul_x4_sat r0.rgb, r0, r1
++add r0.a, r0.a, 1-r0.a
+[RS]
+D3DRS_ALPHATESTENABLE FALSE
+[TSS]
+0 D3DTSS_TEXTURETRANSFORMFLAGS D3DTTFF_PROJECTED
+1 D3DTSS_TEXTURETRANSFORMFLAGS D3DTTFF_DISABLE
+0 D3DTSS_COLOROP D3DTOP_MODULATEALPHA_ADDCOLOR 
+0 D3DTSS_COLORARG1 D3DTA_TEXTURE
+0 D3DTSS_COLORARG2 D3DTA_TFACTOR
+0 D3DTSS_ALPHAOP D3DTOP_SELECTARG1
+0 D3DTSS_ALPHAARG1 D3DTA_TEXTURE
+1 D3DTSS_COLOROP D3DTOP_MODULATE4X
+1 D3DTSS_COLORARG1 D3DTA_TEXTURE
+1 D3DTSS_COLORARG2 D3DTA_CURRENT
+1 D3DTSS_ALPHAOP D3DTOP_ADD
+1 D3DTSS_ALPHAARG1 D3DTA_DIFFUSE
+1 D3DTSS_ALPHAARG2 D3DTA_DIFFUSE|D3DTA_COMPLEMENT
+
+[PS] LMPDTextureAT
+ps.1.1
+tex t0
+tex t1
+mad r0, c0, t0.a, t0
+mul_x4_sat r0.rgb, r0, t1
+mov r0.a, t1
+[PS14]
+ps.1.4
+texld r0, t0_dw.xyw
+texld r1, t1.xyz
+mad r0, c0, r0.a, r0
+mul_x4_sat r0.rgb, r0, r1
+mov r0.a, r1
+[RS]
+D3DRS_ALPHATESTENABLE TRUE
+D3DRS_ALPHAREF 120
+D3DRS_ALPHAFUNC D3DCMP_GREATER
+[TSS]
+0 D3DTSS_TEXTURETRANSFORMFLAGS D3DTTFF_PROJECTED
+1 D3DTSS_TEXTURETRANSFORMFLAGS D3DTTFF_DISABLE
+0 D3DTSS_COLOROP D3DTOP_MODULATEALPHA_ADDCOLOR 
+0 D3DTSS_COLORARG1 D3DTA_TEXTURE
+0 D3DTSS_COLORARG2 D3DTA_TFACTOR
+0 D3DTSS_ALPHAOP D3DTOP_SELECTARG1
+0 D3DTSS_ALPHAARG1 D3DTA_TEXTURE
+1 D3DTSS_COLOROP D3DTOP_MODULATE4X
+1 D3DTSS_COLORARG1 D3DTA_TEXTURE
+1 D3DTSS_COLORARG2 D3DTA_CURRENT
+1 D3DTSS_ALPHAOP D3DTOP_ADD
+1 D3DTSS_ALPHAARG1 D3DTA_DIFFUSE
+1 D3DTSS_ALPHAARG2 D3DTA_DIFFUSE|D3DTA_COMPLEMENT
+
+[PS] LMPDTextureCopyAlpha
+ps.1.1
+tex t0
+tex t1
+mad r0, c0, t0.a, t0
+mul_x4_sat r0.rgb, r0, t1
++mov r0.a, t1
+[PS14]
+ps.1.4
+texld r0, t0_dw.xyw
+texld r1, t1.xyz
+mad r0, c0, r0.a, r0
+mul_x4_sat r0.rgb, r0, r1
++mov r0.a, r1
+[RS]
+D3DRS_ALPHATESTENABLE TRUE
+D3DRS_ALPHAREF 120
+D3DRS_ALPHAFUNC D3DCMP_GREATER
+[TSS]
+0 D3DTSS_TEXTURETRANSFORMFLAGS D3DTTFF_PROJECTED
+1 D3DTSS_TEXTURETRANSFORMFLAGS D3DTTFF_DISABLE
+0 D3DTSS_COLOROP D3DTOP_MODULATEALPHA_ADDCOLOR 
+0 D3DTSS_COLORARG1 D3DTA_TEXTURE
+0 D3DTSS_COLORARG2 D3DTA_TFACTOR
+0 D3DTSS_ALPHAOP D3DTOP_SELECTARG1
+0 D3DTSS_ALPHAARG1 D3DTA_TEXTURE
+1 D3DTSS_COLOROP D3DTOP_MODULATE4X
+1 D3DTSS_COLORARG1 D3DTA_TEXTURE
+1 D3DTSS_COLORARG2 D3DTA_CURRENT
+1 D3DTSS_ALPHAOP D3DTOP_SELECTARG1
+1 D3DTSS_ALPHAARG1 D3DTA_TEXTURE
+
+[PS] PerPixelDiffuseTex4
+ps.1.1
+tex t0
+tex t1
+dp3_sat r0, t1_bx2, c0_bx2
+mul r0, r0, t0
+mul_x4 r0.rgb, v0, r0
++mov r0.a, t0.a
+[RS]
+D3DRS_ALPHATESTENABLE FALSE
+
+[PS] PerPixelFullTex4
+ps.1.1
+tex t0
+tex t1
+tex t2
+tex t3
+dp3_sat r0, t1_bx2, c0
+mul r0.rgb, v0, r0
+mad r1, c1, t2.a, t2
+mul_x4 r1, r1, t0
+mul r0, r0, t3
+mul_x4 r0, r0, t0
+add r0.rgb, r0, r1
++mov r0.a, t0.a
+[PS14]
+ps.1.4
+texld r0, t0.xyz
+texld r1, t1.xyz
+texld r2, t2_dw.xyw
+texld r3, t3_dw.xyw
+dp3_sat r5, r1_bx2, c0
+mul r5.rgb, v0, r5
+mad r1, c1, r2.a, r2
+mul_x4_sat r1, r1, r0
+mul r5, r5, r3
+mul_x4_sat r5, r5, r0
+add r0.rgb, r5, r1
+[RS]
+D3DRS_ALPHATESTENABLE FALSE
+
+[PS] FastFullBump4
+ps.1.1
+tex t0
+tex t1
+tex t2
+tex t3
+dp3_sat r0, t0_bx2, v0_bx2
+mul r0, r0, v1
+mad r1, c1, t2.a, t2
+mul_x4 r1, r1, t1
+mul r0, r0, t3
+mul_x4 r0, r0, t1
+add r0.rgb, r0, r1
++mov r0.a, t2.a
+[PS14]
+ps.1.4
+texld r0, t0.xyz
+texld r1, t1.xyz
+texld r2, t2_dw.xyw
+texld r3, t3_dw.xyw
+dp3_sat r5, r0_bx2, v0_bx2
+mul r5, r5, v1
+mad r0, c1, r2.a, r2
+mul_x4_sat r0, r0, r1
+mul r5, r5, r3
+mul_x4_sat r5, r5, r1
+add r0.rgb, r0, r5
++mov r0.a, r2.a
+[RS]
+D3DRS_ALPHATESTENABLE FALSE
+
+[PS] FullPerPixel4
+ps.1.1
+tex t0
+tex t1
+tex t2
+dp3_sat r0, t0_bx2, c0
+mul r0.rgb, r0, c1
+mad r1, c3, t1.a, t1
+mul_x4 r1, r1, c2
+mul r0, r0, t2
+mul_x4 r0, r0, c2
+add r0.rgb, r0, r1
++mov r0.a, v0.a
+[PS14]
+ps.1.4
+texld r0, t0.xyz
+texld r1, t1_dw.xyw
+texld r2, t2_dw.xyw
+dp3_sat r5, r0_bx2, c0
+mul r5.rgb, r5, c1
+mad r1, c3, r1.a, r1
+mad r5, r5, r2, r1
+mul_x4 r0.rgb, r5, c2
++mov r0.a, v0.a
+[RS]
+D3DRS_ALPHATESTENABLE FALSE
+
+[PS] DynLMPerPixel4
+ps.1.1
+tex t0
+tex t1
+dp3_sat r0, t0_bx2, c0
+mul r0.rgb, r0, c1
+mad r0, r0, t1, v0
+mul_x4 r0.rgb, r0, c2
++mov r0.a, c2.a
+[PS14]
+ps.1.4
+texld r0, t0.xyz
+texld r1, t1_dw.xyw
+dp3_sat r5, r0_bx2, c0
+mul r5.rgb, r5, c1
+mad r5, r5, r1, v0
+mul_x4 r0.rgb, r5, c2
++mov r0.a, c2.a
+[RS]
+D3DRS_ALPHATESTENABLE FALSE
+
+[PS] DynLMPerPixelTex4
+ps.1.1
+tex t0
+tex t1
+tex t2
+dp3_sat r0, t1_bx2, c0
+mul r0.rgb, c1, r0
+mad r0, r0, t2, v0
+mul_x4 r0.rgb, r0, t0
++mov r0.a, t0.a
+[PS14]
+ps.1.4
+texld r0, t0.xyz
+texld r1, t1.xyz
+texld r2, t2_dw.xyw
+dp3_sat r5, r1_bx2, c0
+mul r5.rgb, c1, r5
+mad r5, r5, r2, v0
+mul_x4 r0.rgb, r5, r0
++mov r0.a, r0.a
+[RS]
+D3DRS_ALPHATESTENABLE FALSE
+
+[PS] DynLMPreciseBumpTex4
+ps.1.1
+tex t0
+tex t1
+tex t2
+tex t3
+dp3_sat r0, t0_bx2, t1_bx2
+mul r0, r0, v0
+mad r0, r0, t3, v1
+mul_x4 r0.rgb, r0, t2
++mov r0.a, t2.a
+[PS14]
+ps.1.4
+texld r0, t0.xyz
+texld r1, t1.xyz
+texld r2, t2.xyz
+texld r3, t3_dw.xyw
+dp3_sat r5, r0_bx2, r1_bx2
+mul r5, r5, v0
+mad r5, r5, r3, v1
+mul_x4 r0.rgb, r5, r2
++mov r0.a, r2.a
+[RS]
+D3DRS_ALPHATESTENABLE FALSE
+
+[PS] ProjectedTexture
+ps.1.1
+tex t0
+mov r0, t0
+[PS14]
+ps.1.4
+texld r0, t0_dw.xyw
+[RS]
+D3DRS_ALPHATESTENABLE FALSE
+[TSS]
+0 D3DTSS_TEXTURETRANSFORMFLAGS D3DTTFF_PROJECTED
+1 D3DTSS_TEXTURETRANSFORMFLAGS D3DTTFF_DISABLE
+0 D3DTSS_COLOROP D3DTOP_SELECTARG1
+0 D3DTSS_COLORARG1 D3DTA_TEXTURE
+0 D3DTSS_ALPHAOP D3DTOP_SELECTARG1
+0 D3DTSS_ALPHAARG1 D3DTA_TEXTURE
+1 D3DTSS_ALPHAOP D3DTOP_DISABLE
+1 D3DTSS_COLOROP D3DTOP_DISABLE
+
+[PS] FastBump4
+ps.1.1
+tex t0
+tex t1
+dp3_sat r0, t0_bx2, v0_bx2
+mul_x4 r0.rgb, t1, v1
+[RS]
+D3DRS_ALPHATESTENABLE FALSE
+[TSS]
+0 D3DTSS_TEXTURETRANSFORMFLAGS D3DTTFF_DISABLE
+1 D3DTSS_TEXTURETRANSFORMFLAGS D3DTTFF_DISABLE
+0 D3DTSS_COLOROP D3DTOP_DOTPRODUCT3
+0 D3DTSS_COLORARG1 D3DTA_TEXTURE
+0 D3DTSS_COLORARG2 D3DTA_DIFFUSE
+0 D3DTSS_ALPHAOP D3DTOP_DOTPRODUCT3
+0 D3DTSS_ALPHAARG1 D3DTA_TEXTURE
+0 D3DTSS_ALPHAARG2 D3DTA_DIFFUSE
+1 D3DTSS_ALPHAOP D3DTOP_SELECTARG1
+1 D3DTSS_ALPHAARG1 D3DTA_CURRENT
+1 D3DTSS_COLOROP D3DTOP_MODULATE4X
+1 D3DTSS_COLORARG1 D3DTA_TEXTURE
+1 D3DTSS_COLORARG2 D3DTA_SPECULAR
+
+[PS] FastTranspBump
+ps.1.1
+tex t0
+tex t1
+dp3 r0, t0_bx2, v0_bx2
+//add r0, t0, 1-t0
+mul_sat r1, r0, c0
+mul_sat r0, r0, v1
+mad r0, r1, v1, r0
+mul_x2 r0, r0, t1
+[RS]
+D3DRS_ALPHATESTENABLE FALSE
+
+[PS] PreciseBump4
+ps.1.1
+tex t0
+tex t1
+tex t2
+dp3_sat r0, t0_bx2, t1_bx2
+mul r0, r0, t2
+mul_x4 r0.rgb, r0, v0
++mov r0.a, t2.a
+[RS]
+D3DRS_ALPHATESTENABLE FALSE
+
+[PS] PrecisePointBumpTex
+ps.1.1
+tex t0
+tex t1
+tex t2
+tex t3
+dp3_sat r0, t1_bx2, t2_bx2
+mul r0, r0, t0
+mul r0, r0, v0
+mul_x4 r0.rgb, r0, t3
++mov r0.a, t3.a
+[PS14]
+ps.1.4
+texld r0, t0_dw.xyw
+texld r1, t1
+texld r2, t2
+texld r3, t3
+dp3_sat r4, r1_bx2, r2_bx2
+mul r4, r4, r0
+mul_x4 r4, r4, r3
+mul r0.rgb, r4, v0
++mov r0.a, r3.a
+[RS]
+D3DRS_ALPHATESTENABLE FALSE
+
+[PS] PrecisePointBumpTex16
+ps.1.1
+tex t0
+tex t1
+tex t2
+tex t3
+dp3_sat r0, t1_bx2, t2_bx2
+mul r0, r0, t0
+mul r0, r0, v0
+mul_x4 r0.rgb, r0, t3
+mov_x4 r0.rgb, r0
++mov r0.a, t3.a
+[PS14]
+ps.1.4
+texld r0, t0_dw.xyw
+texld r1, t1
+texld r2, t2
+texld r3, t3
+dp3_sat r4, r1_bx2, r2_bx2
+mul r4, r4, r0
+mul_x4 r4, r4, r3
+mul r0.rgb, r4, v0
+mov_x4 r0.rgb, r0
++mov r0.a, r3.a
+[RS]
+D3DRS_ALPHATESTENABLE FALSE
+
+[PS] CalcNH
+ps.1.1
+tex t0 // N
+tex t1 // H
+texcoord t2 // L
+sub r1.rgb, t0, t1  // r1 = a/2; a = N-H
+dp3 r1, r1, r1  // (a/2)*(a/2)
+sub_x2 r0.rgb, t0, t1
++mad r1.a, c0, r1, c0 // c0.a = 0.5
+dp3 r0, r0, r0  // (a)*(a)
+mov r0.rgb, c0           // ro is stored to rgb, c0 has ro, or t0.a for bump
++cnd r0.a, r0.a, r1, r0  // alpha channel is subject, f(NH) is stored to alpha
+dp3_x4 r1, t0_bx2, t2_bx2
+mov_x4_sat r1, r1
+lrp r0, r1.a, r0, c1
+[RS]
+D3DRS_ALPHATESTENABLE FALSE
+
+[PS] CalcNHBumped
+ps.1.1
+tex t0 // bump, (N)
+tex t1 // H
+texcoord t2 // L
+sub r1.rgb, t0, t1  // r1 = a/2; a = N-H
+dp3 r1, r1, r1  // (a/2)*(a/2)
+sub_x2 r0.rgb, t0, t1
++mad r1.a, c0, r1, c0 // c0.a = 0.5
+dp3 r0, r0, r0  // (a)*(a)
+mov r0.rgb, t0.a           // ro is moved to rgb, ro is stored in bump`s alpha
++cnd r0.a, r0.a, r1, r0  // alpha channel is subject, f(NH) is stored to alpha
+dp3_x4 r1, c2, t2_bx2
+mov_x4_sat r1, r1
+lrp r0, r1.a, r0, c1
+[PS14]
+ps.1.4
+texld r0, t0 // bump, (N)
+texld r1, t1 // H
+texcrd r2.xyz, t2 // L
+sub r5.rgb, r0, r1  // r5 = a/2; a = N-H
+dp3 r5, r5, r5  // (a/2)*(a/2)
+sub_x2 r4.rgb, r0, r1
++mad r5.a, c0, r5, c0 // c0.a = 0.5
+dp3 r4, r4, r4  // (a)*(a)
+mov r4.rgb, r0.a           // ro is moved to rgb, ro is stored in bump`s alpha
++cnd r4.a, r4.a, r5, r4  // alpha channel is subject, f(NH) is stored to alpha
+dp3_x8_sat r5, c2, r2_bx2
+//mov_x4_sat r5, r5
+lrp r4.a, r5.a, r4, c1
+mov r0, r4
+[RS]
+D3DRS_ALPHATESTENABLE FALSE
+
+[PS] PerPixelSpecular
+ps.1.1
+tex t0
+texreg2ar t1, t0
+mul r0, t1, v0
+[PS14]
+ps.1.4
+texld r0, t0_dw.xyw
+mov r0.r, r0.a
+phase
+texld r1, r0.xyz
+mul r0, r1, v0
+[RS]
+D3DRS_ALPHATESTENABLE FALSE
+
+[PS] PerPixelTexSpecular
+ps.1.1
+tex t0
+texreg2ar t1, t0
+tex t2
+mul r0, t1, v0
+mul r0, r0, t2
+[PS14]
+ps.1.4
+texld r0, t0_dw.xyw
+mov r0.r, r0.a
+phase
+texld r1, r0.xyz
+texld r2, t2.xyz
+mul r0, r1, v0
+mul r0, r0, r2
+[RS]
+D3DRS_ALPHATESTENABLE FALSE
+
+[PS] FullPerPixelSpecular
+ps.1.1
+tex t0
+texreg2ar t1, t0
+tex t2
+mul r0, t1, v0
+mul r0, r0, t2
+[PS14]
+ps.1.4
+texld r0, t0_dw.xyw
+mov r0.r, r0.a
+phase
+texld r1, r0.xyz
+texld r2, t2.xyz
+mul r0, r1, v0
+mul r0, r0, r2
+[RS]
+D3DRS_ALPHATESTENABLE FALSE
+
+[PS] FullPerPixelTexSpecular
+ps.1.1
+tex t0
+texreg2ar t1, t0
+tex t2
+tex t3
+mul r0, t1, v0
+mul r0, r0, t2
+mul r0, r0, t3
+[PS14]
+ps.1.4
+texld r0, t0_dw.xyw
+mov r0.r, r0.a
+phase
+texld r1, r0.xyz
+texld r2, t2.xyz
+texld r3, t3.xyz
+mul r0, r1, v0
+mul r0, r0, r2
+mul r0, r0, r3
+[RS]
+D3DRS_ALPHATESTENABLE FALSE
+
+[PS] PointPerPixelSpecular
+ps.1.1
+tex t0
+texreg2ar t1, t0
+tex t2
+mul r0, t1, v0
+mul r0, r0, t2
+[PS14]
+ps.1.4
+texld r0, t0_dw.xyw
+mov r0.r, r0.a
+phase
+texld r1, r0.xyz
+texld r2, t2.xyz
+mul r0, r1, v0
+mul r0, r0, r2
+[RS]
+D3DRS_ALPHATESTENABLE FALSE
+
+[PS] PointPerPixelTexSpecular
+ps.1.1
+tex t0
+texreg2ar t1, t0
+tex t2
+tex t3
+mul r0, t1, v0
+mul r0, r0, t2
+mul r0, r0, t3
+[PS14]
+ps.1.4
+texld r0, t0_dw.xyw
+mov r0.r, r0.a
+phase
+texld r1, r0.xyz
+texld r2, t2.xyz
+texld r3, t3.xyz
+mul r0, r1, v0
+mul r0, r0, r2
+mul r0, r0, r3
+[RS]
+D3DRS_ALPHATESTENABLE FALSE
+
+[PS] PerPixelDiffuse
+ps.1.1
+tex t0
+dp3_sat r0, t0_bx2, c0_bx2
+mul_x2 r0, v0, r0
+[RS]
+D3DRS_ALPHATESTENABLE FALSE
+[TSS]
+0 D3DTSS_TEXTURETRANSFORMFLAGS D3DTTFF_DISABLE
+1 D3DTSS_TEXTURETRANSFORMFLAGS D3DTTFF_DISABLE
+0 D3DTSS_COLOROP D3DTOP_DOTPRODUCT3
+0 D3DTSS_COLORARG1 D3DTA_TEXTURE
+0 D3DTSS_COLORARG2 D3DTA_TFACTOR
+0 D3DTSS_ALPHAOP D3DTOP_DOTPRODUCT3
+0 D3DTSS_ALPHAARG1 D3DTA_TEXTURE
+0 D3DTSS_ALPHAARG2 D3DTA_TFACTOR
+1 D3DTSS_COLOROP D3DTOP_MODULATE
+1 D3DTSS_COLORARG1 D3DTA_CURRENT
+1 D3DTSS_COLORARG2 D3DTA_DIFFUSE
+1 D3DTSS_ALPHAOP D3DTOP_MODULATE
+1 D3DTSS_ALPHAARG1 D3DTA_CURRENT
+1 D3DTSS_ALPHAARG2 D3DTA_DIFFUSE
+
+[PS] PrecisePerPixelDiffuse
+ps.1.1
+tex t0
+tex t1
+dp3_sat r0, t0_bx2, t1_bx2
+mul r0, v0, r0
+[RS]
+D3DRS_ALPHATESTENABLE FALSE
+
+; TSS version of this is impossible
+[PS] FoggedParticle
+ps.1.1
+tex t0
+tex t1
+mul r0, t0, t1.a
+mad r0.rgb, t1, 1-t0.a, r0
++mov r0.a, t1.a
+[RS]
+D3DRS_ALPHATESTENABLE FALSE
+[TSS]
+0 D3DTSS_TEXTURETRANSFORMFLAGS D3DTTFF_DISABLE
+1 D3DTSS_TEXTURETRANSFORMFLAGS D3DTTFF_DISABLE
+0 D3DTSS_ALPHAOP D3DTOP_SELECTARG1
+0 D3DTSS_ALPHAARG1 D3DTA_TEXTURE|D3DTA_COMPLEMENT
+0 D3DTSS_COLOROP D3DTOP_SELECTARG1
+0 D3DTSS_COLORARG1 D3DTA_TEXTURE
+1 D3DTSS_ALPHAOP D3DTOP_SELECTARG1
+1 D3DTSS_ALPHAARG1 D3DTA_TEXTURE
+1 D3DTSS_COLOROP D3DTOP_BLENDCURRENTALPHA
+1 D3DTSS_COLORARG1 D3DTA_TEXTURE
+1 D3DTSS_COLORARG2 D3DTA_CURRENT
+
+[PS] FoggedLitParticle
+ps.1.1
+tex t0
+tex t1
+tex t2
+mul r0.rgb, t0, v0
++mul r0.a, t0.a, v0.a
+mul_x4 r0.rgb, r0, t1
+mul r1, t2, r0.a
+mad r0.rgb, r0, 1-t2.a, r1
+[RS]
+D3DRS_ALPHATESTENABLE FALSE
+
+;[PS] FoggedDiffuseParticle
+;ps.1.1
+;tex t0
+;tex t1
+;mul r0, t1, v0
+;lrp r0.rgb, t0.a, t0, r0
+;[RS]
+;D3DRS_ALPHATESTENABLE FALSE
+
+[PS] TexturedFog
+ps.1.1
+tex t0
+texm3x2pad t1, t0
+texm3x2tex t2, t0
+mov r0, t2
+
+[RS]
+D3DRS_ALPHATESTENABLE FALSE
+
+[PS] TextureAndMirror
+ps.1.1
+tex t0
+tex t1
+mul r0.rgb, t0, v0
++mov r0.a, t0.a
+//add r0.rgb, r0, t1
+lrp r0, v0.a, t1, r0
+[RS]
+D3DRS_ALPHATESTENABLE FALSE
+[TSS]
+0 D3DTSS_TEXTURETRANSFORMFLAGS D3DTTFF_DISABLE
+1 D3DTSS_TEXTURETRANSFORMFLAGS D3DTTFF_DISABLE
+0 D3DTSS_ALPHAOP D3DTOP_SELECTARG1
+0 D3DTSS_ALPHAARG1 D3DTA_TEXTURE
+0 D3DTSS_COLOROP D3DTOP_MODULATE
+0 D3DTSS_COLORARG1 D3DTA_TEXTURE
+0 D3DTSS_COLORARG2 D3DTA_DIFFUSE
+1 D3DTSS_ALPHAOP D3DTOP_BLENDDIFFUSEALPHA
+1 D3DTSS_ALPHAARG1 D3DTA_TEXTURE
+1 D3DTSS_ALPHAARG2 D3DTA_CURRENT
+1 D3DTSS_COLOROP D3DTOP_BLENDDIFFUSEALPHA
+1 D3DTSS_COLORARG1 D3DTA_TEXTURE
+1 D3DTSS_COLORARG2 D3DTA_CURRENT
+
+[PS] FoggedTextureAndMirror
+ps.1.1
+tex t0
+tex t1
+tex t2
+mul r0.rgb, t0, v0
++mov r0.a, t0.a
+;add r0.rgb, r0, t1
+lrp r0, v0.a, t1, r0
+mul r1.rgb, t2, r0.a
+mad r0.rgb, r0, 1-t2.a, r1
+;lrp r0.rgb, t2.a, t2, r0
+[RS]
+D3DRS_ALPHATESTENABLE FALSE
+
+[PS] Mirror
+ps.1.1
+tex t0
+mov r0.rgb, t0
++mul r0.a, v0.a, t0.a
+[RS]
+D3DRS_ALPHATESTENABLE FALSE
+[TSS]		
+0 D3DTSS_TEXTURETRANSFORMFLAGS D3DTTFF_DISABLE
+1 D3DTSS_TEXTURETRANSFORMFLAGS D3DTTFF_DISABLE
+0 D3DTSS_COLOROP D3DTOP_SELECTARG1
+0 D3DTSS_COLORARG1 D3DTA_TEXTURE
+0 D3DTSS_ALPHAOP D3DTOP_SELECTARG1
+0 D3DTSS_ALPHAARG1 D3DTA_DIFFUSE
+1 D3DTSS_ALPHAOP D3DTOP_DISABLE
+1 D3DTSS_COLOROP D3DTOP_DISABLE
+
+[PS] GlossedMirror
+ps.1.1
+tex t0
+tex t1
+mov r0.rgb, t0
++mul r0.a, v0.a, t0.a
+mul r0, r0, t1
+[RS]
+D3DRS_ALPHATESTENABLE FALSE
+[TSS]		
+0 D3DTSS_TEXTURETRANSFORMFLAGS D3DTTFF_DISABLE
+1 D3DTSS_TEXTURETRANSFORMFLAGS D3DTTFF_DISABLE
+0 D3DTSS_COLOROP D3DTOP_SELECTARG1
+0 D3DTSS_COLORARG1 D3DTA_TEXTURE
+0 D3DTSS_ALPHAOP D3DTOP_SELECTARG1
+0 D3DTSS_ALPHAARG1 D3DTA_DIFFUSE
+1 D3DTSS_ALPHAOP D3DTOP_DISABLE
+1 D3DTSS_COLOROP D3DTOP_MODULATE
+1 D3DTSS_COLORARG1 D3DTA_CURRENT
+1 D3DTSS_COLORARG2 D3DTA_TEXTURE
+
+[PS] BumpedMirror
+ps.1.1
+tex t0
+texm3x3pad t1, t0_bx2
+texm3x3pad t2, t0_bx2
+texm3x3vspec t3, t0_bx2
+mov r0, t3
+[RS]
+D3DRS_ALPHATESTENABLE FALSE
+
+[PS] BumpedFresnel
+ps.1.1
+tex t0
+tex t1
+tex t2
+dp3 r1.rgb, t0_bx2, t2_bx2
++mul r0.a, c0.a, t1.a
+mul r1.rgb, 1-r1, 1-r1
++mul r1.a, c0.b, t1.a
+mul r1.rgb, r1, r1
+mov r0.rgb, t1
++mad r0.a, r1.a, r1.b, r0.a
+[RS]
+D3DRS_ALPHATESTENABLE FALSE
+
+[PS] ShadowBlur
+ps.1.1
+tex t0
+tex t1
+tex t2
+tex t3
+add_x4 r0.a, t0.a, -t1.a
+mad r0.a, r0.a, r0.a, c0.a
+; first texture blend, calc difference for second
+cnd r1.rgb, r0.a, t0, t1
++add_x4 r0.a, t0.a, -t2.a
+lrp r0.rgb, c1.a, t0, r1
++mad r0.a, r0.a, r0.a, c0.a
+; second texture blend, calc difference for third
+cnd r1.rgb, r0.a, t0, t2
++add_x4 r0.a, t0.a, -t3.a
+lrp r0.rgb, c2.a, r0, r1
++mad r0.a, r0.a, r0.a, c0.a
+; third texture blend
+cnd r1.rgb, r0.a, t0, t3
+lrp r0.rgb, c3.a, r0, r1
+[RS]
+D3DRS_ALPHATESTENABLE FALSE
+
+[PS] AlienEffect
+ps.1.1
+tex t0
+tex t1
+lrp r0, v0.a, t1, t0
+[PS14]
+ps.1.4
+texld r0, t0_dw.xyw
+texld r1, t1.xyz
+lrp r0, v0.a, r1, r0
+[RS]
+D3DRS_ALPHATESTENABLE FALSE
+[TSS]
+0 D3DTSS_TEXTURETRANSFORMFLAGS D3DTTFF_DISABLE
+1 D3DTSS_TEXTURETRANSFORMFLAGS D3DTTFF_DISABLE
+0 D3DTSS_COLOROP D3DTOP_SELECTARG1
+0 D3DTSS_COLORARG1 D3DTA_TEXTURE
+0 D3DTSS_ALPHAOP D3DTOP_SELECTARG1
+0 D3DTSS_ALPHAARG1 D3DTA_TEXTURE
+1 D3DTSS_ALPHAOP D3DTOP_BLENDDIFFUSEALPHA 
+1 D3DTSS_ALPHAARG1 D3DTA_TEXTURE
+1 D3DTSS_ALPHAARG2 D3DTA_CURRENT
+1 D3DTSS_COLOROP D3DTOP_BLENDDIFFUSEALPHA 
+1 D3DTSS_COLORARG1 D3DTA_TEXTURE
+1 D3DTSS_COLORARG2 D3DTA_CURRENT
+
+[PS] PointCubeMapDepth
+ps.1.1
+tex t0
+dp3_sat r0, t0_bx2, v0_bx2
+[RS]
+D3DRS_ALPHATESTENABLE FALSE
+[TSS]
+0 D3DTSS_TEXTURETRANSFORMFLAGS D3DTTFF_DISABLE
+1 D3DTSS_TEXTURETRANSFORMFLAGS D3DTTFF_DISABLE
+0 D3DTSS_COLOROP D3DTOP_DOTPRODUCT3
+0 D3DTSS_COLORARG1 D3DTA_TEXTURE
+0 D3DTSS_COLORARG2 D3DTA_DIFFUSE
+0 D3DTSS_ALPHAOP D3DTOP_DOTPRODUCT3
+0 D3DTSS_ALPHAARG1 D3DTA_TEXTURE
+0 D3DTSS_ALPHAARG2 D3DTA_DIFFUSE
+1 D3DTSS_ALPHAOP D3DTOP_DISABLE
+1 D3DTSS_COLOROP D3DTOP_DISABLE
+
+[PS] CLPointDepthCheck
+ps.1.1
+tex t0
+tex t1
+dp3_sat r0, t0_bx2, v0_bx2
+sub r0, r0, t1
+[RS]
+D3DRS_ALPHATESTENABLE TRUE
+D3DRS_ALPHAREF 2
+D3DRS_ALPHAFUNC D3DCMP_LESSEQUAL
+[TSS]
+0 D3DTSS_TEXTURETRANSFORMFLAGS D3DTTFF_DISABLE
+1 D3DTSS_TEXTURETRANSFORMFLAGS D3DTTFF_DISABLE
+0 D3DTSS_COLOROP D3DTOP_DOTPRODUCT3
+0 D3DTSS_COLORARG1 D3DTA_TEXTURE
+0 D3DTSS_COLORARG2 D3DTA_DIFFUSE
+0 D3DTSS_ALPHAOP D3DTOP_DOTPRODUCT3
+0 D3DTSS_ALPHAARG1 D3DTA_TEXTURE
+0 D3DTSS_ALPHAARG2 D3DTA_DIFFUSE
+1 D3DTSS_COLOROP D3DTOP_SUBTRACT
+1 D3DTSS_COLORARG1 D3DTA_CURRENT
+1 D3DTSS_COLORARG2 D3DTA_TEXTURE
+1 D3DTSS_ALPHAOP D3DTOP_SUBTRACT
+1 D3DTSS_ALPHAARG1 D3DTA_CURRENT
+1 D3DTSS_ALPHAARG2 D3DTA_TEXTURE
+
+[PS] CLPointLightShadowed
+ps.1.1
+tex t0
+tex t1
+tex t2
+dp3_sat r0, t1_bx2, v1_bx2
+mul r0.rgb, t0, v0
++sub r0.a, r0, t2
+[PS14]
+ps.1.4
+texld r0, t0_dw.xyw
+texld r1, t1.xyz
+texld r2, t2.xyz
+dp3_sat r5, r1_bx2, v1_bx2
+mul r0.rgb, r0, v0
++sub r0.a, r5, r2
+[RS]
+D3DRS_ALPHATESTENABLE TRUE
+D3DRS_ALPHAREF 2
+D3DRS_ALPHAFUNC D3DCMP_LESSEQUAL

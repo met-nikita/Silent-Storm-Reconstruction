@@ -1,0 +1,19 @@
+
+	// TEdit.idl : IDL source for TEdit.exe
+//
+// This file will be processed by the MIDL tool to
+// produce the type library (TEdit.tlb) and marshalling code.
+import "oaidl.idl";
+import "ocidl.idl";
+[
+	uuid(82EFE9ED-6F27-403A-961C-D4651DCAA3F8),
+	version(1.0),
+	helpstring("TEdit 1.0 Type Library")
+]
+library TEditLib
+{
+	importlib("stdole32.tlb");
+	importlib("stdole2.tlb");
+};
+
+	

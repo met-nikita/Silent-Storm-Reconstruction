@@ -1,0 +1,32 @@
+#ifndef __EVENT_PLAYER_H__
+#define __EVENT_PLAYER_H__
+//
+namespace NWorld
+{
+//
+class CPlayer;
+////////////////////////////////////////////////////////////////////////////////////////////////////
+class CEventOnNewPlayerTurnOrTime
+{
+public:
+	CPtr<CPlayer> pPlayer;
+	CEventOnNewPlayerTurnOrTime( CPlayer *_pPlayer = 0 ): pPlayer( _pPlayer ) {};
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
+class CEventOnNewPlayerFastTurnOrTime
+{
+public:
+	CPtr<CPlayer> pPlayer;
+	CEventOnNewPlayerFastTurnOrTime( CPlayer *_pPlayer = 0 ): pPlayer( _pPlayer ) {};
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
+class CEventOnNewPlayerTurn
+{
+public:
+	CPtr<CPlayer> pPlayer;
+	CEventOnNewPlayerTurn( CPlayer *_pPlayer = 0 ): pPlayer( _pPlayer ) {};
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
+}
+//
+#endif __EVENT_PLAYER_H__

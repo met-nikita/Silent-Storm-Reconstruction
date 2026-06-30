@@ -1,0 +1,39 @@
+#ifndef __IUNIT_ICON_BAR_H_
+#define __IUNIT_ICON_BAR_H_
+#if _MSC_VER > 1000
+#pragma once
+#endif // _MSC_VER > 1000
+////////////////////////////////////////////////////////////////////////////////////////////////////
+namespace NUI
+{
+////////////////////////////////////////////////////////////////////////////////////////////////////
+class CIconBarSet;
+class CComplexButton;
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// CUnitIconsBar
+////////////////////////////////////////////////////////////////////////////////////////////////////
+class CUnitIconsBar: public CWindow
+{
+	OBJECT_BASIC_METHODS(CUnitIconsBar)
+private:
+	ZDATA_(CWindow)
+	CPtr<NGame::IMission> pMission;
+	////
+	CPtr<CIconBarSet> pIconBar;
+	NGame::EActionIconsSet eLastSet;
+	vector<CPtr<CComplexButton> > iconsSet;
+	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CWindow*)this); f.Add(2,&pMission); f.Add(3,&pIconBar); f.Add(4,&eLastSet); f.Add(5,&iconsSet); return 0; }
+
+public:
+	CUnitIconsBar() {}
+	CUnitIconsBar( const SWindowInfo &sInfo, NGame::IMission *pMission );
+
+	void SetIconBar( CIconBarSet *pIcons );
+
+	bool ProcessMessage( const SEvent &sEvent );
+	void Draw( const STime &sTime, NGScene::I2DGameView *pView );
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
+} // Namespace
+////////////////////////////////////////////////////////////////////////////////////////////////////
+#endif

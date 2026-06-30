@@ -1,0 +1,143 @@
+#ifndef __WACKBASE_H_
+#define __WACKBASE_H_
+#include "..\DBFormat\DataAck.h"
+
+namespace NDb
+{
+	class CDBAckSequence;
+	class CDBAck;
+	class CDBAckInfo;
+	class CRPGPers;
+}
+
+namespace NWorld
+{
+////////////////////////////////////////////////////////////////////////////////////////////////////
+const int N_ACK_CRITICAL = 0;
+const int N_ACK_DEATH = 1;
+const int N_ACK_SKILL = 2;
+////////////////////////////////////////////////////////////////////////////////////////////////////
+class CUnit;
+class CWorld;
+class IPlayer;
+class CUnitServer;
+class CDumbUnitServer;
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// IAck           ( Ack == Acknowledgement )
+////////////////////////////////////////////////////////////////////////////////////////////////////
+class IAck: virtual public CObjectBase
+{
+public:
+	//
+	virtual NDb::CDBAck *GetDBAck() { return 0; }
+	// ����������� �������
+	virtual void OnSegment() {} // �������
+	virtual void OnEnemyBecomesVisible( CUnitServer *pWatcher, 
+		CUnitServer *pTarget, bool bRealTime ) {}
+	virtual void OnLastPieceOfAmmo( CUnitServer *pUnit ) {} // ��������� �������
+	virtual void OnWeaponJammed( CUnitServer *pUnit ) {} // ������ ���������
+	virtual void OnOrderConfirmation( CUnitServer *pUnit ) {} // ������������� �������
+	virtual void OnImpossibleToPerformAction( CUnitServer *pUnit ) {} // ���������� ��������� �������
+	virtual void OnSuffersLightDamage( CUnitServer *pUnit ) {} // ������� ������ �����������
+	virtual void OnSuffersHardDamage( CUnitServer *pUnit ) {} // ������� ������� �����������
+	virtual void OnUnitDied( CUnitServer *pUnit ) {} // unit ����
+	virtual void OnTargetHit( CUnitServer *pUnit ) {} // Unit ����� � ����
+	virtual void OnHardTargetHit( CUnitServer *pUnit ) {} // Unit ����� � ������� ����
+	virtual void OnTargetMissed( CUnitServer *pUnit ) {} // Unit �� ����� � ����
+	virtual void OnGrenadeExplosion( CUnitServer *pUnit, int nUnitsDestroyed, int nObjectsDestroyed ) {} // ����������� �� �������
+	virtual void OnDoDamage( CUnitServer *pAttacker, CUnitServer *pTarget ) {}
+	virtual void OnDoAccidentalDamage( CUnitServer *pAttacker, CUnitServer *pTarget ) {}
+	virtual void OnDoCriticalDamage( CUnitServer *pAttacker, CUnitServer *pTarget ) {}
+	virtual void OnUnitWasKilled( CUnitServer *pAttacker, CUnitServer *pTarget ) {}
+	virtual void OnNewTurnStarted( IPlayer *pPlayer ) {}
+	virtual void OnRealTimeStarted() {}
+	virtual void OnInterrupt( CUnitServer *pWho ) {}
+	virtual void OnSkillIncreased( CUnitServer *pWho ) {}
+	virtual void OnCannotFinishHeal( CUnitServer *pHealer, CUnitServer *pTarget ) {}
+	virtual void OnHealFinished( CUnitServer *pHealer, CUnitServer *pTarget ) {}
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// CGlobalAck
+////////////////////////////////////////////////////////////////////////////////////////////////////
+class CGlobalAck: public IAck
+{
+  OBJECT_BASIC_METHODS(CGlobalAck);
+	// Retail @0x33a350: a queued ack-sequence now also carries the unit that triggered it (both the
+	// CPtr<CUnitServer> and the CDBPtr<CDBAck> are refcounted), so the global ack can tie a pending bark
+	// to its speaker. Serialized as { tag2 pUS, tag3 pAck } -- mirrors NWorld::CGlobalAck::SAck::operator&.
+	struct SAck
+	{
+		CPtr<CUnitServer> pUS;
+		CDBPtr<NDb::CDBAck> pAck;
+		SAck() : pUS(0), pAck(0) {}
+		SAck( CUnitServer *_pUS, NDb::CDBAck *_pAck ) : pUS(_pUS), pAck(_pAck) {}
+		int operator&( CStructureSaver &f ) { f.Add(2,&pUS); f.Add(3,&pAck); return 0; }
+	};
+	ZDATA
+	vector< CObj<IAck> > vAck;
+	list< SAck > sequences; // ����������� sequence � ������������ ����������� �� ����������� ack
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&vAck); f.Add(3,&sequences); return 0; }
+
+	bool IsContainUnit( const list< CPtr<CUnit> > &visibleUnits, int nRPGPersID );
+	bool IsSequenceVisible( const list< CPtr<CUnit> > &visibleUnits, NDb::CDBAckSequence *pSequence );
+	void RemoveInvisibleSequences( IPlayer *pPlayer );
+	void FetchHighestAcks();
+public:
+	CGlobalAck() {}
+	// ���������� � vAck
+	void AddAck( CUnitServer *pUnit );
+	// ���������� � sequences
+	void AddAckSequence( CUnitServer *pUnit, NDb::CDBAck *pAck ); 
+	// �������� ��������� �� ����������� sequence � ������ ����, ��� �������
+	virtual NDb::CDBAckSequence *GetSequence( IPlayer *pPlayer ); 
+	void RemoveUnitAcks( CUnitServer *pUnit );
+	// IAck
+	virtual void OnSegment();
+	virtual void OnEnemyBecomesVisible( CUnitServer *pWatcher, 
+		CUnitServer *pTarget, bool bRealTime );
+	virtual void OnLastPieceOfAmmo( CUnitServer *pUnit );
+	virtual void OnWeaponJammed( CUnitServer *pUnit );
+	virtual void OnOrderConfirmation( CUnitServer *pUnit );
+	virtual void OnImpossibleToPerformAction( CUnitServer *pUnit );
+	virtual void OnSuffersLightDamage( CUnitServer *pUnit );
+	virtual void OnSuffersHardDamage( CUnitServer *pUnit );
+	virtual void OnUnitDied( CUnitServer *pUnit );
+	virtual void OnTargetHit( CUnitServer *pUnit );
+	virtual void OnHardTargetHit( CUnitServer *pUnit );
+	virtual void OnTargetMissed( CUnitServer *pUnit );
+	virtual void OnGrenadeExplosion( CUnitServer *pUnit, int nUnitsDestroyed, int nObjectsDestroyed );
+	virtual void OnDoDamage( CUnitServer *pAttacker, CUnitServer *pTarget );
+	virtual void OnDoAccidentalDamage( CUnitServer *pAttacker, CUnitServer *pTarget );
+	virtual void OnDoCriticalDamage( CUnitServer *pAttacker, CUnitServer *pTarget );
+	virtual void OnUnitWasKilled( CUnitServer *pAttacker, CUnitServer *pTarget );
+	virtual void OnNewTurnStarted( IPlayer *pPlayer );
+	virtual void OnRealTimeStarted();
+	virtual void OnInterrupt( CUnitServer *pWho );
+	virtual void OnSkillIncreased( CUnitServer *pWho );
+	virtual void OnCannotFinishHeal( CUnitServer *pHealer, CUnitServer *pTarget );
+	virtual void OnHealFinished( CUnitServer *pHealer, CUnitServer *pTarget );
+	virtual void SayAck( CUnitServer *pWho, int nConditionID );
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// CAckBase
+////////////////////////////////////////////////////////////////////////////////////////////////////
+class CAckBase: public IAck
+{
+	ZDATA
+	CPtr<CUnitServer> pUnit; // ���� ����������� ��� �������� ack ��� ������ ���������������� Unit-�
+	CDBPtr<NDb::CDBAck> pDBAck; // ��������� ack-�
+public:
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&pUnit); f.Add(3,&pDBAck); return 0; }
+
+	CAckBase() : pUnit(0), pDBAck(0) { }
+	CAckBase( CUnitServer *_pUnit, NDb::CDBAck *_pDBAck );
+	CUnitServer *GetUnit();
+	// IAck
+	virtual NDb::CDBAck *GetDBAck();
+	virtual CWorld *GetWorld();
+	virtual void PlayAck();
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
+}
+
+#endif

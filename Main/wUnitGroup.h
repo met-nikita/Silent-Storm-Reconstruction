@@ -1,0 +1,29 @@
+#ifndef __WUNITGROUP_H_
+#define __WUNITGROUP_H_
+//
+#include "..\Misc\set.h"
+//
+namespace NWorld
+{
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// CUnitGroup
+////////////////////////////////////////////////////////////////////////////////////////////////////
+class CUnitServer;
+//
+class CUnitGroup: public CObjectBase
+{
+	OBJECT_BASIC_METHODS( CUnitGroup );
+	ZDATA
+	int nID;
+public:
+	CSet<CUnitServer> units;
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&nID); f.Add(3,&units); return 0; }
+	//
+	CUnitGroup( int _nID = 0 );
+	//
+	int GetID() const;
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
+}
+//
+#endif __WUNITGROUP_H_

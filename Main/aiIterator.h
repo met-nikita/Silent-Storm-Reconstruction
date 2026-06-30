@@ -1,0 +1,30 @@
+#ifndef __AIITERATOR_H_
+#define __AIITERATOR_H_
+
+namespace NAI
+{
+////////////////////////////////////////////////////////////////////////////////////////////////////
+class IAIState;
+class IAIAction;
+class IAILogContainer;
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// IAIIterator
+////////////////////////////////////////////////////////////////////////////////////////////////////
+class IAIIterator: public CObjectBase
+{
+public:
+	virtual void First() = 0; // установить в начало
+	virtual void Next() = 0; // следующее значение 
+	virtual bool IsEnd() = 0; // дальше итератор увеличивать некуда
+	virtual IAILogContainer *GetAILog() = 0; // получить log используемый iterator
+	virtual void SetMaxAP( int nMaxAP ) = 0;
+	virtual void Reset() = 0; // сбросить все оптимизационные данные
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
+IAIIterator *CreateAIPositionIterator( IAIState *pAIState );
+IAIIterator *CreateAIUnitIterator( IAIState *pAIState );
+IAIIterator *CreateAIActionIterator( IAIState *pAIState, int nCount );
+////////////////////////////////////////////////////////////////////////////////////////////////////
+}
+
+#endif

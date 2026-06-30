@@ -1,0 +1,4 @@
+LIBRARY GDPFile.dll
+EXPORTS
+    ?Create@IGDPFile@LifeStudioHeadAPI@@SGPAU12@PBD@Z
+    ?CreateFullControl@IGDPFileDev@LifeStudioHeadAPI@@SGPAU12@PBD@Z

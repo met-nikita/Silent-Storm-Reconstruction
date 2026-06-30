@@ -1,0 +1,24 @@
+#ifndef __RPGObject_H_
+#define __RPGObject_H_
+#if _MSC_VER > 1000
+#pragma once
+#endif // _MSC_VER > 1000
+//
+namespace NRPG
+{
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// IObject
+////////////////////////////////////////////////////////////////////////////////////////////////////
+class IObject: virtual public CObjectBase
+{
+public:
+	virtual void Kill() = 0;
+	virtual int GetDestroyStage() = 0;
+	virtual bool IsDead() const = 0;
+	virtual void SetDestroyStage( int nStage ) = 0;
+	virtual int GetHP() { return 0; }   // object hit-points (luaObjectGetHP @0x2e9260); CObject overrides
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
+} // namespace
+//
+#endif

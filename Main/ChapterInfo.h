@@ -1,0 +1,54 @@
+#ifndef __CHAPTERINFO_H_
+#define __CHAPTERINFO_H_
+#if _MSC_VER > 1000
+#pragma once
+#endif // _MSC_VER > 1000
+////////////////////////////////////////////////////////////////////////////////////////////////////
+#include "DG.h"
+#include "GResource.h"
+////////////////////////////////////////////////////////////////////////////////////////////////////
+namespace NDb
+{
+	class CUITexture;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+enum EChapterSectorType
+{
+	ZONE,
+	RANDOM,
+	EXITZONE
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
+struct SChapterSector
+{
+	ZDATA
+	int nTemplate;
+	int nProbability;
+	int nDescriptionID;
+	vector<CVec2> pointsSet;
+	EChapterSectorType eType;
+	string szID;
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&nTemplate); f.Add(3,&nProbability); f.Add(4,&nDescriptionID); f.Add(5,&pointsSet); f.Add(6,&eType); f.Add(7,&szID); return 0; }
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
+class CChapterInfo: public CObjectBase
+{
+	OBJECT_BASIC_METHODS(CChapterInfo)
+public:
+	ZDATA
+	int nMapID;
+	CVec2 vDeployPos;
+	vector<SChapterSector> sectorsSet;
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&nMapID); f.Add(3,&vDeployPos); f.Add(4,&sectorsSet); return 0; }
+
+	CChapterInfo();
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
+class CChapterInfoLoader: public NGScene::CResourceLoader<int, CChapterInfo>
+{
+	OBJECT_BASIC_METHODS(CChapterInfoLoader);
+protected:
+	virtual void Recalc();
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
+#endif

@@ -1,0 +1,12 @@
+#ifndef __SCENARIOCOMMANDS_H_
+#define __SCENARIOCOMMANDS_H_
+//
+namespace NScenario
+{
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CommandScenario( const string &szID, const vector<wstring> &paramsSet, void *pContext );
+void CommandZone( const string &szID, const vector<wstring> &paramsSet, void *pContext );
+////////////////////////////////////////////////////////////////////////////////////////////////////
+}
+//
+#endif __SCENARIOCOMMANDS_H_

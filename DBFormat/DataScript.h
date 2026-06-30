@@ -1,0 +1,24 @@
+#ifndef __DATASCRIPT_H_
+#define __DATASCRIPT_H_
+//
+#include "..\ADOImport\BasicDB.h"
+//
+namespace NDb
+{
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// CDBAutoLoadScript
+////////////////////////////////////////////////////////////////////////////////////////////////////
+class CDBAutoLoadScript: public CDBRecord
+{
+	OBJECT_BASIC_METHODS( CDBAutoLoadScript );
+	ZDATA
+public:
+	ZPARENT( CDBRecord );
+	string szFileName;
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,(CDBRecord *)this); f.Add(3,&szFileName); return 0; }
+	//
+	virtual void Import();
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
+}
+#endif __DATASCRIPT_H_

@@ -1,0 +1,19 @@
+tasklist (feel free to add new tasks and remove done ones)
+-INTERFACE
+ -anchor camera with terrain + smooth anchor.z changing with terrain
+ -save/load interface cmds list
+-ANIMATION
+ -avoid obstacles when smoothing route
+-EDITOR
+ -add mdac_type.exe to installation
+-GDG
+ -built in sphere model, remove from iaiviewer/imission its usage
+ -make something for missing file resources - log their absense somehow etc
+ -scalability
+  -LOD (should be capable to reduce 50k->20k at least for whole scene)
+-GENERAL
+ -pkgbuilder without files fails
+ -move to 32:32 complex resource file names
+ -track that all resources exist, make console command for searching missing resources
+ -memory management
+ -sync for peer to peer networking - advanced checks

@@ -1,0 +1,29 @@
+#ifndef __wDynObject_H_
+#define __wDynObject_H_
+#if _MSC_VER > 1000
+#pragma once
+#endif // _MSC_VER > 1000
+
+namespace NWorld
+{
+////////////////////////////////////////////////////////////////////////////////////////////////////
+class IDynamicObject : virtual public CObjectBase
+{
+public:
+	virtual bool Segment() { return true; } // true = delete object
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
+template<class T>
+void CallSegment( T *p )
+{
+	for ( T::iterator i = p->begin(); i != p->end(); )
+	{
+		if ( (*i)->Segment() )
+			i = p->erase( i );
+		else
+			++i;
+	}
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+}
+#endif

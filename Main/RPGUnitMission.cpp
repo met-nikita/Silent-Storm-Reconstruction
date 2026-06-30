@@ -1,0 +1,1879 @@
+#include "StdAfx.h"
+#include "RPGGlobal.h"
+#include "RPGUnitInfo.h"
+#include "RPGMerc.h"
+#include "RPGItemSet.h"
+#include "RPGAttackMech.h"
+#include "RPGGame.h"        // NRPG::IGame::GetMaxCriticalSeverity (combat critical clamp)
+#include "Grid.h"
+#include "A5Script.h"
+#include "..\DBFormat\DataRPG.h"
+#include "..\DBFormat\DataFormat.h"
+#include "..\DBFormat\DataAI.h"
+#include "..\Misc\RandomGen.h"
+#include "..\Misc\StrProc.h"
+#include "..\MiscDll\LogStream.h"
+#include "aiPosition.h"
+#include "RPGCritical.h"
+#include "RPGToHit.h"
+#include "wUnitServer.h"   // NWorld::CUnitServer / CUnit -- the to-hit dispatch RTTI-casts to the server
+#include "wAckBase.h"
+#include "RPGDiplomacy.h"
+#include "rpgCheatConstants.h"
+#include "rpgPerkConstants.h"
+#include "..\DBFormat\DataRpgConstants.h"
+
+#include "RPGUnitMission.h"
+////////////////////////////////////////////////////////////////////////////////////////////////////
+namespace NRPG
+{
+const float F_BACKSTAB_MELEE_COEFF = 2.5f;
+////////////////////////////////////////////////////////////////////////////////////////////////////
+struct SCriticalType
+{
+	ZDATA
+	int nStartPos;					// ������ ��������� � ������� ������� ������ ����������� �����������
+	CDBPtr<NDb::CRPGCritical> pCritical;
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&nStartPos); f.Add(3,&pCritical); return 0; }
+	SCriticalType( int nStart, NDb::CRPGCritical *p ): nStartPos(nStart), pCritical(p) {}
+};
+typedef vector<SCriticalType> TCriticalSet;
+static vector<TCriticalSet> criticalBar( NDb::N_CL ); //[NDb::N_CL];
+static bool bCBarInitialized = false;
+int Round( float f ) { return int( f + 0.5f ); }
+////////////////////////////////////////////////////////////////////////////////////////////////////
+enum EToHitType
+{
+	TH_MELEE,
+	TH_THROWING,
+	TH_SHOOT,
+	TH_RLAUNCHER,
+	TH_DEFAULT,
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
+struct SCriticalsHolder
+{
+	ZDATA
+	vector<CPtr<CCritical> > criticals;
+	int nTimeLeft;
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&criticals); f.Add(3,&nTimeLeft); return 0; }
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// CUnitMission
+////////////////////////////////////////////////////////////////////////////////////////////////////
+class CUnitMission: public IUnitMission
+{
+	friend class CUnitToHitCalcer;
+	friend class CTileToHitCalcer;
+	friend class CGrenadeToHitCalcer;
+	friend class CRLauncherToHitCalcer;
+	// release migration: the free-fn to-hit dispatch reaches GetToHitWeaponType / GetSnipeAP /
+	// GetMeleeToHit / bLogActive (all private) -- befriend it (no visibility change to the class).
+	friend int GetToHit( const NWorld::CUnit*, NAI::EPose, int, const CVec3&, const NAI::SPosition&, NAI::EHitLocation, int, const NWorld::CUnit*, const vector<int>&, int, bool, const CVec3&, bool );
+	friend int GetTileToHit( const NWorld::CUnit*, NAI::EPose, int, const CVec3&, CVec3, NAI::ETileHitLocation, int, int, bool, const CVec3& );
+	friend int GetGrenadeToHit( const NWorld::CUnit*, NAI::EPose, int, const CVec3&, bool, CVec3, const CVec3& );
+	friend int GetRLauncherToHit( const NWorld::CUnit*, NAI::EPose, int, const CVec3&, CVec3, NAI::ETileHitLocation, int, bool, const CVec3& );
+
+	OBJECT_BASIC_METHODS(CUnitMission);
+private:
+	void UseSkill( NDb::ESkillType eSkill );
+	void ApplyCritical( CCritical *p );
+	void ApplyCritical( NDb::CRPGCritical *pCritical, int nDC );
+	void ProcessCriticalsOnNewTurnFor();
+	float GetCriticalDmgModifier( NAI::EHitLocation eHL, int nCriticalProbability, int nCriticalDifficulty );
+	EToHitType GetToHitWeaponType() const;
+	int GetMeleeToHit( const CVec3 &ptAttacker, const NAI::SPosition &posTarget, 
+		IUnitMissionInfo *pTarget, NAI::EHitLocation hl, const vector<int> &accessibleHLs, bool bBackStab ) const;
+	int CalcInterruptProbability( const IUnitMission *pEnemy,	bool bIsMutual, bool bWasShot );
+
+	virtual int GetHealedVP() const { return pRPGUnit->nHealedVP; }
+	virtual int GetTotalVP() const { return pRPGUnit->Skills( NDb::ST_VP ) + GetHealedVP(); }
+	void SetHealedVP( int n ) { pRPGUnit->nHealedVP = n; }
+	virtual int GetLastActionTimes() const { return nLastActionTimes; }
+	virtual int GetMoveInLastTurn() const { return nMoveInLastTurn; }
+	virtual int RollCritical( NAI::EHitLocation eHL, int nCriticalDifficulty, NDb::CRPGCritical **pCritical );
+	void SaveAck( int nAckID, IUnitMissionInfo *pAttacker );
+	void ResetUnitParameters();
+	int GetSnipeAP( IUnitMissionInfo *pTarget ) const;
+	int GetUnconsciousProbability( IUnitMissionInfo *pAttacker, 
+		IUnitMissionInfo *pTarget, int nBaseProbability ) const;
+	int ProcessAttackForPK( int nUserID, CAttackPortion *pAttack, NDb::CRPGArmor *pArmor, bool bApplyToVP );
+
+	float GetPanzerkleinAddCoverIgnore() { if ( pPanzerklein ) return pPanzerklein->fAddCoverIgnore; return 0; }
+	void WearBrokenPK();
+	int GetSkillAddValue( const int eSkill ) const;
+
+	ZDATA
+	int nMoveInLastTurn;
+	EAction eLastAction;
+	int nLastActionTimes;
+	vector<CPtr<CCritical> > criticals;
+	int _nShameOnEpik;
+	bool bLogActive;
+	bool bSitting;
+	int  nBullet;
+	SSnipeAP savedSnipeAP;
+	float fLastToHit; // for Burst ToHit
+	vector<NDb::ECritical> lastCriticals;
+	bool bUseTwoHanded;
+	float fLightPerception;
+	float fSoundPerception;
+	NDb::SToHitConstants tohit;
+	NDb::SAISoundConstants sAISoundConstants; // ��������� AI sound
+	NDb::SInterruptsConstants SInterruptsConstants; // ��������� Interrupt-��
+	CVec3 ptLastCP;
+	vector<ECriticalState> criticalsState; // ������ ������ �� roll ����� ����������
+public:
+	CPtr<NDb::CModel> pModel;
+	CObj<CUnit> pRPGUnit;
+	wstring sID;
+private:
+	int nBulletHitThisTurn; // for criticals
+	list< CPtr<IUnitMissionInfo> > AckAttackers;
+	list<int> AckIDs;
+	SDiplomacy diplomacy;
+	bool bUnconscious;
+	CDBPtr<NDb::CPanzerklein> pPanzerklein;
+	CPtr<CDynamicSkill> pPanzerkleinVP;
+	bool bHiding;
+	CDBPtr<NDb::CDBMinesConstants> pMinesConstants;
+	list<SCriticalsHolder> suspendedCriticals;
+public:
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&nMoveInLastTurn); f.Add(3,&eLastAction); f.Add(4,&nLastActionTimes); f.Add(5,&criticals); f.Add(6,&_nShameOnEpik); f.Add(7,&bLogActive); f.Add(8,&bSitting); f.Add(9,&nBullet); f.Add(10,&savedSnipeAP); f.Add(11,&fLastToHit); f.Add(12,&lastCriticals); f.Add(13,&bUseTwoHanded); f.Add(14,&fLightPerception); f.Add(15,&fSoundPerception); f.Add(16,&tohit); f.Add(17,&sAISoundConstants); f.Add(18,&SInterruptsConstants); f.Add(19,&ptLastCP); f.Add(20,&criticalsState); f.Add(21,&pModel); f.Add(22,&pRPGUnit); f.Add(23,&sID); f.Add(24,&nBulletHitThisTurn); f.Add(25,&AckAttackers); f.Add(26,&AckIDs); f.Add(27,&diplomacy); f.Add(28,&bUnconscious); f.Add(29,&pPanzerklein); f.Add(30,&pPanzerkleinVP); f.Add(31,&bHiding); f.Add(32,&pMinesConstants); f.Add(33,&suspendedCriticals); return 0; }
+
+	// transient (NOT serialized): the per-mission RPG game, pushed in by the owning unit-server before each
+	// attack so the combat critical clamp can honor CGame::nMaxCriticalSeverity (retail cached this game on
+	// the mission via its ctor; this dev fork dropped that ctor arg).
+	CPtr<IGame> pGame;
+	virtual void SetGame( IGame *p ) { pGame = p; }
+	//
+	CUnitMission();
+	//
+	virtual void GetInfo( NAI::EPose pose, SUnitInfo *pInfo ) const;
+	virtual bool IsDead() const;
+	virtual NDb::EWeaponType GetWeaponType() const;
+	virtual NDb::CAnimWeaponType* GetDBAnimWeapon() const;
+	virtual int  GetActionAP( NAI::EPose pose, EAction action ) const;
+	virtual int GetAP() const;
+	virtual bool CanSpendAP( int nAP ) const;
+	virtual void SpendAP( int nAP );
+	virtual void RegisterAction( EAction action );
+	virtual const SSnipeAP& GetSavedAP() const { return savedSnipeAP; }
+	virtual void SaveAP( const SSnipeAP &ap );
+	virtual float GetSightDistance( NAI::EPose pose ) const;
+	virtual void StartNewTurn( const CVec3 &ptCP );
+
+	virtual bool CreateAttack( vector<CAttackPortion> *pRes, bool bSpendAmmo, 
+		bool bAnonymous, IUnitMissionInfo *pTarget, bool bBackStab );
+	virtual int ProcessAttack( int nUserID, CAttackPortion *pAttack, NDb::CRPGArmor *pArmor );
+
+	// GetToHit/GetTileToHit/GetObjectToHit/GetGrenadeToHit/GetRLauncherToHit moved to free fns
+	// (NRPG::Get*ToHit, RPGUnitMission.h) -- the release migrated the to-hit dispatch out of the
+	// interface. GetToHitWeaponType / GetSnipeAP / GetMeleeToHit stay as private helpers the free fns
+	// reach via friendship.
+
+	virtual int  GetBulletsQuantityInShot() const;
+	virtual void HealVP( const SFirstAid &fa );
+	virtual void HealCriticals( int nDC );
+	virtual int  GetIC() const;
+	virtual bool CheckIC();
+	virtual int CheckInterrupt( const IUnitMission *pEnemy, bool bIsMutual, bool bWasShot );
+	virtual int  GetInterrupt() const { return pRPGUnit->Skills(NDb::ST_INTERRUPT); }
+	virtual NDb::CRPGArmor* GetRPGArmor() const;
+	virtual NDb::CModel* GetModel() const { return pRPGUnit->pModel; }
+	virtual const wstring& GetName() const;
+	virtual void Kill();
+	virtual IInventory* GetInventory() const { return pRPGUnit->GetInventory(); };
+	virtual IInventoryInfo* GetInventoryInfo() const { return pRPGUnit->GetInventory(); };
+	virtual int GetMaxExtraAP() const;
+	virtual int GetSkillValue( NDb::ESkillType skill ) const { return pRPGUnit->Skills( skill ); }
+	virtual int GetSkillMaxValue( NDb::ESkillType skill ) const { return pRPGUnit->Skills( skill ).GetMaxValue(); }
+	virtual float GetSkillProgress( NDb::ESkillType skill ) const { return pRPGUnit->Skills( skill ).GetProgress(); }
+	virtual void DumpStats() const;
+	virtual void PrintLog( bool bPrint ) { bLogActive = bPrint; }
+	virtual void Seat() { bSitting = true; }
+	virtual void Stand() { bSitting = false; }
+	virtual bool CanMove() const { return !bSitting; }
+	virtual void Reload();
+	virtual bool LoadWeapon( IWeaponItemInfo *pWeapon, IClipItem *pClip );
+	virtual bool UnloadWeapon( IWeaponItemInfo *pWeapon );
+	virtual void StartAttack() { nBullet = 0; }
+	virtual void NextBullet() { ++nBullet; }
+	virtual int  GetNBullets() const { return nBullet; }
+	virtual void AddLastCritical( NDb::ECritical eCA ) { lastCriticals.push_back( eCA ); }
+	virtual void GetLastCriticals( vector<NDb::ECritical> *pResCritical ) { *pResCritical = lastCriticals; lastCriticals.clear(); }
+	virtual void UseTwoHanded( bool bUse ) { bUseTwoHanded = bUse;}
+	virtual bool CanUseTwoHanded() const { return bUseTwoHanded; }
+	virtual void Blind( bool bBlind ) { bBlind ? fLightPerception = 0 : fLightPerception = 1; }
+	virtual void Deaf( bool bDeaf ) { bDeaf ? fSoundPerception = 0 : fSoundPerception = 1; }
+	virtual int GetRPGPersID() const { return pRPGUnit->GetRPGPersID(); }
+	virtual void SetCannonItem( IWeaponItem *pItem );
+	virtual IWeaponItem* GetCannonItem() const { return pRPGUnit->GetCannonItem(); }
+	virtual IWeaponItem* GetWeaponItem() const { return pRPGUnit->GetWeaponItem(); }
+	virtual IWeaponItemInfo* GetCannonItemInfo() const { return pRPGUnit->GetCannonItem(); }
+	virtual bool CanHearSound( const CVec3 &ptSoundPosition, const CVec3 &ptListenerPosition,
+		NDb::CAISound *pSound, int nAISoundType, IUnitMission *pSource );
+	virtual int GetHearingProbability( IUnitMission *pSource, float fDist, const NDb::SAISound &sound, bool *pAudible );
+	virtual CVec3 GetTurnStartCP() const { return ptLastCP; }
+	virtual NDb::CRPGPers* GetRPGPers() const;
+	virtual NDb::CComplexHead* GetRPGPersHead() const;
+	virtual CUnit *GetRPGUnit() const { return pRPGUnit; }
+	virtual NDb::SToHitConstants *GetToHitConstants() { return &tohit; }
+	virtual NDb::SAISoundConstants *GetAISoundConstants() { return &sAISoundConstants; }
+	virtual NDb::SInterruptsConstants *GetInterruptsConstants() { return &SInterruptsConstants; }
+	virtual bool HasCritical( NDb::ECritical eCritical, CCritical** ppCritical = 0 ) const;
+	virtual void ApplyCritical( const SCritical &critical );
+	virtual bool RemoveCritical( NDb::ECritical eCritical );
+	virtual void SuspendCriticals( int nTurns );
+	virtual void GetCriticalsList( list<CPtr<ICriticalInfo> > *pListCriticals ) const;
+	virtual void MakeDirectDamage( int nDmg );
+	virtual void EnableCriticals();
+	virtual void DisableCriticals();
+	virtual void DisableCritical( NDb::ECritical eC, ECriticalState eState  );
+	virtual void BulletHit() { ++nBulletHitThisTurn; }
+	virtual bool GetAck( int *pAckID, IUnitMissionInfo ** ppAttacker );
+	virtual float GetXP( int nHowManyPerson ) const;
+	virtual void StartRealTime();
+	virtual const SDiplomacy& GetDiplomacy() const { return diplomacy; }
+	virtual void SetDiplomacy( const SDiplomacy &dip ) { diplomacy = dip; }
+	virtual bool IsUnconscious() { return bUnconscious; }
+	virtual void InitAsCorpse( bool bDead );
+	virtual int GetFallDamage( float fHDiff );
+	virtual NDb::CPanzerklein *GetPanzerklein() { return pPanzerklein; }
+	virtual void SetPanzerklein( NDb::CPanzerklein *pPK, CDynamicSkill *_pPanzerkleinVP, IInventory *_pPKInventory ); 
+	virtual void DoRegenerations();
+	virtual bool IsHero() const;
+	virtual bool IsHiding() const { return bHiding; }
+	virtual void SetHiding( bool _bHiding );
+	virtual bool HasPerk( int nPerkID, 
+		float *pParam1 = 0, float *pParam2 = 0, float *pParam3 = 0 ) const;
+	virtual int GetGrenadeTrapDC( NDb::CRPGGrenade *pGrenade );
+	virtual int GetMineDC( NDb::CRPGMine *pMine );
+	virtual bool CanSeeMine( float fDistance, int nDC );
+	virtual bool CanClear( int nDC, int nSkillModif );
+	virtual int GetUnhideProbability( IUnitMission *pTarget, float fDistance ) const;
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
+inline bool DBCriticalCmp( const SCriticalType &a, const SCriticalType &b )
+{
+	return a.nStartPos < b.nStartPos;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// ��������� ��������� � ������ � ����������� � �������� ������������� ������������
+void RangeCriticals( vector<SCriticalType> *pCriticals )
+{
+	if ( pCriticals->empty() )
+		return;
+	sort( pCriticals->begin(), pCriticals->end(), DBCriticalCmp );
+	//
+	int pos = 0;
+	for ( vector<SCriticalType>::iterator i = pCriticals->begin(); i != pCriticals->end(); ++i )
+	{
+		i->nStartPos = pos;
+		pos += i->pCritical->nRange;
+	}
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+static void InitializeCriticals()
+{
+	CDBTable<NDb::CRPGCritical> *pDTable = NDatabase::GetTable<NDb::CRPGCritical>();
+	CDBIterator<NDb::CRPGCritical> it(*pDTable);
+	while ( it.MoveNext() )
+	{
+		NDb::CRPGCritical *pC = it.Get();
+		if ( !pC )
+			continue;
+		ASSERT( pC->hl < NDb::N_CL );
+		if ( pC->hl >= NDb::N_CL )
+			continue;
+		criticalBar[pC->hl].push_back( SCriticalType( pC->nWeight, pC ) );
+	}
+	for ( int i = 0; i < NDb::N_CL; ++i )
+		RangeCriticals( &criticalBar[i] );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+CUnitMission::CUnitMission() 
+	: nMoveInLastTurn(0), nLastActionTimes(0), bLogActive(true), 
+		bSitting(false), nBullet(-1), fLastToHit(0),
+		bUseTwoHanded(true), fLightPerception(1), fSoundPerception(1), nBulletHitThisTurn(0),
+		bUnconscious( false ), bHiding( false )
+{
+	pMinesConstants = NDb::GetDBMinesConstants();
+	ASSERT( IsValid( pMinesConstants ) );
+	NDb::CRPGToHit *pToHit = NDb::GetToHitConstants( 1 );
+	if ( pToHit )
+		tohit = pToHit->constants;
+	NDb::CRPGAISoundConstants *pAISoundConstants = NDb::GetAISoundConstants( 1 );
+	if ( pAISoundConstants )
+		sAISoundConstants = pAISoundConstants->constants;
+	NDb::CRPGInterruptsConstants *pInterruptsConstants = NDb::GetInterruptsConstants( 1 );
+	if ( pInterruptsConstants )
+		SInterruptsConstants = pInterruptsConstants->constants;
+
+	criticalsState.resize( NDb::N_CRIT_TYPES );
+	EnableCriticals();
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+const wstring& CUnitMission::GetName() const
+{
+	return pRPGUnit->GetName();
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CUnitMission::InitAsCorpse( bool bDead )
+{
+	bUnconscious = !bDead;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+bool CUnitMission::HasPerk( int nPerkID, 
+		float *pParam1, float *pParam2, float *pParam3 ) const
+{
+	return pRPGUnit->HasPerk( nPerkID, pParam1, pParam2, pParam3 );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CUnitMission::SaveAck( int nAckID, IUnitMissionInfo *pAttacker )
+{
+	AckAttackers.push_back( pAttacker );
+	AckIDs.push_back( nAckID );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+bool CUnitMission::GetAck( int *pAckID, IUnitMissionInfo **ppAttacker )
+{
+	if ( AckAttackers.empty() )
+		return false;
+	//
+	*pAckID = AckIDs.front();
+	AckIDs.pop_front();
+	*ppAttacker = AckAttackers.front().Extract();
+	AckAttackers.pop_front();
+	return true;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+int CUnitMission::GetUnhideProbability( IUnitMission *pTarget, float fDistance ) const
+{
+	int n0 = 45; // ����������� ��� ���������� 0 ������
+	int n30 = 1; // ����������� ��� ���������� 30 ������
+	int nBase = ( int )( ( n30 - n0 ) / 30.f * fDistance + n0 );
+	int nProbability = 
+		GetRPGUnit()->Skills( NDb::ST_SPOT ) -	pTarget->GetRPGUnit()->Skills( NDb::ST_STEALTH ) + nBase;
+	return Clamp( nProbability, 0, 100 );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CUnitMission::UseSkill( NDb::ESkillType eSkill )
+{
+	if ( !pRPGUnit->UseSkill( eSkill, GetSkillAddValue( eSkill ) ) )
+		return;
+	SaveAck( NWorld::N_ACK_SKILL, 0 );
+	csRPG << "<font size=16pt>";
+	csRPG << "<color=yellow>" << GetName() << " improve skill N" << eSkill << " to " << pRPGUnit->Skills(eSkill) << endl;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CUnitMission::GetInfo( NAI::EPose pose, SUnitInfo *pInfo ) const
+{
+	pInfo->nAP = pRPGUnit->Skills(NDb::ST_AP);
+	pInfo->nMaxAP = pRPGUnit->Skills(NDb::ST_AP).GetMaxValue();
+	pInfo->nHP = pRPGUnit->Skills(NDb::ST_VP);
+	pInfo->nMaxHP = pRPGUnit->Skills(NDb::ST_VP).GetMaxValue();
+	pInfo->nSightDistance = int( GetSightDistance( pose ) );
+	pInfo->nHealedHP = GetHealedVP();
+
+	pInfo->bWearingPK = pPanzerklein && pPanzerkleinVP;
+	pInfo->nPKLife = pInfo->bWearingPK ? int( *pPanzerkleinVP ) : 0;
+	pInfo->nMaxPKLife = pInfo->bWearingPK ? pPanzerkleinVP->GetMaxValue() : 0;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+int CUnitMission::GetSnipeAP( IUnitMissionInfo *pTarget ) const
+{
+	if ( savedSnipeAP.pTarget == pTarget )
+		return savedSnipeAP.nAP;
+	else
+		return 0;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+bool CUnitMission::IsDead() const
+{
+	return pRPGUnit->IsDead();
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CUnitMission::MakeDirectDamage( int nDmg )
+{
+	pRPGUnit->Skills(NDb::ST_VP) -= nDmg;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CUnitMission::RegisterAction( EAction action )
+{
+	if ( action == AC_PREPARE_AND_SHOOT )
+	{
+		action = AC_SHOOT;
+		nLastActionTimes = 0;
+	}
+    eLastAction = action;
+
+	if ( action != AC_END_SHOOT && action != AC_SHOOT && action != AC_BURST )
+		nLastActionTimes = 0;
+
+	switch( action )
+	{
+		case AC_END_SHOOT:
+			nLastActionTimes++;
+			break;
+		case AC_MELEE:
+			pRPGUnit->UseSkill( NDb::ST_MELEE, GetSkillAddValue( NDb::ST_MELEE ) );
+			break;
+		case AC_THROW_GRENADE:
+		case AC_THROW_KNIFE:
+			pRPGUnit->UseSkill( NDb::ST_THROWING, GetSkillAddValue( NDb::ST_THROWING ) );
+			break;
+		case AC_SHOOT:
+		case AC_PREPARE_AND_SHOOT:
+			pRPGUnit->UseSkill( NDb::ST_SHOOTING, GetSkillAddValue( NDb::ST_SHOOTING ) );
+			break;
+		case AC_BURST:
+			pRPGUnit->UseSkill( NDb::ST_BURST, GetSkillAddValue( NDb::ST_BURST ) );
+			break;
+		case AC_MOVE_DIAGONAL:
+			nMoveInLastTurn += 1;
+		case AC_MOVE_SIDE:
+			nMoveInLastTurn += 2;
+			pRPGUnit->UseSkill( NDb::ST_AP, GetSkillAddValue( NDb::ST_AP ) );
+			break;
+	}
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+int CUnitMission::GetFallDamage( float fHDiff ) 
+{
+	// crap
+	int nHit = ( fHDiff - 2.8f ) * 50;
+	int nRet = 0;
+	for ( int i = 0; i < 3; ++i )
+		nRet += random.Get( 0, nHit / 4 ); 
+	return nRet;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CUnitMission::SpendAP( int nAP )
+{
+	if ( GetRPGUnit()->IsCheatEnabled( CHEAT_AP ) ||
+		GetRPGUnit()->IsCheatEnabled( CHEAT_SCRIPTSEQUENCE ) )
+			return;
+	//
+	ASSERT( pRPGUnit->Skills(NDb::ST_AP) >= nAP );
+	pRPGUnit->Skills(NDb::ST_AP) -= nAP;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+bool CUnitMission::CanSpendAP( int nAP ) const
+{
+	if ( GetRPGUnit()->IsCheatEnabled( CHEAT_AP ) ||
+		GetRPGUnit()->IsCheatEnabled( CHEAT_SCRIPTSEQUENCE ) )
+			return true;
+	//
+	return pRPGUnit->Skills(NDb::ST_AP) >= nAP;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+int CUnitMission::GetAP() const
+{
+	return pRPGUnit->Skills(NDb::ST_AP);
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+float CUnitMission::GetSightDistance( NAI::EPose pose ) const
+{
+	float fRetDist = 0;
+	//NAI::EPose pose = pUnit->GetPosition().GetPose();
+	switch ( pose )
+	{
+		case NAI::CRAWL: fRetDist = 25; break;
+		case NAI::CROUCH: fRetDist = 27; break;
+		case NAI::WALK: fRetDist = 30; break;
+		case NAI::RUN: fRetDist = 30; break;
+	}
+	return fRetDist * FP_GRID_STEP;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CUnitMission::ResetUnitParameters()
+{
+	nBulletHitThisTurn = 0;
+	pRPGUnit->Skills(NDb::ST_AP).Reset();
+	nMoveInLastTurn = 0;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CUnitMission::StartNewTurn( const CVec3 &ptCP )
+{
+	ResetUnitParameters();
+	ProcessCriticalsOnNewTurnFor();
+	ptLastCP = ptCP;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CUnitMission::StartRealTime()
+{
+	ResetUnitParameters();
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+int CUnitMission::GetActionAP( NAI::EPose curPose, EAction action ) const
+{
+	// �������� ��������� ������� �� ������� �� ����
+	switch ( action )
+	{
+		case AC_NONE: return 0;
+		case AC_HIDE: return 14;
+		case AC_PREPARE: 
+		{
+			float fParam;
+			if ( HasPerk( N_PERK_CHEAP_SHOOT_PREPARE, &fParam ) )
+				return fParam;
+			else
+				return 2;
+		}
+		case AC_SHOOT:   return pRPGUnit->GetWeaponAP();
+		case AC_PREPARE_AND_SHOOT:	return GetActionAP( curPose, AC_PREPARE ) + GetActionAP( curPose, AC_SHOOT );
+		case AC_EXPLODE: return 2;
+		case AC_THROW_GRENADE: return 20; // CRAP
+		case AC_CLIMB_1: return 10;
+		case AC_CLIMB_2: return 12;
+		case AC_CLIMB_3: return 14;
+		case AC_CLIMB_4: return 15;
+		case AC_JUMP: return 10;
+		case AC_TAKE_CORPSE: return 12;
+		case AC_THROW_KNIFE: return 16; // CRAP
+		case AC_TRAP_OBJECT: return 30;
+		case AC_DISARM_TRAP: return 30;
+		case AC_SET_MINE: 
+			{
+				NRPG::IInventoryItem *pItem = pRPGUnit->GetInventory()->GetActive();
+				CDynamicCast<NRPG::IMineItem> pMine(pItem);
+				if (pMine)
+					return pMine->GetDBItemInfo()->nAPToSet;
+			}
+			return 0;
+		case AC_DISARM_MINE:
+			return 30;
+
+		case AC_FIRSTAID: 
+			{
+				NRPG::IFirstAidItem *pItem = pRPGUnit->GetFirstAidItem();
+				if ( pItem )
+					return pItem->GetDBFirstAid()->nAPToUse;
+				ASSERT( 0 && "���������� ��������?" );
+				return 15;
+			}
+		case AC_MELEE:
+			{
+				CMeleeWeaponItem *pMelee = pRPGUnit->GetMeleeWeaponItem();
+				if ( !pMelee )
+					return 0;
+				NDb::CRPGMeleeWeapon *pW = pMelee->GetDBMeleeWeapon();
+				return pW->nMaxAP - (pW->nMaxAP - pW->nMinAP) * pRPGUnit->Skills(NDb::ST_MELEE) / N_MAX_SKILL;
+			}
+		case AC_BURST:
+			return pRPGUnit->GetWeaponBurstAP();
+		case AC_RELOAD:
+			return pRPGUnit->GetWeaponReloadAP();
+		case AC_OPEN_CLOSE:
+			return 4;
+		case AC_APPROACH_CANNON:
+			return 4;
+
+		case AC_POSE_CRAWL:
+		case AC_POSE_CROUCH:
+		case AC_POSE_WALK:
+		case AC_POSE_RUN:
+		{
+			if ( action == AC_POSE_RUN )
+				action = AC_POSE_WALK;
+			if ( curPose == NAI::RUN )
+				curPose = NAI::WALK;
+			int nCoeff = 4;
+			//
+			float fParam;
+			if ( HasPerk( N_PERK_CHEAP_CHANGE_POSE, &fParam ) )
+				nCoeff -= fParam;
+			//
+			return abs( curPose - ( action - AC_POSE_CRAWL ) ) * nCoeff;
+		}
+		case AC_LADDER:
+			return 2;
+		case AC_LADDER_MOVE:
+			return 2;
+		case AC_END_SHOOT:
+			return 0;
+		case AC_ENTER_PK:
+			return 10;
+		case AC_LEAVE_PK:
+			return 6;
+		case AC_ROTATE:
+			{
+				float fParam;
+				if ( HasPerk( N_PERK_CHEAP_ROTATE, &fParam ) )
+					return fParam;
+				else
+					return curPose == NAI::CRAWL? 4 : 2;
+			}
+	}
+
+	// �������� ��������� ������� ������� �� ����
+	int nAddedAP = 0;
+	if ( pPanzerklein )
+		nAddedAP = pPanzerklein->nAddMoveAP;
+	switch ( curPose )
+	{
+		case NAI::CRAWL:
+		case NAI::CROUCH:
+		case NAI::WALK:
+		case NAI::RUN:
+		{
+			int nPose = ( NAI::RUN - curPose + 1 ) * 2;
+			switch ( action )
+			{
+				case AC_MOVE_SIDE:		return nPose + nAddedAP;
+				case AC_MOVE_DIAGONAL:	return ( ( nPose + nAddedAP ) * 15 ) / 10 ;
+				case AC_MOVE_CORPSE_SIDE:		return ( ( nPose + nAddedAP ) * 15 ) / 10;
+				case AC_MOVE_CORPSE_DIAGONAL:	return ( ( nPose + nAddedAP ) * 225 ) / 100;
+			}
+		}
+		break;
+	}
+	ASSERT(0); // unknown action
+	return 0;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+NDb::CAnimWeaponType* CUnitMission::GetDBAnimWeapon() const
+{
+	return pRPGUnit->GetDBAnimWeapon();
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+NDb::EWeaponType CUnitMission::GetWeaponType() const 
+{
+	return pRPGUnit->GetWeaponType();
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+EToHitType CUnitMission::GetToHitWeaponType() const
+{
+	IWeaponItem *pWeapon = GetWeaponItem();
+	if ( pWeapon )
+	{
+		NDb::CRPGWeapon *pDBWeapon = pWeapon->GetDBWeapon();
+		if ( pDBWeapon->bBazookaLogic )
+			return TH_RLAUNCHER;
+		return TH_SHOOT;
+	}
+	IMeleeWeaponItem *pMeleeWeapon = pRPGUnit->GetMeleeWeaponItem();
+	if ( pMeleeWeapon )
+	{
+		NDb::CRPGMeleeWeapon *pDBMWeapon = pMeleeWeapon->GetDBMeleeWeapon();
+		if ( pDBMWeapon->bThrowing )
+			return TH_THROWING;
+		return TH_MELEE;
+	}
+	return TH_DEFAULT;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+static void DumpAttackPortion( const CAttackPortion &ap )
+{
+	csRPG << "<font size=16pt>";
+	csRPG << CC_ORANGE << " \tK="  << CC_GREY << ap.nK;
+	csRPG << CC_ORANGE << " \tType="    << CC_GREY << ap.nDmgType;
+	csRPG << CC_ORANGE << " \tDmgMin=" << CC_GREY << ap.nDmgMin;
+	csRPG << CC_ORANGE << " \tDmgMax=" << CC_GREY << ap.nDmgMax;
+	csRPG << CC_ORANGE << " \tCrit="  << CC_GREY << ap.nCrtical;
+	csRPG << CC_ORANGE << " \tCritSev=" << CC_GREY << ap.nCrticalDifficulty;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+int CUnitMission::GetUnconsciousProbability( IUnitMissionInfo *pAttacker, 
+	IUnitMissionInfo *pTarget, int nBaseProbability ) const
+{
+	if ( !IsValid( pTarget ) )
+		return nBaseProbability;
+	//
+	int nHits = pTarget->GetSkillValue( NDb::ST_VP );
+	int nMaxHits = pTarget->GetSkillMaxValue( NDb::ST_VP );
+	return ( - 1.f / ( 2.f * nMaxHits ) * nHits + 1 ) * nBaseProbability;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// �����. true, ���� ��� ������� �������� (�� ����� ������� �� ����� ���� �������� �� �����)
+bool CUnitMission::CreateAttack( vector<CAttackPortion> *pRes, bool bSpendAmmo, 
+	bool bAnonymous, IUnitMissionInfo *pTarget, bool bBackStab )
+{
+	IUnitMissionInfo *pAttacker = bAnonymous ? 0 : this;
+	bool bRet = true;
+	CWeaponItem *pWeapon  = pRPGUnit->GetWeaponItem();
+	CMeleeWeaponItem *pMW = pRPGUnit->GetMeleeWeaponItem();
+	//
+	if ( IsValid( pWeapon ) )
+	{
+		if ( pWeapon->GetDBWeapon()->pWeaponType->bTwoHanded && !CanUseTwoHanded() )
+		{
+			// �� ������ �� ����� ������������ ��������� ������
+			return true;
+		}
+		switch ( pWeapon->GetShootMode() )
+		{
+		case NDb::SM_ShortBurst:
+				{
+					float fPerkBullets = 0;
+					HasPerk( NRPG::N_PERK_LONGER_SHORT_BURST, &fPerkBullets );
+					const int nShoots = ( int )( pWeapon->GetDBWeapon()->nRoF / 6.f + fPerkBullets );
+					if ( nBullet < nShoots )
+						bRet = false;
+				}
+				break;
+		case NDb::SM_LongBurst:
+				bRet = false;
+				break;
+		}
+		pWeapon->CreateNewAttackPortion( pRes, bSpendAmmo );
+		for ( int i = 0; i < pRes->size(); ++i )
+		{
+			int nSnipeSkill = pRPGUnit->Skills( NDb::ST_SNIPE );
+			CAttackPortion &a = (*pRes)[i];
+			a.pAttacker = pAttacker;
+			a.pTarget = pTarget;
+			a.nCrtical = 10.f * ( nBulletHitThisTurn + 1 );
+			a.nCrticalDifficulty = nSnipeSkill / 10.f;
+			a.nUnconsciousProbability = GetUnconsciousProbability( pAttacker, 
+				pTarget, pWeapon->GetInnerClip()->GetDBAmmo()->nUnconsciousProbability );
+			a.bBackStab = bBackStab;
+			//
+			if ( IsValid(savedSnipeAP.pTarget) && pTarget == savedSnipeAP.pTarget )
+			{
+				// ����������� �������
+				a.nCrtical += savedSnipeAP.nAP / 5.f * 3;
+				a.nCrticalDifficulty += savedSnipeAP.nAP / 5.f * 3;
+				if ( bSpendAmmo )
+					pRPGUnit->UseSkill( NDb::ST_SNIPE, GetSkillAddValue( NDb::ST_SNIPE ) );
+			}
+			else
+			{
+				// ������� �������
+				a.nCrtical += nSnipeSkill / 10;
+			}
+		}
+	}
+	else if ( pMW )
+	{
+		NDb::CRPGMeleeWeapon *pW = pMW->GetDBMeleeWeapon();
+				pRes->push_back( CAttackPortion( 110, 2, 0, 0, 0, 0 ) ); // ��������� ������ Epik
+		CAttackPortion &a = pRes->front();
+		const int nStr = pRPGUnit->Skills( NDb::ST_STR );
+		int nMelee = pRPGUnit->Skills( NDb::ST_MELEE );
+		if ( bBackStab )
+			nMelee *= F_BACKSTAB_MELEE_COEFF;
+		//
+		a.nDmgMin = pW->nDmgMin + nStr + nMelee * (pW->nDmgMax - pW->nDmgMin) / (N_MAX_SKILL * 2);
+		a.nDmgMax = pW->nDmgMax + nStr;
+		a.nK = 160 + 10 * nStr;
+		a.nCrtical = Max( 0.f, 10 + 0.4f * (nMelee - 25) + pMW->GetDBMeleeWeapon()->nCriticalBonus );
+		a.nCrticalDifficulty = 0.5f * a.nCrtical;
+		a.pAttacker = pAttacker;
+		a.pTarget = pTarget;
+		a.nUnconsciousProbability = GetUnconsciousProbability( pAttacker, 
+			pTarget, pMW->GetDBMeleeWeapon()->nUnconsciousProbability );
+		a.bBackStab = bBackStab;
+	}
+	return bRet;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+NDb::CRPGArmor* CUnitMission::GetRPGArmor() const 
+{
+	if ( pPanzerklein )
+		return pPanzerklein->pArmor;
+	return NDb::GetArmor( NDb::N_HUMAN_BODY_ARMOR );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+float CUnitMission::GetXP( int nHowManyPerson ) const
+{
+	nHowManyPerson = Clamp( nHowManyPerson, 1, 6 );
+	int nLvl = pRPGUnit->Skills(NDb::ST_LEVEL);
+	float fXPDiff = pRPGUnit->GetXPForSkill( NDb::ST_LEVEL, nLvl+1 ) - pRPGUnit->GetXPForSkill( NDb::ST_LEVEL, nLvl );
+	return ( fXPDiff / float(nHowManyPerson) ) / 8.1f;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+int CUnitMission::ProcessAttackForPK( int nUserID, CAttackPortion *pAttack, NDb::CRPGArmor *pArmor, bool bApplyToVP )
+{
+	if ( pAttack->CanRicochet() && random.Check( pPanzerklein->nRicochetProb ) )
+	{
+		pAttack->nK = 0; // ���� CRAP
+			return -1;
+	}
+	
+	CDynamicSkill *pVP = 0;
+	if ( bApplyToVP )
+		pVP = &pRPGUnit->Skills(NDb::ST_VP);
+	else 
+		pVP = pPanzerkleinVP;
+	CDynamicSkill &panzerkleinVP = *pVP;
+	bool bWasAlive = panzerkleinVP > 0;
+
+	int nDmg = 0;
+	if ( random.Check( int( pPanzerklein->fCriticalResist * float(pAttack->nCrtical) ) ) )
+	{
+		// ������ ������ ������
+		csRPG << CC_RED << " \tCritical, PK Ignored!" << endl;
+		pAttack->nCrtical = 2000;
+	}
+	else
+	{
+		if ( !pAttack->CanDealDmg(pArmor) )
+			return -1;
+/*		pAttack->nK = nDmg = Max( pAttack->nK - 1000, 0 );
+		nDmg *= pAttack->fDamageCoeff;*/
+		nDmg = pAttack->CalcStructDmg(pArmor);
+		if ( nDmg <= 0 )
+			return -1;
+		pAttack->nK -= pArmor->pMaterial->nThreshold * 10;
+		pAttack->nCrtical = 0;
+		pAttack->nDmgMax *= pPanzerklein->fCriticalResist;
+		pAttack->nDmgMin *= pPanzerklein->fCriticalResist;
+
+		if ( pAttack->atkType == AT_CLICK_OF_DEATH )
+			nDmg = 100000;
+	}
+
+	panzerkleinVP -= nDmg;
+	csRPG << " \t" << CC_YELLOW << GetName() << CC_WHITE << " PK damaged on " << nDmg << "VP, remain " << panzerkleinVP << " PK VP" << endl;
+	bool bAlive = panzerkleinVP > 0;
+	if ( bWasAlive && !bAlive )
+		WearBrokenPK();
+	return nDmg;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CUnitMission::WearBrokenPK()
+{
+	SCritical cr( NDb::CL_ANY, NDb::C_PANZERKLEIN_BROKEN );
+	ApplyCritical( cr );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+int CUnitMission::ProcessAttack( int nUserID, CAttackPortion *pAttack, NDb::CRPGArmor *pRealArmor )
+{
+	if ( GetRPGPers()->pPanzerklein ) // ��� �� �� ���� � �� �� �����, �.�. ������ ���� ��� �� ���� ��
+	{
+		if ( !pPanzerklein )
+			pPanzerklein =  GetRPGPers()->pPanzerklein;
+		return ProcessAttackForPK( nUserID, pAttack, pRealArmor, true );
+	}
+	NDb::CRPGArmor *pArmor = NDb::GetArmor( NDb::N_HUMAN_BODY_ARMOR );
+
+	if ( GetPanzerklein() ) 
+		if ( ProcessAttackForPK( nUserID, pAttack, pRealArmor, false ) == -1 )
+			return -1;
+
+	int nTotalDmg = 0;
+	bool bAlive = !IsDead();
+	if ( pAttack->CanDealDmg(pArmor) && pAttack->nK > 0 )
+	{
+		csRPG << "<font size=16pt>";
+		// � ����� � ���������?
+		if ( this != pAttack->pTarget && !GetPanzerklein() && CheckIC() && pAttack->atkType != NRPG::AT_CLICK_OF_DEATH )
+		{
+			csRPG << CC_RED << " damage avoided!" << endl;
+			return -1;
+		}
+		int nDmg = pAttack->CalcStructDmg(pArmor);
+		//	Get
+		float fDmgModifier = 0;
+		switch ( nUserID )
+		{
+		case NAI::HL_HEAD:
+			fDmgModifier = 1.2f;
+			break;
+		case NAI::HL_RHAND:
+		case NAI::HL_LHAND:
+			fDmgModifier = 0.7f;
+			break;
+		case NAI::HL_RLEG:
+		case NAI::HL_LLEG:
+			fDmgModifier = 0.85f;
+			break;
+		case NAI::HL_BODY:
+			fDmgModifier = 1.0f;
+			break;
+		default:
+			ASSERT(0);
+			break;
+		}
+		if ( pAttack->atkType == AT_CLICK_OF_DEATH )
+		{
+			if ( !bUnconscious && !IsDead() )
+			{
+				pAttack->nUnconsciousProbability = 100;
+				nDmg = 0;
+			}
+			else
+				nDmg = 100000;
+		}
+		// � GetCriticalDmgModifier ����� ���������� ����. �����������
+		float fCriticalDmgModifier = 
+			GetCriticalDmgModifier( (NAI::EHitLocation)nUserID, pAttack->nCrtical, pAttack->nCrticalDifficulty );
+		fDmgModifier += fCriticalDmgModifier;
+		csRPG << CC_GREY << "\tHL=" << GetHLName( (NAI::EHitLocation)nUserID );
+		csRPG << CC_GREY << " \tDmgModifier=" << fDmgModifier;
+		int nDamage = fDmgModifier * nDmg;
+		int ndBVP = nDamage * (float)GetHealedVP() / GetTotalVP();
+		ASSERT( ndBVP >= 0 );
+		SetHealedVP( GetHealedVP() - ndBVP );
+		pRPGUnit->Skills(NDb::ST_VP) -= nDamage - ndBVP;
+		// Acks
+		if ( bAlive )
+		{
+			if ( IsDead() )
+				SaveAck( NWorld::N_ACK_DEATH, pAttack->pAttacker );
+			else if ( fCriticalDmgModifier > 0 || 
+				( nDamage - ndBVP ) >= 3.f / 4.f * pRPGUnit->Skills( NDb::ST_VP ).GetMaxValue() )
+				SaveAck( NWorld::N_ACK_CRITICAL, pAttack->pAttacker );
+		}
+		//
+		csRPG << " \t" << CC_YELLOW << GetName() << CC_WHITE << " damaged on " << nDamage << "hp" << " \tPiercingAbility = " << pAttack->nK << " HP:" << pRPGUnit->Skills(NDb::ST_VP) << "\n";
+		pRPGUnit->UseSkill( NDb::ST_VP, GetSkillAddValue( NDb::ST_VP ) );
+		nTotalDmg = nDamage;
+		//
+		if ( !IsDead() )
+		{
+			int nProbability = pAttack->nUnconsciousProbability;
+			int nCheck = random.Get( 0, 100 );
+			if ( pRPGUnit->Skills(NDb::ST_VP) <= 0 || nCheck <= nProbability )
+			{
+				bUnconscious = true;
+				csRPG << " \t" << CC_YELLOW << GetName() << CC_WHITE << " made unconscious" << endl;
+			}
+		}
+		else
+			bUnconscious = false;
+	}
+	else
+	{
+		csRPG << "<font size=16pt>";
+		csRPG << "<color=blue>" << " Bullet can`t penetrate target armor, BulletAPA = " << pAttack->nK << endl;
+	}
+	ApplyCritical( SCritical( NDb::CL_ANY, NDb::C_VP ) );
+	return nTotalDmg;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+inline CVec3 Projection( const CVec3 &pt, const SPlane &plane )
+{
+	float t = -( pt * plane.n + plane.d ) / fabs2( plane.n );
+	return pt + t * plane.n;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+inline float IntersectionArea( const CVec3 &ptA, const CVec3 &ptB, float fRadius )
+{
+	const float fL = fabs( ptB - ptA );
+	const float fAng = acos( Min( 1.0f, fL / (2 * fRadius) ) );
+	return sqr( fRadius ) * (2 * fAng - sin( 2*fAng ));
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+const float F_RADIUS = 0.25f;
+float GetCubesArea( const CVec3 &ptPos, vector<CVec3> *pCubes )
+{
+	if ( pCubes->size() < 2 )
+		return 0;
+	CVec3 ptCeneter( VNULL3 );
+	for ( vector<CVec3>::iterator i = pCubes->begin(); i != pCubes->end(); ++i )
+		ptCeneter += *i;
+	ptCeneter /= pCubes->size();
+	//
+	CVec3 nrm( ptCeneter - ptPos );
+	Normalize( &nrm );
+	SPlane plane( nrm, 0 );
+	plane.RecalcDist( ptCeneter );
+	for ( vector<CVec3>::iterator i = pCubes->begin(); i != pCubes->end(); ++i )
+		*i = Projection( *i, plane );
+	//
+	float fSum = 0;
+	switch ( pCubes->size() )
+	{
+		case 2:
+			fSum += IntersectionArea( pCubes->front(), pCubes->back(), F_RADIUS );
+			break;
+		case 3:
+			fSum += IntersectionArea( (*pCubes)[0], (*pCubes)[1], F_RADIUS );
+			fSum += IntersectionArea( (*pCubes)[1], (*pCubes)[2], F_RADIUS );
+			fSum += IntersectionArea( (*pCubes)[0], (*pCubes)[2], F_RADIUS );
+			break;
+	}
+	const float fOne = FP_PI * sqr( F_RADIUS );
+	return (fOne * pCubes->size() - fSum) / (fOne * 3);
+}
+/*
+////////////////////////////////////////////////////////////////////////////////////////////////////
+float GetHLPenalty( NAI::EHitLocation hl )
+{
+	switch ( hl )
+	{
+		case NAI::HL_BODY:
+			return 0.9f;
+		case NAI::HL_HEAD:
+			return 0.6f;
+		case NAI::HL_RHAND:
+		case NAI::HL_LHAND:
+			return 0.7f;
+		case NAI::HL_RLEG:
+		case NAI::HL_LLEG:
+			return 0.8f;
+	}
+	return 1;
+}
+*/
+////////////////////////////////////////////////////////////////////////////////////////////////////
+int GetHLPenalty( NAI::EHitLocation hl )
+{
+	switch ( hl )
+	{
+		case NAI::HL_BODY:
+			return 6;
+		case NAI::HL_HEAD:
+			return 9;
+		case NAI::HL_RHAND:
+		case NAI::HL_LHAND:
+			return 8;
+		case NAI::HL_RLEG:
+		case NAI::HL_LLEG:
+			return 7;
+	}
+	return 0;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+float GetVPPenalty( int nVP, int nHealedVP, int nMaxVP )
+{
+	const int nVPPercentage = 100.0f * ( nVP + nHealedVP / 2.f ) / nMaxVP;
+	if ( nVPPercentage > 75 )
+		return 1.0f;
+	else if ( nVPPercentage > 50 )
+		return 0.9f;
+	else if ( nVPPercentage > 25 )
+		return 0.75f;
+	else
+		return 0.5f;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// To-hit dispatch (release migration). Each free fn RTTI-casts the firing unit to its CUnitServer,
+// picks the EToHitType from the held weapon and builds the matching ToHitCalcer (which now takes the
+// CUnitServer*). bNight is wired false (CWorld::IsNight absent in this tree -- documented elision).
+int GetToHit( const NWorld::CUnit *pAttacker, NAI::EPose curPose, int nDistance, const CVec3 &ptAttacker,
+	const NAI::SPosition &posTarget, NAI::EHitLocation hl, int nExtraAP, const NWorld::CUnit *pTarget,
+	const vector<int> &accessibleHLs, int nHitCover, bool bFirstRound, const CVec3 &ptIllumination, bool bBackstab )
+{
+	CDynamicCast<NWorld::CUnitServer> pUS( const_cast<NWorld::CUnit*>( pAttacker ) );
+	CDynamicCast<NWorld::CUnitServer> pUSTarget( const_cast<NWorld::CUnit*>( pTarget ) );
+	CUnitMission *pMission = CDynamicCast<CUnitMission>( pUS->GetUnitRPG() );
+	IUnitMissionInfo *pTargetRPG = pTarget ? pTarget->GetRPG() : 0;
+	const bool bNight = false;
+	CPtr<IToHitCalcer> pToHitCalcer;
+	switch ( pMission->GetToHitWeaponType() )
+	{
+		case TH_THROWING:
+			pToHitCalcer = new CThrowKnifeUnitToHitCalcer( pUS, curPose, nDistance, ptAttacker, (float)nHitCover,
+				bFirstRound, bNight, ptIllumination, pUSTarget, hl, posTarget, nExtraAP, bBackstab );
+			break;
+		case TH_MELEE:
+			return pMission->GetMeleeToHit( ptAttacker, posTarget, pTargetRPG, hl, accessibleHLs, bBackstab );
+		case TH_SHOOT:
+			pToHitCalcer = new CUnitToHitCalcer(
+				pUS, curPose, nDistance, ptAttacker,
+				posTarget, nExtraAP, pMission->GetSnipeAP( pTargetRPG ), (float)nHitCover,
+				bFirstRound, bNight, ptIllumination, hl, pUSTarget, pMission->GetNBullets(), bBackstab );
+			break;
+		case TH_RLAUNCHER:
+			pToHitCalcer = new CRLauncherToHitCalcer(
+				pUS, curPose, nDistance, ptAttacker, (float)nHitCover, nExtraAP,
+				bFirstRound, bNight, ptIllumination, CVec3(1,1,1) );
+			break;
+		default:
+			ASSERT( 0 );
+			return 0;
+	}
+
+	int nToHit = pToHitCalcer->GetToHit();
+	if ( pMission->bLogActive )
+		pToHitCalcer->Log();
+	return nToHit;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+int GetTileToHit( const NWorld::CUnit *pAttacker, NAI::EPose curPose, int nDistance, const CVec3 &ptAttacker,
+	CVec3 ptTilePos, NAI::ETileHitLocation eHitLocation, int nExtraAP, int nHitCover, bool bFirstRound,
+	const CVec3 &ptIllumination )
+{
+	CDynamicCast<NWorld::CUnitServer> pUS( const_cast<NWorld::CUnit*>( pAttacker ) );
+	CUnitMission *pMission = CDynamicCast<CUnitMission>( pUS->GetUnitRPG() );
+	const bool bNight = false;
+	CPtr<IToHitCalcer> pToHitCalcer;
+	switch ( pMission->GetToHitWeaponType() )
+	{
+		case TH_THROWING:
+			// the release drops the tile knife calcer's hit-location (eHitLocation unused here).
+			pToHitCalcer = new CThrowKnifeTileToHitCalcer( pUS, curPose, nDistance, ptAttacker, (float)nHitCover,
+				bFirstRound, bNight, ptIllumination, ptTilePos, nExtraAP );
+			break;
+		case TH_MELEE:
+			return 0;
+		case TH_SHOOT:
+			pToHitCalcer = new CTileToHitCalcer(
+				pUS, curPose, nDistance, ptAttacker, nExtraAP, (float)nHitCover, bFirstRound,
+				bNight, ptIllumination, ptTilePos, pMission->GetNBullets() );
+			break;
+		case TH_RLAUNCHER:
+			pToHitCalcer = new CRLauncherToHitCalcer(
+				pUS, curPose, nDistance, ptAttacker, (float)nHitCover, nExtraAP, bFirstRound,
+				bNight, ptIllumination, ptTilePos );
+			break;
+		default:
+			ASSERT(0);
+			return 0;
+	}
+	int nToHit = pToHitCalcer->GetToHit();
+	if ( pMission->bLogActive )
+		pToHitCalcer->Log();
+	return nToHit;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+int GetRLauncherToHit( const NWorld::CUnit *pAttacker, NAI::EPose curPose, int nDistance, const CVec3 &ptAttacker,
+	CVec3 ptTilePos, NAI::ETileHitLocation eHitLocation, int nExtraAP, bool bFirstRound, const CVec3 &ptIllumination )
+{
+	CDynamicCast<NWorld::CUnitServer> pUS( const_cast<NWorld::CUnit*>( pAttacker ) );
+	CUnitMission *pMission = CDynamicCast<CUnitMission>( pUS->GetUnitRPG() );
+	CPtr<CRLauncherToHitCalcer> pToHitCalcer =
+		new CRLauncherToHitCalcer( pUS, curPose, nDistance, ptAttacker, 100.f, nExtraAP, bFirstRound,
+			false, ptIllumination, ptTilePos );
+
+	int nToHit = pToHitCalcer->GetToHit();
+
+	if ( pMission->bLogActive )
+		pToHitCalcer->Log();
+
+	return nToHit;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// (CGame::GetObjectToHit / CObjectToHitCalcer dropped in the release.)
+////////////////////////////////////////////////////////////////////////////////////////////////////
+int GetGrenadeToHit( const NWorld::CUnit *pAttacker, NAI::EPose curPose, int nDistance, const CVec3 &ptAttacker,
+	bool bFirstRound, CVec3 ptTilePos, const CVec3 &ptIllumination )
+{
+	CDynamicCast<NWorld::CUnitServer> pUS( const_cast<NWorld::CUnit*>( pAttacker ) );
+	CUnitMission *pMission = CDynamicCast<CUnitMission>( pUS->GetUnitRPG() );
+	// release: the thrown grenade is no longer an argument -- the calcer derives it from the active item.
+	CPtr<CGrenadeToHitCalcer> pToHitCalcer =
+		new CGrenadeToHitCalcer( pUS, curPose, nDistance, ptAttacker,
+			bFirstRound, false, ptIllumination, ptTilePos );
+
+	int nToHit = pToHitCalcer->GetToHit();
+
+	if ( pMission->bLogActive )
+		pToHitCalcer->Log();
+
+	return nToHit;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+int CUnitMission::GetBulletsQuantityInShot() const
+{
+	EToHitType type = GetToHitWeaponType();
+	if ( type == TH_MELEE || type == TH_THROWING )
+		return 1;
+  CWeaponItem *pW = pRPGUnit->GetWeaponItem();
+	if ( !pW )
+	{
+		ASSERT(0);
+		return 1;
+	}
+	NDb::CRPGWeapon *pDBW = pW->GetDBWeapon();
+	if ( !pDBW )
+	{
+		ASSERT(0);
+		return 1;
+	}
+	switch ( pW->GetShootMode() )
+	{
+		case NDb::SM_Snap:
+		case NDb::SM_Aimed:
+		case NDb::SM_Careful:
+		case NDb::SM_Snipe:
+			return 1;
+		case NDb::SM_ShortBurst:
+		case NDb::SM_LongBurst:
+			return pDBW->nRoF / 6;
+	}
+	return 1;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+static float GetAccessibleHLsPenalty( const vector<int> &hls )
+{
+	static const int TOTAL_VISIBLE = 5 + 10 + 2 * 5 + 2 * 7;
+	int nVisible = 0;
+	for ( int i = 0; i < hls.size(); ++i )
+		switch ( hls[i] )
+		{
+			case NAI::HL_HEAD:
+				nVisible += 5;
+				break;
+			case NAI::HL_BODY:
+				nVisible += 10;
+				break;
+			case NAI::HL_RHAND:
+			case NAI::HL_LHAND:
+				nVisible += 5;
+				break;
+			case NAI::HL_RLEG:
+			case NAI::HL_LLEG:
+				nVisible += 7;
+				break;
+		}
+	int nInvisible = TOTAL_VISIBLE - nVisible;
+	return 0.01f * (100 - nInvisible);
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+int CUnitMission::GetMeleeToHit( const CVec3 &ptAttacker, const NAI::SPosition &posTarget, 
+	IUnitMissionInfo *pTarget, NAI::EHitLocation hl, const vector<int> &accessibleHLs, bool bBackStab ) const
+{
+	CMeleeWeaponItem *pW = pRPGUnit->GetMeleeWeaponItem();
+	if ( !pTarget || !pW )
+		return 0;
+	NDb::CRPGMeleeWeapon *pDBW = pW->GetDBMeleeWeapon();
+	if ( !pDBW )
+		return 0;
+	int nSkill = GetSkillValue( NDb::ST_MELEE );
+	if ( bBackStab )
+		nSkill *= F_BACKSTAB_MELEE_COEFF;
+	//
+	const int   nTargetSkill = pTarget->GetSkillValue( NDb::ST_MELEE );
+	const float nWBonus = pDBW->nToHitBonus;
+	const float fMovePenalty = nMoveInLastTurn * pDBW->pWeaponType->fMovePenalty;
+	const float fVPPenalty = GetVPPenalty( pRPGUnit->Skills(NDb::ST_VP), pRPGUnit->nHealedVP, pRPGUnit->Skills(NDb::ST_VP).GetMaxValue() );
+	const float fAccessibleHLsPenalty = GetAccessibleHLsPenalty( accessibleHLs );
+	//
+	float fToHit = 50.0f + 0.4f * (nSkill - nTargetSkill) + nWBonus + fMovePenalty;
+	fToHit *= fAccessibleHLsPenalty;
+	fToHit *= fVPPenalty;
+	if ( bLogActive )
+	{
+		csRPG << "<font size=16pt>";
+		csRPG << CC_GREEN << " \tToHit: ";
+		csRPG << CC_ORANGE << " \tSkill=" << CC_GREY << nSkill;
+		csRPG << CC_ORANGE << " \tTarget skill=" << CC_GREY << nTargetSkill;
+		csRPG << CC_ORANGE << " \tMove bonus=" << CC_GREY << (int)fMovePenalty;
+		csRPG << CC_ORANGE << " \tWeapon bonus=" << CC_GREY << (int)nWBonus;
+		csRPG << CC_ORANGE << " \tHL penalty=" << CC_GREY << int( 100 * (1.0f-fAccessibleHLsPenalty) ) << "%";
+		csRPG << CC_ORANGE << " \tVPPenalty=" << CC_GREY << int(100 * (1.0f - fVPPenalty)) << "%";
+		csRPG << CC_GREEN << " \tToHit=" << CC_GREY << fToHit << endl;
+	}
+	return fToHit;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+int CUnitMission::GetIC() const
+{
+	//const float fMoveCoeff = 0.65f;
+	//return ( 100 - pRPGUnit->Skills(NDb::ST_IC) ) * int( 100 - float(nMoveInLastTurn) * fMoveCoeff ) / 100;
+	return pRPGUnit->Skills(NDb::ST_IC);
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+bool CUnitMission::CheckIC()
+{
+	UseSkill(NDb::ST_IC);
+	// �������� ����???
+	bool isCheck = random.Check(GetIC());
+	csRPG << "\t" << GetName() << " Dodge:" << isCheck << endl;
+	return isCheck;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+int CUnitMission::CalcInterruptProbability( const IUnitMission *pEnemy,
+	bool bIsMutual, bool bWasShot )
+{
+	int nRes = 0; // ����������� interrupt-�
+	NDb::SInterruptsConstants *pConst = GetInterruptsConstants();
+
+	SUnitInfo sUnitInfo;
+	GetInfo( NAI::WALK, &sUnitInfo );
+	if ( sUnitInfo.nAP <= pConst->nMinInterruptAP )
+		return nRes;
+
+	int nASkill = pRPGUnit->Skills(NDb::ST_INTERRUPT); 	// A - ��� 
+	int nBSkill = pEnemy->GetRPGUnit()->Skills(NDb::ST_INTERRUPT); 	// B - ����
+
+	if ( bWasShot )
+	{
+		nRes = pConst->nMissedShotInterruptsBase + ( nASkill - nBSkill );
+	} 
+	else
+	{
+		if ( bIsMutual )
+		{
+			nRes = pConst->nInterruptsBase + ( nASkill - nBSkill );
+		}
+		else
+		{
+			nRes = pConst->nBackInterruptsBase + ( nASkill - nBSkill );
+		}
+	}
+
+	// ��������� ����������� �� ����������� AP
+	int nAPPenalty = 0;
+	nAPPenalty = pConst->fAPInterruptReduction * ( sUnitInfo.nMaxAP - sUnitInfo.nAP );
+
+	// ������� ���������
+	nRes -= nAPPenalty;
+	nRes = Clamp( nRes, 5, 95 );
+
+	return nRes;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+int CUnitMission::CheckInterrupt( const IUnitMission *pEnemy, bool bIsMutual, bool bWasShot )
+{
+	int nProbability = CalcInterruptProbability( pEnemy, bIsMutual, bWasShot );
+	int nCheck = random.Get(100);
+	csRPG << CC_YELLOW << GetName() << CC_WHITE << " interrupt "<< CC_YELLOW << pEnemy->GetName() << CC_WHITE
+		  << " probability " << nProbability << "% Check:" << nCheck << endl;
+	pRPGUnit->UseSkill( NDb::ST_INTERRUPT, GetSkillAddValue( NDb::ST_INTERRUPT ) );
+	return nProbability - nCheck;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CUnitMission::Kill()
+{
+	bUnconscious = false;
+	pRPGUnit->Kill();
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+bool CUnitMission::RemoveCritical( NDb::ECritical eCritical )
+{
+	for ( vector<CPtr<CCritical> >::iterator i = criticals.begin(); i != criticals.end(); )
+	{
+		if ( (*i)->GetCritical().eCritical == eCritical )
+		{
+			i = criticals.erase( i ); // ������� ������ ���� �������� ������ ����
+			return true;
+		}
+		else
+			++i;
+	}
+	return false;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CUnitMission::ApplyCritical( CCritical *p )
+{
+	for ( vector<CPtr<CCritical> >::iterator i = criticals.begin(); i != criticals.end(); ++i )
+	{
+		if ( !(*i)->CanBeMerged() )
+			continue;
+		switch( (*i)->Merge( p ) )
+		{
+		case CCritical::WEAKER:
+			return;
+		case CCritical::MERGED:
+			*i = p;
+			if ( !IsValid( *i ) || !(*i)->SetModifiers( pRPGUnit, this ) )
+				criticals.erase( i );
+			return;
+		}
+	}
+	if ( IsValid( p ) && p->SetModifiers( pRPGUnit, this ) )
+		criticals.push_back( p );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CUnitMission::ApplyCritical( const SCritical &cr )
+{
+	CPtr<CCritical> p = CreateCritical( cr );
+	ApplyCritical( p );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CUnitMission::ApplyCritical( NDb::CRPGCritical *p, int nDC )
+{
+	// honor the script-set cap (luaSetMaxCriticalSeverity -> CGame::nMaxCriticalSeverity). Retail clamps the
+	// rolled severity here in the combat path via the mission's cached IGame; this is that read-site. (The
+	// script-driven UnitApplyCritical path builds an SCritical directly and is intentionally not clamped.)
+	if ( IsValid( pGame ) )
+	{
+		int nCap = pGame->GetMaxCriticalSeverity();
+		if ( nDC > nCap )
+			nDC = nCap;
+	}
+	int nDuration = -1;
+	if ( p->nMinDuration > 0 )
+		nDuration = p->nMinDuration + random.Get( p->nMaxDuration - p->nMinDuration );
+	csRPG << "<font size=16pt>";
+	csRPG << "<color=red>" << "\tCritical: " << "<color=yeloow>" << "\"" << p->szName << "\", difficulty=" << nDC;
+	csRPG << "  Duration=" << nDuration << "(" << p->nMinDuration << " : " << p->nMaxDuration;
+	csRPG << ")  HL=" << GetCLName( p->hl ) << "\n";
+	ApplyCritical( SCritical( p->hl, p->type, nDuration, p->fValue, nDC ) );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CUnitMission::SuspendCriticals( int nTurns )
+{
+	ASSERT( nTurns > 0 );
+	if ( nTurns <= 0 )
+		return;
+	SCriticalsHolder &h = *suspendedCriticals.insert( suspendedCriticals.end(), SCriticalsHolder());
+	h.nTimeLeft = nTurns;
+	for ( vector<CPtr<CCritical> >::iterator i = criticals.begin(); i != criticals.end();  )
+	{
+		CCritical *p = *i;
+		if ( p->CanBeSuspended() )
+		{
+			h.criticals.push_back( p );
+			p->RemoveModifiers();
+			i = criticals.erase( i );
+		}
+		else
+			++i;
+	}
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+static void SegmentCriticals( vector<CPtr<CCritical> > *pRes )
+{
+	for ( vector<CPtr<CCritical> >::iterator i = pRes->begin(); i != pRes->end();  )
+	{
+		if ( !(*i)->NextTurn() )
+			i = pRes->erase( i );
+		else
+			++i;
+	}
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CUnitMission::ProcessCriticalsOnNewTurnFor()
+{
+	SegmentCriticals( &criticals );
+	for ( list<SCriticalsHolder>::iterator i = suspendedCriticals.begin(); i != suspendedCriticals.end(); )
+	{
+		if ( --i->nTimeLeft > 0 )
+		{
+			SegmentCriticals( &i->criticals );
+			++i;
+		}
+		else
+		{
+			for ( int k = 0; k < i->criticals.size(); ++k )
+				ApplyCritical( i->criticals[k] );		
+			i = suspendedCriticals.erase( i );
+		}
+	}
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+int CUnitMission::GetMaxExtraAP() const
+{
+	CWeaponItem *pW = pRPGUnit->GetWeaponItem();
+	if ( !pW )
+		return 0;
+	SWeaponInfo info;
+	pW->GetInfo( &info );
+	return info.nTargetingAP;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+static NDb::CRPGCritical* GetCritical( int nProbability, 
+	const vector<SCriticalType> &criticals, const vector<ECriticalState> &criticalsStates )
+{
+	vector<SCriticalType> enabledCriticals;
+	for ( vector<SCriticalType>::const_iterator i = criticals.begin(); i != criticals.end(); ++i )
+		if ( criticalsStates[ (*i).pCritical->type ] == CS_ENABLED )
+			enabledCriticals.push_back( *i );
+	//
+	if ( enabledCriticals.empty() )
+		return 0;
+	//
+	if ( nProbability >= enabledCriticals.back().nStartPos )
+		return enabledCriticals.back().pCritical;
+	//
+	for ( int i = 1; i < enabledCriticals.size(); ++i )
+		if ( nProbability < enabledCriticals[i].nStartPos )
+			return enabledCriticals[i-1].pCritical;
+	//
+	return 0;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+int CUnitMission::RollCritical( NAI::EHitLocation eHL, int nCriticalDifficulty, NDb::CRPGCritical **pCritical )
+{
+	int nRezDiff = nCriticalDifficulty + random.Get(100);
+	switch ( eHL )
+	{
+		case NAI::HL_HEAD:
+			*pCritical = GetCritical( nRezDiff, criticalBar[NDb::CL_HEAD], criticalsState );
+			break;
+		case NAI::HL_BODY:
+			*pCritical = GetCritical( nRezDiff, criticalBar[NDb::CL_TORSO], criticalsState );
+			break;
+		case NAI::HL_RHAND:
+		case NAI::HL_LHAND:
+			*pCritical = GetCritical( nRezDiff, criticalBar[NDb::CL_ARMS], criticalsState );
+			break;
+		case NAI::HL_RLEG:
+		case NAI::HL_LLEG:
+			*pCritical = GetCritical( nRezDiff, criticalBar[NDb::CL_LEGS], criticalsState );
+			break;
+	}
+	return nRezDiff;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+float CUnitMission::GetCriticalDmgModifier( NAI::EHitLocation eHL, 
+	int nCriticalProbability, int nCriticalDifficulty )
+{
+	if ( nCriticalProbability == 0 )
+		return 0;
+
+	static SRand rand;
+	float fRet = 0;
+
+	if ( !bCBarInitialized )
+	{
+		InitializeCriticals();
+		bCBarInitialized = true;
+	}
+
+	int nRand = rand.Get( 100 );
+	float fCriticalResist = 1;
+	if ( pPanzerklein )
+		fCriticalResist = pPanzerklein->fCriticalResist;
+	if ( nRand > nCriticalProbability * fCriticalResist )
+		return fRet;
+	csRPG << "<font size=16pt>";
+	csRPG << "<color=grey>" << "\tcrit prob=" << nCriticalProbability << " (check=" << nRand << ") \tseverity=" << nCriticalDifficulty;
+
+	NDb::CRPGCritical *pCritical = 0;
+	nRand = RollCritical( eHL, nCriticalDifficulty, &pCritical );
+	if ( !IsValid( pCritical ) )
+		return 0;
+	//
+	float fDC = (float)nRand / N_MAX_SKILL;
+
+	switch ( eHL )
+	{
+		case NAI::HL_HEAD:
+			fRet = 2.5f * fDC;
+			fDC *= 300;
+			break;
+		case NAI::HL_BODY:
+			fRet = 3.0f * fDC;
+			fDC *= 300;
+			break;
+		case NAI::HL_RHAND:
+		case NAI::HL_LHAND:
+			fRet = 1.5f * fDC;
+			fDC *= 200;
+			break;
+		case NAI::HL_RLEG:
+		case NAI::HL_LLEG:
+			fRet = 2.0f * fDC;
+			fDC *= 250;
+			break;
+	}
+	ApplyCritical( pCritical, fDC );
+	return fRet * fCriticalResist;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CUnitMission::DumpStats() const
+{
+	csRPG << "\t " << GetName() << endl;
+	NRPG::DumpStats( pRPGUnit, GetHealedVP() );
+	csRPG << "\n";
+	for ( int i = 0; i < criticals.size(); ++i )
+		DumpCritical( criticals[i] );
+	csRPG << "\n";
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CUnitMission::SaveAP( const SSnipeAP &ap )
+{
+	savedSnipeAP.pTarget = ap.pTarget;
+	savedSnipeAP.nAP = ap.nAP;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CUnitMission::HealVP( const SFirstAid &fa )
+{
+	GetRPGUnit()->Heal( fa );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CUnitMission::HealCriticals( int nDC )
+{
+	for ( vector<CPtr<CCritical> >::iterator i = criticals.begin(); i != criticals.end(); )
+	{
+		const SCritical &c = (*i)->GetCritical();
+		if ( c.nDC <= nDC && c.eCritical <	NDb::C_PANZERKLEIN_AXIS )
+		{
+			csRPG << "\tCured: \t";
+			DumpCritical( *i );
+			i = criticals.erase( i );
+		}
+		else
+			++i;
+	}
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CUnitMission::Reload()
+{
+	CWeaponItem *pW = pRPGUnit->GetWeaponItem();
+	if ( pW )
+		pW->Reload( pRPGUnit->GetInventory() );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+bool CUnitMission::LoadWeapon( IWeaponItemInfo *pWeapon, IClipItem *pClip )
+{
+	CDynamicCast<CWeaponItem> pWeaponItem( pWeapon );
+	if ( !IsValid( pWeaponItem ) )
+		return false;
+
+	if ( !pWeaponItem->CanLoad( pClip ) )
+		return false;
+
+	if ( pWeaponItem->HasAmmo() && !pWeaponItem->Unload( pRPGUnit->GetInventory() ) )
+		return false;
+
+	return pWeaponItem->Load( pClip );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+bool CUnitMission::UnloadWeapon( IWeaponItemInfo *pWeapon )
+{
+	CDynamicCast<CWeaponItem> pWeaponItem( pWeapon );
+	if ( !IsValid( pWeaponItem ) )
+		return false;
+
+	return pWeaponItem->Unload( pRPGUnit->GetInventory() );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CUnitMission::SetCannonItem( IWeaponItem *pItem )
+{
+	pRPGUnit->SetCannonItem( dynamic_cast<CWeaponItem*>(pItem) );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+bool CUnitMission::CanHearSound( const CVec3 &ptSoundPosition, const CVec3 &ptListenerPosition, 
+		NDb::CAISound *pSound, int nAISoundType, IUnitMission *pSource )
+{
+	if ( HasCritical( NDb::C_DEAF ) )
+		return false;
+	//
+	float fRadius = pSound->GetRadiusFromAISoundType( nAISoundType );
+	NDb::SAISoundConstants *c = GetAISoundConstants();
+
+	float fHearingDistance = c->nPrecisePositionRadius + 
+		( fRadius - c->nPrecisePositionRadius ) * 
+		GetRPGUnit()->Skills(NDb::ST_SPOT) / NRPG::N_MAX_SKILL;
+
+	if ( pPanzerklein && pPanzerklein->fSensorRange )
+	{
+		fHearingDistance *= pPanzerklein->fSensorRange;
+	}
+
+	float fDistance = fabs( ptSoundPosition - ptListenerPosition ) / FP_GRID_STEP;
+
+	if ( !pSource || fRadius >= c->nLoudSound )
+	{
+		if ( fHearingDistance >= fDistance )
+			return true;
+		else
+			return false;
+	}
+	else
+	{	
+		float fHearingProbability = c->nBaseProbability + ( GetRPGUnit()->Skills(NDb::ST_SPOT) +
+			( c->nPrecisePositionRadius - fDistance ) * c->nDistanceCoeff -
+			pSource->GetRPGUnit()->Skills( NDb::ST_STEALTH ) ) * 100 / NRPG::N_MAX_SKILL;
+		if ( pSource->IsHiding() )
+			fHearingProbability *= c->fHideCoeff;
+		int nHearingProbability = Clamp( fHearingProbability, 0.0f, 95.0f );		
+
+		if ( random.Get( 1, 100) <= nHearingProbability )
+			return true;
+		else
+			return false;
+	}
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// CUnitMission::GetHearingProbability @0x2bff30 -- the probability-returning sibling of CanHearSound above: it
+// reports HOW LIKELY this unit is to hear `sound` coming from pSource at grid distance fDist (instead of rolling
+// it). `this` is the LISTENER; pSource is the unit being heard. Reconstructed from the release decomp + this
+// CanHearSound body; the answer-key's pfnHearChance gate (s2_aiassassinreaction.h:54-57,183) reads it as
+// `>= 15`. Two release refinements over CanHearSound: the silencer scales the sound radius, and two data-driven
+// perks modulate the spot skill (id 0x14) and the loud-sound hearing distance (id 0x4c). Dead until consumed.
+//
+// (Workflow corrections to the answer-key/decomp labels, resolved from the raw vtable: there is NO difficulty
+// global -- the "_DAT" chain is an inlined Skills(ST_SPOT/ST_STEALTH) CDynamicSkill read; the "ptLastCP" loud-
+// branch read is actually pPanzerklein->fSensorRange. Perk ids 0x14/0x4c are retail data-driven ids, emitted as
+// literals. The release rounds the clamped probability; we keep CanHearSound's truncating Clamp idiom.)
+int CUnitMission::GetHearingProbability( IUnitMission *pSource, float fDist, const NDb::SAISound &sound, bool *pAudible )
+{
+	if ( pAudible )
+		*pAudible = false;
+	if ( HasCritical( NDb::C_DEAF ) )
+		return 0;
+	//
+	float fRadius = sound.pAISound->GetRadiusFromAISoundType( sound.nSoundType ) * sound.fSilencer;
+	NDb::SAISoundConstants *c = GetAISoundConstants();
+	// the listener's SPOT skill, optionally boosted by the perception perk (id 0x14)
+	int nSpot = GetRPGUnit()->Skills( NDb::ST_SPOT );
+	float fPerk;
+	if ( HasPerk( 0x14, &fPerk ) )
+		nSpot = (int)( nSpot * fPerk + 0.5f );
+	//
+	if ( fRadius >= c->nLoudSound )
+	{
+		// a loud sound -> a hard hearing-DISTANCE test: certainly heard (100) if within range, else 0
+		float fHearingDistance = c->nPrecisePositionRadius +
+			( fRadius - c->nPrecisePositionRadius ) * nSpot / NRPG::N_MAX_SKILL;
+		if ( pPanzerklein && pPanzerklein->fSensorRange )
+			fHearingDistance *= pPanzerklein->fSensorRange;
+		if ( HasPerk( 0x4c, &fPerk ) )           // a silent-movement / acute-hearing perk
+			fHearingDistance *= fPerk;
+		return ( fHearingDistance >= fDist ) ? 100 : 0;   // pAudible stays false on this branch
+	}
+	else
+	{
+		// a soft sound -> the PROBABILITY the listener hears it (the assassin's hear-chance answer)
+		int nStealth = pSource->GetRPGUnit()->Skills( NDb::ST_STEALTH );
+		float fHearingProbability = c->nBaseProbability +
+			( nSpot + ( c->nPrecisePositionRadius - fDist ) * c->nDistanceCoeff - nStealth ) * 100 / NRPG::N_MAX_SKILL;
+		if ( pSource->IsHiding() )
+			fHearingProbability *= c->fHideCoeff;
+		if ( pAudible )
+			*pAudible = true;
+		return Clamp( fHearingProbability, 0.0f, 95.0f );
+	}
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+NDb::CRPGPers* CUnitMission::GetRPGPers() const
+{
+	return pRPGUnit->GetPers();
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+NDb::CComplexHead* CUnitMission::GetRPGPersHead() const
+{
+	if ( IsValid( pRPGUnit->pPers->pPanzerklein ) )
+		return 0;
+
+	return pRPGUnit->GetHead();
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+bool CUnitMission::HasCritical( NDb::ECritical eCritical, CCritical** ppCritical ) const
+{
+	for ( vector<CPtr<CCritical> >::const_iterator i = criticals.begin(); i != criticals.end(); ++i )
+		if ( (*i)->GetCriticalType() == eCritical )
+		{
+			if ( ppCritical != 0 )
+				*ppCritical = *i;
+			return true;
+		}
+	//
+	return false;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CUnitMission::EnableCriticals()
+{
+	for ( int i = 0; i < NDb::N_CRIT_TYPES; ++i )
+		criticalsState[i] = CS_ENABLED;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CUnitMission::DisableCriticals()
+{
+	for ( int i = 0; i < NDb::N_CRIT_TYPES; ++i )
+		criticalsState[i] = CS_DISABLED;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CUnitMission::DisableCritical( NDb::ECritical eC, ECriticalState eState  )
+{
+	criticalsState[eC] = eState;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CUnitMission::GetCriticalsList( list<CPtr<ICriticalInfo> > *pListCriticals ) const
+{
+	for ( vector<CPtr<CCritical> >::const_iterator i = criticals.begin(); i != criticals.end(); ++i )
+		pListCriticals->push_back( i->GetPtr() );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CUnitMission::SetPanzerklein( NDb::CPanzerklein *pPK, CDynamicSkill *_pPanzerkleinVP, IInventory *_pPKInventory ) 
+{ 
+	pPanzerkleinVP = _pPanzerkleinVP;
+	if ( pPanzerkleinVP && ( *pPanzerkleinVP < 0 ) )
+		WearBrokenPK();
+	for ( int skill = NDb::ST_MELEE; skill < NDb::SKILL_TYPE_NUMBERS; ++skill )
+	{
+		if ( skill == NDb::ST_VP )
+			continue;
+		int nChange = 0;
+		if ( pPK && pPK->pChangeValues )
+			nChange += pPK->pChangeValues->skills[ skill ];
+		if ( pPanzerklein && pPanzerklein->pChangeValues )
+			nChange -= pPanzerklein->pChangeValues->skills[ skill ];
+		pRPGUnit->Skills( skill ).Modify( nChange );
+	}
+	pPanzerklein = pPK; 
+	GetInventory()->SetPanzerklein( pPK, _pPKInventory ); 
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CUnitMission::DoRegenerations()
+{
+	if ( !pPanzerklein )
+		return;
+	if ( !pPanzerklein->fRegenerationValue )
+		return;
+	SFirstAid fa;
+	fa.fdVP = pPanzerklein->fRegenerationValue;
+	fa.nMaxVP = N_MAX_VP;
+	HealVP( fa );
+	HealCriticals( N_MAX_DC );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+bool CUnitMission::IsHero() const
+{
+	return pRPGUnit->IsHero();
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+int CUnitMission::GetSkillAddValue( const int eSkill ) const
+{
+	if ( !pPanzerklein )
+		return 0;
+	if ( !pPanzerklein->pChangeValues )
+		return 0;
+	if ( eSkill == NDb::ST_VP )
+		return 0;
+	return pPanzerklein->pChangeValues->skills[ eSkill ];
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CUnitMission::SetHiding( bool _bHiding )
+{ 
+	bHiding = _bHiding; 
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+int CUnitMission::GetGrenadeTrapDC( NDb::CRPGGrenade *pGrenade )
+{
+	return GetRPGUnit()->Skills( NDb::ST_ENGINEERING );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+int CUnitMission::GetMineDC( NDb::CRPGMine *pMine )
+{
+	return GetRPGUnit()->Skills( NDb::ST_ENGINEERING );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+bool CUnitMission::CanSeeMine( float fDistance, int nDC )
+{
+	int nEngSkill = GetRPGUnit()->Skills( NDb::ST_ENGINEERING );
+	int nSpotSkill = GetRPGUnit()->Skills( NDb::ST_SPOT );
+	int nSkill = Max( nSpotSkill - pMinesConstants->nSpotSkillModif, nEngSkill );
+	float fSpotDistance = Max( nSkill - nDC - pMinesConstants->nMinerEngineerSkillModif, 0 ) * 1.f / pMinesConstants->nMineSpotModif;
+	return fDistance <= fSpotDistance;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+bool CUnitMission::CanClear( int nDC, int nSkillModif )
+{
+	int nEngSkill = GetRPGUnit()->Skills( NDb::ST_ENGINEERING );
+	int nProb = Min( pMinesConstants->nBaseDisarmProb + nEngSkill - nDC, 95 );
+	return random.Get( 0, 100 ) < nProb;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// ������� ��� �������� ����� �� NRPG::Unit-�, ��� ���������� ������
+IUnitMission* CreateUnit( CUnit *pSrc )
+{
+	static int nUnitN = 0;
+	CUnitMission *pRes = new CUnitMission();
+	pRes->pRPGUnit = pSrc; 
+	wstring szDotString;
+	NStr::ToDotString( &szDotString, ++nUnitN );
+	pRes->sID = L"Pers#" + szDotString;
+	return pRes;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// ������� ��� �������� �������
+IUnitMission* CreateUnit( NDb::CRPGPers *pSrc )
+{
+	static int nUnitN = 0;
+	CUnitMission *pRes = new CUnitMission();
+	pRes->pRPGUnit = new CUnit(pSrc);
+	if ( IsValid( pSrc->pDefaultWearsPanzerklein ) )
+		pRes->GetRPGUnit()->pPanzerklein = pSrc->pDefaultWearsPanzerklein;
+	NStr::ToDotString( &pRes->sID, ++nUnitN );
+	pRes->sID = L"Enemy#" + pRes->sID;
+	if ( IsValid( pRes->GetPanzerklein() ) )
+		pRes->GetRPGUnit()->Skills(NDb::ST_VP).SetConst( pRes->GetPanzerklein()->nMaxVP );
+	return pRes;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+} // namespace
+using namespace NRPG;
+REGISTER_SAVELOAD_CLASS( 0x02511016, CUnitMission );
+BASIC_REGISTER_CLASS( IUnitMission );
+BASIC_REGISTER_CLASS( IUnitMissionInfo );

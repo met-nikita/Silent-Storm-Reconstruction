@@ -1,0 +1,11 @@
+HKCR
+{
+	NoRemove AppID
+	{
+		{9F90256A-8BB5-45BF-BD1E-7F8AD492F16E} = s 'MapEdit'
+		'MapEdit.EXE'
+		{
+			val AppID = s {9F90256A-8BB5-45BF-BD1E-7F8AD492F16E}
+		}
+	}
+}

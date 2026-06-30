@@ -1,0 +1,14 @@
+#ifndef __SCRIPTDIPLOMACY_H
+#define __SCRIPTDIPLOMACY_H
+//
+namespace NScript
+{
+////////////////////////////////////////////////////////////////////////////////////////////////////
+DECLARE_SCRIPT_COMMAND( GetDiplomacy );
+DECLARE_SCRIPT_COMMAND( SetDiplomacy );
+DECLARE_SCRIPT_COMMAND( UnitGetDiplomacy );
+DECLARE_SCRIPT_COMMAND( UnitSetDiplomacy );
+////////////////////////////////////////////////////////////////////////////////////////////////////
+}
+//
+#endif __SCRIPTDIPLOMACY_H

@@ -1,0 +1,2 @@
+#define ZDATA
+#define ZEND //

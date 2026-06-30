@@ -1,0 +1,27 @@
+#ifndef __OIPIECESEDIT_H_
+#define __OIPIECESEDIT_H_
+#if _MSC_VER > 1000
+#pragma once
+#endif // _MSC_VER > 1000
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// COIGeometryPiecesEdit dialog
+#include "OIBrowEdit.h"
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+class COIGeometryPiecesEdit: public COIBrowseEdit
+{
+public:
+	COIGeometryPiecesEdit();
+
+	virtual void OnBrowse();
+	void SetAIGeometryID( int nID );
+
+protected:
+	int nAIGeometryID;
+	afx_msg int OnCreate(LPCREATESTRUCT lpCreateStruct);
+
+	DECLARE_MESSAGE_MAP()
+
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
+#endif // __OIPIECESEDIT_H_

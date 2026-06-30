@@ -1,0 +1,12 @@
+#include "StdAfx.h"
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// Reconstructed from release Game.exe (NDatabase::GetDatabaseName @ 0x007f3200). dbinfo.cpp is the
+// whole compiland (single function): the hard-coded source database name used by the importer.
+////////////////////////////////////////////////////////////////////////////////////////////////////
+namespace NDatabase
+{
+string GetDatabaseName()
+{
+	return "A5GAME";
+}
+}

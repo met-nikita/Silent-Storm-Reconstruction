@@ -1,0 +1,55 @@
+; Module-definition file for synthesizing an IMPORT LIBRARY (fmodvc.lib) that
+; binds the engine's FSOUND_* references to a separately-obtained fmod.dll
+; (e.g. from a retail Silent Storm install -- FMOD 3.70, the "fmodvc" audio lib).
+;
+; These are the DLL's actual exported __stdcall symbol names -- factual data read
+; from the DLL export table (dumpbin /exports). No vendor code is included; only
+; the subset the engine links against is listed. make_implibs.ps1 turns this list
+; into the import library fmodvc.lib by building (and discarding) a throwaway stub
+; DLL that re-exports these same names -- see that script for why lib /def cannot.
+
+LIBRARY fmod.dll
+EXPORTS
+    _FSOUND_SetOutput@4
+    _FSOUND_SetDriver@4
+    _FSOUND_SetHWND@4
+    _FSOUND_Init@12
+    _FSOUND_Close@0
+    _FSOUND_Update@0
+    _FSOUND_GetNumDrivers@0
+    _FSOUND_GetDriverName@4
+    _FSOUND_GetDriverCaps@8
+    _FSOUND_GetVersion@0
+    _FSOUND_GetMixer@0
+    _FSOUND_GetOutputHandle@0
+    _FSOUND_GetError@0
+    _FSOUND_SetSFXMasterVolume@4
+    _FSOUND_SetSpeakerMode@4
+    _FSOUND_Sample_Load@20
+    _FSOUND_Sample_Free@4
+    _FSOUND_Sample_GetLength@4
+    _FSOUND_Sample_SetMode@8
+    _FSOUND_Sample_SetDefaults@20
+    _FSOUND_Sample_SetMinMaxDistance@12
+    _FSOUND_PlaySound@8
+    _FSOUND_PlaySoundEx@16
+    _FSOUND_StopSound@4
+    _FSOUND_IsPlaying@4
+    _FSOUND_SetVolume@8
+    _FSOUND_SetVolumeAbsolute@8
+    _FSOUND_GetVolume@4
+    _FSOUND_SetPaused@8
+    _FSOUND_SetPan@8
+    _FSOUND_GetCurrentPosition@4
+    _FSOUND_GetLoopMode@4
+    _FSOUND_GetPriority@4
+    _FSOUND_3D_SetAttributes@12
+    _FSOUND_3D_Listener_SetAttributes@32
+    _FSOUND_Stream_Open@16
+    _FSOUND_Stream_Close@4
+    _FSOUND_Stream_Play@8
+    _FSOUND_Stream_Stop@4
+    _FSOUND_Stream_SetTime@8
+    _FSOUND_Stream_GetTime@4
+    _FSOUND_Stream_SetPosition@8
+    _FSOUND_Stream_SetSyncCallback@12

@@ -1,0 +1,23 @@
+; Module-definition file for synthesizing an IMPORT LIBRARY (binkw32.lib) that
+; binds the engine's Bink* references to a separately-obtained binkw32.dll
+; (e.g. from a retail Silent Storm install -- RAD Bink video runtime).
+;
+; These are the DLL's actual exported __stdcall symbol names -- factual data read
+; from the DLL export table (dumpbin /exports). No vendor code is included; only
+; the subset the engine links against is listed. make_implibs.ps1 turns this list
+; into the import library binkw32.lib by building (and discarding) a throwaway stub
+; DLL that re-exports these same names -- see that script for why lib /def cannot.
+
+LIBRARY binkw32.dll
+EXPORTS
+    _BinkOpen@8
+    _BinkClose@4
+    _BinkWait@4
+    _BinkDoFrame@4
+    _BinkNextFrame@4
+    _BinkGoto@12
+    _BinkPause@8
+    _BinkSetVolume@12
+    _BinkCopyToBuffer@28
+    _BinkOpenDirectSound@4
+    _BinkSetSoundSystem@8

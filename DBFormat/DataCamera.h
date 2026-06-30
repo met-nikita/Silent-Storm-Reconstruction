@@ -1,0 +1,32 @@
+#ifndef __DATACAMERA_H_
+#define __DATACAMERA_H_
+//
+#include "..\ADOImport\BasicDB.h"
+//
+namespace NDb
+{
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// CDBCamera
+////////////////////////////////////////////////////////////////////////////////////////////////////
+class CDBCamera: public CDBRecord
+{
+	OBJECT_BASIC_METHODS( CDBCamera );
+public:
+	ZDATA
+	ZPARENT( CDBRecord );
+	float fYaw;
+	float fPitch;
+	float fRoll;
+	float fDistance;
+	CVec3 vAnchor;
+	float fFOV;
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,(CDBRecord *)this); f.Add(3,&fYaw); f.Add(4,&fPitch); f.Add(5,&fRoll); f.Add(6,&fDistance); f.Add(7,&vAnchor); f.Add(8,&fFOV); return 0; }
+	//
+	virtual void Import();
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
+CDBCamera *GetDBCamera( int nID );
+////////////////////////////////////////////////////////////////////////////////////////////////////
+}
+//
+#endif __DATACAMERA_H_

@@ -1,0 +1,87 @@
+#ifndef __WAYPOINT_H_
+#define __WAYPOINT_H_
+#if _MSC_VER > 1000
+#pragma once
+#endif // _MSC_VER > 1000
+////////////////////////////////////////////////////////////////////////////////////////////////////
+#include "Time.h"
+#include "GResource.h"
+////////////////////////////////////////////////////////////////////////////////////////////////////
+namespace NAI
+{
+enum EPose;
+enum EDirection;
+////////////////////////////////////////////////////////////////////////////////////////////////////
+enum ECommand
+{
+	CMD_GOTO,
+	CMD_POSE,
+	CMD_WAIT,
+	CMD_DIR,
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
+struct SCommand
+{
+	ZDATA
+	ECommand cmd;
+	CVec3 ptPos;
+	STime time;
+	EPose pose;
+	EDirection dir;
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&cmd); f.Add(3,&ptPos); f.Add(4,&time); f.Add(5,&pose); f.Add(6,&dir); return 0; }
+
+	SCommand();
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
+class CWaypoint: public CObjectBase
+{
+	OBJECT_BASIC_METHODS(CWaypoint)
+public:
+	ZDATA
+	CVec3 ptPos;
+	int nFloor;
+	int fRotation;
+	vector<SCommand> commands;
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&ptPos); f.Add(3,&nFloor); f.Add(4,&fRotation); f.Add(5,&commands); return 0; }
+	CWaypoint();
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
+class CWaypointLoader: public NGScene::CResourceLoader<int, CWaypoint>
+{
+	OBJECT_BASIC_METHODS(CWaypointLoader);
+protected:
+	virtual void Recalc();
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
+struct SRoute
+{
+	ZDATA
+	vector<int> waypoints;
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&waypoints); return 0; }
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
+class CUnitAIInfo: public CObjectBase
+{
+	OBJECT_BASIC_METHODS(CUnitAIInfo)
+public:
+	ZDATA
+	vector<SRoute> routes;
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&routes); return 0; }
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
+class CUnitAIInfoLoader: public NGScene::CResourceLoader<int, CUnitAIInfo>
+{
+	OBJECT_BASIC_METHODS(CUnitAIInfoLoader);
+protected:
+	virtual void Recalc();
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
+class CUnitGroupAIInfoLoader: public NGScene::CResourceLoader<int, CUnitAIInfo>
+{
+	OBJECT_BASIC_METHODS(CUnitGroupAIInfoLoader);
+protected:
+	virtual void Recalc();
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
+}
+#endif // __WAYPOINT_H_

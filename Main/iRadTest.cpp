@@ -1,0 +1,38 @@
+#include "StdAfx.h"
+#include "iRadTest.h"
+#include "GView.h"
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+/*struct STiming
+{
+	NHPTimer::STime t;
+	STiming()
+	{
+		NHPTimer::GetTime( &t );
+	}
+	~STiming()
+	{
+		float fTime = NHPTimer::GetTimePassed( &t );
+		char szBuf[1024];
+		sprintf( szBuf, "trageGrid time = %g ms\n", fTime * 1000 );
+		OutputDebugString( szBuf );
+	}
+};*/
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// CICRadTest
+////////////////////////////////////////////////////////////////////////////////////////////////////
+CICRadTest::CICRadTest( NGScene::IGameView *_pScene, const ICamera::SCameraPos &_cameraPos )
+	: pScene(_pScene), cameraPos(_cameraPos)
+{
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CICRadTest::Exec()
+{
+//	CRadViewer *pView = new CRadViewer;
+//	pView->ImportScene( pScene );
+//	pView->SetCamera( cameraPos );
+//	PushInterface( pView );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+REGISTER_SAVELOAD_CLASS( 0x01552130, CICRadTest )
+//REGISTER_SAVELOAD_CLASS( 0x01552131, CRadViewer )

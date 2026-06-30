@@ -1,0 +1,197 @@
+#include "StdAfx.h"
+#include "GDecal.h"
+#include "GSceneInternal.h"
+////////////////////////////////////////////////////////////////////////////////////////////////////
+namespace NGScene
+{
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// CDecal
+////////////////////////////////////////////////////////////////////////////////////////////////////
+CDecal::CDecal( CDecalsManager *_pOwner, CDecalTarget *_pTarget, IMaterial *_pMaterial ) : pOwner(_pOwner), pTarget(_pTarget), pMaterial(_pMaterial)
+{
+	// create target geometry
+	vector<CPtr<CNonePart> > &targetParts = pTarget->parts;
+	for ( int k = 0; k < targetParts.size(); ++k )
+	{
+		if ( IsValid( targetParts[k] ) )
+		{
+			CNonePart *pPart = targetParts[k];
+			const SFullGroupInfo &fg = pPart->GetFullGroupInfo();
+			SDecalTargetPart tp( fg.pUser, fg.nUserID );
+			SSrcPosInfo srcPos( tp.pUser, tp.nUserID, pPart->GetObjectInfoNode() );
+			OnCreate( pOwner->GetScene(), pPart, srcPos );
+		}
+		else
+			targetParts[k] = 0;
+	}
+	targetParts.clear();
+	pOwner->Register( this, pTarget );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+CDecal::~CDecal()
+{
+	if ( IsValid(pOwner) )
+		pOwner->Unregister( this, pTarget );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+template<class T>
+static void WalkVector( vector<T> *pRes )
+{
+	int nRes = 0;
+	for ( int k = 0; k < pRes->size(); ++k )
+	{
+		if ( IsValid( (*pRes)[k] ) )
+		{
+			if ( nRes != k )
+				(*pRes)[ nRes++ ] = (*pRes)[k];
+			else
+				++nRes;
+		}
+	}
+	pRes->resize( nRes );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CDecal::OnCreate( IDecalQuery *pScene, CNonePart *pNew, const SSrcPosInfo &tp )
+{
+	CDecalTarget::CSrcPosHash::iterator i = pTarget->srcPositions.find( tp );
+	CObjectBase *pRes;
+	if ( i != pTarget->srcPositions.end() )
+		pRes = pScene->CreateDecal( pNew, i->second, pTarget->mapInfo, pMaterial );
+	else
+		pRes = pScene->CreateDecal( pNew, vector<CVec3>(), pTarget->mapInfo, pMaterial );
+	WalkVector( &pNew->decals );
+	pNew->decals.push_back( pRes );
+	decals.push_back( pRes );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CDecal::Walk()
+{
+	WalkVector( &decals );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// CDecalsManager
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CDecalsManager::OnCreate( CNonePart *pNew )
+{
+	const SFullGroupInfo &fg = pNew->GetFullGroupInfo();
+	SDecalTargetPart tp( fg.pUser, fg.nUserID );
+	SSrcPosInfo srcPos( tp.pUser, tp.nUserID, pNew->GetObjectInfoNode() );
+	CPerUserHash::iterator i = decalsPerUser.find( tp );
+	if ( i != decalsPerUser.end() )
+	{
+		// add decal on each CDecal
+		vector<CPtr<CDecal> > &decals = i->second;
+		for ( int k = 0; k < decals.size(); ++k )
+		{
+			ASSERT( IsValid(decals[k]) );
+			if ( IsValid(decals[k]) )
+				decals[k]->OnCreate( pScene, pNew, srcPos );
+		}
+	}
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+CDecalTarget* CDecalsManager::CreateDecalTarget( const vector<CObjectBase*> &_targets, const SDecalMappingInfo &_info )
+{
+	CDecalTarget *pRes = new CDecalTarget( _info );
+	CObjectBaseSet targets;
+	for ( int k = 0; k < _targets.size(); ++k )
+		targets[ _targets[k] ] = 1;
+	pScene->GetPartsList( _info, targets, &pRes->parts );
+	for ( int k = 0; k < pRes->parts.size(); ++k )
+	{
+		CNonePart *pPart = pRes->parts[k];
+		ASSERT( IsValid(pPart) );
+		if ( IsValid(pPart) )
+		{
+			SDecalTargetPart tp( pPart->GetFullGroupInfo().pUser, pPart->GetFullGroupInfo().nUserID );
+			pRes->targetParts.push_back( tp );
+			// calc source position
+			if ( pPart->HasLoadedObjectInfo() )
+			{
+				CDGPtr<CPtrFuncBase<CObjectInfo> > pSource( pPart->GetObjectInfoNode() );
+				pSource.Refresh();
+				if ( pSource->GetValue() )
+				{
+					SSrcPosInfo srcPos( tp.pUser, tp.nUserID, pSource );
+					TransformPart( pPart, &pRes->srcPositions[srcPos], 0 );
+				}
+			}
+		}
+	}
+	return pRes;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+CDecal* CDecalsManager::CreateDecal( CDecalTarget *pTarget, IMaterial *pMaterial )
+{
+	if ( !IsValid(pTarget) )
+	{
+		ASSERT(0);
+		return 0;
+	}
+	return new CDecal( this, pTarget, pMaterial );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CDecalsManager::Register( CDecal *pDecal, CDecalTarget *pTarget )
+{
+	ASSERT( IsValid( pTarget ) );
+	const vector<SDecalTargetPart> &targetParts = pTarget->targetParts;
+	for ( int k = 0; k < targetParts.size(); ++k )
+	{
+		bool bFound = false;
+		vector<CPtr<CDecal> > &decals = decalsPerUser[ targetParts[k] ];
+		for ( int i = 0; i < decals.size(); ++i )
+		{
+			if ( decals[i] == pDecal )
+			{
+				bFound = true;
+				break;
+			}
+		}
+		if ( !bFound )
+			decals.push_back( pDecal );
+	}
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CDecalsManager::Unregister( CDecal *pDecal, CDecalTarget *pTarget )
+{
+	ASSERT( IsValid( pTarget ) );
+	const vector<SDecalTargetPart> &targetParts = pTarget->targetParts;
+	for ( int k = 0; k < targetParts.size(); ++k )
+	{
+		CPerUserHash::iterator i = decalsPerUser.find( targetParts[k] );
+		if ( i == decalsPerUser.end() )
+			continue;
+		vector<CPtr<CDecal> > &d = i->second;
+		int nRes = 0;
+		for ( int m = 0; m < d.size(); ++m )
+		{
+			if ( d[m] != pDecal )
+				d[ nRes++ ] = d[m];
+		}
+		if ( nRes == 0 )
+			decalsPerUser.erase( i );
+		else
+			d.resize( nRes );
+	}
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CDecalsManager::Walk()
+{
+	for ( CPerUserHash::iterator i = decalsPerUser.begin(); i != decalsPerUser.end(); ++i )
+	{
+		vector<CPtr<CDecal> > &r = i->second;
+		for ( int k = 0; k < r.size(); ++k )
+		{
+			if ( IsValid(r[k]) )
+				r[k]->Walk();
+			else
+				ASSERT(0);
+		}
+	}
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+}
+using namespace NGScene;
+REGISTER_SAVELOAD_CLASS( 0x003c2140, CDecal )
+REGISTER_SAVELOAD_CLASS( 0x003c2141, CDecalsManager )
+REGISTER_SAVELOAD_CLASS( 0x003c2142, CDecalTarget )
