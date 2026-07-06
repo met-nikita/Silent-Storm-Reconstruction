@@ -20,7 +20,7 @@ https://github.com/nival/Silent-Storm
     <tr>
       <td colspan="3" align="center">
         <img width="200" alt="image" src="https://github.com/user-attachments/assets/483a8f95-eada-4e40-8d54-f18576291676" />
-        <img width="200" alt="image" src="https://github.com/user-attachments/assets/ad808b8d-4add-4a7c-98b1-4c776db496d3" />
+        <img width="200" alt="image" src="https://github.com/user-attachments/assets/ab4f9895-265b-4b83-af60-c0e8401f29be" />
       </td>
     </tr>
   </table>
