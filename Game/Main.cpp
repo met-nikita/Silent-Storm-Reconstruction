@@ -42,12 +42,12 @@ int APIENTRY WinMain( HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdL
 		return 0;
 	}
 
-	// Build the post-load DB relations from the just-loaded tables: skeleton->animations
-	// (CSkeleton::pAnimations), debris materials, item->uniform looks, and item assignment (GiveItems).
-	// Retail does this at db-load (NDb::BuildMapLinks, release Main @0x424150 caller); the dev defined
-	// BuildMapLinks but never called it, so pAnimations stayed empty -> every NDb::CSkeleton::GetAnimation
-	// returned null -> units were invisible and Stand/Move animation setup dereferenced null (crash).
-	NDb::BuildMapLinks();
+	// NOTE: no explicit NDb::BuildMapLinks() here (it is APPEND-ONLY -- calling it twice duplicates
+	// skeleton-anim/debris/uniform-look/per-pers-inventory links). Every load path already covers it:
+	// a v1/Steam columnar game.db has its links built by NDatabase::Serialize itself (gated internal
+	// BuildMapLinks(false), ADOImport\BasicDB.cpp), and a v0 dev-format game.db carries the links
+	// serialized in its records (DataImport runs BuildMapLinks before exporting; CSkeleton::pAnimations
+	// is a serialized member). The unconditional call that used to sit here double-pushed on both.
 
 	// init subsystems
 	if ( !NWinFrame::InitApplication( hInstance, "Silent Storm", "Silent Storm" ) )

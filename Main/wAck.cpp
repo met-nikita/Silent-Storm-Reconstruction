@@ -7,6 +7,7 @@
 #include "wAckBase.h"
 #include "wDumbUnit.h"
 #include "wUnitServer.h"
+#include "wMain.h"	// CPlayer roster (CAckNPercentOfGroupIsKilled squad/dead counts)
 #include "rpgUnit.h"
 #include "rpgUnitMission.h"
 #include "..\Misc\EventsBase.h"
@@ -29,6 +30,54 @@ public:
 	virtual void OnUnitDied( CUnitServer *_pUnit )
 	{ 
 		if ( GetUnit() != _pUnit && GetUnit()->GetPlayer() == _pUnit->GetPlayer()  ) 
+			PlayAck();
+	}
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail NWorld::CAckNPercentOfGroupIsKilled (release-added; NO Jan03 counterpart -- ported from
+// retail OnUnitDied @0x3384e0, ctors @0x331ac0/@0x333da0, factory case 0x76 = condition 118, oracle
+// s2_cacknpercentofgroupiskilled.h). When a SQUADMATE (same player, different unit) dies: resolve
+// the owning CPlayer (retail __RTDynamicCast of GetPlayer @0x738568), take the FULL squad roster
+// size and the dead-member count (retail pl sub-obj +0x28 roster vector + vtbl+0x50 FillDeadList),
+// and bark iff  atoi(sParam[0]) < 100 - trunc(nDead*100/nTotal).
+// DISASM-VERIFIED polarity (0x738626..0x738639: eax = 0x64 - pct; cmp eax,ebp; jle skip): the bark
+// fires while the SURVIVOR percentage still EXCEEDS the param -- ported faithfully, not "fixed".
+// The retail game.db keys 8 such rows on the enemy voice-holder personas (AckUnit), so this is an
+// enemy-chatter bark. ORIGINAL BUG (confirmed @0x738608): retail fidivs by the raw roster size with
+// no empty-roster guard; we guard nTotal==0 to avoid the UB while keeping the branch shape.
+class CAckNPercentOfGroupIsKilled: public CAckBase
+{
+	OBJECT_BASIC_METHODS(CAckNPercentOfGroupIsKilled);
+	ZDATA
+	ZPARENT( CAckBase );
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,(CAckBase *)this); return 0; }
+public:
+	CAckNPercentOfGroupIsKilled() : CAckBase() {};
+	CAckNPercentOfGroupIsKilled( CUnitServer *_pUnit, NDb::CDBAck *_pDBAck ): CAckBase( _pUnit, _pDBAck ) {};
+	virtual void OnUnitDied( CUnitServer *_pUnit )
+	{
+		if ( !IsValid( _pUnit ) )
+			return;
+		// retail gate order @0x3384e0: unit live -> !IsThis -> IsFriend (same player, different unit)
+		if ( GetUnit() == _pUnit || GetUnit()->GetPlayer() != _pUnit->GetPlayer() )
+			return;
+		CDynamicCast<CPlayer> pOwner( GetUnit()->GetPlayer() );	// retail __RTDynamicCast to CPlayer
+		if ( !IsValid( pOwner ) )
+			return;
+		const int nParam = atoi( GetDBAck()->sParam[0].c_str() );
+		// full roster (the dev player list keeps dead members -- only RemoveUnit drops them)
+		const vector< CMObj<CUnitServer> > &members = pOwner->GetPlayerUnits();
+		int nDead = 0;
+		for ( int k = 0; k < members.size(); ++k )
+		{
+			CUnitServer *pMember = members[k];	// plain extraction (no ternary over CObj -- UAF rule)
+			if ( pMember && pMember->IsDead() )
+				++nDead;
+		}
+		int nPct = 0;
+		if ( !members.empty() )	// retail divides unguarded (see ORIGINAL BUG note above)
+			nPct = int( float( nDead ) / float( members.size() ) * 100.0f );	// trunc, matches fistp RC=11
+		if ( nParam < 100 - nPct )
 			PlayAck();
 	}
 };
@@ -327,9 +376,11 @@ public:
 	//
 	virtual void OnDoCriticalDamage( CUnitServer *pAttacker, CUnitServer *pTarget )
 	{
-		if ( !IsValid( pTarget ) )
-			return;
-		if ( GetUnit()->GetPlayer() != pTarget->GetPlayer() )
+		// retail CAckBase::IsThis(pTarget) @0x338ec0: only the unit that ACTUALLY suffered the crit barks the
+		// "PC suffers critical" line. The Jan03 predecessor filter (GetUnit()->GetPlayer() != pTarget->GetPlayer())
+		// made every player-hero ack-owner bark "I'm hurt" whenever an ENEMY was critted (different player).
+		// The sibling suffer-acks (CAckSuffersLightDamage/HardDamage) already use GetUnit()==unit -- match them.
+		if ( IsValid( pTarget ) && GetUnit() == pTarget )
 			PlayAck();
 	}
 };
@@ -659,6 +710,7 @@ const int N_WEAPON_JAMMED = 103;
 const int N_ABOUT_TO_TAKE_AN_ENEMY_BY_SURPRISE = 105;
 const int N_LONG_BURST = 114;
 const int N_UNHIDE = 115;
+const int N_N_PERCENT_OF_GROUP_IS_KILLED = 118;	// retail CreateAck @0x330b10 case 0x76 -> CAckNPercentOfGroupIsKilled
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CAckBase *CreateAck( CUnitServer *_pUnit, NDb::CDBAck *_pDBAck )
 {
@@ -783,6 +835,9 @@ CAckBase *CreateAck( CUnitServer *_pUnit, NDb::CDBAck *_pDBAck )
 		case N_UNHIDE:
 			pRes = new CAckUnhide( _pUnit, _pDBAck );
 			break;
+		case N_N_PERCENT_OF_GROUP_IS_KILLED:
+			pRes = new CAckNPercentOfGroupIsKilled( _pUnit, _pDBAck );
+			break;
 	}
 	return pRes;
 }
@@ -795,6 +850,7 @@ REGISTER_SAVELOAD_CLASS( 0x52032120, CAckFriendGrenadeKillsMoreThanOneEnemy );
 REGISTER_SAVELOAD_CLASS( 0x52032121, CAckGrenadeKillsMoreThanOneEnemy );
 REGISTER_SAVELOAD_CLASS( 0x52912145, CAckEnemyHasBeenInfictedCritical );
 REGISTER_SAVELOAD_CLASS( 0x51232163, CAckFriendDies );
+REGISTER_SAVELOAD_CLASS( 0x51953110, CAckNPercentOfGroupIsKilled );	// retail classreg id 1368731920
 REGISTER_SAVELOAD_CLASS( 0x50732150, CAckEnemyBecomesVisibleInRealtime );
 REGISTER_SAVELOAD_CLASS( 0x52912140, CAckEnemyBecomesVisibleInTurnbased );
 REGISTER_SAVELOAD_CLASS( 0x52912141, CAckLastPieceOfAmmo );

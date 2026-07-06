@@ -159,4 +159,21 @@ int CFaceExpression::operator&( CStructureSaver &f )
 	return 0;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail NDb::GetSequenceByExpression @0x42cf30: linear walk of the FaceExpression2Sequences table;
+// first live record with the matching kind wins; null on a miss.
+CSequence* GetSequenceByExpression( EFaceExpression eExpression )
+{
+	CDBTable<CFaceExpression> *pTable = NDatabase::GetTable<CFaceExpression>();
+	if ( !pTable )
+		return 0;
+	CDBIterator<CFaceExpression> i( *pTable );
+	while ( i.MoveNext() )
+	{
+		CDBPtr<CFaceExpression> pRec = i.Get();
+		if ( IsValid( pRec ) && pRec->eExpression == eExpression )
+			return pRec->pSequence;
+	}
+	return 0;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 }

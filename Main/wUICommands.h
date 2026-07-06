@@ -423,28 +423,43 @@ public:
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // Events
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail NScript::luac_BeginSequence @0x2f1890 ("b[false]"): the command carries the script's bool at
+// +0x10 -- the movie letterbox's bSkipFadeOut (Common.l DelayGameStart passes BeginSequence(true) so the
+// bars appear instantly behind the loading screen). Serialize tags: 1 = base (pre-existing), 2 =
+// bSkipFadeOut (dev-appended -- old saves without it default to false).
 class CUICmdBeginSequence: public CUICmd
 {
 	OBJECT_BASIC_METHODS( CUICmdBeginSequence );
 private:
 	ZDATA_(CUICmd)
 public:
-	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CUICmd*)this); return 0; }
+	bool bSkipFadeOut;	// +0x10: skip the letterbox fade-in/out (immediate bars)
+	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CUICmd*)this); f.Add(2,&bSkipFadeOut); return 0; }
 	//
-	CUICmdBeginSequence(): 
-		CUICmd( 0 ) {}
+	CUICmdBeginSequence():
+		CUICmd( 0 ), bSkipFadeOut( false ) {}
+	CUICmdBeginSequence( bool _bSkipFadeOut ):
+		CUICmd( 0 ), bSkipFadeOut( _bSkipFadeOut ) {}
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail NScript::luaEndSequence @0x2f1a60 ("b[false]b[false]"): +0x10 = bRestoreCamera (pop the
+// BeginSequence camera pose back onto the camera; false = commit the cutscene-end pose as the gameplay
+// camera), +0x11 = bSkipFade (tear the letterbox down immediately, movieUI SetSkipFade @0x20e130).
+// Serialize tags: 1 = base (pre-existing), 2/3 = bRestoreCamera/bSkipFade (dev-appended).
 class CUICmdEndSequence: public CUICmd
 {
 	OBJECT_BASIC_METHODS( CUICmdEndSequence );
 private:
 	ZDATA_(CUICmd)
 public:
-	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CUICmd*)this); return 0; }
+	bool bRestoreCamera;	// +0x10: restore the pose pushed by the matching BeginSequence
+	bool bSkipFade;			// +0x11: skip the letterbox fade-out (immediate teardown)
+	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CUICmd*)this); f.Add(2,&bRestoreCamera); f.Add(3,&bSkipFade); return 0; }
 	//
-	CUICmdEndSequence(): 
-		CUICmd( 0 ) {}
+	CUICmdEndSequence():
+		CUICmd( 0 ), bRestoreCamera( false ), bSkipFade( false ) {}
+	CUICmdEndSequence( bool _bRestoreCamera, bool _bSkipFade ):
+		CUICmd( 0 ), bRestoreCamera( _bRestoreCamera ), bSkipFade( _bSkipFade ) {}
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CUICmdPlayDialog: public CUICmd

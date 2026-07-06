@@ -34,6 +34,12 @@ class CAICommander: public NWorld::CCommander
 	bool bAITurn;
 	bool bWantTurnBased;
 	ZEND int operator&( CStructureSaver &f ) { f.Add(2,(NWorld::CCommander*)this); f.Add(3,&pPlayer); f.Add(4,&pTaskCommander); f.Add(5,&pTacticalCommander); f.Add(6,&LockedObjects); f.Add(7,&units); f.Add(8,&pWorld); f.Add(9,&bAITurn); f.Add(10,&bWantTurnBased); return 0; }
+	// retail SAICommandTracker::bCommandGiven (@+100, GetCommand @0x341b0 / Segment @0x338b0): the AI hands
+	// the world at most ONE decision per world segment. Without it CTBSWorld::FetchPlayerCommands' for(;;)
+	// can spin forever on an AI that keeps regenerating a no-progress command (e.g. CCmdContinue for a unit
+	// blocked by a cinematic sequence) -- world time never advances, so the state can never change: a FREEZE.
+	// Transient (cleared every Segment) -- deliberately not serialized.
+	bool bCommandGiven = false;
 	//
 private:
 	// TBSEvents
@@ -82,12 +88,9 @@ public:
 // scripted/human one. Purely additive -- nothing in this (predecessor) snapshot instantiates it yet; the
 // ctor + override are reconstructed for parity, not wired into any existing call path.
 //
-// DIVERGENCE (documented): the release override gates on CWorld::IsSequence, which has no equivalent in
-// this dev snapshot (wTurnBased.h:427 notes there is no world-level sequence predicate; the TBS layer uses
-// IsForcedRealTime, a CTBSWorld member not reachable from CAICommander::GetWorld()). The override is
-// therefore reconstructed as a conservative no-op (a human commander never auto-drives) -- the
-// release-direction-preserving choice -- rather than inventing a predicate. The distinct vtable slot is
-// preserved (faithful); only the body is dev-limited.
+// The release override gates on CWorld::IsSequence @0x376ff0 -- now reconstructed for real (the dev
+// predicate is CWorld::IsSequence == IsForcedRealTime, see wMain.h): the override auto-drives the base
+// GenerateCommand only while a scripted sequence runs, exactly the @0x358d0 body.
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CSequenceCommander: public CAICommander
 {

@@ -29,9 +29,9 @@
 // @0x4a4720, Do @0x4a4c00/@0x4a4c90/@0x4a4df0). Every decode hook resolves to a real in-tree call.
 //
 // One documented dev<->release divergence: the release reads the snipe AP pool + the unit's current AP from
-// the RPG skill block; the dev-native CUnitStateSniping caches the pool as nBaseAP (set at snipe start) and the
-// AI planner exposes the AP available here as place.nUnitAP, so CollectAP computes the same min( pool-collected,
-// availableAP ) from the in-tree state (equivalent values; observable only if max AP changes mid-snipe).
+// the RPG skill block; the dev-native CUnitStateSniping caches the pool as nBaseAP (set at snipe start). The
+// AP CAP is the unit's CURRENT AP (pU->GetAP()), read PLACE-INDEPENDENTLY exactly as the release does -- the
+// release GetInfoInner @0x4a4490 ignores its `place` arg entirely. (Earlier this capped by place.nUnitAP.)
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 namespace NAI
 {
@@ -167,8 +167,13 @@ void CAICollectSnipeAPAction::GetInfoInner( const SPlaceWithAP &place, SInfo *pI
 	if ( nCollected >= nPool )
 		return;
 	int nAP = nPool - nCollected;
-	if ( place.nUnitAP < nAP )       // cap by the AP available here (release: the unit's current AP)
-		nAP = place.nUnitAP;
+	// @0x4a4490 -- the release caps by the unit's CURRENT AP (its RPG AP skill), read PLACE-INDEPENDENTLY:
+	// GetInfoInner never references its `place` arg (raw decode reads GetUnit()->GetRPG()+0x14+0x28). Oracle
+	// s2_aisnipeaction.h: Min( nPool - nCollected, GetUnitAPAsInt(pU) ). Was: place.nUnitAP, which the per-place
+	// SActionInfo cache memoizes separately and which diverges for non-current candidate places (move-cost reduced).
+	int nCurAP = pU->GetAP();        // IAIUnit::GetAP() == the unit's current AP (same getter aiAction.cpp seeds nUnitAP with)
+	if ( nCurAP < nAP )
+		nAP = nCurAP;
 	pInfo->nAP = nAP;
 	if ( nAP > 0 )
 		pInfo->bCanDo = true;

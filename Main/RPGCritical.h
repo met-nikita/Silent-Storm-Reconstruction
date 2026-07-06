@@ -52,7 +52,7 @@ public:
 	CCritical() {}
 	CCritical( const SCritical &crit );
 
-	// false, если для этого критикала не требуется отмена (не было повешено никаких модификаторов)
+	// false, пїЅпїЅпїЅпїЅ пїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ (пїЅпїЅ пїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ)
 	virtual bool SetModifiers( CUnit *pRPGUnit, IUnitMission *pRPGMission  )
 	{
 		OutputDebugString( "Empty critical\n" );
@@ -62,16 +62,17 @@ public:
 	virtual bool CanBeSuspended() = 0;
 	virtual bool CanBeMerged() const { return true; }
 
-	enum { WEAKER, MERGED, OTHER }; // результаты функции Merge
+	enum { WEAKER, MERGED, OTHER }; // пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ Merge
 	int Merge( CCritical *pCritical ) const;
 
-	bool NextTurn();		// true пока время действия данного critical'а не истекло
+	bool NextTurn();		// true пїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ critical'пїЅ пїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ
 
-	int  GetRemainingTime() const;
-	bool IsTemporarily() const { return critical.nDuration >= 0; }
+	virtual int  GetRemainingTime() const;
+	virtual bool IsTemporarily() const { return critical.nDuration >= 0; }
 	float GetModifier() const;
 	const SCritical& GetCritical() const { return critical; }
 
+	virtual float GetValue() const { return critical.fValue; } // release @0x695fb0
 	virtual int GetDifficultyClass() const { return critical.nDC; }
 	virtual NDb::ECritical GetCriticalType() const { return critical.eCritical; }
 	virtual NDb::ECriticalLocation GetCriticalLocation() const { return critical.eCl; }

@@ -13,6 +13,7 @@
 #include "wVision.h"
 #include "eventPlayer.h"
 #include "wUnitCommands.h"   // complete NWorld::SItem for CPlayer::sHandItem (release save-format, by-value)
+#include "wPocket.h"         // CPocket::SSmthPtrHolder -- the release object pocket (luaObjectPlaceInPocket family)
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 struct SMapUnit;
 struct SMapInfo;
@@ -91,6 +92,7 @@ enum ESkipMode;
 class CUnitGroup;
 class IMine;
 class CMineTracker;
+struct SPerkMineModifiers;   // explosive-perk damage modifiers (wExplosionPerks.h); AddGrenadeExplosion takes them by ptr
 enum EInterfaceEventType;
 //
 //class CEventOnNewPlayerFastTurnOrTime;
@@ -129,6 +131,7 @@ public:
 	////
 	virtual void GetUnits( vector<CPtr<CUnitServer> > *pRes ) const;
 	virtual void GetUnits( CUnitSet *pRes ) const;
+	virtual void GetEnemyUnitInfo( CObjectBase *pEnemy, SEnemyInfo *out ) const;   // retail @0x386c20
 	virtual void GetUnitsThatCanFight( list<CPtr<CUnitServer> > *pRes ) const;
 	virtual void GetVisible( list<CPtr<CUnit> > *pRes ) const;
 	virtual void GetVisibleObjects( list<CPtr<CObjectBase> > *pRes ) const;
@@ -249,10 +252,15 @@ public:
 	vector<int> createFlags;
 	bool bForcedRealTime;
 	bool bScriptWantTurnBased = false;  // retail @CWorld+0x1c0 -- script's turn-based wish (saved state; ScriptWantTurnBased)
+	bool bIsBase = false;               // retail @CWorld+0x1b9 -- current zone IS the scenario "base"; computed in
+	                                    // StartGame @0x36bb50, NOT serialized (retail omits it from operator&)
 	bool bFreezeStart = false;          // retail @CWorld+0x1b8 -- a script froze the game start (c_DelayGameStartEx);
 	                                    // StartFirstSegments keeps segmenting while it's set (DelayGameStart sets it)
 	bool bFirstSegment = true;          // retail @CWorld -- one-shot latch: fire global lua OnEnterZone() on the
 	                                    // first Segment of a freshly (re)started scenario; re-armed in RunPostInit
+	bool bAttackAllowed = true;         // retail @CWorld+421, save chunk 0x2e -- ctor seeds true (@0x36a4b0);
+	                                    // CreateRandom @0x36d0b0 sets !mapInfo.bNoAttack (variant NoAttack=1 in
+	                                    // base zones); read ONLY via IsAttackAllowed @0x376da0 (IWorld vtbl+0xc8)
 	int nTurnID;
 	STime prevTurnTime;
 	CObj< NRPG::CGlobalDiplomacy > pDiplomacy;
@@ -260,8 +268,13 @@ public:
 	CObj<CMineTracker> pMineTracker;
 	STime prevFastTurnTime;
 	vector<SUnitPtrHolder> pocket;
+	// retail CPocket's OBJECT side (wPocket.h; consumed by luaObjectPlaceInPocket @0x2e9000 /
+	// luaObjectRestoreFromPocket @0x2e9130): plain world objects the script pockets are held alive here
+	// (non-master O-ref only) while removed from the world lists. Tag 49 (appended; old saves lack it).
+	vector< CPocket::SSmthPtrHolder<CObjectServerBase> > objectPocket;
 	unordered_map< string, CPtr<CObjectBase> > nameToObj;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(TTBSWorld*)this); f.Add(2,&pShow); f.Add(3,&pShowUnits); f.Add(4,&uiCmdsList); f.Add(5,&eventHits); f.Add(6,&pTerrain); f.Add(7,&pTime); f.Add(8,&pAimTime); f.Add(9,&tPrev); f.Add(10,&tHiddenDelta); f.Add(11,&pAIMap); f.Add(12,&pPathNetwork); f.Add(13,&pRPGGame); f.Add(14,&pDefaultLight); f.Add(15,&units); f.Add(16,&objects); f.Add(17,&segmentObjects); f.Add(18,&miscObjects); f.Add(19,&buildings); f.Add(20,&pGlobalAck); f.Add(21,&pTerrainInfo); f.Add(22,&deploySpots); f.Add(23,&bLeanAndMean); f.Add(24,&nRootLayersGroup); f.Add(25,&nPartiesAdded); f.Add(26,&sMapSafeZone); f.Add(27,(CDebrisController*)this); f.Add(28,&pAIJobManager); f.Add(29,&pOwnScript); f.Add(30,&pAISignalManager); f.Add(31,&nAIUnitsCreated); f.Add(32,&pGlobalGame); f.Add(33,&pDeployedDeadUnitsPlayer); f.Add(34,&waypoints); f.Add(35,&unitGroups); f.Add(36,&createFlags); f.Add(37,&bForcedRealTime); f.Add(38,&nTurnID); f.Add(39,&prevTurnTime); f.Add(40,&pDiplomacy); f.Add(41,&trappedObjects); f.Add(42,&pMineTracker); f.Add(43,&prevFastTurnTime); f.Add(44,&pocket); f.Add(45,&nameToObj); f.Add(46,&bScriptWantTurnBased); f.Add(47,&bFreezeStart); return 0; }
+	vector<CPtr<IVisObj> > allSoundStuff;   // @CWorld+0x1a8: weak refs to the live heard-not-seen markers (CDMesh), tag 48
+	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(TTBSWorld*)this); f.Add(2,&pShow); f.Add(3,&pShowUnits); f.Add(4,&uiCmdsList); f.Add(5,&eventHits); f.Add(6,&pTerrain); f.Add(7,&pTime); f.Add(8,&pAimTime); f.Add(9,&tPrev); f.Add(10,&tHiddenDelta); f.Add(11,&pAIMap); f.Add(12,&pPathNetwork); f.Add(13,&pRPGGame); f.Add(14,&pDefaultLight); f.Add(15,&units); f.Add(16,&objects); f.Add(17,&segmentObjects); f.Add(18,&miscObjects); f.Add(19,&buildings); f.Add(20,&pGlobalAck); f.Add(21,&pTerrainInfo); f.Add(22,&deploySpots); f.Add(23,&bLeanAndMean); f.Add(24,&nRootLayersGroup); f.Add(25,&nPartiesAdded); f.Add(26,&sMapSafeZone); f.Add(27,(CDebrisController*)this); f.Add(28,&pAIJobManager); f.Add(29,&pOwnScript); f.Add(30,&pAISignalManager); f.Add(31,&nAIUnitsCreated); f.Add(32,&pGlobalGame); f.Add(33,&pDeployedDeadUnitsPlayer); f.Add(34,&waypoints); f.Add(35,&unitGroups); f.Add(36,&createFlags); f.Add(37,&bForcedRealTime); f.Add(38,&nTurnID); f.Add(39,&prevTurnTime); f.Add(40,&pDiplomacy); f.Add(41,&trappedObjects); f.Add(42,&pMineTracker); f.Add(43,&prevFastTurnTime); f.Add(44,&pocket); f.Add(45,&nameToObj); f.Add(46,&bScriptWantTurnBased); f.Add(47,&bFreezeStart); f.Add(48,&allSoundStuff); f.Add(49,&objectPocket); f.Add(50,&bAttackAllowed); return 0; }
 	
 	CObjectServerBase* AddObject( const SObjectPlace &pos, 
 		NRPG::IObject *pRPGObject, const SMapElement &mapElement, CPostWorldCreateInfo *pPostInfo = 0 );
@@ -272,7 +285,7 @@ public:
 	void PlaceAllUnits();
 	void StartGame();
 	void StartFirstSegments();           // retail @0x36c4c0 -- the freeze-driven initial-segment warm-up loop (internal)
-	
+
 	void Segment();
 	virtual void OnNewPlayerTurn( CPlayer *pPlayer );
 	virtual void OnRealTimeStarted();
@@ -297,7 +310,9 @@ private:
 	bool GetPassageDeployPlace( IPassageObject *pPassage, 
 		CUnitServer *pUS, const vector<NAI::SPathPlace> &lockedPlaces, NAI::SPathPlace *pPathPlace );
 	void InitPlayerCorpseCarrying( CPlayer *pPlayer );
-	CUnitServer *GetDeployedDeadUnit( const NAI::SPathPlace &aiPos, NRPG::CUnit *pRPGUnit );
+	// retail @0x369b30: pOwner is who receives a freshly created body (enemy corpse -> the shared
+	// dead-units player, ally body -> the carrier's player); the corpse state tail runs on both paths
+	CUnitServer *GetDeployedDeadUnit( const NAI::SPathPlace &aiPos, NRPG::CUnit *pRPGUnit, CPlayer *pOwner );
 	void LoadWaypoints( const list< CObj<CMapWaypoint> > &_waypoints );
 	virtual STime GetWorldTime() { return GetTime()->GetValue(); }
 	void RunAutoLoadScripts();
@@ -363,7 +378,13 @@ public:
 		CObj<CPostWorldCreateInfo> *pPostInfo, SRandomSeed sSeed, bool bLeanAndMean = false );
 	virtual void RunPostInit( CPostWorldCreateInfo *pPostInfo );
 	virtual void CreateDefault();
-	virtual void CreateRestored();
+	virtual void CreateRestored( NRPG::CGlobalGame *pGlobalGame );	// retail @0x36e100
+	virtual bool IsBase() const { return bIsBase; }					// retail @0x376e20
+	virtual bool IsLinkedZone() const;								// retail @0x361c80
+	virtual void RemoveCarriedCorpses();							// retail @0x365900
+	virtual bool IsAttackAllowed() const { return bAttackAllowed; }	// retail @0x376da0 (mov al,[this+0x1a5])
+	// retail @0x3770c0: plain vector copy-out of the live heard-marker weak refs
+	virtual void GetAllSoundStuff( vector< CPtr<IVisObj> > *pRes ) { *pRes = allSoundStuff; }
 	virtual IPlayer* AddPlayer( const wstring &wsName, NRPG::CGlobalPlayer *pGlobalPlayer, 
 		CCommander *pCommander, bool bAddOnManyDeploySpots = false );
 	virtual void RemovePlayer( IPlayer *pPlayer );
@@ -372,6 +393,16 @@ public:
 	virtual void GetActiveUnits( IPlayer *pPlayer, list<CUnit*> *pRes );
 	virtual bool IsFirstTurn() const { return TTBSWorld::IsFirstTurn(); }
 	virtual bool IsInterrupt() const { return TTBSWorld::IsInterrupt(); }
+	// retail CWorld::IsSequence @0x376ff0 -> CTBSWorld::IsSequence @0x375a30: "non-empty interrupt stack
+	// with an OWNERLESS top". Retail dropped Jan03's bForcedRealTime: ForceRealTime(true) (called ONLY by
+	// luac_BeginSequence @0x2f1890) pushes that ownerless sequence interrupt (StartSequence @0x375dd0) and
+	// EndSequence pops it -- so retail IsSequence is true for exactly the c_BeginSequence..EndSequence span,
+	// EVEN when the sequence starts from clean real time (empty stack). The dev TBS layer kept the Jan03
+	// forced-RT flag instead of the ownerless interrupt, and its TTBSWorld::IsSequence requires
+	// !interrupts.empty() -- FALSE for a real-time cutscene, so nothing knew a sequence was running (camera,
+	// AI, heard-render all mis-gated). bForcedRealTime has the same lifetime as retail's ownerless interrupt
+	// (only scriptSequence.cpp toggles it), so it IS the sequence predicate here.
+	virtual bool IsSequence() const { return IsForcedRealTime(); }
 	virtual void ClickOfDeath( const CRay &ray, int nMaxFloor );
 	virtual CUnit* GetUnit( const NAI::SUnitPosition &pos );
 	virtual CUnit* GetUnitInTile( const NAI::SUnitPosition &pos );
@@ -410,12 +441,18 @@ public:
 		STime tThrow, float fDistance, NDb::CModel *pModel, NRPG::CAttackPortion &attack, 
 		NRPG::IClipItem *pRocket, CUnitServer *pIgnored, NDb::CEffect *_pEffect = 0 );
 	virtual void AddGrenadeExplosion( const CVec3 &vStartPosition,
-		NDb::CRPGGrenade *pRPGGrenade, CUnitServer *pUnitServer = 0, CObjectBase *pIgnitionObject = 0 );
+		NDb::CRPGGrenade *pRPGGrenade, CUnitServer *pUnitServer = 0, CObjectBase *pIgnitionObject = 0,
+		const SPerkMineModifiers *pMods = 0 );
 	void KillObject( CObjectServerBase *pOS );
+	// retail object pocket (luaObjectPlaceInPocket @0x2e9000 / luaObjectRestoreFromPocket @0x2e9130):
+	// pocket = hold alive + KillObject + unbind from the vis sync; restore = re-list + rebind + unpocket.
+	bool IsObjectInPocket( CObjectServerBase *pObject ) const;
+	void PlaceObjectInPocket( CObjectServerBase *pObject );
+	void RestoreObjectFromPocket( CObjectServerBase *pObject );
 	void FindCloseGroundItems( CUnit *pU, vector<SItem> *pRes );
 	bool IsWinnerPlayer( IPlayer *pPlayer );
 	void GenerateDebris( NDb::CDebrisMaterial *pDebrisMaterial, const CVec3 &ptCenter, const CVec3 &ptDir, int nDebris );
-	void CreateSoundStuff( vector<CObj<CTimedObject> > *stuff, CVec3 ptPos );
+	void CreateSoundStuff( CUnitServer *pWho, vector<CObj<CTimedObject> > *stuff, CVec3 ptPos );   // @0x369110
 	void MakeAISound( NDb::CAISound *pAISound, CDumbUnitServer *pWho, int nSoundType = 0, NDb::CSound *pSound = 0 );
 	void MakeSound( const CVec3 &ptCenter, NDb::CSound *pSound );
 	list< CObj<IDynamicObject> > *GetMiscObjects() { return &miscObjects; }

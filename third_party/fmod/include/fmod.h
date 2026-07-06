@@ -101,6 +101,8 @@ signed char    __stdcall FSOUND_SetVolumeAbsolute( int channel, int vol );
 int            __stdcall FSOUND_GetVolume( int channel );
 signed char    __stdcall FSOUND_SetPaused( int channel, signed char paused );
 signed char    __stdcall FSOUND_SetPan( int channel, int pan );
+signed char    __stdcall FSOUND_SetCurrentPosition( int channel, unsigned int offset );
+int            __stdcall FSOUND_GetFrequency( int channel );
 unsigned int   __stdcall FSOUND_GetCurrentPosition( int channel );
 unsigned int   __stdcall FSOUND_GetLoopMode( int channel );
 int            __stdcall FSOUND_GetPriority( int channel );
@@ -116,6 +118,7 @@ int            __stdcall FSOUND_Stream_Play( int channel, FSOUND_STREAM *stream 
 signed char    __stdcall FSOUND_Stream_Stop( FSOUND_STREAM *stream );
 signed char    __stdcall FSOUND_Stream_SetTime( FSOUND_STREAM *stream, int ms );
 int            __stdcall FSOUND_Stream_GetTime( FSOUND_STREAM *stream );
+int            __stdcall FSOUND_Stream_GetLengthMs( FSOUND_STREAM *stream );
 signed char    __stdcall FSOUND_Stream_SetPosition( FSOUND_STREAM *stream, unsigned int position );
 signed char    __stdcall FSOUND_Stream_SetSyncCallback( FSOUND_STREAM *stream, FSOUND_STREAMCALLBACK callback, int userdata );
 

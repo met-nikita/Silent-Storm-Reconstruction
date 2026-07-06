@@ -102,14 +102,25 @@ NWorld::CCommand* CAITaskCommander::GetCommand()
 	if ( !CanGetCommand() )
 		return 0;
 	//
-	for ( list< CObj<CTask> >::const_iterator i = Tasks.begin(); i != Tasks.end(); ++i )
+	for ( list< CObj<CTask> >::iterator i = Tasks.begin(); i != Tasks.end(); ++i )
 	{
-		if ( IsValid( *i ) && (*i)->IsActive() && 
+		if ( IsValid( *i ) && (*i)->IsActive() &&
 			!(*i)->IsEndOfTask() && ( GetWorld()->IsRealTime() || !(*i)->IsEndOfTurn() ) )
 		{
 			NWorld::CCmd *pCmd = (*i)->GetCommand();
 			if ( IsValid( pCmd ) )
-				return new NWorld::CCmdSetCommand( (*i)->GetUnitServer(), pCmd );
+			{
+				NWorld::CCommand *pRes = new NWorld::CCmdSetCommand( (*i)->GetUnitServer(), pCmd );
+				// ROUND-ROBIN (retail parity): retail serves AI units through SAIUnitsTracker with a
+				// Next() rotation after every real-time serve (CAICommander::GenerateCommand @0x353d0
+				// tail) -- no unit can monopolize its commander. The dev task list was scanned
+				// front-first every segment, so one greedy task (a unit whose kept command re-pumps
+				// CCmdContinue each segment) combined with the one-decision-per-segment latch STARVED
+				// every later task of the same player -- the GFirst safe-run freeze (RB's fresh route
+				// never pumped while RF1 spun). Rotate the served task to the back of the scan order.
+				Tasks.splice( Tasks.end(), Tasks, i );
+				return pRes;
+			}
 		}
 	}
 	//
@@ -170,9 +181,14 @@ void CAITaskCommander::CreateRoute( NWorld::CUnitServer *pUnitServer, SMapUnit s
 		}
 		else if ( sMapUnit.eLogic == NDb::UL_DEFAULT )
 		{
-			// ��������� �� ����� ����� ����� ������ ������ unit ����������� �������
-			//pTask->AddCommand( new CTaskCommandGoto( pUnitServer->GetPosition().pos ) );
-			pTask->AddLookAround();
+			// Jan03 gave a routeless UL_DEFAULT unit a random look-around (AddLookAround: 3-6 x
+			// Wait(1-6s) + ChangeDirection(random)). RETAIL DELETED IT: CAITaskCommander does not
+			// exist in the release binary at all -- the retail deploy glue (NAI::CreateUnitRoute
+			// @0x96d20) does NOTHING for a routeless default-logic unit, so map units without a
+			// route stand still. The look-around also CANCELLED scripted animations (each
+			// ChangeDirection is a command -- e.g. EFirst's lying wounded commander popped back to
+			// the standing idle on his first random turn). A plain idle wait keeps the task valid.
+			pTask->AddCommand( new CTaskCommandWait( 3000 ) );
 		}
 		else if ( sMapUnit.eLogic == NDb::UL_ROAMING )
 			pTask->AddRoaming( pUnitServer->GetPosition().pos.p, sMapUnit.nRoamingRadius );

@@ -30,8 +30,10 @@ static void UpdateConfig( CCheckButton *pButton, const string &szVar )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 static void UpdateUIElement( CCheckButton *pButton, const string &szVar )
 {
+	// v1.2 @0x229a50: integer truth test via the new CValue::GetInt (FISTP round-to-nearest) --
+	// any var value rounding to a nonzero int now checks the box (was GetFloat() == 1.0f exactly).
 	if ( IsValid( pButton ) )
-		pButton->SetChecked( NGlobal::GetVar( szVar ).GetFloat() == 1.0f );
+		pButton->SetChecked( NGlobal::GetVar( szVar ).GetInt() != 0 );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CComplexSlider  --  the INNER slider widget (the retail "slider" control inside a CComplexScroll).

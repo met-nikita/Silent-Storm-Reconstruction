@@ -54,6 +54,30 @@ public:
 	virtual void Visit( IRenderVisitor *p );
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// CDMesh -- retail @0x37f8d0 (2004-only, absent from Jan03): a renderable + TARGETABLE noise marker placed at a
+// heard-not-seen unit's last position (CreateSoundStuff). Unlike the Jan03 particle it draws a static DB mesh
+// (model N_SOUND_MARKER_MODEL_ID) AND submits a pickable AI hull (TS_PICK), so the player can click/attack the
+// heard position; pUnit is a weak back-reference to the heard unit for target association (may go null).
+class CDMesh: public CTimedObject
+{
+	OBJECT_NOCOPY_METHODS(CDMesh);
+	ZDATA_(CTimedObject)
+	CPtr<CObjectBase> pUnit;        // @0x37f8d0: weak ref to the heard unit (targetability association)
+	CPtr<NDb::CModel> pModel;       // the static marker mesh (DB model 3899)
+	CVec3 pos;
+	int nFloor;
+	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CTimedObject*)this); f.Add(2,&pUnit); f.Add(3,&pModel); f.Add(4,&pos); f.Add(5,&nFloor); return 0; }
+public:
+	CDMesh(): nFloor(0) {}
+	CDMesh( CObjectBase *_pUnit, const CVec3 &_pos, NDb::CModel *_pModel, int _nFloor )
+		: CTimedObject( 1000 ), pUnit(_pUnit), pModel(_pModel), pos(_pos), nFloor(_nFloor) {}
+
+	virtual void Visit( IRenderVisitor *p );
+	virtual void Visit( IAIVisitor *p );
+	CObjectBase* GetUnit() const { return pUnit; }
+	const CVec3& GetPos() const { return pos; }
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
 /*class CDFlash: public CTimedObject
 {
 	OBJECT_NOCOPY_METHODS(CDFlash);
@@ -131,6 +155,28 @@ void CDGrassEvent::Visit( IRenderVisitor *p )
 	p->AddGrassEvent( vPlace );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// CDMesh
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CDMesh::Visit( IRenderVisitor *p )
+{
+	if ( !IsValid( pModel ) )
+		return;
+	SFBTransform t;
+	MakeMatrix( &t, CVec3( 1, 1, 1 ), pos, 0.0f );   // @0x37f630: marker rotation is identity CQuat(0,(0,0,1))
+	p->AddMesh( pModel, t, 0, nFloor, -1 );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CDMesh::Visit( IAIVisitor *p )
+{
+	// @0x37f700: submit a pickable hull so the heard marker is clickable/targetable (mask TS_PICK). Guarded on
+	// the marker model actually carrying AI geometry.
+	if ( !IsValid( pModel ) || !pModel->pGeometry || !pModel->pGeometry->pAIGeometry )
+		return;
+	SFBTransform t;
+	MakeMatrix( &t, CVec3( 1, 1, 1 ), pos, 0.0f );
+	p->AddHull( pModel->pGeometry->pAIGeometry, t, 0, nFloor, TS_PICK );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 // CDFlash
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 /*CDFlash::CDFlash( const CVec3 &_vPlace, CVec3 &_vColor, float _fRadius, int nTime )
@@ -158,6 +204,28 @@ CTimedObject *Create3DSound( CFuncBase<CVec3> *pPos, NDb::CSound *pSound )
 	return new C3DSound( pPos, pSound );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+CTimedObject *CreateDMesh( CObjectBase *pUnit, const CVec3 &pos, NDb::CModel *pModel, int nFloor )
+{
+	return new CDMesh( pUnit, pos, pModel, nFloor );   // @0x3800f0
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+CObjectBase* GetDMeshUnit( CObjectBase *p )
+{
+	CDMesh *pMesh = dynamic_cast<CDMesh*>( p );
+	if ( pMesh == 0 )
+		return 0;
+	return pMesh->GetUnit();
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+bool GetDMeshPos( CObjectBase *p, CVec3 *pPos )
+{
+	CDMesh *pMesh = dynamic_cast<CDMesh*>( p );
+	if ( pMesh == 0 )
+		return false;
+	*pPos = pMesh->GetPos();
+	return true;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 CTimedObject *Create3DSound( const CVec3 &pos, NDb::CSound *pSound )
 {
 	return new C3DSound( pos, pSound );
@@ -174,4 +242,5 @@ BASIC_REGISTER_CLASS( CTimedObject )
 REGISTER_SAVELOAD_CLASS( 0x01512120, CDParticles )
 REGISTER_SAVELOAD_CLASS( 0x01512121, C3DSound )
 REGISTER_SAVELOAD_CLASS( 0x01512122, CDGrassEvent )
+REGISTER_SAVELOAD_CLASS( 0xB3130170, CDMesh )   // @0x37f8d0 retail saveload id
 //REGISTER_SAVELOAD_CLASS( 0x01512130, CDFlash )

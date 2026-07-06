@@ -179,7 +179,10 @@ void CZoneGlobalSector::Update( const STime &sTime )
 CGlobalMapUI::CGlobalMapUI( const SWindowInfo &sInfo, NGame::IGlobalMap *_pGlobal ):
 	CWindow( sInfo ), pGlobal( _pGlobal )
 {
-	sCursor = SCursorInfo( NDb::GetUITexture( 492 ) );
+	// retail CGlobalMapUI ctor @0x1e4b20: disasm @0x5e4bfb `mov ecx,1` -> NDb::GetUICursor(1) =
+	// UICursors row 1 "xz" (UITexture 295, NormalPen.cur) -- the global-map default cursor.
+	// (492 was the pre-remap arbitrary id = HitLocationLeftArm.cur.)
+	sCursor = SCursorInfo( NDb::GetUITexture( 295 ) );
 
 	CDGPtr<CPtrFuncBase<CGlobalInfo> > pGlobalInfo = pGlobal->GetGlobalInfo();
 	pGlobalInfo.Refresh();

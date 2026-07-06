@@ -426,7 +426,9 @@ void CUnitTracker::HideSelection()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CUnitTracker::Update()
 {
-	if ( pMission->IsInterfaceHidden() || ( !IsSelected() && !IsHilighted() ) || !pMission->IsRealTime() && ( pUnit->GetPlayer() != pMission->GetActivePlayer()->GetPlayer() ) )
+	// retail CUnitTracker::Update @0x32d520 HIDEs the path/selection while a scripted sequence runs (mission
+	// vtbl+0x44 IsSequence) -- so the script-assigned move path of your character is not shown during a sequence.
+	if ( pMission->IsSequence() || pMission->IsInterfaceHidden() || ( !IsSelected() && !IsHilighted() ) || !pMission->IsRealTime() && ( pUnit->GetPlayer() != pMission->GetActivePlayer()->GetPlayer() ) )
 	{
 		HidePath();
 		HideSelection();
@@ -458,7 +460,11 @@ void CUnitTracker::Update()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 NDb::EDiplomacyState CUnitTracker::GetUnitDiplomacy( NWorld::CUnit *pTestUnit ) const
 {
-	return pMission->GetWorld()->GetDiplomacyState( pTestUnit, pUnit->GetPlayer() );
+	// retail @0x32b640: MY unit's stance toward the TEST unit's player -- NOT the test unit's
+	// stance toward me. The variant diplomacy matrix is asymmetric (e.g. civilians view the
+	// player as ENEMY so their fear-AI flees, while the player views them NEUTRAL); the old
+	// reversed query painted such civilians as enemies.
+	return pMission->GetWorld()->GetDiplomacyState( pUnit, pTestUnit->GetPlayer() );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CUnitTracker::GetVisibleEnemiesList( list<CPtr<NWorld::CUnit> > *pEnemies ) const

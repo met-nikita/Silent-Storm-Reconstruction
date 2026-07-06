@@ -51,7 +51,7 @@ void CSimpleExecQueue::Run()
 {
 	while ( !execList.empty() )
 	{
-		CObj<CSimpleExecQueue> pHold( this ); // на тот случай, если юнит умер в момент выполнения действия
+		CObj<CSimpleExecQueue> pHold( this ); // пїЅпїЅ пїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ, пїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅ пїЅ пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ
 		execList.front()->Run();
 		EFinishType f = execList.front()->GetState();
 		if ( f == RUNNING )
@@ -123,11 +123,30 @@ bool CSimpleExecQueue::IsExecuting()
 	return true; 
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-bool CSimpleExecQueue::IsWaitingForPath( NAI::SUnitPosition *p ) 
-{ 
+bool CSimpleExecQueue::IsWaitingForPath( NAI::SUnitPosition *p )
+{
 	if ( !execList.empty() )
 		return execList.front()->IsWaitingForPath( p );
-	return false; 
+	return false;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CSimpleExecQueue::Segment()
+{
+	if ( !execList.empty() )
+		execList.front()->Segment();
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+CPathConflictsRemover* CExecQueue::GetPathConflictsRemover()
+{
+	// @0x3bd240 -- the remover of the first execList entry that has one (movers return theirs, others 0).
+	list<CObj<CCommandExecute> >::iterator it;
+	for ( it = execList.begin(); it != execList.end(); ++it )
+	{
+		CPathConflictsRemover *pcr = (*it)->GetPathConflictsRemover();
+		if ( pcr )
+			return pcr;
+	}
+	return 0;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 NAI::CPath* CSimpleExecQueue::GetCurrentPath() const 
@@ -176,17 +195,19 @@ void CExecQueue::GetSearchFromPosition( NAI::SPathPlace *pRes )
 	*pRes = pUS->GetPosition().pos.p;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CExecQueue::GetDesiredPlace( NAI::SPathPlace *pRes, NAI::EFindPathParams *pParams )
+void CExecQueue::GetDesiredPlace( NAI::SPathPlace *pRes, NAI::EFindPathParams *pParams, ENeedActiveItem *pActive )
 {
-	// get last move point
+	// @0x3bd180 -- seed the current place + defaults, then let each queued mover refine (last wins). pActive
+	// (retail's added active-item out-param) is forwarded verbatim.
 	*pRes = pUS->GetPosition().pos.p;
 	*pParams = NAI::PF_DEFAULT;
+	*pActive = ITEM_NO_MATTER;
 	list<CObj<CCommandExecute> >::iterator i;
 	for ( i = execList.begin(); i != execList.end(); ++i )
 	{
 		CDynamicCast<IExecMove> pMove(*i);
 		if (pMove)
-			pMove->GetDesiredPlace( pRes, pParams );
+			pMove->GetDesiredPlace( pRes, pParams, pActive );
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -224,12 +245,13 @@ void CExecQueue::SetNewPath( NAI::CPath *pPath, NAI::EFindPathParams _eParams, E
 	list<CObj<CCommandExecute> >::iterator i, firstToAdd = oldExecList.end(); 
 	NAI::SPathPlace p;
 	NAI::EFindPathParams params;
+	ENeedActiveItem active = ITEM_NO_MATTER;
 	for ( i = oldExecList.begin(); i != oldExecList.end(); ++i )
 	{
 		CDynamicCast<IExecMove> pMove(*i);
 		if (pMove)
 		{
-			pMove->GetDesiredPlace( &p, &params );
+			pMove->GetDesiredPlace( &p, &params, &active );
 			if ( p == pPath->points.back() && _eParams == params )
 			{
 				firstToAdd = i;
@@ -275,7 +297,7 @@ static bool CanSimplyOpen( NAI::IPathNetwork *pNet, NAI::SPathPlace &from, IWind
 void CExecQueue::AddPath( NAI::CPath *pPath, NAI::EFindPathParams _eParams, ENeedActiveItem eActive, IExecMove *pOldFront,
 	bool bCheckCanRotate )
 {
-	// разбираем путь
+	// пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅ
 	CPtr<NAI::CPath> pSimplePath = new NAI::CPath;
 	pSimplePath->pNet = pPath->pNet;
 	pSimplePath->bStrafePath = pPath->bStrafePath;
@@ -306,7 +328,7 @@ void CExecQueue::AddPath( NAI::CPath *pPath, NAI::EFindPathParams _eParams, ENee
 				continue;
 			}
 
-			//  Добавляем дополнительную точку поворота, чтобы персонаж открывал дверь с правильной стороны
+			//  пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ, пїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅ пїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ
 			if ( nBestDir != p.GetDirection() )
 			{
 				NAI::SPathPlace newPoint( p );

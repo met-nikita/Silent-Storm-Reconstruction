@@ -18,8 +18,7 @@ private:
 	//// graphics
 	CObj<NGScene::IGameView> pScene;
 	CObj<NSound::ISoundScene> pSoundScene;
-	CObj<NRender::IRenderGame> pRender;
-	CObj<NRender::IRenderSound> pRenderSound;
+	CObj<NRender::IRenderGame> pRender;	// owns the sound mixers (retail CRenderGame pSound/pUnitSounds)
 	//// world
 	CObj<NWorld::IWorld> pWorld;
 	CPtr<NWorld::IPlayer> pPlayer;
@@ -33,7 +32,7 @@ private:
 	int nLightMode;
 	CObj<CObjectBase> pLightSource;
 public:
-	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&pScene); f.Add(3,&pSoundScene); f.Add(4,&pRender); f.Add(5,&pRenderSound); f.Add(6,&pWorld); f.Add(7,&pPlayer); f.Add(8,&pCommander); f.Add(9,&pCursor); f.Add(10,&pInterface); f.Add(11,&pCamera); f.Add(12,&nLightMode); f.Add(13,&pLightSource); return 0; }
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&pScene); f.Add(3,&pSoundScene); f.Add(4,&pRender); f.Add(6,&pWorld); f.Add(7,&pPlayer); f.Add(8,&pCommander); f.Add(9,&pCursor); f.Add(10,&pInterface); f.Add(11,&pCamera); f.Add(12,&nLightMode); f.Add(13,&pLightSource); return 0; }
 
 public:
 	CRenderBaseInterface();

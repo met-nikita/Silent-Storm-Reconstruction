@@ -218,6 +218,11 @@ void CAIInventory::AddThrowingWeapon( CAIThrowingWeapon *pWeapon )
 	AddItemToInventory( pWeapon, &throwingWeapons );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+void CAIInventory::RemoveThrowingWeapon( CAIThrowingWeapon *pWeapon )
+{
+	RemoveItemFromInventory( pWeapon, &throwingWeapons );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 void CAIInventory::AddFirstAid( CAIFirstAid *pFirstAid )
 {
 	AddItemToInventory( pFirstAid, &firstAids );
@@ -390,25 +395,34 @@ CAIFirstAid* CAIInventory::GetBestFirstAid() const
 	return firstAids.front();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// true if the firearm's current clip is spent and a different, non-empty spare clip is available.
+// @0xb5b80 (IsCurrentClipFull) + @0xb6250 (HasAmmoForReload): the firearm is reload-eligible when
+// its CURRENT clip is NOT at the RPG clip's capacity AND a live spare clip sits at the FRONT of the
+// spares vector. A null/dead current clip counts as not-full. The release does NOT consult the spare's
+// own ammo, nor require spare != current -- those "non-empty" / "different" gates were dev-tree
+// additions and are dropped here to match the decode.
 static bool NeedsReloadAndCan( CAIFireArmsWeapon *pWeapon )
 {
 	if ( !IsValid( pWeapon ) )
 		return false;
-	CAIFireArmsWeaponClip *pCur  = pWeapon->GetCurrentClip();
-	CAIFireArmsWeaponClip *pNext = pWeapon->GetNextClip();
-	const bool bNeeds = !IsValid( pCur ) || pCur->IsEmpty();
-	const bool bCan   = IsValid( pNext ) && pNext != pCur && !pNext->IsEmpty();
-	return bNeeds && bCan;
+	// IsCurrentClipFull @0xb5b80: loaded ammo == pClipItem->GetDBClip()->nQuantity (RPG capacity).
+	CAIFireArmsWeaponClip *pCur = pWeapon->GetCurrentClip();
+	if ( IsValid( pCur ) )
+	{
+		NRPG::CClipItem *pClipItem = pCur->GetItem();
+		if ( IsValid( pClipItem ) && IsValid( pClipItem->GetDBClip() ) &&
+			pCur->GetAmmoCount() == pClipItem->GetDBClip()->nQuantity )
+			return false;                      // current clip full -> not reload-eligible
+	}
+	// HasAmmoForReload @0xb6250: a live spare clip at the FRONT of the spares vector (ammo not checked).
+	return IsValid( pWeapon->GetNextClip() );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// Reconstructed: the release CAIInventory::GetBestWeaponForReload (used by CAIReloadAction @0x0041c0d0).
-// Prefer reloading the equipped firearm; otherwise the first firearm with a spent clip + a usable spare.
+// CAIInventory::GetBestWeaponForReload @0x56450 -- the release scans GetItems<CAIFireArmsWeaponBase>
+// in inventory order and returns the FIRST reload-eligible firearm. There is NO current-item
+// preference (used by CAIReloadAction @0x0041c0d0).
 CAIFireArmsWeapon* CAIInventory::GetBestWeaponForReload() const
 {
-	CPtr<CAIFireArmsWeapon> pCurrent = GetCurrentFireArms();
-	if ( NeedsReloadAndCan( pCurrent ) )
-		return pCurrent;
+	// @0x56450 -- pure inventory order, no current-item preference (removed the dev-tree prefer-equipped).
 	for ( vector< CObj<CAIFireArmsWeapon> >::const_iterator i = fireArms.begin(); i != fireArms.end(); ++i )
 		if ( NeedsReloadAndCan( *i ) )
 			return *i;

@@ -174,6 +174,16 @@ bool Script::CheckArgs( const char *szArgList, string sFuncName, vector<SLuaPara
 					isOK = o.IsTable();
 					break;
 				case 'u':
+					// nil hardening: a NIL lua argument (e.g. the tutorial's ItemUnload(FindItem(25))
+					// when the item doesn't exist) must NOT fail the check and lua_error-kill the whole
+					// zone-script thread -- treat it like the stale-pointer path below: warn + null
+					// param (isOK stays true; every 'u' consumer already null-checks via CDynamicCast).
+					if ( o.IsNil() )
+					{
+						param.p = 0;
+						luaWarningNVA( this, sFuncName, nCurArg );
+						break;
+					}
 					isOK = o.IsUserData();
 					if ( isOK )
 					{

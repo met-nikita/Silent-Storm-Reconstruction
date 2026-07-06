@@ -91,8 +91,14 @@ void CObjectivesUI::GenerateList()
 	if ( !IsValid( pGame ) || !IsValid( pGame->pScenarioTracker ) )
 		return;
 
+	// retail CScenarioTracker::GetGoalsFromZone @0x303b10: the objectives popup renders the goals of
+	// game->pCurrentZone -- the zone the player is IN. GetAvailableZones (the previous source here) lists
+	// the zones you can travel to NEXT and EXCLUDES the current (passed) one, so in-mission the list came
+	// up empty. (Retail additionally prepends the zone's clue-derived capture/destroy goals via
+	// GetCluesFromZone -- not yet ported; script goals cover the campaign mission objectives.)
 	list< CPtr<NScenario::CScenarioZone> > zonesList;
-	pGame->pScenarioTracker->GetAvailableZones( &zonesList );
+	if ( IsValid( pGame->pCurrentZone ) )
+		zonesList.push_back( pGame->pCurrentZone );
 
 	int nCount = 0;
 	for ( list< CPtr<NScenario::CScenarioZone> >::const_iterator iZone = zonesList.begin(); iZone != zonesList.end(); iZone++ )

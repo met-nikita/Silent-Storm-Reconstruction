@@ -524,19 +524,26 @@ void CUnitHead::SetUnit( NWorld::CUnit *pUnit )
 	pHead = NRender::CreateShowUnitHead( p3DView, pUnit, pRenderGame->GetHeadController(), pTransform );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CUnitHead::SetSequence( NDb::CSequence *pSequence )
+void CUnitHead::SetSequence( NDb::CSequence *pSequence, NDb::CSequence *pExpression )
 {
 	ASSERT( IsValid( pHead ) );
 	if ( !IsValid( pHead ) )
 		return;
 
-	pHead->SetSequence( pSequence );
+	pHead->SetSequence( pSequence, pExpression );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CUnitHead::Draw( const STime &sTime, NGScene::I2DGameView *pView )
 {
+	// dev-only predecessor of CUnitView (retail has no CUnitHead). Draw order aligned to the
+	// retail CUnitView::Draw shape @0x1bf070: without a head the plain 2D window draws; with a
+	// head the 2D window/children draw LAST -- clear-rect(1.0) -> Flush -> 3D -> clear-rect(0.0)
+	// -> CWindow::Draw -- so template children are not wiped by the 3D depth punch.
 	if ( !IsValid( pHead ) )
+	{
+		CWindow::Draw( sTime, pView );
 		return;
+	}
 
 	SPoint sSize( (float)GetSize().x * p3DView->GetScreenRect().x / 1024.0f, (float)GetSize().y * p3DView->GetScreenRect().y / 768.0f );
 
@@ -579,6 +586,8 @@ void CUnitHead::Draw( const STime &sTime, NGScene::I2DGameView *pView )
 	p3DView->Draw( drawInfo );
 
 	pView->CreateDynamicClearRects( sLayout, s2DPosition, s2DWindow, 0.0f );
+
+	CWindow::Draw( sTime, pView );	// 2D window/children AFTER the depth punch (retail CUnitView order @0x1bf070)
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CUnitView
@@ -651,13 +660,15 @@ void CUnitView::SetUnit( NWorld::CUnit *pUnit, ECameraType eType )
 	vAnchor = sCameraParams.vAnchor;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CUnitView::SetUnit( NWorld::CUnit *pUnit, NDb::CDBCamera *pCamera )
+// release @0x1c03d0: SetUnit(unit, camera, bItems, bShowCap, bPlayIdle). The three bools are threaded into
+// NRender::CreateShowUnit in the retail push order (@0x1c043c..3e): (bItems, bPlayIdle, bShowCap).
+void CUnitView::SetUnit( NWorld::CUnit *pUnit, NDb::CDBCamera *pCamera, bool bItems, bool bShowCap, bool bPlayIdle )
 {
 	pInventoryUnit = 0;
 	if ( !IsValid( pUnit ) || !IsValid( pCamera ) )
 		return;
 
-	pInventoryUnit = NRender::CreateShowUnit( p3DView, pUnit, sTimer.GetTime(), pRenderGame );
+	pInventoryUnit = NRender::CreateShowUnit( p3DView, pUnit, sTimer.GetTime(), pRenderGame, bItems, bPlayIdle, bShowCap );
 
 	fFOV = 60; //sCameraParams.fFOV;
 	fYaw = pCamera->fYaw;
@@ -693,13 +704,14 @@ void CUnitView::SetLight( NDb::CTAmbientLight *pLight )
 	p3DView->SetAmbient( pLight->GetLight( &rnd ), NGScene::IGameView::LT_INVENTORY );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CUnitView::SetSequence( NDb::CSequence *pSequence )
+void CUnitView::SetSequence( NDb::CSequence *pSequence, NDb::CSequence *pExpression )
 {
+	// release @0x1bf030: forward BOTH sequences (lipsync + per-phrase facial expression)
 	ASSERT( IsValid( pInventoryUnit ) );
 	if ( !IsValid( pInventoryUnit ) )
 		return;
 
-	pInventoryUnit->SetSequence( pSequence );
+	pInventoryUnit->SetSequence( pSequence, pExpression );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CUnitView::PlayAnimation( NDb::CAnimation *pAnim, bool bLoop )
@@ -710,10 +722,14 @@ void CUnitView::PlayAnimation( NDb::CAnimation *pAnim, bool bLoop )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CUnitView::Draw( const STime &sTime, NGScene::I2DGameView *pView )
 {
-	CWindow::Draw( sTime, pView );
-
+	// retail @0x1bf070: with a live unit the 2D window draws LAST -- clear-rect(1.0) ->
+	// Flush -> 3D head -> clear-rect(0.0) -> CWindow::Draw -- so the face background/frame
+	// children land after the 3D depth punch-through instead of being wiped by it.
 	if ( !IsValid( pInventoryUnit ) )
+	{
+		CWindow::Draw( sTime, pView );
 		return;
+	}
 
 	SPoint sSize( (float)GetSize().x * p3DView->GetScreenRect().x / 1024.0f, (float)GetSize().y * p3DView->GetScreenRect().y / 768.0f );
 
@@ -770,6 +786,8 @@ void CUnitView::Draw( const STime &sTime, NGScene::I2DGameView *pView )
 	p3DView->Draw( drawInfo );
 
 	pView->CreateDynamicClearRects( sLayout, s2DPosition, s2DWindow, 0.0f );
+
+	CWindow::Draw( sTime, pView );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CInteractiveUnitView::CInteractiveUnitView( const SWindowInfo &sInfo, NRender::IRenderGame *_pRender ):
@@ -866,8 +884,14 @@ bool CInteractiveUnitView::ProcessMessage( const SEvent &sEvent )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CInteractiveUnitView::Draw( const STime &sTime, NGScene::I2DGameView *pView )
 {
+	// release @0x1bf390: CInteractiveUnitView::Draw just stores the interactive angle and
+	// delegates to CUnitView::Draw @0x1bf070 -- so the no-unit fallback is the PLAIN window
+	// draw (template children still render), not an early-out that hides them.
 	if ( !IsValid( pInventoryUnit ) )
+	{
+		CWindow::Draw( sTime, pView );
 		return;
+	}
 
 	SRect sWindow;
 	SPoint sPosition;

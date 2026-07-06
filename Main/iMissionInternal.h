@@ -76,6 +76,7 @@ private:
 	NInput::CBind bindCancel, bindCancelAction, bindContinue, bindPause, bindMainMenu, bindCluesMenu, bindObjectivesMenu, bindGameMenu, bindEndMission;
 	NInput::CBind bindHero1, bindHero2, bindHero3, bindHero4, bindHero5, bindHero6, bindSelPrev, bindSelNext;
 	NInput::CBind bindMove, bindAttack, bindSetMine, bindSetTrap, bindFirstAid, bindDropCorpse, bindExitPK, bindRotate;
+	NInput::CBind bindUseTool;	// retail "usetool" icon-bar command (use the held tool on a target)
 	NInput::CBind bindNormalPose, bindCrawlPose, bindCrouchPose, bindRunPose, bindStrafe, bindHide;
 	NInput::CBind bindSnipeAttack, bindCollect1AP, bindCollect10AP, bindCollectMaxAP, bindCollectAllAP;
 	NInput::CBind bindGrenadeModeThrow, bindGrenadeModeSetTrap;
@@ -95,14 +96,21 @@ private:
 
 	ZDATA
 	int nTemplateID, nVariantID;
+	// retail CMission::Initialize @0x200690: the template variant's cut-floor range clamps the
+	// floor-switch keys (camera SetCutFloorRange(min, max-1); retail default [-3,4] when the
+	// variant leaves MinCutFloor/MaxCutFloor unset, i.e. min >= max). Dev keeps floors on the
+	// scene, so the clamp is applied at the bindAddFloor/bindSubFloor handler instead.
+	int nMinCutFloor = -3;
+	int nMaxCutFloor = 4;
 	CPtr<NRPG::CGlobalGame> pGlobalGame;
 	////
 	CPtr<NScenario::CScenarioZone> pZone;
 	//// graphics
 	CObj<NGScene::IGameView> pScene;
 	CObj<NSound::ISoundScene> pSoundScene;
+	// (the render-sound mixers moved INTO the render game -- retail CRenderGame owns
+	// pSound/pUnitSounds so UpdateVisible can fog-gate the unit-sound source)
 	CObj<NRender::IRenderGame> pRender;
-	CObj<NRender::IRenderSound> pRenderSound;
 	//// world
 	bool bPause;
 	CObj<NWorld::IWorld> pWorld;
@@ -189,23 +197,31 @@ private:
 	bool bLoseSignalSended = false;
 	// BeginSequence/EndSequence nesting depth. Scripts nest sequences (e.g. Common.l DelayGameStart() opens
 	// one via BeginSequence(true) and StartGame() closes one via EndSequence(), around the script's own
-	// BeginSequence/EndSequence). Only the OUTERMOST begin creates the cinematic movie UI and only the
-	// outermost end tears it down -- otherwise the first EndSequence ends the whole cutscene early.
+	// BeginSequence/EndSequence). Retail (@0x1fd8c0 "nSequence") stacks ONE movieUI PER begin and
+	// EndSequence hides the TOP one; the depth gates only the camera-limits save (1) / restore (1->0).
 	int nSequenceDepth = 0;
+	// retail CMission::ExecWorldCommand @0x1fd8c0: the per-BeginSequence camera-pose stack. Every begin
+	// pushes the current camera pose; EndSequence pops -- bRestoreCamera ? SetPlacement(popped) : commit
+	// the CURRENT (cutscene-end) pose as the active player's gameplay camera (SetCamera) so the camera
+	// doesn't jump back after a scripted move. Serialized (dev-appended tag 69) so a save mid-sequence
+	// keeps the stack.
+	vector<ICamera::SCameraPos> sequenceCameraPoses;
 	// SetFirstMissionMode(b) (retail CMission @0x1fd8c0 / SetPanelState @0x1fb7e0): while set, SetPanelState
 	// masks off the 0x14 panel bits -- the "first mission" HUD keeps those panels hidden. Save/loaded
 	// (retail iAutoPlay.c:3716).
 	bool bSpecialFirstMissionMode = false;
 	// EnableFeature("reenter") (retail CMission::ExecWorldCommand @0x1fd8c0): allow re-entering this zone's
-	// templates. Save/loaded (retail iAutoPlay.c:3722). DOCUMENTED GAP: the dev re-entry LOAD path (which save
-	// file CICBeginMission/LoadWorld reads on re-entry) is not yet wired, so the flag is recorded + save-correct
-	// + queryable but its per-template re-entry save consumer is the still-absent re-entry subsystem.
+	// templates. Save/loaded (retail iAutoPlay.c:3722). Consumed by CMission::Terminate (@0x1fbc30): the zone
+	// world is saved per zone+template ("%d_%d.sav") when IsBase() || IsLinkedZone() || this flag; Initialize
+	// (@0x200690) loads that file on re-entry and restores via CWorld::CreateRestored (@0x36e100: per-building
+	// Update() refresh + live-CGlobalGame rebind -- the save's weak global-game ref loads dangling).
 	bool bEnableFeatureReenter = false;
 public:
 	bool CanLeaveZone() const { return !bLeaveBlockedByScript; }	// honors SetLeaveZoneMode (retail @0x1fcbd0 gate)
 	int GetLeaveBlockReason() const { return nLeaveBlockReason; }
 	bool IsSpecialFirstMissionMode() const { return bSpecialFirstMissionMode; }	// retail @0x19def0
-	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&nTemplateID); f.Add(3,&nVariantID); f.Add(4,&pGlobalGame); f.Add(5,&pZone); f.Add(6,&pScene); f.Add(7,&pSoundScene); f.Add(8,&pRender); f.Add(9,&pRenderSound); f.Add(10,&bPause); f.Add(11,&pWorld); f.Add(12,&pActivePlayer); f.Add(13,&playersSet); f.Add(14,&bHideInterface); f.Add(15,&bSpecialHideInterface); f.Add(16,&pCursor); f.Add(17,&pInterface); f.Add(18,&bUpdated); f.Add(19,&bForceUpdateNextFrame); f.Add(20,&pState); f.Add(21,&pStateTarget); f.Add(22,&updatedStatesSet); f.Add(23,&bRealTime); f.Add(24,&bHasCommands); f.Add(25,&bActionExecuted); f.Add(26,&pTrackTarget); f.Add(27,&pPlayerInHand); f.Add(28,&pTrackPlayer); f.Add(29,&selectedUnits); f.Add(30,&actionsInfoSet); f.Add(31,&fFOV); f.Add(32,&eCameraType); f.Add(33,&cameraLimits); f.Add(34,&pCamera); f.Add(35,&pCameraOwner); f.Add(36,&bFreezeCamera); f.Add(37,&sFreezePose); f.Add(38,&vCameraCP); f.Add(39,&sCameraPos); f.Add(40,&sTransform); f.Add(41,&bTraceOk); f.Add(42,&rTraceRay); f.Add(43,&sTraceTile); f.Add(44,&pTraceObject); f.Add(45,&pCmdExec); f.Add(46,&nPanelsState); f.Add(47,&bWaitForPartFinished); f.Add(48,&eActionIconsSet); f.Add(49,&pMissionUI); f.Add(50,&desktopWindowsList); f.Add(51,&nLightMode); f.Add(52,&bCheatVisibility); f.Add(53,&pLightSource); f.Add(54,&pVisibleTracker); f.Add(55,&buildingSchemas); f.Add(56,&pIntersectHolder); f.Add(57,&pIntersectLineHolder); f.Add(58,&vPrevCameraPosition); f.Add(59,&nFramesSameCameraPosition); f.Add(60,&nDeltaTime); f.Add(61,&pCombatMelody); f.Add(62,&pTestWeatherEffect); f.Add(63,&bTutorialMode); f.Add(64,&bLeaveBlockedByScript); f.Add(65,&nLeaveBlockReason); f.Add(66,&nSequenceDepth); f.Add(67,&bSpecialFirstMissionMode); f.Add(68,&bEnableFeatureReenter); return 0; }
+	void OnSnapshotRestored();	// restart.sav in-place resume: rebuild building shells + camera height source
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&nTemplateID); f.Add(3,&nVariantID); f.Add(4,&pGlobalGame); f.Add(5,&pZone); f.Add(6,&pScene); f.Add(7,&pSoundScene); f.Add(8,&pRender); f.Add(10,&bPause); f.Add(11,&pWorld); f.Add(12,&pActivePlayer); f.Add(13,&playersSet); f.Add(14,&bHideInterface); f.Add(15,&bSpecialHideInterface); f.Add(16,&pCursor); f.Add(17,&pInterface); f.Add(18,&bUpdated); f.Add(19,&bForceUpdateNextFrame); f.Add(20,&pState); f.Add(21,&pStateTarget); f.Add(22,&updatedStatesSet); f.Add(23,&bRealTime); f.Add(24,&bHasCommands); f.Add(25,&bActionExecuted); f.Add(26,&pTrackTarget); f.Add(27,&pPlayerInHand); f.Add(28,&pTrackPlayer); f.Add(29,&selectedUnits); f.Add(30,&actionsInfoSet); f.Add(31,&fFOV); f.Add(32,&eCameraType); f.Add(33,&cameraLimits); f.Add(34,&pCamera); f.Add(35,&pCameraOwner); f.Add(36,&bFreezeCamera); f.Add(37,&sFreezePose); f.Add(38,&vCameraCP); f.Add(39,&sCameraPos); f.Add(40,&sTransform); f.Add(41,&bTraceOk); f.Add(42,&rTraceRay); f.Add(43,&sTraceTile); f.Add(44,&pTraceObject); f.Add(45,&pCmdExec); f.Add(46,&nPanelsState); f.Add(47,&bWaitForPartFinished); f.Add(48,&eActionIconsSet); f.Add(49,&pMissionUI); f.Add(50,&desktopWindowsList); f.Add(51,&nLightMode); f.Add(52,&bCheatVisibility); f.Add(53,&pLightSource); f.Add(54,&pVisibleTracker); f.Add(55,&buildingSchemas); f.Add(56,&pIntersectHolder); f.Add(57,&pIntersectLineHolder); f.Add(58,&vPrevCameraPosition); f.Add(59,&nFramesSameCameraPosition); f.Add(60,&nDeltaTime); f.Add(61,&pCombatMelody); f.Add(62,&pTestWeatherEffect); f.Add(63,&bTutorialMode); f.Add(64,&bLeaveBlockedByScript); f.Add(65,&nLeaveBlockReason); f.Add(66,&nSequenceDepth); f.Add(67,&bSpecialFirstMissionMode); f.Add(68,&bEnableFeatureReenter); f.Add(69,&sequenceCameraPoses); return 0; }
 
 private:
 	void InternalStep();
@@ -301,6 +317,7 @@ public:
 	NUI::ICursor* GetCursor() const;
 	NUI::CInterface* GetInterface() const;
 	bool IsInterfaceHidden() const;
+	bool IsSequence() const;
 	////
 	void SetWaitForPartFinished( bool bState );
 	bool IsWaitForPartFinished() const;

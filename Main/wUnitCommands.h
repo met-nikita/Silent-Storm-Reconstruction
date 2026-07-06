@@ -44,7 +44,17 @@ enum EUnitCommandResult
 	UCR_CRITICALS_BAN,
 	UCR_TARGET_OUT_OF_RANGE,
 	//// Inventory
-	UCR_INVENTORY_NO_PLACE
+	UCR_INVENTORY_NO_PLACE,
+	//// Skill / hero / passage  (retail PDB result codes; appended at END so existing ordinals are
+	//// unchanged -- eResult IS raw-serialized via NGame::SActionInfo (mission save, DoDataVector) but an
+	//// append is byte-safe because eResult is a per-frame-recomputed UI cache; NEVER reorder/insert existing)
+	UCR_NEED_HIGHER_SKILL,            // clearing tool unusable / skill too low (disarm trap+mine CanDoIt)
+	UCR_NOT_HERO,                     // can-talk-but-not-hero -- SILENT no-op (CExecTalk::CanDoIt)
+	UCR_NOT_ALL_UNITS_NEAR_PASSAGE,   // unit not in the passage zone (CExecUsePassage::CanDoIt)
+	UCR_PK_BAN,                       // crouching, fight-capable unit may not look-and-move -- CanDo @0x3c1570
+	                                  // (retail ordinal 0x13; here appended -> 16)
+	UCR_CANT_HEAL                     // heal target's CanHeal() failed -- CanDoFirstAid @0x3a2d40
+	                                  // (retail ordinal 16; here appended -> 17)
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CCmd: public CObjectBase

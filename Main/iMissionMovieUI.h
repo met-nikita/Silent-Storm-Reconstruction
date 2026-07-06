@@ -45,12 +45,22 @@ private:
 protected:
 	CAckEvent* PlayAckEvent( const STime &sTime, NWorld::CAckEvent *pEvent );
 
+	// retail BorderShow @0x20e210 / BorderHide @0x20e2b0: the fade-IN / fade-OUT completion steps.
+	// Both post CCmdInterfaceEvent(nNotifyID) so lua WaitForUI(BeginSequence/EndSequence id) unblocks.
+	void BorderShow();
+	void BorderHide();
+
 public:
 	CMissionMovieUI();
-	CMissionMovieUI( const SWindowInfo &sInfo, NGame::IMission *pMission, CDesktopWindow *pTransition );
+	// retail ctor @0x20e5b0 takes the skip-fade-out flag (from CUICmdBeginSequence's bool)
+	CMissionMovieUI( const SWindowInfo &sInfo, NGame::IMission *pMission, CDesktopWindow *pTransition, bool bSkipFadeOut = false );
 
-	void ShowDesktop();
-	void HideDesktop();
+	// retail ShowDesktop @0x20e330 / HideDesktop @0x20e390 carry the queued command's wait id;
+	// with bSkipFadeOut set they jump straight to BorderShow/BorderHide (immediate bars).
+	void ShowDesktop( int nNotifyID );
+	void HideDesktop( int nNotifyID );
+	// retail SetSkipFade @0x20e130 (EndSequence's second bool re-arms the flag before HideDesktop)
+	void SetSkipFade( bool bSkip ) { bSkipFadeOut = bSkip; }
 	void UpdateDesktop( const STime &sTime );
 	NGame::CUICmdExec* CreateExecutor( NWorld::CUICmd *pCmd );
 

@@ -16,6 +16,7 @@ namespace NWorld
 {
 class CCommandExecute;
 class CUnitServer;
+class CPathConflictsRemover;
 enum ENeedActiveItem;
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class IExecMove
@@ -32,7 +33,7 @@ public:
 
 	virtual void GetSearchFromPosition( NAI::SPathPlace *pRes ) = 0;
 	virtual void SetNewPath( NAI::CPath *pPath, NAI::EFindPathParams _eParams, ENeedActiveItem eActive = ITEM_NO_MATTER ) = 0;
-	virtual void GetDesiredPlace( NAI::SPathPlace *pRes, NAI::EFindPathParams *pParams ) = 0;
+	virtual void GetDesiredPlace( NAI::SPathPlace *pRes, NAI::EFindPathParams *pParams, ENeedActiveItem *pActive ) = 0;  // @0x3b76f0 retail added the active-item out-param
 	virtual void GetPathPoints( list<SPathPoint> *pRes ) = 0;
 	virtual void FullCancel() = 0;
 };

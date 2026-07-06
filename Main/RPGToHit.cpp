@@ -312,7 +312,12 @@ float CToHitCalcer::GetAuraToHitAdd()
 int CToHitCalcer::GetToHit()
 {
 	Prepare();
-	if ( fHitCover < 0.0f )
+	// retail @0x2b85e0 (disasm 0x6b85eb: fld fHitCover; fcomp [0x8d54dc]=0.0f; test ah,0x41; jp):
+	// the gate is fHitCover <= 0 -> 0%, NOT strict <. GetHitCover (@0x2b4390) returns exactly 0.0
+	// when hitRays is EMPTY (every candidate ray obstructed at the muzzle -- target fully walled
+	// off; the case RealPeekRay @0x2b3f00 logs "Kick the programmers"); strict < let that case
+	// through and the UI showed a live % for an unreachable target.
+	if ( fHitCover <= 0.0f )
 		return 0;
 	fToHit = GetAllMult() + ( GetAuraToHitAdd() + GetCarefulShootPerk() ) - GetWeatherPenalty();
 	fToHit = Clamp( fToHit, 2.0f, 100.0f );
@@ -362,7 +367,9 @@ CUnitToHitCalcer::CUnitToHitCalcer(	CUnitServer *_pUnitServer, NAI::EPose _eCurP
 int CUnitToHitCalcer::GetToHit()
 {
 	Prepare();
-	if ( fHitCover < 0.0f )
+	// retail @0x2b86c0: same <=0 cover gate as CToHitCalcer::GetToHit (disasm 0x6b86cb,
+	// fcomp against the 0.0f global; strictly-greater continues). 0.0 = empty hitRays.
+	if ( fHitCover <= 0.0f )
 		return 0;
 	float fDef = 0;
 	if ( !bBackStab )
@@ -676,7 +683,9 @@ CThrowKnifeUnitToHitCalcer::CThrowKnifeUnitToHitCalcer( CUnitServer *_pUnitServe
 int CThrowKnifeUnitToHitCalcer::GetToHit()
 {
 	Prepare();
-	if ( fHitCover < 0.0f )
+	// retail @0x2b8a50: same <=0 cover gate (disasm 0x6b8a5b). CGrenadeToHitCalcer
+	// @0x2b8990 deliberately has NO gate (grenades arc over cover) -- dev matches.
+	if ( fHitCover <= 0.0f )
 		return 0;
 	fToHit = GetAllMult() + ( GetAuraToHitAdd() + GetCarefulShootPerk() ) - GetWeatherPenalty();
 	// release: called shots enabled -> per-HL headshot multiplier on the whole result; else the

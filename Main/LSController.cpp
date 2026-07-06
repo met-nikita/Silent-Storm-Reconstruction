@@ -8,6 +8,23 @@
 namespace NLSHead
 {
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// CIdleHead
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// release @0x25dd20: adopt the animator and, if it is idling-off, switch it to ambient idling.
+CIdleHead::CIdleHead( CHeadAnimator *_pAnimator ): pAnimator( _pAnimator )
+{
+	if ( IsValid( pAnimator ) && pAnimator->GetIdleType() == IDLE_NONE )
+		pAnimator->SetIdleType( IDLE_NORMAL );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// release @0x25dca0: the last view showing the head dropped its token -> switch ambient idling back
+// off (pruning the armed idle sequences). A KillHead'ed (IDLE_DEATH) animator is left untouched.
+CIdleHead::~CIdleHead()
+{
+	if ( IsValid( pAnimator ) && pAnimator->GetIdleType() == IDLE_NORMAL )
+		pAnimator->SetIdleType( IDLE_NONE );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 // CHeadController
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CCTime* CHeadsController::GetTime()
@@ -47,13 +64,46 @@ CHeadAnimator* CHeadsController::GetAnimator( NWorld::CUnit *pUnit )
 	return pAnimator;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CHeadsController::PlaySequence( NWorld::CUnit *pUnit, NDb::CSequence *pSeq, bool bCycle )
+void CHeadsController::PlaySequence( NWorld::CUnit *pUnit, NDb::CSequence *pSeq, NDb::CSequence *pExpr, bool bCycle )
 {
+	// release @0x25df90: both sequences go to the animator in one call (the expression = the MASK entry)
 	CHeadAnimator *pAnimator = GetAnimator( pUnit );
 	if ( pAnimator )
-		pAnimator->PlaySequence( pSeq, timer.GetTime()->GetValue(), bCycle );
+		pAnimator->PlaySequence( pSeq, pExpr, timer.GetTime()->GetValue(), bCycle );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// release @0x25dda0: find the unit's animator record (raw-pointer compare, exactly the release scan --
+// no record is created here: the render path's AddHead/GetAnimator made it before the visitor reaches
+// AddHeadIdleAnimator); if its idle token is missing or dying, create a fresh one (whose ctor arms
+// IDLE_NORMAL) into the weak pIdler slot, and return it for the caller to own via its sync destination.
+CObjectBase* CHeadsController::PlayIdle( NWorld::CUnit *pUnit )
+{
+	for ( vector<SUnitHeadAnimator>::iterator i = animators.begin(); i != animators.end(); ++i )
+	{
+		if ( i->pUnit != pUnit )
+			continue;
+		if ( !IsValid( i->pIdler ) )
+			i->pIdler = new CIdleHead( i->pAnimator );
+		return i->pIdler;
+	}
+	return 0;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// release @0x25dc60: force the unit's head animator into the frozen death-mask idle (skipped when it
+// is already there). No-op when the unit has no animator record.
+void CHeadsController::KillHead( NWorld::CUnit *pUnit )
+{
+	for ( vector<SUnitHeadAnimator>::iterator i = animators.begin(); i != animators.end(); ++i )
+	{
+		if ( i->pUnit != pUnit )
+			continue;
+		if ( IsValid( i->pAnimator ) && i->pAnimator->GetIdleType() != IDLE_DEATH )
+			i->pAnimator->SetIdleType( IDLE_DEATH );
+		return;
+	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 }
 using namespace NLSHead;
 REGISTER_SAVELOAD_CLASS( 0x11042140, CHeadsController )
+REGISTER_SAVELOAD_CLASS( 0x02353120, CIdleHead )

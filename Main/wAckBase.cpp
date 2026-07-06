@@ -6,6 +6,7 @@
 #include "wUnitServer.h"
 #include "wAck.h"
 #include "RPGUnitMission.h"
+#include "RPGUnit.h"       // NRPG::CUnit::GetAckPersID (hero voice-donor pers)
 #include "wMain.h"
 #include "rpgCheatConstants.h"
 
@@ -104,6 +105,17 @@ void CGlobalAck::OnUnitDied( CUnitServer *pUnit )
 		(*i)->OnUnitDied( pUnit );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+bool CGlobalAck::HasAcksFor( CUnitServer *pUnit )
+{
+	for ( vector< CObj<IAck> >::iterator i = vAck.begin(); i != vAck.end(); ++i )
+	{
+		CDynamicCast<CAckBase> pAckBase( *i );
+		if ( pAckBase && pAckBase->GetUnit() == pUnit )
+			return true;
+	}
+	return false;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 void CGlobalAck::RemoveUnitAcks( CUnitServer *pUnit )
 {
 	for ( vector< CObj<IAck> >::iterator i = vAck.begin(); i != vAck.end(); )
@@ -130,14 +142,22 @@ void CGlobalAck::AddAck( CUnitServer *pUnit )
 {
 	CDBTable<NDb::CDBAck> *pDBTable = NDatabase::GetTable<NDb::CDBAck>();
 	CDBIterator<NDb::CDBAck> i(*pDBTable);
+	// retail GetAckHolder @0x2ba8f0: hero -> side defaultPersesSet donor matched by voice;
+	// non-hero -> pPers->pAcksHolder ("AckUnit"); null holder -> own pers (CUnit::GetAckPersID)
+	const int nAckPersID = pUnit->GetUnitRPG()->GetRPGUnit()->GetAckPersID();
+	int nRows = 0, nListeners = 0;
 	while ( pDBTable && i.MoveNext() )
 	{
 		NDb::CDBAck *pDBAck = i.Get();
-		if ( pDBAck && pDBAck->nRPGPersID == pUnit->GetUnitRPG()->GetRPGPersID() )
+		if ( pDBAck && pDBAck->nRPGPersID == nAckPersID )
 		{
+			++nRows;
 			CAckBase *pAck = CreateAck( pUnit, pDBAck );
 			if ( pAck )
+			{
 				vAck.push_back( pAck );
+				++nListeners;
+			}
 		}
 	}
 }
@@ -186,36 +206,76 @@ void CGlobalAck::RemoveInvisibleSequences( IPlayer *pPlayer )
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CGlobalAck::FetchHighestAcks()
+// retail NWorld::GetAckPriority @0x338e40 (oracle s2_ackutil.h:43): the sequence's priority when
+// it is > 0, else the CONDITION record's priority, else 0. CRITICAL with the Steam game.db: EVERY
+// AckSeqs row carries Priority 0, so the retail priorities (death=10, order-confirm=1, ...) come
+// ENTIRELY from the AckConditions fallback -- without it the whole competition ties at 0.
+static int GetAckPriority( NDb::CDBAck *pAck )
 {
-	// ���� ������������ ���������
+	if ( !IsValid( pAck ) )
+		return 0;
+	NDb::CDBAckSequence *pSeq = pAck->pAckSequence;
+	if ( !IsValid( pSeq ) )
+		return 0;
+	if ( pSeq->nPriority > 0 )
+		return pSeq->nPriority;
+	NDb::CDBAckCondition *pCond = pAck->pCondition;	// plain extraction (no ternary over CPtr -- UAF)
+	if ( IsValid( pCond ) )
+		return pCond->nPriority;
+	return 0;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail roulette weight (CGlobalAck::GetSequence @0x339230, oracle s2_globalack.h:251): the ack's
+// own probability SCALED by its condition's probability factor (1.0 when absent) -- e.g. order
+// confirmations carry factor 0.1, enemy-spotted 0.2 in the retail AckConditions table.
+static float GetAckWeight( NDb::CDBAck *pAck )
+{
+	if ( !IsValid( pAck ) )
+		return 0.f;
+	float fFactor = 1.f;
+	NDb::CDBAckCondition *pCond = pAck->pCondition;	// plain extraction (no ternary over CPtr -- UAF)
+	if ( IsValid( pCond ) )
+		fFactor = pCond->fProbability;
+	return fFactor * pAck->fProbability;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+int CGlobalAck::FetchHighestAcks()
+{
+	// ���� ������������ ��������� -- retail @0x339150: the per-entry value is GetAckPriority
+	// (sequence priority with the CONDITION fallback), not the bare sequence field.
 	int nMaxPriority = 0;
 	list< SAck >::iterator i;
 	for ( i = sequences.begin(); i != sequences.end(); ++i )
-		if ( i->pAck->pAckSequence->nPriority > nMaxPriority )
-			nMaxPriority = i->pAck->pAckSequence->nPriority;
-	// ������� ��� ���� � ������� �����������
+		if ( GetAckPriority( i->pAck ) > nMaxPriority )
+			nMaxPriority = GetAckPriority( i->pAck );
+	// ������� ��� ���� � ������� ����������� (ties at the max are kept)
 	for ( i = sequences.begin(); i != sequences.end(); )
-		if ( i->pAck->pAckSequence->nPriority < nMaxPriority )
+		if ( GetAckPriority( i->pAck ) < nMaxPriority )
 			i = sequences.erase( i );
 		else
 			++i;
+	return nMaxPriority;	// retail @0x339150 writes the highest through its out param
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-NDb::CDBAckSequence *CGlobalAck::GetSequence( IPlayer *pPlayer )
+NDb::CDBAckSequence *CGlobalAck::GetSequence( IPlayer *pPlayer, CUnitServer **ppSpeaker, int *pnPriority )
 {
 	NDb::CDBAckSequence *pRes = 0;
 	//RemoveInvisibleSequences( pPlayer );
-	FetchHighestAcks();
+	const int nHighest = FetchHighestAcks();
+	// retail @0x339230 reports the fetched highest priority through its int* out param; CheckForAcks
+	// feeds THAT into the CAckEvent (the AckSeqs rows all carry 0 -- see GetAckPriority above).
+	if ( pnPriority )
+		*pnPriority = nHighest;
 	if ( !sequences.empty() )
 	{
-		// �������� ���� �� Ack-��
+		// �������� ���� �� Ack-�� -- retail weight: ack probability x condition factor
 		float fProb = 0;
 		CRoulette roulette;
 		for ( list< SAck >::iterator i = sequences.begin(); i != sequences.end(); ++i )
 		{
-			fProb += i->pAck->fProbability;
-			roulette.AddSector( i->pAck->fProbability );
+			const float fWeight = GetAckWeight( i->pAck );
+			fProb += fWeight;
+			roulette.AddSector( fWeight );
 		}
 		//
 		fProb = Max( 0.f, 100 - fProb );
@@ -228,6 +288,9 @@ NDb::CDBAckSequence *CGlobalAck::GetSequence( IPlayer *pPlayer )
 			list< SAck >::iterator i = sequences.begin();
 			for ( int k = 0; i != sequences.end() && k < nSector; ++i, ++k );
 			pRes = i->pAck->pAckSequence;
+			// retail @0x339230: the winning ack's queued SPEAKER rides along with the sequence
+			if ( ppSpeaker )
+				*ppSpeaker = i->pUS;
 		}
 		// �������
 		sequences.clear();
@@ -239,10 +302,13 @@ void CGlobalAck::SayAck( CUnitServer *pWho, int nConditionID )
 {
 	CDBTable<NDb::CDBAck> *pDBTable = NDatabase::GetTable<NDb::CDBAck>();
 	CDBIterator<NDb::CDBAck> i(*pDBTable);
+	// retail GetAckHolder @0x2ba8f0: a hero's ack rows come from his VOICE-DONOR pers (the chargen
+	// voice pick), not his own single-voice persona
+	const int nAckPersID = pWho->GetUnitRPG()->GetRPGUnit()->GetAckPersID();
 	while ( pDBTable && i.MoveNext() )
 	{
 		NDb::CDBAck *pDBAck = i.Get();
-		if ( pDBAck && pDBAck->nRPGPersID == pWho->GetUnitRPG()->GetRPGPersID() && 
+		if ( pDBAck && pDBAck->nRPGPersID == nAckPersID &&
 				 pDBAck->nConditionID == nConditionID )
 		{
 			AddAckSequence( pWho, pDBAck );
@@ -252,8 +318,8 @@ void CGlobalAck::SayAck( CUnitServer *pWho, int nConditionID )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CAckBase
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CAckBase::CAckBase( CUnitServer *_pUnit, NDb::CDBAck *_pDBAck ): 
-	pUnit(_pUnit), pDBAck(_pDBAck) 
+CAckBase::CAckBase( CUnitServer *_pUnit, NDb::CDBAck *_pDBAck ):
+	pUnit(_pUnit), pDBAck(_pDBAck)
 {
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////

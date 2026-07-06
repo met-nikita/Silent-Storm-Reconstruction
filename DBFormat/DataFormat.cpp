@@ -313,6 +313,15 @@ void CAnimation::Import()
 		{ "Destruct2", DESTRUCT_2 },
 		{ "Destruct3", DESTRUCT_3 },
 		{ "Destruct4", DESTRUCT_4 },
+		// release CAnimation::Import string table (DataFormat.obj, decomp DataFormat.c): "InterfaceIdle" -> 0x49.
+		// The retail content DB has 4 such rows (SkeletonID 8, Stand-only flags) -- the HUD unit-face idle clips.
+		// NB game.db must be REGENERATED (DataImport.exe) for this mapping to reach the runtime data.
+		{ "InterfaceIdle", INTERFACE_IDLE },
+		// retail directional death rows (string table in release CAnimation::Import; Game.exe @0x4cfb58..7c)
+		{ "DeathFront", DEATH_FRONT },
+		{ "DeathBack", DEATH_BACK },
+		{ "DeathRight", DEATH_RIGHT },
+		{ "DeathLeft", DEATH_LEFT },
 		{ 0, 0 },
 	};
 	SAnimFlagString animPWFlags[] =
@@ -1286,6 +1295,35 @@ void CMusic::Import()
 		szFileName = "Res\\Music\\";
 		szFileName += split.back();
 	}
+	// retail CMusic::Import @0x3fb950: the data-driven music-machine timings (all ms). The retail
+	// Steam game.db carries these columns (e.g. Music 1 "Ambient" = FadeIn 0, FadeOut 20000,
+	// PlayTime 180000, RndPlayTime 120000, Silence 60000, RndSilence 120000); a db lacking them
+	// keeps the retail-typical member defaults (ImportField leaves *pData untouched).
+	NDatabase::ImportField( "FadeIn", &nFadeIn );
+	NDatabase::ImportField( "FadeOut", &nFadeOut );
+	NDatabase::ImportField( "PlayTime", &nPlayTime );
+	NDatabase::ImportField( "RndPlayTime", &nRndPlayTime );
+	NDatabase::ImportField( "Silence", &nSilence );
+	NDatabase::ImportField( "RndSilence", &nRndSilence );
+	string szFlags;
+	NDatabase::ImportField( "Flags", &szFlags );
+	UnpackVariantFlags( szFlags, &flags );
+	// retail CMusic::Import @0x3fb950 tail: resolve the TemplateID column into the MusicTemplates
+	// pool (CTMusic, table 0x7d) and register this record there with its RndWeight roulette sector
+	// (same pattern as CAmbientLight::Import above). Everything that references music by id --
+	// CTemplVariant.AmbientMusic/CombatMusic (retail @0x423dd0 ImportField<CTMusic>) and the
+	// CMission defaults GetTMusic(1)/GetTMusic(3) -- references these POOLS, not Music records:
+	// in the retail Steam game.db template ids do NOT mirror Music ids (template 124 = the base
+	// ambient07 pool, while MUSIC record 124 is Combat13.wav).
+	CPtr<CTMusic> pTemplate;
+	NDatabase::ImportField( "TemplateID", &pTemplate );
+	if ( IsValid( pTemplate ) )
+	{
+		pTemplate->variants.push_back( this );
+		float fRndWeight = 1.0f;
+		NDatabase::ImportField( "RndWeight", &fRndWeight );
+		pTemplate->roulette.AddSector( fRndWeight );
+	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CDebrisMaterial
@@ -1328,11 +1366,15 @@ int CDebris::operator&( CStructureSaver &f )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CRndContainerModel::Import()
 {
-	int nPLightCr, nSLightCr, nAmbient, nFOV;
+	int nPLightCr = 0, nSLightCr = 0, nAmbient = 0, nFOV = 0;
   NDatabase::ImportField( "ModelID", &pModel );
   NDatabase::ImportField( "ParticleID", &pEffect );
-	NDatabase::ImportField( "PointLight", &nPLightCr );
-	NDatabase::ImportField( "SpotLight", &nSLightCr );
+	// v1.2 @0x7d9f20: five post-processing steps (the three UnpackColor conversions, the
+	// SLightFOV int->float store and the SoundType mapping below) are guarded on their
+	// column-read successes -- a mod db missing a column leaves the member untouched
+	// (v1.1 forced black colors / 0.0f FOV / ST_PERMANENT).
+	bool bHasPLightCr = NDatabase::ImportField( "PointLight", &nPLightCr );
+	bool bHasSLightCr = NDatabase::ImportField( "SpotLight", &nSLightCr );
   NDatabase::ImportField( "ParticlePosX", &ptEffectPos.x );
 	NDatabase::ImportField( "ParticlePosY", &ptEffectPos.y );
 	NDatabase::ImportField( "ParticlePosZ", &ptEffectPos.z );
@@ -1348,10 +1390,10 @@ void CRndContainerModel::Import()
 	NDatabase::ImportField( "PLightRadius", &fPLightRadius );
 	NDatabase::ImportField( "PLightFlareRadius", &fPFlareRadius );
 	NDatabase::ImportField( "PLightFlareTexture", &pPFlareTexture );
-	NDatabase::ImportField( "SLightFOV", &nFOV );
+	bool bHasFOV = NDatabase::ImportField( "SLightFOV", &nFOV );
 	NDatabase::ImportField( "SLightMaskID", &pSLightMask );
 	NDatabase::ImportField( "SLightRadius", &fSLightRadius );
-	NDatabase::ImportField( "AmbientColor", &nAmbient );
+	bool bHasAmbient = NDatabase::ImportField( "AmbientColor", &nAmbient );
 	NDatabase::ImportField( "SoundID", &pSound );
 	NDatabase::ImportField( "DestructionSoundID", &pDestroySound );
 	NDatabase::ImportField( "SoundEffectID", &pSoundEffect );
@@ -1362,19 +1404,22 @@ void CRndContainerModel::Import()
 	NDatabase::ImportField( "PLightFlarePosY", &ptPLightFlarePos.y );
 	NDatabase::ImportField( "PLightFlarePosZ", &ptPLightFlarePos.z );
 	string szSoundType;
-	NDatabase::ImportField( "SoundType", &szSoundType );
-	if ( "Permanent" == szSoundType )
-		eSoundType = ST_PERMANENT;
-	else if ( "Random" == szSoundType )
-		eSoundType = ST_RANDOM;
-	else if ( "Realtime" == szSoundType )
-		eSoundType = ST_REALTIME;
-	else if ( "Wind" == szSoundType )
-		eSoundType = ST_WIND;
-	else
+	// v1.2 @0x7d9f20: the SoundType mapping is guarded on the column read (see above)
+	if ( NDatabase::ImportField( "SoundType", &szSoundType ) )
 	{
-		ASSERT(0);
-		eSoundType = ST_PERMANENT;
+		if ( "Permanent" == szSoundType )
+			eSoundType = ST_PERMANENT;
+		else if ( "Random" == szSoundType )
+			eSoundType = ST_RANDOM;
+		else if ( "Realtime" == szSoundType )
+			eSoundType = ST_REALTIME;
+		else if ( "Wind" == szSoundType )
+			eSoundType = ST_WIND;
+		else
+		{
+			ASSERT(0);
+			eSoundType = ST_PERMANENT;
+		}
 	}
 	NDatabase::ImportField( "SoundAvgInterval", &fSoundAvgInterval );
 	// Steam game.db CRndContainerModel int columns "AttachedGrenade"/"PLightShadow" (retail CRndContainerModel::Import
@@ -1385,11 +1430,16 @@ void CRndContainerModel::Import()
 	NDatabase::ImportField( "AttachedGrenade", &pAttachedGrenade );
 	NDatabase::ImportField( "PLightShadow", &bPLightShadow );
 
-	fSLightFOV = nFOV;
+	// v1.2 @0x7d9f20: each post-processing step runs only when its column read succeeded
+	if ( bHasFOV )
+		fSLightFOV = nFOV;
 	const float fScale = 1.0f / 255.0f;
-	ptPLightCr = fScale * CVec3( nPLightCr & 0xff, (nPLightCr & 0xff00) >> 8, (nPLightCr & 0xff0000) >> 16 );
-	ptSLightCr = fScale * CVec3( nSLightCr & 0xff, (nSLightCr & 0xff00) >> 8, (nSLightCr & 0xff0000) >> 16 );
-	ptAmbientColor = fScale * CVec3( nAmbient & 0xff, (nAmbient & 0xff00) >> 8, (nAmbient & 0xff0000) >> 16 );
+	if ( bHasPLightCr )
+		ptPLightCr = fScale * CVec3( nPLightCr & 0xff, (nPLightCr & 0xff00) >> 8, (nPLightCr & 0xff0000) >> 16 );
+	if ( bHasSLightCr )
+		ptSLightCr = fScale * CVec3( nSLightCr & 0xff, (nSLightCr & 0xff00) >> 8, (nSLightCr & 0xff0000) >> 16 );
+	if ( bHasAmbient )
+		ptAmbientColor = fScale * CVec3( nAmbient & 0xff, (nAmbient & 0xff00) >> 8, (nAmbient & 0xff0000) >> 16 );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CContainerModel* CRndContainerModel::CreateContainer( SRand *pRand, const vector<int> &flags )
@@ -1487,6 +1537,8 @@ void CRndObject::Import()
 	NDatabase::ImportField( "TemplateID", &pTemplate );
 	NDatabase::ImportField( "KeepDecals", &bKeepDecals );
 	NDatabase::ImportField( "RPGGrenade", &pGrenade );	// retail CRndObject::Import @0x3fbb20 -- explodable-object self-detonation grenade
+	NDatabase::ImportField( "RPGChestLayout", &pChestLayout );		// retail CRndObject::Import @0x3fbb20 -- chest shelf layout
+	NDatabase::ImportField( "DefaultRPGChest", &pDefaultChest );	// retail CRndObject::Import @0x3fbb20 -- default loot-chest template
 	/*string szType;
 	NDatabase::ImportField( "InteractiveType", &szType );
 	if ( szType == "WindowDoor" )
@@ -1534,6 +1586,8 @@ int CRndObject::operator&( CStructureSaver &f )
 //	f.Add( 22, &pGun );
 	f.Add( 23, &bKeepDecals );
 	f.Add( 24, &pGrenade );		// retail CRndObject::operator& @0x3fcc70 index 0x18
+	f.Add( 25, &pChestLayout );	// retail CRndObject::operator& @0x3fcc70 index 0x19
+	f.Add( 26, &pDefaultChest );	// retail CRndObject::operator& @0x3fcc70 index 0x1a
 	return 0;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1557,6 +1611,8 @@ CObject* CRndObject::CreateObject( SRand *pRand, const vector<int> &params )
 	pO->pPassage = pTemplate->pPassage;
 	pO->bKeepDecals = bKeepDecals;
 	pO->pGrenade = pGrenade;	// retail CreateObject @0x3f7b00 -- carry the self-detonation grenade onto the runtime object record
+	pO->pChestLayout = pChestLayout;	// retail CreateObject -- carry chest layout + default chest onto the runtime object record
+	pO->pDefaultChest = pDefaultChest;
 	return pO;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1574,6 +1630,8 @@ int CObject::operator&( CStructureSaver &f )
 	f.Add( 19, &nParentID );
 	f.Add( 20, &bKeepDecals );
 	f.Add( 21, &pGrenade );		// retail CObject::operator& @0x3fa960 index 0x15
+	f.Add( 22, &pChestLayout );	// retail CObject::operator& @0x3fa960 index 0x16
+	f.Add( 23, &pDefaultChest );	// retail CObject::operator& @0x3fa960 index 0x17
 	return 0;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1671,13 +1729,29 @@ int CHead::operator&( CStructureSaver &f )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CSequence
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// release @0x42dbc0: import the two HeadSeqs facial-idle columns; the IdleType string maps
+// "Death" -> SIT_DEATH and anything else -> SIT_NORMAL (exactly the release strncmp).
 void CSequence::Import()
 {
+	NDatabase::ImportField( "IsIdleAnimation", &bIdleAnimation );
+	string szIdleType;
+	// v1.2 @0x80efd0: the WHOLE IdleType mapping (default included) is guarded on the
+	// column read -- a mod db lacking "IdleType" leaves the record's previous eIdleType
+	// untouched (v1.1 forced SIT_NORMAL).
+	if ( NDatabase::ImportField( "IdleType", &szIdleType ) )
+	{
+		eIdleType = SIT_NORMAL;
+		if ( szIdleType == "Death" )
+			eIdleType = SIT_DEATH;
+	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 int CSequence::operator&( CStructureSaver &f )
 {
+	// release @0x400d60: tags 2/3 -- read straight from the retail game.db chunks
 	f.Add( 1, (CDBRecord*)this );
+	f.Add( 2, &bIdleAnimation );
+	f.Add( 3, &eIdleType );
 	return 0;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1836,6 +1910,7 @@ CRndTerrainSpot* GetRndTerrainSpot( int nID ) { return Get<CRndTerrainSpot>( nID
 CRectangle* GetRectangle( int nID ) { return Get<CRectangle>( nID ); }
 CTRndObject* GetTRndObject( int nID ) { return Get<CTRndObject>( nID ); }
 CMusic* GetMusic( int nID ) { return Get<CMusic>( nID ); }
+CTMusic* GetTMusic( int nID ) { return Get<CTMusic>( nID ); }	// retail NDb::GetTMusic @0x3f98c0 (MusicTemplates pool)
 CPlacableObject* GetPlacableObject( int nID ) { return Get<CPlacableObject>( nID ); }
 CSpot* GetSpot( int nID ) { return Get<CSpot>( nID ); }
 CUnit* GetUnit( int nID ) { return Get<CUnit>( nID ); }

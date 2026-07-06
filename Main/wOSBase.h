@@ -102,7 +102,9 @@ public:
 	int GetDestroyStage();           // luaObjectGetDestroyStage @0x2e8ec0 (delegates to the RPG object)
 	int GetTimeSinceLastStageChange(); // wOSBase.obj @0x383c00 -- ticks since the last destroy-stage change
 	void UpdateLight();              // retail @0x384ea0 -- re-sync the object's vis binding (re-light it for a new TOD)
+	void BeAddedToVisitiors( bool bAdd ); // retail [sic] -- (un)bind the global vis sync (object-pocket support)
 	void AttachExplosion( NDb::CRPGGrenade *pGrenade ); // retail @0x372170 (IObject vtbl slot +0x10) -- arm-only setter of pAttachedGrenade
+	void MakeDestroySound();         // retail @0x384100 -- current stage's destroy sound, throttled to >99 ticks since the last stage change
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class IGetApproaches

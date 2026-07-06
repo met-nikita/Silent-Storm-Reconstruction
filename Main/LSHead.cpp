@@ -9,6 +9,7 @@
 #include "SWTexture.h"       // NGScene::CSWTextureData (source texture-layer pixels)
 #include "2DSceneSW.h"       // NGScene::GetSWTex
 #include "..\ADOImport\BasicDB.h"   // NDatabase::GetTable / CDBTable / CDBIterator (FaceGen hair/glasses bars)
+#include "ModManager.h"      // v1.2 @0x6602e0: CModManager::GetBaseVersion keys the idle-table rebuild
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 namespace NLSHead
@@ -110,6 +111,45 @@ void CHeadBound::Recalc()
 	value.SphereInit( pt, 1 ); // CRAP
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// Ambient facial-idle tables (release NLSHead::idleAnimations / idleDeathAnimations globals, filled by
+// InitializeIdleAnimations @0x2602f0): every HeadSeqs record flagged IsIdleAnimation, bucketed by its
+// IdleType (retail data: Blink/Blink01 -> normal, Death -> death). Built on first use; the head
+// animator picks a uniformly random entry whenever no idle sequence is in flight (Recalc @0x265a30).
+// v1.2 @0x6602e0: the once-only guard is version-keyed on CModManager::GetBaseVersion() (bumped by
+// every mod Activate) -- on mismatch both lists are cleared and rebuilt from the re-imported
+// HeadSeqs table, so no stale CSequence refs survive a runtime DB reload.
+////////////////////////////////////////////////////////////////////////////////////////////////////
+static vector< CPtr<NDb::CSequence> > idleAnimations;
+static vector< CPtr<NDb::CSequence> > idleDeathAnimations;
+static bool bIdleInitialized = false;
+static void InitializeIdleAnimations()
+{
+	// v1.2 @0x6602e0: function-local static caches the DB version this ran at
+	static int nBaseVersion = CModManager::GetBaseVersion();
+	if ( bIdleInitialized && nBaseVersion == CModManager::GetBaseVersion() )
+		return;
+	if ( !bIdleInitialized )
+		EnsureLSInit();   // release calls LifeStudioHeadAPI::Init() on the FIRST init only, not on version-change rebuilds (v1.2 @0x6602e0)
+	CDBTable<NDb::CSequence> *pTable = NDatabase::GetTable<NDb::CSequence>();
+	if ( !pTable )
+		return;        // DB not up yet -> retry on a later Recalc (release assumes it is always up)
+	nBaseVersion = CModManager::GetBaseVersion();
+	idleAnimations.clear();        // v1.2 @0x6602e0: drop the previous DB's sequence refs before re-bucketing
+	idleDeathAnimations.clear();
+	bIdleInitialized = true;
+	CDBIterator<NDb::CSequence> it( *pTable );
+	while ( it.MoveNext() )
+	{
+		NDb::CSequence *r = it.Get();
+		if ( !IsValid( r ) || !r->bIdleAnimation )
+			continue;
+		if ( r->eIdleType == NDb::SIT_NORMAL )
+			idleAnimations.push_back( r );
+		else if ( r->eIdleType == NDb::SIT_DEATH )
+			idleDeathAnimations.push_back( r );
+	}
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 // CHeadAnimator
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CHeadAnimator::CHeadAnimator( CFuncBase<STime> *_pTime, NDb::CHead *_pDbHead ): pTime(_pTime), pDbHead(_pDbHead)
@@ -132,26 +172,94 @@ void CHeadAnimator::SetHeadTransformInfo( CHeadTransformInfo *p )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CHeadAnimator::NeedUpdate()
 {
-	bool bChanged = pTime.Refresh() | pHead.Refresh();
+	// release @0x264e40: headChanged | (timeChanged & !bDeathMask), with a bare time tick suppressed
+	// when there is nothing to animate (no playing sequences AND idle mode off) -- a quiescent head
+	// stops recomputing; the CIdleHead token flipping eIdleType back on re-awakens it.
+	bool bTimeChanged = pTime.Refresh();
+	bool bHeadChanged = pHead.Refresh();
+	if ( sequences.empty() && eIdleType == IDLE_NONE )
+		bTimeChanged = false;
+	if ( bDeathMask )
+		bTimeChanged = false;
+	bool bChanged = bHeadChanged | bTimeChanged;
 	if ( IsValid( pHeadTransformInfo ) )
-		bChanged = bChanged | pHeadTransformInfo.Refresh();   // a slider moved -> re-deform
+		bChanged = bChanged | pHeadTransformInfo.Refresh();   // a slider moved -> re-deform (dev live-morph extra)
 	return bChanged;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CHeadAnimator::PlaySequence( NDb::CSequence *pDbSeq, STime _tStart, bool _bCycle )
+// release @0x265890 (both legs): stop whatever non-idle sequence is playing, then arm the new one as
+// a sequences-vector entry; the optional SECOND sequence (the per-phrase facial expression) arms as a
+// MASK entry (bMask=true) that Recalc's existing bMask machinery renders/prunes. Armed idles keep
+// running underneath (blinks layer over lipsync, exactly the release behavior).
+void CHeadAnimator::PlaySequence( NDb::CSequence *pDbSeq, NDb::CSequence *pDbExpr, STime _tStart, bool _bCycle )
 {
-	if ( !pDbSeq )
-		return;
-	pSequence = shareSequences.Get( pDbSeq->GetRecordID() );
-	tStart = _tStart;
-	bCycle = _bCycle;
+	StopSequence();
+	if ( pDbSeq )
+	{
+		CPtrFuncBase<CHeadSequenceInfo> *pNode = shareSequences.Get( pDbSeq->GetRecordID() );
+		if ( IsValid( pNode ) )
+		{
+			SSequence s;
+			s.pSequence = pNode;
+			s.tStart = _tStart;
+			s.bCycle = _bCycle;
+			s.bIdle = false;
+			s.bMask = false;
+			sequences.push_back( s );
+			// legacy dev-format mirror (save tags 5/6/7; see the operator& note in LSHead.h)
+			pSequence = pNode;
+			tStart = _tStart;
+			bCycle = _bCycle;
+		}
+	}
+	// release @0x265890 second leg: the expression MASK entry (same tStart/bCycle, bMask=true)
+	if ( pDbExpr )
+	{
+		CPtrFuncBase<CHeadSequenceInfo> *pNode = shareSequences.Get( pDbExpr->GetRecordID() );
+		if ( IsValid( pNode ) )
+		{
+			SSequence s;
+			s.pSequence = pNode;
+			s.tStart = _tStart;
+			s.bCycle = _bCycle;
+			s.bIdle = false;
+			s.bMask = true;
+			sequences.push_back( s );
+		}
+	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// release @0x2654d0: prune every NON-idle entry (spoken/mask sequences); the armed ambient idles keep
+// playing. Also clears the legacy dev-format mirror.
 void CHeadAnimator::StopSequence()
 {
+	for ( vector<SSequence>::iterator it = sequences.begin(); it != sequences.end(); )
+	{
+		if ( !it->bIdle )
+			it = sequences.erase( it );
+		else
+			++it;
+	}
 	pSequence = 0;
 	tStart = 0;
 	bCycle = false;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// release @0x265520: on an idle-mode CHANGE drop the death mask and prune the armed idle entries, so
+// the next Recalc arms a fresh idle of the new mode (or none for IDLE_NONE). Non-idle sequences keep playing.
+void CHeadAnimator::SetIdleType( EIdleType e )
+{
+	if ( e == eIdleType )
+		return;
+	eIdleType = e;
+	bDeathMask = false;
+	for ( vector<SSequence>::iterator it = sequences.begin(); it != sequences.end(); )
+	{
+		if ( it->bIdle )
+			it = sequences.erase( it );
+		else
+			++it;
+	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CHeadAnimator::Recalc()
@@ -164,20 +272,111 @@ void CHeadAnimator::Recalc()
 	memset( &value.normals[0], 0, sizeof(CVec3) * value.normals.size() );
 
 	STime t = pTime->GetValue();
-	CHeadSequenceInfo *pSeq = 0;
-	int nTime = 0;
-	if ( IsValid(pSequence) )
+
+	// ==== release @0x265a30 sequence maintenance over the retail-style vector ====================
+	// One macro-muscle render to apply to every mesh animator this frame: which sequence, at which
+	// sequence-local time.
+	struct SSeqFrame
 	{
-		pSequence.Refresh();
-		pSeq = pSequence->GetValue();
-		if ( pSeq )
-			nTime = pSeq->pLSSequence->SequenceTime();
-		if ( !nTime || ( !bCycle && t >= tStart && t - tStart > nTime ) )
+		CHeadSequenceInfo *pSeq;
+		int nFrameTime;
+	};
+	vector<SSeqFrame> frames;
+
+	// (1) mask entries live only while a real (non-idle, non-mask) sequence is playing
+	bool bHasReal = false;
+	for ( int i = 0; i < sequences.size(); ++i )
+		bHasReal |= !sequences[i].bMask && !sequences[i].bIdle;
+	if ( !bHasReal )
+	{
+		for ( vector<SSequence>::iterator it = sequences.begin(); it != sequences.end(); )
 		{
-			pSeq = 0;
-			pSequence = 0;
+			if ( it->bMask )
+				it = sequences.erase( it );
+			else
+				++it;
 		}
 	}
+
+	// (2) refresh/expire each entry; collect this frame's renders. STime is unsigned, so the
+	// comparisons below are the release's unsigned jb/jbe.
+	bool bIdleActive = false;
+	for ( vector<SSequence>::iterator it = sequences.begin(); it != sequences.end(); )
+	{
+		if ( !IsValid( it->pSequence ) )
+		{
+			// dead/unloaded loader node: keep the record, render nothing (release keeps these too)
+			bIdleActive |= it->bIdle;
+			++it;
+			continue;
+		}
+		it->pSequence.Refresh();
+		CHeadSequenceInfo *pSeqInfo = it->pSequence->GetValue();
+		int nSeqTime = pSeqInfo ? pSeqInfo->pLSSequence->SequenceTime() : 0;
+		if ( pSeqInfo && nSeqTime != 0 && ( it->bCycle || t < it->tStart || t - it->tStart <= (STime)nSeqTime || it->bMask ) )
+		{
+			// live entry: render once started; a mask past its end clamps to its tail frame
+			if ( t >= it->tStart )
+			{
+				SSeqFrame fr;
+				fr.pSeq = pSeqInfo;
+				if ( !it->bMask || t - it->tStart < (STime)nSeqTime )
+					fr.nFrameTime = it->bCycle ? (int)( ( t - it->tStart ) % (STime)nSeqTime ) : (int)( t - it->tStart );
+				else
+					fr.nFrameTime = nSeqTime - 2;
+				frames.push_back( fr );
+			}
+			bIdleActive |= it->bIdle;
+			++it;
+		}
+		else if ( pSeqInfo && it->bIdle && eIdleType == IDLE_DEATH )
+		{
+			// finished death idle: freeze on its last frame and raise the death mask (NeedUpdate then
+			// stops the per-tick recompute, so the corpse keeps this face)
+			SSeqFrame fr;
+			fr.pSeq = pSeqInfo;
+			fr.nFrameTime = nSeqTime - 1;
+			frames.push_back( fr );
+			bDeathMask = true;
+			bIdleActive = true;
+			++it;
+		}
+		else
+		{
+			// expired / valueless: drop it (and the legacy dev-format mirror when it was the spoken one)
+			if ( !it->bIdle )
+			{
+				pSequence = 0;
+				tStart = 0;
+				bCycle = false;
+			}
+			it = sequences.erase( it );
+		}
+	}
+
+	// (3) release @0x265a30 tail: nothing idle in flight -> arm one random ambient idle (a blink) with
+	// a random 0..999 ms lead-in, so shown heads keep blinking at natural, unsynchronized intervals.
+	if ( !bIdleActive )
+	{
+		InitializeIdleAnimations();
+		static SRand rnd;   // release: one lazily-seeded static generator shared by all heads
+		NDb::CSequence *pPick = 0;
+		if ( eIdleType == IDLE_NORMAL && !idleAnimations.empty() )
+			pPick = idleAnimations[ rnd.Get( idleAnimations.size() ) ];
+		else if ( eIdleType == IDLE_DEATH && !idleDeathAnimations.empty() )
+			pPick = idleDeathAnimations[ rnd.Get( idleDeathAnimations.size() ) ];
+		if ( IsValid( pPick ) )
+		{
+			SSequence s;
+			s.pSequence = shareSequences.Get( pPick->GetRecordID() );
+			s.tStart = t + rnd.Get( 1000 );
+			s.bCycle = false;
+			s.bIdle = true;
+			s.bMask = false;
+			sequences.push_back( s );
+		}
+	}
+	// =============================================================================================
 
 	// RETAIL morph path (CHeadTransformInfo::Recalc @0x660000 + CHeadMeshTransformer @0x65fab0): for a
 	// transformable head the rendered POSITIONS come from a per-instance ITransformer baked from the head's
@@ -209,6 +408,11 @@ void CHeadAnimator::Recalc()
 		if ( pStatic && pStatic->VerticesCount() == nReal && nReal > 0 )
 		{
 			pStatic->ClearAllMacroMuscles();
+			// release @0x265a30 renders every playing sequence into every mesh animator before
+			// ComputePhysics -- the baked hero head blinks/lip-syncs exactly like a base head (the
+			// morph rides in the GDP base geometry; sequence macro-muscles layer on top).
+			for ( int r = 0; r < frames.size(); ++r )
+				frames[r].pSeq->pLSSequence->RenderMacroMuscles( pStatic, frames[r].nFrameTime );
 			pStatic->ComputePhysics();
 			pStatic->FillUnused( true );
 			pStatic->Process( &(value.mesh[0].x), 3 );
@@ -221,7 +425,15 @@ void CHeadAnimator::Recalc()
 		if ( pMorph && pMorph->VerticesCount() == nReal && nReal > 0 )
 		{
 			// Whole head = the single live morphed GDP animator (positions); base pack supplies topology only.
-			// pMorph was Generate()'d this frame (CHeadTransformInfo::Recalc), so FillUnused + Process suffice.
+			// pMorph was Generate()'d this frame (CHeadTransformInfo::Recalc) with the slider tensions.
+			// release layers the playing sequences (armed ambient idles / expressions) ON TOP of the morph
+			// -- RenderMacroMuscles adds to the tensions Generate() installed (NO ClearAllMacroMuscles here,
+			// that would wipe the sliders), then one re-solve. This is what makes the AdvFaceGen preview
+			// head blink/emote instead of sitting frozen.
+			for ( int r = 0; r < frames.size(); ++r )
+				frames[r].pSeq->pLSSequence->RenderMacroMuscles( pMorph, frames[r].nFrameTime );
+			if ( !frames.empty() )
+				pMorph->ComputePhysics();
 			pMorph->FillUnused( true );
 			pMorph->Process( &(value.mesh[0].x), 3 );
 		}
@@ -233,13 +445,10 @@ void CHeadAnimator::Recalc()
 			{
 				LifeStudioHeadAPI::IAnimator *pLSAnimator = pMesh->pLSAnimators[i];
 				pLSAnimator->ClearAllMacroMuscles();
-				if ( pSeq && t >= tStart )
-				{
-					if ( bCycle )
-						pSeq->pLSSequence->RenderMacroMuscles( pLSAnimator, (t - tStart) % nTime );
-					else
-						pSeq->pLSSequence->RenderMacroMuscles( pLSAnimator, t - tStart );
-				}
+				// release @0x265a30: every playing sequence (spoken + armed blinks + masks) renders its
+				// macro-muscles into every segment animator at its own sequence-local time.
+				for ( int r = 0; r < frames.size(); ++r )
+					frames[r].pSeq->pLSSequence->RenderMacroMuscles( pLSAnimator, frames[r].nFrameTime );
 				pLSAnimator->ComputePhysics();
 				pLSAnimator->FillUnused( true );
 				pLSAnimator->Process( &(value.mesh[nVert].x), 3 );
@@ -250,6 +459,12 @@ void CHeadAnimator::Recalc()
 
 	for ( int i = 0; i < pMesh->copys.size(); ++i )
 		value.mesh[ pMesh->copys[i].y ] = value.mesh[ pMesh->copys[i].x ];
+
+	// NB (nose-tip-at-origin, 2026-07-02): a runtime session with the origin-vertex diagnostic here
+	// showed value.mesh is CLEAN while the on-screen nose still shows one vertex at the model
+	// center -- the defect is DOWNSTREAM of NLSHead (AssignFast -> CreateDynamicGeometry ->
+	// GfxBuffers vertex packer). Offline audits (all 134 retail heads + a real-DLL harness over all
+	// four fill branches) also cleared this stage. Hunt there next; nose tip = source vertex 117.
 
 	int nFrom = 0;
 	int nTo = 0;
@@ -281,10 +496,29 @@ void CHead::Recalc()
 	NGScene::CObjectInfo::SData res;
 	res.verts.resize( nVertices );
 	NGScene::SVertex *pRes = &res.verts[0];
-	res.geometry.polys.resize( pMesh->tris.size() );
-	for ( int k = 0; k < res.geometry.polys.size(); ++k )
-		res.geometry.polys[k] = pMesh->tris[k];
-	res.geometry.indices = pMesh->indices;
+	// The head pack's indices/tris are the NORMAL-SMOOTHING data: each poly range is
+	// [a,b,c, +every smoothing-group duplicate of a/b/c], and tris[] holds cumulative END
+	// offsets with no leading 0. That layout is only meant for the face-normal accumulation
+	// above (CalcHeadGeometry, release @0x265100). The renderer's SPolygonIndices fan-walker
+	// expects an N+1 sentinel table of pure triangles, so feeding the raw data merged the
+	// first two triangles into one fan (hole on the nose of every head) and emitted the
+	// duplicate-vertex spokes as coincident triangles with the seam's other UVs (z-fighting).
+	// Release derives a TRUE triangle list instead -- CHeadMeshLoader::Recalc @0x266070
+	// builds trueIndices/trueTris = leading 0 + the first 3 indices of each range, and
+	// CHeadMeshTransformer::Recalc @0x25fab0 renders THOSE. Build them inline here so both
+	// mesh sources (base pack + baked FaceGen heads) get the clean list.
+	res.geometry.indices.clear();
+	res.geometry.polys.clear();
+	res.geometry.polys.push_back( 0 );				// release trueTris leading sentinel
+	int nBase = 0;
+	for ( int k = 0; k < pMesh->tris.size(); ++k )
+	{
+		res.geometry.indices.push_back( pMesh->indices[nBase] );
+		res.geometry.indices.push_back( pMesh->indices[nBase + 1] );
+		res.geometry.indices.push_back( pMesh->indices[nBase + 2] );
+		res.geometry.polys.push_back( res.geometry.indices.size() );
+		nBase = pMesh->tris[k];
+	}
 
 	const SFBTransform &trans = pParent->GetValue();
 

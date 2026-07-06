@@ -6,6 +6,7 @@
 #include "wMain.h"
 #include "wMainMoves.h"
 #include "aiPath.h"
+#include "wMainPath.h"   // unit-param FindPath overload (TryToSetNewPath reroute), as the CUnitServer::Segment pump used
 #include "RPGItem.h"
 #include "RPGUnitMission.h"
 #include "aiMoves.h"
@@ -80,10 +81,15 @@ class CCmdJump: public CCmdTravel
 public:
 	ZDATA_(CCmdTravel)
 	bool bRealJump;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CCmdTravel*)this); f.Add(2,&bRealJump); return 0; }
+	// @0x12681161 tag 3 -- retail's jump-BACK flag (a downward jump facing away from the move dir). Carried
+	// + serialized for parity; the CUnitAnimator::Jump that renders the backward-jump animation (retail
+	// @0x73e050, 4-arg) is a separate animation-subsystem convergence, so the flag is not yet consumed at
+	// dispatch. (Retail also adds a scratch processPos + ProcessMe -- deferred with the animator.)
+	bool bJumpBack;
+	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CCmdTravel*)this); f.Add(2,&bRealJump); f.Add(3,&bJumpBack); return 0; }
 	//
-	CCmdJump() {}
-	CCmdJump( CUnit *_pUnit, NAI::SUnitPosition &_pos, bool b ): CCmdTravel(_pUnit,_pos), bRealJump(b) {}
+	CCmdJump(): bJumpBack(false) {}   // default the NEW tag-3 field so a pre-tag3 save loads it as false, not garbage
+	CCmdJump( CUnit *_pUnit, NAI::SUnitPosition &_pos, bool b, bool bBack = false ): CCmdTravel(_pUnit,_pos), bRealJump(b), bJumpBack(bBack) {}
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CCmdEndMove: public CCmdUnit
@@ -91,11 +97,15 @@ class CCmdEndMove: public CCmdUnit
 	OBJECT_BASIC_METHODS(CCmdEndMove);
 public:
 	ZDATA_(CCmdUnit)
-	bool bFreeze;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CCmdUnit*)this); f.Add(2,&bFreeze); return 0; }
-	
+	// @0x12541120 tag 2 -- retail replaced the (write-only) Jan03 bool bFreeze with the CCmdMove this
+	// ender terminates, so DoCommand can EndMove( pWhatToEnd->pos ) even after a path-conflict reroute
+	// nulled pCurCmd. A null pWhatToEnd means an end-ROTATE (dev still reuses CCmdEndMove for both;
+	// retail's separate CCmdEndRotate is a later structural step).
+	CObj<CCmdMove> pWhatToEnd;
+	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CCmdUnit*)this); f.Add(2,&pWhatToEnd); return 0; }
+
 	CCmdEndMove() {}
-	CCmdEndMove( CUnit *_pUnit, bool _bFreeze = false ): CCmdUnit(_pUnit), bFreeze(_bFreeze) {}
+	CCmdEndMove( CUnit *_pUnit, CCmdMove *_pWhatToEnd = 0 ): CCmdUnit(_pUnit), pWhatToEnd(_pWhatToEnd) {}
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CCmdActivateItem: public CCmdUnit
@@ -173,7 +183,15 @@ protected:
 public:
 	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CCommandExecute*)this); f.Add(2,&bWaiting); f.Add(3,&bAfterWaiting); f.Add(4,&nTimeToWait); f.Add(5,&posToWait); return 0; }
 
-	CPathConflictsRemover( CUnitServer *_pUS = 0 ): CCommandExecute(_pUS), bWaiting(false) {}
+	// @0x3bab70 -- retail ctor zeroes the FULL wait-state. Adding bAfterWaiting/nTimeToWait
+	// to the init list fixes an uninitialized read: CExecMove::CanDoMove parks the unit
+	// (bWaiting=true) without setting the timer, then CExecMove::IsWaitingForPath reads
+	// nTimeToWait. posToWait keeps its SUnitPosition/SPathPlace default ctor (0xFDFFFFFF == retail).
+	CPathConflictsRemover( CUnitServer *_pUS = 0 ): CCommandExecute(_pUS), bWaiting(false), bAfterWaiting(false), nTimeToWait(0) {}
+
+	// @0x3babd0 -- retail's trivial wait-state accessor (supersedes the Jan03 heavy
+	// CExecMove::IsWaitingForPath, retired below): report bWaiting + the parked pose.
+	virtual bool IsWaitingForPath( NAI::SUnitPosition *p = 0 ) { if ( p ) *p = posToWait; return bWaiting; }
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CExecMove: public CPathConflictsRemover, public IExecMove
@@ -206,22 +224,17 @@ class CExecMove: public CPathConflictsRemover, public IExecMove
 	int GetStartAP() const;
 	
 	// Movement tests
-	bool CanDoMove( CCmdTravel *pCmd )
-	{
-		if ( !pUS->CanDoGameMove( pCmd->pos ) )
-		{
-			if ( CDynamicCast<CCmdRotate>( pCurCmd ) )
-				pUS->animator.EndRotate( pUS->GetPosition() );
-			bWaiting = true;
-			posToWait = pCmd->pos;
-			return false;
-		}
-		else 
-		{
-			bWaiting = false;
-			return true;
-		}
-	}
+	// @0x3cc570 gate: route the move test through the granular CheckCanDoMove so a blocked cell recovers
+	// per the ECanMoveRes verdict (CMR_LOCKED -> locker chain, CMR_DOOR -> reroute) instead of the Jan03
+	// blanket park. CheckCanDoMove parks the unit + drives recovery and reports "may proceed now".
+	bool CanDoMove( CCmdTravel *pCmd ) { return CheckCanDoMove( &pCmd->pos ); }
+
+	// CPathConflictsRemover wait-state recovery (release wWaitForOthers.obj), reconstructed on CExecMove.
+	bool CheckCanDoMove( NAI::SUnitPosition *reqPos );                        // @0x3cc570
+	CUnitServer* GetWhoLocks();                                              // @0x3cc0d0
+	void TryToSetNewPath();                                                  // @0x3cc130
+	bool UseAnotherPCR( CUnitServer *server, CPathConflictsRemover *other ); // @0x3cc280
+	void CheckLockerState();                                                // @0x3cc2d0
 	
 	bool TestSingleGameMove( CCmdTravel *pCmd )
 	{
@@ -255,7 +268,8 @@ class CExecMove: public CPathConflictsRemover, public IExecMove
 public:
 	CExecMove() {}
 	CExecMove( CUnitServer *_pUS, NAI::CPath *pPath, NAI::EFindPathParams _eParams, ENeedActiveItem eActive, bool _bCheckCanRotate );
-	virtual bool IsWaitingForPath( NAI::SUnitPosition *p = 0 ); 
+	virtual void Segment();                                                  // @0x3cc670 per-tick wait service + resume
+	virtual CPathConflictsRemover* GetPathConflictsRemover() { return this; }// @0x3bc3f0 (CExecMove IS-A CPathConflictsRemover)
 	virtual void Run();
 	virtual bool TimeLabelReached();
 	virtual void AnimationFinished();
@@ -265,7 +279,7 @@ public:
 	// IExecMove
 	void GetSearchFromPosition( NAI::SPathPlace *pRes );
 	void SetNewPath( NAI::CPath *pPath, NAI::EFindPathParams _eParams, ENeedActiveItem eActive );
-	void GetDesiredPlace( NAI::SPathPlace *pRes, NAI::EFindPathParams *pParams );
+	void GetDesiredPlace( NAI::SPathPlace *pRes, NAI::EFindPathParams *pParams, ENeedActiveItem *pActive );
 	void GetPathPoints( list<SPathPoint> *pRes );
 	virtual void FullCancel();
 };
@@ -304,38 +318,160 @@ void CExecMove::DoGameMove( const NAI::SUnitPosition &dst )
 	pUS->DoGameMove( dst );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-bool CExecMove::IsWaitingForPath( NAI::SUnitPosition *p )
+// @0x3cc570 -- may this move proceed now? On CMR_YES clear the wait and report "go". Otherwise park the
+// unit and recover per the ECanMoveRes verdict: CMR_LOCKED -> walk the locker chain + wait 10 ticks;
+// CMR_DOOR -> reroute; else (a pathed cell that isn't passable -- shouldn't happen) abort the move.
+bool CExecMove::CheckCanDoMove( NAI::SUnitPosition *reqPos )
 {
-	CUnitAnimator &animator = pUS->animator;
-	if ( bWaiting )
+	ECanMoveRes res = pUS->CanDoGameMove( *reqPos );
+	if ( res == CMR_YES )
 	{
-		bool bCanDo = pUS->CanDoGameMove( posToWait );
-		if ( bCanDo )
-		{
-			if (nTimeToWait > 0)
-				nTimeToWait--;
-			if ( nTimeToWait == 0 )
-			{
-				animator.AlignTime();
-				animator.PlaceUnit( pUS->GetPosition() );
-
-				CDynamicCast<CCmdMove> pWasMove( pCurCmd );
-				CDynamicCast<CCmdRotate> pWasRotate( pCurCmd );
-				if ( pWasMove || pWasRotate )
-					commandsQueue.push_back( new CCmdEndMove( pUS, true ) );
-			}
-		}
-		else
-		{
-			nTimeToWait = 10;
-			bAfterWaiting = true;
-			bWaiting = true;
-		}
-		if ( p )
-			*p = posToWait;
-		return ( !bCanDo || nTimeToWait != 0 );
+		bWaiting = false;
+		return true;
 	}
-	return false;
+	// blocked: stop any in-progress turn-in-place, then enter the waiting state
+	if ( CDynamicCast<CCmdRotate>( pCurCmd ) )
+		pUS->animator.EndRotate( pUS->GetPosition() );
+	bWaiting = true;
+	posToWait = *reqPos;
+	if ( res == CMR_LOCKED )
+	{
+		CheckLockerState();
+		nTimeToWait = 10;
+		bAfterWaiting = true;
+	}
+	else if ( res == CMR_DOOR )
+	{
+		TryToSetNewPath();   // may clear bWaiting on a successful reroute
+	}
+	else
+	{
+		// CMR_CANNOT_MOVE / CMR_NOT_PASSABLE: the path tracker should never see these -- abort the move.
+		nTimeToWait = 0;
+		FullCancel();
+		pUS->animator.PlaceUnit( pUS->GetPosition() );
+	}
+	if ( bWaiting )
+		return false;
+	bAfterWaiting = true;
+	pUS->animator.PlaceUnit( pUS->GetPosition() );
+	return true;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// @0x3cc0d0 -- who currently locks the cell we want (posToWait)? null if nobody, or if it is not a live unit.
+CUnitServer* CExecMove::GetWhoLocks()
+{
+	CObjectBase *locker = pUS->GetWorld()->GetPathNetwork()->GetWhoLocksThisPlace( posToWait.pos.p );
+	CDynamicCast<CUnitServer> who( locker );
+	if ( !IsValid( who ) )
+		return 0;
+	return who.GetPtr();
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// @0x3cc130 -- reroute around the obstacle: find a fresh path to the desired place and install it
+// (clearing the wait), or abort the move if none exists.
+void CExecMove::TryToSetNewPath()
+{
+	NAI::SPathPlace desiredPlace;
+	NAI::EFindPathParams eParams2;
+	ENeedActiveItem eActive2 = ITEM_NO_MATTER;
+	GetDesiredPlace( &desiredPlace, &eParams2, &eActive2 );
+	vector<NAI::SPathPlace> dst;
+	dst.push_back( desiredPlace );
+	NAI::SPathPlace src;
+	GetSearchFromPosition( &src );
+	CPtr<NAI::CPath> pPath = FindPath( pUS->GetWorld()->GetPathNetwork(), pUS, src, dst, 0, true, eParams2, pUS->IsStrafing() );
+	if ( IsValid( pPath ) )
+	{
+		SetNewPath( pPath, eParams2, eActive2 );   // @0x3cc130 -- preserve the path's active-item constraint on reroute
+		bWaiting = false;
+	}
+	else
+		// No route: FullCancel latches the exec FAILED but (retail-faithful, oracle s2_execmove.h FullCancel)
+		// leaves bWaiting set, so the unit parks until the cell frees or a new order arrives -- superseding
+		// the Jan03 pump's immediate CancelAction()+pCurrentCmd=0 abandon. CheckCmdExecState reaps the exec
+		// once a later retry clears bWaiting.
+		FullCancel();
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// @0x3cc280 -- decide whether we may defer to the unit locking us. If it has no remover of its own it
+// cannot step aside, so we reroute ourselves and report handled; otherwise we may pass only once it is
+// no longer waiting for a path.
+bool CExecMove::UseAnotherPCR( CUnitServer *server, CPathConflictsRemover *other )
+{
+	if ( !other )
+	{
+		// server == pUS is the degenerate "unit locks himself" case (retail logs it here).
+		TryToSetNewPath();
+		return true;
+	}
+	return !other->IsWaitingForPath( 0 );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// @0x3cc2d0 -- walk the chain of who-locks-whom from the unit blocking our target cell. A visited list
+// breaks cycles (deadlock): if a link has no remover, or is no longer waiting, or the cycle loops back
+// to us, we reroute ourselves and stop.
+// DELIBERATE DIVERGENCE from retail @0x3cc2d0: retail inserts the running node into its visited set
+// BEFORE the membership test, so on the 2nd hop it "finds" the just-inserted node and the walk always
+// terminates at depth 2 (never inspecting past the second locker). This does a full cycle-walk instead:
+// for chains 3+ deep it reroutes in cases retail would leave waiting -- non-crashing, and a reroute is
+// the safer resolution than an unbounded wait. The head-of-chain rotation housekeeping (Hide +
+// interrupted-counter bump, retail 0x7cc332-0x7cc384) is animation-only and elided.
+void CExecMove::CheckLockerState()
+{
+	CUnitServer *who = GetWhoLocks();
+	if ( !who )
+	{
+		TryToSetNewPath();
+		return;
+	}
+	CUnitServer *myUnit = pUS;
+	vector<CUnitServer*> visited;
+	visited.push_back( myUnit );
+	for ( ;; )
+	{
+		bool bSeen = false;
+		for ( int i = 0; i < visited.size(); ++i )
+			if ( visited[i] == who ) { bSeen = true; break; }
+		if ( bSeen )
+		{
+			if ( who == myUnit )
+				TryToSetNewPath();   // deadlock rooted at us -> break it by rerouting
+			return;
+		}
+		CPathConflictsRemover *pcr = who->GetPathConflictsRemover();
+		if ( !pcr )
+		{
+			// the locker has no remover -> it cannot move out of the way; reroute ourselves.
+			TryToSetNewPath();
+			return;
+		}
+		NAI::SUnitPosition otherWait;
+		if ( !pcr->IsWaitingForPath( &otherWait ) )
+			return;   // that locker isn't waiting -> it will free the cell soon
+		visited.push_back( who );
+		CObjectBase *nextLocker = pUS->GetWorld()->GetPathNetwork()->GetWhoLocksThisPlace( otherWait.pos.p );
+		CDynamicCast<CUnitServer> next( nextLocker );
+		if ( !IsValid( next ) )
+			return;
+		who = next.GetPtr();
+	}
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// @0x3cc670 -- per-tick service of the wait state: count the timer down, and once it expires while still
+// waiting, realign the animation clock and retry the move via CheckCanDoMove. The resume is driven by the
+// queued path ender (CCmdEndMove::pWhatToEnd) which DoCommand consumes once bWaiting clears (bAfterWaiting was
+// latched at park) -- retail-faithful @0x3cc670, so NO ender is re-emitted here (the Stage-4 dev-preserving
+// push is dropped now that CCmdEndMove carries pWhatToEnd).
+void CExecMove::Segment()
+{
+	if ( nTimeToWait > 0 )
+		nTimeToWait--;
+	if ( bWaiting && nTimeToWait == 0 )
+	{
+		pUS->animator.AlignTime();
+		CheckCanDoMove( &posToWait );
+	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CExecMove::DoCommand()
@@ -349,6 +485,12 @@ void CExecMove::DoCommand()
 	CUnitAnimator &animator = pUS->animator;
 	const NAI::SUnitPosition &position = pUS->GetPosition();
 	NAI::SUnitPosition prevPos( position );
+	// Hold an OWNING ref to the current command BEFORE the move gate below. CanDoMove -> CheckCanDoMove
+	// can now reroute a blocked move (CMR_DOOR/CMR_LOCKED): TryToSetNewPath -> SetNewPath nulls pCurCmd,
+	// dropping the SOLE ref and freeing this CCmdMove, then CheckCanDoMove returns true (bWaiting cleared)
+	// -- so DoGameMove( pPrevMove->pos ) would read freed memory. Retail's DoCommand @0x3b86e0 AddRefs
+	// pCurCmd here (the CStack_40 hold) for exactly this reason; the Jan03 dev tree took the hold too late.
+	CObj<CCommand> pHoldPrev( pCurCmd );
 	CDynamicCast<CCmdMove> pPrevMove(pCurCmd);
 	if (pPrevMove)
 	{
@@ -362,7 +504,14 @@ void CExecMove::DoCommand()
 	// fetch command
 	CObj<CCommand> pCmd = commandsQueue.front(), pHoldCmd(pCurCmd);
 	commandsQueue.pop_front();
-	pUS->GetWorld()->AddUICommand( new CUICmdUnit( pUS ) );
+	// GLUE FIX (camera followed every walking enemy): the Jan03 per-move-STEP CUICmdUnit post drove
+	// the follow-camera executor once per fetched move command, so a multi-tile walk re-pinned the
+	// camera to the unit for the whole move. CUICmdUnit's ONLY consumer is that follow exec
+	// (NGame::CreateExecutor). Retail replaced this with a priority-arbitrated, self-terminating,
+	// eased CUICmdUnitCamera posted once per move (CExecMove::ProcessMoveCommand @0x3b83a0) -- NOT a
+	// per-step hard follow. The genuine "fly to an event" posts survive (unit spotted @wMain.cpp:817,
+	// unconscious @wUnitServer.cpp:172); dropping the per-step spam stops the walker glue.
+	//pUS->GetWorld()->AddUICommand( new CUICmdUnit( pUS ) );
 	// process it
 	CDynamicCast<CCmdMove> pMove(pCmd);
 	if (pMove)
@@ -417,7 +566,12 @@ void CExecMove::DoCommand()
 			CDynamicCast<CCmdEndMove> pEndMove(pCmd);
 			if (pEndMove)
 			{
-				animator.EndMove(prevPos, pPrevMove->pos, false, pPrevMove->bInterGrid);
+				// @0x3b86e0 -- terminate the move the ender remembers (pWhatToEnd), robust to a wait/reroute
+				// having nulled pCurCmd. A null pWhatToEnd is an end-rotate.
+				if ( IsValid( pEndMove->pWhatToEnd ) )
+					animator.EndMove( prevPos, pEndMove->pWhatToEnd->pos, false, pEndMove->pWhatToEnd->bInterGrid );
+				else
+					animator.EndRotate( prevPos );
 			}
 			else
 				ASSERT(0);
@@ -427,11 +581,12 @@ void CExecMove::DoCommand()
 		CDynamicCast<CCmdEndMove> pEndMove(pCmd);
 		if (pEndMove)
 		{
-			CDynamicCast<CCmdMove> pPrevMove(pCurCmd);
-			if (pPrevMove)
+			// @0x3b86e0 -- the ender remembers the move it terminates (pWhatToEnd), so this survives a
+			// path-conflict reroute that nulled pCurCmd (the Jan03 pCurCmd cast wrongly fell to EndRotate).
+			if ( IsValid( pEndMove->pWhatToEnd ) )
 			{
 				pCurCmd = pCmd;
-				animator.EndMove(prevPos, pPrevMove->pos, false, pPrevMove->bInterGrid);
+				animator.EndMove(prevPos, pEndMove->pWhatToEnd->pos, false, pEndMove->pWhatToEnd->bInterGrid);
 			}
 			else
 				animator.EndRotate(position);
@@ -601,7 +756,13 @@ void CExecMove::Run()
 		return;
 	if ( commandsQueue.empty() )
 	{
-		Finished();
+		// @0x3b8bc0 -- retail latches result-dependent (state=(result!=FINISHED)+1),
+		// NOT an unconditional Finished(): a queue drained after a FAILED Cancel must
+		// report FAILED, matching the AnimationFinished tail latch.
+		if ( result == FINISHED )
+			Finished();
+		else
+			Failed();
 		return;
 	}
 	StartAction( pUS->GetWorld(), SKIPPABLE );
@@ -664,13 +825,20 @@ void CExecMove::AnimationFinished()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CExecMove::Cancel()
 {
+	// @0x3b8cf0 -- retail makes Cancel a no-op while a CCmdJump is in flight: a jump
+	// cannot be aborted mid-air, so leave it to land and be reaped by the Segment loop.
+	CDynamicCast<CCmdJump> pWasJump( pCurCmd );
+	if ( pWasJump )
+		return;
 	CDynamicCast<CCmdMove> pWasMove( pCurCmd );
 	CDynamicCast<CCmdRotate> pWasRotate( pCurCmd );
 	commandsQueue.clear();
 	if ( pWasMove || pWasRotate )
-		commandsQueue.push_back( new CCmdEndMove( pUS, true ) );
+		// @0x3b8cf0 -- the ender remembers the move it terminates (null for a rotate -> end-rotate).
+		commandsQueue.push_back( new CCmdEndMove( pUS, pWasMove.GetPtr() ) );
 	bWaiting = false;
 	bAfterWaiting = false;
+	nTimeToWait = 0;   // @0x3b8cf0 -- retail also clears the wait timer here
 	result = FAILED;
 	pUS->DynamicallyLockWay( 0 );
 }
@@ -680,6 +848,8 @@ void CExecMove::FullCancel()
 	commandsQueue.clear();
 	result = FAILED;
 	pCurCmd = 0;
+	Finished();   // @0x3b8d50 -- retail latches state=FINISHED unconditionally here
+	              // (disasm `[esi-8]=1`), an addition over Jan03, so the Segment loop reaps us.
 	//pUS->animator.PlaceUnit( pUS->GetPosition() );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -788,6 +958,7 @@ void CExecMove::ConvertPath( NAI::CPath *pPath, ENeedActiveItem eActive )
 	bool bRun = pUS->GetPosition().bRun;
 	bool bInterGrid = false;
 	bool bMoving = false;
+	CCmdMove *pLastMove = 0;   // the last CCmdMove pushed -> pWhatToEnd for the trailing CCmdEndMove
 	NAI::SUnitPosition pos;
 	NAI::SUnitPosition prevPos;
 	for ( int i = 1; i < pPath->points.size(); ++i )
@@ -805,10 +976,11 @@ void CExecMove::ConvertPath( NAI::CPath *pPath, ENeedActiveItem eActive )
 		{
 			if ( bInterGrid )
 			{
-				commandsQueue.push_back( new CCmdMove( pUS, prevPos, true, pPath->bStrafePath ) );
+				pLastMove = new CCmdMove( pUS, prevPos, true, pPath->bStrafePath );
+				commandsQueue.push_back( pLastMove );
 				bInterGrid = false;
 			}
-			commandsQueue.push_back( new CCmdEndMove( pUS ) );
+			commandsQueue.push_back( new CCmdEndMove( pUS, pLastMove ) );
 			bMoving = false;
 		}
 		//
@@ -848,7 +1020,8 @@ void CExecMove::ConvertPath( NAI::CPath *pPath, ENeedActiveItem eActive )
 				bActive = true;
 			}
 			// change layer
-			commandsQueue.push_back( new CCmdMove( pUS, pos, true, pPath->bStrafePath ) );
+			pLastMove = new CCmdMove( pUS, pos, true, pPath->bStrafePath );
+			commandsQueue.push_back( pLastMove );
 			bInterGrid = false;
 			bMoving = true;
 		}
@@ -880,9 +1053,9 @@ void CExecMove::ConvertPath( NAI::CPath *pPath, ENeedActiveItem eActive )
 			bool bReal = true;
 			if ( type == NAI::TT_MOVE || type == NAI::TT_MOVE_DIAGONAL )
 				bReal = false;
-			else if ( type != NAI::TT_JUMP )
+			else if ( type != NAI::TT_JUMP && type != NAI::TT_JUMP_BACK )
 				ASSERT(0);
-			commandsQueue.push_back( new CCmdJump( pUS, pos, bReal ) );
+			commandsQueue.push_back( new CCmdJump( pUS, pos, bReal, type == NAI::TT_JUMP_BACK ) );
 		}
 		else if ( prev.GetPose() != cur.GetPose() )
 		{
@@ -911,15 +1084,19 @@ void CExecMove::ConvertPath( NAI::CPath *pPath, ENeedActiveItem eActive )
 				bActive = true;
 			}				
 			// move
-			commandsQueue.push_back( new CCmdMove( pUS, pos, bInterGrid, pPath->bStrafePath ) );
+			pLastMove = new CCmdMove( pUS, pos, bInterGrid, pPath->bStrafePath );
+			commandsQueue.push_back( pLastMove );
 			bInterGrid = false;
 			bMoving = true;
 		}
 	}
 	if ( bInterGrid )
-		commandsQueue.push_back( new CCmdMove( pUS, pos, true, pPath->bStrafePath ) );
+	{
+		pLastMove = new CCmdMove( pUS, pos, true, pPath->bStrafePath );
+		commandsQueue.push_back( pLastMove );
+	}
 	if ( bMoving )
-		commandsQueue.push_back( new CCmdEndMove( pUS ) );
+		commandsQueue.push_back( new CCmdEndMove( pUS, pLastMove ) );
 
 	if ( eActive == ITEM_ACTIVE && !bActive && !bInactivePose )
 		commandsQueue.push_back( new CCmdActivateItem( pUS, nSlot ) );
@@ -1023,10 +1200,12 @@ int CExecMove::GetActionAP() const
 	return apCalc.GetResult();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CExecMove::GetDesiredPlace( NAI::SPathPlace *pRes, NAI::EFindPathParams *pParams )
+void CExecMove::GetDesiredPlace( NAI::SPathPlace *pRes, NAI::EFindPathParams *pParams, ENeedActiveItem *pActive )
 {
+	// @0x3b76f0 -- copy out the three stored search descriptors (retail added the active-item out-param).
 	*pRes = desired;
 	*pParams = eParams;
+	*pActive = eNeedActive;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CExecMove::GetPathPoints( list<SPathPoint> *pRes )

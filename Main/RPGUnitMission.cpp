@@ -42,14 +42,8 @@ static vector<TCriticalSet> criticalBar( NDb::N_CL ); //[NDb::N_CL];
 static bool bCBarInitialized = false;
 int Round( float f ) { return int( f + 0.5f ); }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-enum EToHitType
-{
-	TH_MELEE,
-	TH_THROWING,
-	TH_SHOOT,
-	TH_RLAUNCHER,
-	TH_DEFAULT,
-};
+// EToHitType moved to RPGUnitMission.h -- the composite tile to-hit / cover entry points
+// (RPGGame.cpp) branch on NRPG::GetToHitType like retail RealCalcTileCovers @0x2b4700.
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 struct SCriticalsHolder
 {
@@ -73,6 +67,7 @@ class CUnitMission: public IUnitMission
 	friend int GetTileToHit( const NWorld::CUnit*, NAI::EPose, int, const CVec3&, CVec3, NAI::ETileHitLocation, int, int, bool, const CVec3& );
 	friend int GetGrenadeToHit( const NWorld::CUnit*, NAI::EPose, int, const CVec3&, bool, CVec3, const CVec3& );
 	friend int GetRLauncherToHit( const NWorld::CUnit*, NAI::EPose, int, const CVec3&, CVec3, NAI::ETileHitLocation, int, bool, const CVec3& );
+	friend EToHitType GetToHitType( const NWorld::CUnit* );
 
 	OBJECT_BASIC_METHODS(CUnitMission);
 private:
@@ -91,6 +86,7 @@ private:
 	void SetHealedVP( int n ) { pRPGUnit->nHealedVP = n; }
 	virtual int GetLastActionTimes() const { return nLastActionTimes; }
 	virtual int GetMoveInLastTurn() const { return nMoveInLastTurn; }
+	virtual void AddMoveInLastTurn( int n ) { nMoveInLastTurn += n; }
 	virtual int RollCritical( NAI::EHitLocation eHL, int nCriticalDifficulty, NDb::CRPGCritical **pCritical );
 	void SaveAck( int nAckID, IUnitMissionInfo *pAttacker );
 	void ResetUnitParameters();
@@ -431,9 +427,10 @@ void CUnitMission::RegisterAction( EAction action )
 			pRPGUnit->UseSkill( NDb::ST_BURST, GetSkillAddValue( NDb::ST_BURST ) );
 			break;
 		case AC_MOVE_DIAGONAL:
-			nMoveInLastTurn += 1;
 		case AC_MOVE_SIDE:
-			nMoveInLastTurn += 2;
+			// retail @0x34edb0: the nMoveInLastTurn accounting moved to DoAction (gated on RUN pose); here we
+			// only spend the AP-skill use. (Old code added it unconditionally here, with a diagonal fall-through
+			// bug that summed +3 -- both are corrected by the relocation.)
 			pRPGUnit->UseSkill( NDb::ST_AP, GetSkillAddValue( NDb::ST_AP ) );
 			break;
 	}
@@ -605,6 +602,14 @@ int CUnitMission::GetActionAP( NAI::EPose curPose, EAction action ) const
 				else
 					return curPose == NAI::CRAWL? 4 : 2;
 			}
+		// @0x2c0bd0 -- retail sources the inventory-move AP from NDb::GetRPGAP()->nAP (a DB
+		// table with no accessor in this tree). Return 0 (== the pre-existing default path for
+		// these codes) so GetActionAP stays switch-total and never ASSERT(0)s / OOBs on the
+		// new AC_ITEM_* action codes. NOTE: retail charges a non-zero DB AP here.
+		case AC_ITEM_TAKE:
+		case AC_ITEM_SLOT:
+		case AC_ITEM_TRANSFER:
+			return 0;
 	}
 
 	// �������� ��������� ������� ������� �� ����
@@ -1041,6 +1046,20 @@ float GetVPPenalty( int nVP, int nHealedVP, int nMaxVP )
 		return 0.5f;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// NRPG::GetToHitType @0x2b3790 -- release free-fn form of CUnitMission::GetToHitWeaponType, shared
+// with the composite/cover entry points (RealCalcTileCovers @0x2b4700 takes the melee-swing cover
+// path only on TH_MELEE).
+EToHitType GetToHitType( const NWorld::CUnit *pAttacker )
+{
+	CDynamicCast<NWorld::CUnitServer> pUS( const_cast<NWorld::CUnit*>( pAttacker ) );
+	if ( !pUS )
+		return TH_DEFAULT;
+	CUnitMission *pMission = CDynamicCast<CUnitMission>( pUS->GetUnitRPG() );
+	if ( !pMission )
+		return TH_DEFAULT;
+	return pMission->GetToHitWeaponType();
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 // To-hit dispatch (release migration). Each free fn RTTI-casts the firing unit to its CUnitServer,
 // picks the EToHitType from the held weapon and builds the matching ToHitCalcer (which now takes the
 // CUnitServer*). bNight is wired false (CWorld::IsNight absent in this tree -- documented elision).
@@ -1049,6 +1068,12 @@ int GetToHit( const NWorld::CUnit *pAttacker, NAI::EPose curPose, int nDistance,
 	const vector<int> &accessibleHLs, int nHitCover, bool bFirstRound, const CVec3 &ptIllumination, bool bBackstab )
 {
 	CDynamicCast<NWorld::CUnitServer> pUS( const_cast<NWorld::CUnit*>( pAttacker ) );
+	// retail RPGUnitGetToHit @0x2b4ae0 head gate: a script-forced to-hit (UnitSetToHit, -1 = off)
+	// REPLACES the whole computation for this attacker -- shoot/melee/throw/rocket alike (grenades
+	// excluded; the grenade calcer has no such read). This is how missions cap tutorial/intro
+	// enemies to 8%.
+	if ( pUS && pUS->GetScriptToHit() >= 0 )
+		return pUS->GetScriptToHit();
 	CDynamicCast<NWorld::CUnitServer> pUSTarget( const_cast<NWorld::CUnit*>( pTarget ) );
 	CUnitMission *pMission = CDynamicCast<CUnitMission>( pUS->GetUnitRPG() );
 	IUnitMissionInfo *pTargetRPG = pTarget ? pTarget->GetRPG() : 0;
@@ -1089,6 +1114,10 @@ int GetTileToHit( const NWorld::CUnit *pAttacker, NAI::EPose curPose, int nDista
 	const CVec3 &ptIllumination )
 {
 	CDynamicCast<NWorld::CUnitServer> pUS( const_cast<NWorld::CUnit*>( pAttacker ) );
+	// retail RPGUnitGetTileToHit @0x2b4df0: same script-forced to-hit head gate as the unit-target
+	// dispatcher (@0x2b4ae0) -- absolute replacement, -1 = off.
+	if ( pUS && pUS->GetScriptToHit() >= 0 )
+		return pUS->GetScriptToHit();
 	CUnitMission *pMission = CDynamicCast<CUnitMission>( pUS->GetUnitRPG() );
 	const bool bNight = false;
 	CPtr<IToHitCalcer> pToHitCalcer;
@@ -1100,7 +1129,17 @@ int GetTileToHit( const NWorld::CUnit *pAttacker, NAI::EPose curPose, int nDista
 				bFirstRound, bNight, ptIllumination, ptTilePos, nExtraAP );
 			break;
 		case TH_MELEE:
-			return 0;
+			// retail RPGUnitGetTileToHit @0x2b4df0, TH_MELEE branch (disasm @0x6b4ecc): a melee
+			// swing at a tile/object has NO calcer -- it connects with certainty whenever the
+			// cover walk lets anything through (`fucompp fHitCover, 0.0f` -> equal returns 0,
+			// otherwise returns 100). The previous `return 0` made every melee attack at
+			// ground/walls/objects a guaranteed miss and showed a constant 0% on the cursor.
+			// NOTE <= not ==: retail GetHitCover (@0x2b4390) returns exactly 0.0 for a fully
+			// blocked ray set, but the dev GetHitCover encodes that case as the -1 BLOCKED
+			// sentinel (consumed by CToHitCalcer::GetToHit's retail-faithful `fHitCover <= 0
+			// -> 0%` gate, @0x2b85e0), which must read as a miss here too -- otherwise melee
+			// through a wall would show 100%.
+			return nHitCover <= 0 ? 0 : 100;
 		case TH_SHOOT:
 			pToHitCalcer = new CTileToHitCalcer(
 				pUS, curPose, nDistance, ptAttacker, nExtraAP, (float)nHitCover, bFirstRound,
@@ -1858,11 +1897,13 @@ IUnitMission* CreateUnit( CUnit *pSrc )
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // ������� ��� �������� �������
-IUnitMission* CreateUnit( NDb::CRPGPers *pSrc )
+// pInHandItem/pBackpack = the map builder's rolled loot (retail NRPG::CreateUnit @0x2c4f50 params
+// 4/5 from SMapUnit); they thread into the CUnit ctor and replace the pers-default equipment.
+IUnitMission* CreateUnit( NDb::CRPGPers *pSrc, NDb::CRPGItem *pInHandItem, NDb::CRPGChestReal *pBackpack )
 {
 	static int nUnitN = 0;
 	CUnitMission *pRes = new CUnitMission();
-	pRes->pRPGUnit = new CUnit(pSrc);
+	pRes->pRPGUnit = new CUnit( pSrc, 0, false, 0, pInHandItem, pBackpack );
 	if ( IsValid( pSrc->pDefaultWearsPanzerklein ) )
 		pRes->GetRPGUnit()->pPanzerklein = pSrc->pDefaultWearsPanzerklein;
 	NStr::ToDotString( &pRes->sID, ++nUnitN );

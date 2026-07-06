@@ -31,10 +31,10 @@ static CUnitArea* GetUnitArea( IAIUnit *pUnit );
 // CAICombatLogic engine
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CAICombatLogic::CAICombatLogic( IAIUnit *pUnit, IAIChoosePlaceJob *_pChoosePlace ):
-	CAILogic( pUnit ), CAIJob( 0 ), pChoosePlace( _pChoosePlace ), prepareState( PS_FINISHED ), nUnitLastAP( 0 )
+	CAILogic( pUnit ), CAIJob( 0 ), pChoosePlace( _pChoosePlace ), prepareState( PS_FINISHED ), nUnitLastAP( 0 ),
+	regOnNewTurn( this, &CAICombatLogic::OnNewTurn )   // subscribe OnNewTurn to the new-player-turn event
 {
 	pLog = CreateAILog();
-	// regOnNewTurn: register OnNewTurn on the world's pass-control event (build-settle: NGlobal event hook).
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 int CAICombatLogic::operator&( CStructureSaver &f )
@@ -58,15 +58,28 @@ IAIActionPlaceSource* CAICombatLogic::AddPlaceSource( IAIActionPlaceSource *pSrc
 void CAICombatLogic::DoAction( CAIAction *pAction )
 {
 	IAIUnit *pUnit = GetUnit();
-	if ( !IsValid( pUnit ) || !IsValid( pAction ) || !IsValid( pLog ) )
+	if ( !IsValid( pUnit ) )
+		return;
+	NWorld::CUnitServer *pUS = pUnit->GetUnitServer();   // retail also gates the server + choose-place job
+	if ( !IsValid( pUS ) )
+		return;
+	if ( !IsValid( pAction ) || !IsValid( pLog ) || !IsValid( pChoosePlace ) )
 		return;
 	SPlaceWithAP place;
 	if ( pChoosePlace->GetPlaceForAction( pAction, &place ) )
 	{
 		int nMoveAP = pUnit->GetAP() - place.nUnitAP;
+		if ( nMoveAP < 0 ) nMoveAP = 0;   // @0x00432900 -- release clamps the move cost at 0 (never log negative spent AP)
 		*pLog << new CAILogSpendAP( pUnit, nMoveAP );
-		if ( !( place.place.pos.p == pUnit->GetPosition().p ) )   // dev SPathPlace::operator== (no ISamePlace)
-			*pLog << new CAILogPosition( pUnit, pUnit->GetPosition(), place.place.pos, place.place.GetPose() );
+		// @0x00432900: log the move ONLY when the chosen place differs from where the unit stands under the mask
+		// 0xc1feffff (tile + layer + POSE) -- not the dev's full SPathPlace::operator== (which also compared the
+		// direction/moving bits and over-logged). Pose = WALK when the unit wears a Panzerklein (retail IsInPK ==
+		// IsWearingPK), else RUN -- NOT the destination place's stored pose the dev used.
+		if ( !NAI::IsSamePlace( pUnit->GetPosition().p, place.place.pos.p, 0xc1feffff ) )
+		{
+			EPose wishPose = pUS->IsWearingPK() ? NAI::WALK : NAI::RUN;
+			*pLog << new CAILogPosition( pUnit, pUnit->GetPosition(), place.place.pos, wishPose );
+		}
 	}
 	pAction->Do( pLog );
 }
@@ -82,50 +95,197 @@ void CAICombatLogic::GenerateCommand()
 	pLog->Clear();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// Per-segment pipeline (state machine over prepareState): prepare place sources -> run the choose-place
-// job -> MakeDecision -> finish. @0x00432aa0
+// @0x00432aa0 -- the retail 5-stage/one-tick DoJob machine (switch on prepareState). Instead of pumping the
+// choose-place job inline, PS_ACTION queues it on the WORLD job manager (Add-before-WaitForJob) and yields;
+// the manager re-DoJob()s this logic across Segments until the chooser finishes, then PS_THINK decides.
+// Top guard is retail IsIdleJob() (@0x004331c0): a logic that is invalid, or has nothing queued while not in a
+// scripted sequence, does no work this tick.
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CAICombatLogic::DoJob()
 {
-	if ( IsJobFinished() )
+	if ( IsIdleJob() )
 		return;
 	switch ( prepareState )
 	{
-	case PS_FINDING_PLACES:
-		// (release: snapshot the unit's reachable moves) then advance
-		prepareState = PS_CHOOSING_PLACE;
+	case PS_INIT:
+		// sync the unit (retail Synchronize(1); the a5dll IAIUnit::Synchronize is no-arg), then advance
+		// while the logic object is still live (retail: a plain IsValid(this), NOT IsLogicValid)
+		GetUnit()->Synchronize();
+		if ( IsValid( this ) )
+			prepareState = PS_PLACESOURCE;
 		break;
-	case PS_CHOOSING_PLACE:
-		// prepare each place source's candidate places
-		for ( int i = 0; i < (int)placeSources.size(); ++i )
-			placeSources[i]->Prepare();
-		prepareState = PS_DECIDING;
+	case PS_PLACESOURCE:
+		// prepare ONE place source per tick (nPSToPrepare cursor); advance once all are prepared
+		if ( nPSToPrepare >= 0 && nPSToPrepare < (int)placeSources.size() )
+		{
+			placeSources[nPSToPrepare]->Prepare();
+			++nPSToPrepare;
+		}
+		if ( nPSToPrepare >= (int)placeSources.size() )
+			prepareState = PS_ACTION;
 		break;
-	case PS_DECIDING:
-		// run the choose-place job to completion (it picks the best place per action), then decide
+	case PS_ACTION:
+		// queue the choose-place sub-job on the world manager and wait for it. Add BEFORE WaitForJob:
+		// WaitForJob ASSERTs the expected job is already in `jobs` (aiJob.cpp:170-171).
 		if ( IsValid( pChoosePlace ) )
 		{
 			pChoosePlace->Reset();
-			while ( !pChoosePlace->IsJobFinished() )
-				pChoosePlace->DoJob();
+			IAIJobManager *pMgr = static_cast<NWorld::CWorld*>( GetWorld() )->GetAIJobManager();
+			pMgr->Add( pChoosePlace.GetPtr() );
+			pMgr->WaitForJob( (CAIJob*)this, pChoosePlace.GetPtr() );
 		}
+		prepareState = PS_THINK;
+		return;
+	case PS_THINK:
+		// the chooser has finished; decide, then the job is done this same tick
 		MakeDecision();
 		prepareState = PS_FINISHED;
-		CAIJob::Finish();
-		break;
+		// fallthrough -- retail sets prepareState=PS_FINISHED then finishes the job
 	default:
 		CAIJob::Finish();
 		break;
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CAICombatLogic::Think()           { prepareState = PS_FINDING_PLACES; bFinished = false; CAIJob::ReArm(); } // @0x00432c20 (release zeroes prepareState + the CAIJob finished-state so a reused logic re-runs)
+// @0x00432c20: unless skippable, restart the pipeline (PS_INIT) and SELF-Add this logic's CAIJob on the world
+// manager. The logic OWNS its Add now (the tactical commander no longer Adds it -> no double-Add). prepareState
+// = PS_INIT IS the stage reset (prepareState is the DoJob stage counter); ReArm clears the job-finished flag so
+// a reused logic re-runs. NOTE (retail-faithful): does NOT clear CAILogic::bFinished -- a self-ended logic stays
+// IsFinished() so the reaction layer swaps it (the dev's unconditional bFinished=false is dropped); attack
+// logics never Finish() so this is inert for them.
+void CAICombatLogic::Think()
+{
+	StopThinking();
+	if ( CanSkip() )
+		return;
+	if ( !IsLogicValid() )
+		return;
+	prepareState = PS_INIT;
+	CAIJob::ReArm();
+	static_cast<NWorld::CWorld*>( GetWorld() )->GetAIJobManager()->Add( (CAIJob*)this );
+}
 bool CAICombatLogic::IsThinking()      { return prepareState != PS_FINISHED; }                     // @0x00432720
-bool CAICombatLogic::IsNeedToThink()   { return IsValid( GetUnit() ) && GetUnit()->GetAP() > 0 && !bFinished; } // @0x00432f70
-void CAICombatLogic::StopThinking()    { prepareState = PS_FINISHED; }
-bool CAICombatLogic::IsFinished()      { return bFinished; }
-bool CAICombatLogic::IsEndOfTurn()     { return bFinished || ( IsValid( GetUnit() ) && GetUnit()->GetAP() <= 0 ); } // @0x00433010
-void CAICombatLogic::OnNewTurn()       { prepareState = PS_FINISHED; bFinished = false; }           // @0x00432820
+// @0x00432f70: think when the logic is live, idle (not executing / no pending command / not already thinking),
+// not skippable, AND either the world ticks in real time or a fresh turn-based segment arrived with changed AP.
+// (The world-executor real-time/segment probes are CTBSWorld::IsRealTime()/IsTurnBased() -- CWorld IS-A CTBSWorld.)
+bool CAICombatLogic::IsNeedToThink()
+{
+	if ( !IsLogicValid() )
+		return false;
+	NWorld::CWorld *pW = static_cast<NWorld::CWorld*>( GetWorld() );
+	bool bRealTime  = pW->IsRealTime();
+	bool bTurnBased = pW->IsTurnBased();
+	if ( CanSkip() || IsExecutingCommand() || HasCommandToExecute() || IsThinking() )
+		return false;
+	if ( bRealTime )
+		return true;
+	return bTurnBased && !HasSameAP();
+}
+// @0x00432cc0: pull both jobs off the world manager, drop queued commands + the log, snapshot the unit-server
+// AP (anti-cycling; the SAME source HasSameAP compares) and finish the prepare state.
+void CAICombatLogic::StopThinking()
+{
+	NWorld::IWorld *pWorld = GetWorld();
+	if ( !pWorld )
+		return;
+	IAIJobManager *pMgr = static_cast<NWorld::CWorld*>( pWorld )->GetAIJobManager();
+	pMgr->Remove( (CAIJob*)this );
+	pMgr->Remove( pChoosePlace.GetPtr() );
+	ClearCommands();
+	if ( IsValid( pLog ) )
+		pLog->Clear();
+	nPSToPrepare = 0;
+	NWorld::CUnitServer *pUS = GetUnitServer();
+	nUnitLastAP = IsValid( pUS ) ? pUS->GetAP() : 0;
+	prepareState = PS_FINISHED;
+}
+// @0x00432800: finished if the base logic finished OR the logic is no longer valid.
+bool CAICombatLogic::IsFinished()      { return CAILogic::IsFinished() || !IsLogicValid(); }
+// @0x004331c0 (CAIJob virtual): idle if the logic is invalid, OR the world is NOT running a scripted sequence
+// and there is nothing queued to execute. (The executor "idle probe" is CTBSWorld::IsSequence.)
+bool CAICombatLogic::IsIdleJob()
+{
+	if ( !IsLogicValid() )
+		return true;
+	NWorld::CWorld *pW = static_cast<NWorld::CWorld*>( GetWorld() );
+	if ( !pW->IsSequence() && !HasCommandToExecute() )
+		return false;
+	return true;
+}
+// @0x00433010: the unit's turn is over. Invalid / skippable / finished -> true; a server the world will not let
+// act -> true; executing -> false; outside a turn-based segment -> false; already thinking -> false; otherwise
+// the unit still has work (pending commands or fresh AP) unless a queued server command became un-actionable.
+bool CAICombatLogic::IsEndOfTurn()
+{
+	if ( !IsLogicValid() )
+		return true;
+	if ( CanSkip() )
+		return true;
+	if ( IsFinished() )
+		return true;
+	NWorld::CUnitServer *pUS = GetUnitServer();
+	if ( !IsValid( pUS ) )
+		return true;
+	NWorld::CWorld *pW = static_cast<NWorld::CWorld*>( GetWorld() );
+	if ( !pW->IsUnitActive( pUS ) )               // world vtbl+0x64: the TBS world still lets this unit act
+		return true;
+	if ( IsExecutingCommand() )
+		return false;
+	if ( !pW->IsTurnBased() )
+		return false;
+	if ( IsThinking() )
+		return false;
+	if ( ( HasCommandToExecute() || !HasSameAP() ) &&
+	     ( !pUS->HasCommand() || pUS->HasEnoughAP() ) )   // person +0x60 == CUnitServer::HasEnoughAP
+		return false;
+	return true;
+}
+// @0x00432820 -- the CEventOnNewPlayerTurn handler (registered via regOnNewTurn; retail's CEventOnPassControl
+// handler). On each new player turn: StopThinking(); and when control is OUR player's, forget the AP snapshot so
+// the fresh turn re-thinks. Fires ALONGSIDE CAIAfterCombatLogic's own OnNewTurn on the single event -- disjoint
+// state (base here: prepareState/nUnitLastAP via StopThinking; derived: bAPUpdated). Replaces the fabricated
+// no-arg override (retail's slot-12 OnNewTurn() is empty; the dropped prepareState=PS_FINISHED is subsumed by
+// StopThinking()).
+void CAICombatLogic::OnNewTurn( const NWorld::CEventOnNewPlayerTurn &event )
+{
+	StopThinking();
+	NWorld::CUnitServer *pUS = GetUnitServer();
+	if ( IsValid( pUS ) && pUS->GetPlayer() == event.pPlayer.GetPtr() )
+		nUnitLastAP = 0;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// Stage-0 parity scaffolding (BUILD-SAFE, UNCALLED). Every symbol confirmed present; no behaviour
+// change (no call site rewired). See the header banner + the world-job-manager blueprint.
+bool CAICombatLogic::IsLogicValid()          // @0x00432780
+{
+	IAIUnit *pU = GetUnit();
+	if ( !IsValid( pU ) ) return false;
+	NWorld::CUnitServer *pUS = GetUnitServer();
+	if ( !IsValid( pUS ) ) return false;
+	NWorld::IWorld *pW = GetWorld();
+	if ( !IsValid( pW ) ) return false;
+	return pUS->CanFight();                  // server vtbl+0x44
+}
+bool CAICombatLogic::IsExecutingCommand()    // @0x00432ea0
+{
+	if ( !IsLogicValid() ) return false;
+	NWorld::CUnitServer *pUS = GetUnitServer();
+	return IsValid( pUS ) && pUS->IsPerformingAction();   // person (server+0x14c) vtbl+0x20
+}
+bool CAICombatLogic::HasCommandToExecute()   // @0x00432da0
+{
+	if ( !IsLogicValid() ) return false;
+	NWorld::CUnitServer *pUS = GetUnitServer();
+	if ( !IsValid( pUS ) ) return false;
+	if ( pUS->HasCommand() ) return true;    // pCurrentCmd alive @0x00433700
+	if ( HasCommands() ) return true;        // queued logic command
+	return !pLog->IsEmpty();                 // pending log records
+}
+bool CAICombatLogic::HasSameAP()             // @0x00432730
+{
+	NWorld::CUnitServer *pUS = GetUnitServer();            // retail reads GetUnit()->GetUnitServer()'s AP; MUST
+	return IsValid( pUS ) && pUS->GetAP() == nUnitLastAP;  // match StopThinking's snapshot source (was pU->GetAP)
+}
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 static CUnitArea* GetUnitArea( IAIUnit * ) { return 0; /* build-settle: derive from unit mission */ }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -262,13 +422,17 @@ CAIDefenceLogic::CAIDefenceLogic( IAIUnit *pUnit, const SPathPlace &_attackPlace
 	pLaunchRocket = AddAction( new CAILaunchRocketAction( u ), currentPlaceSource );
 	pReload       = AddAction( new CAIReloadAction( u ),       currentPlaceSource );
 }
-bool CAIDefenceLogic::CanSkip() const { IAIUnit *u = GetUnit(); return !IsValid( u ) || u->GetAP() <= 0; }
+// vtable slot 15 (@0x008b26e0) -> COMDAT-folded `return false` @0x163980: the defence logic NEVER voluntarily
+// skips its turn -- the defence reaction (CAIDefenceReaction::Update) owns turn flow, identical to
+// CAIAfterCombatLogic::CanSkip. Was the dev predecessor `!IsValid(u) || u->GetAP() <= 0`.
+bool CAIDefenceLogic::CanSkip() const { return false; }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // Defence decision (shoot/rocket/grenade/reload, no move fallback -> Finish). @0x00439810.
 // FAITHFUL rule set, recovered by static stack-trace of the release MakeDecision (TraceDecision.py ->
 // reconstruction/exports/decision_traced.txt). Rule order hi->lo = shoot, rocket, grenade, reload; each
-// rule's required sign is CSign(bCanDo); shoot adds a regular CSign(bKillTargetCertainly==false) and
-// grenade a regular CSign(bBadGroupHealth==true). Note this logic is not yet on the live path
+// rule's required sign is CSign(bCanDo); SHOOT is plain (required-only) and the ThrowGrenade rule carries
+// BOTH regular votes -- CSign(shoot.bKillTargetCertainly==false) (overkill-defer, moved off Shoot) +
+// CSign(grenade.bBadGroupHealth==true). Note this logic is not yet on the live path
 // (aiTacticalCommander::ChooseLogic only builds CAIAttackLogic), so this is fidelity-only for now.
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CAIDefenceLogic::MakeDecision()
@@ -278,17 +442,23 @@ void CAIDefenceLogic::MakeDecision()
 	CAILaunchRocketAction::SInfo rocket; GetInfo( pLaunchRocket.GetPtr(), &rocket );
 	CAIReloadAction::SInfo reload; GetInfo( pReload.GetPtr(), &reload );
 	CPtr< CDecision<CAIAction*> > pDecision = new CDecision<CAIAction*>;
-	// shoot (highest): only fires when it would NOT massively overkill (bKillTargetCertainly==false); an
-	// overkill target defers to rocket/grenade. required=[bCanDo], regular=[!bKillTargetCertainly].
-	{ vector< CPtr<ISign> > req, reg; req.push_back( new CSign<bool>( &shoot.bCanDo, true, true, true ) );    reg.push_back( new CSign<bool>( &shoot.bKillTargetCertainly, false, false, false ) ); pDecision->AddRule( new CRule<CAIAction*>( pShoot.GetPtr(), req, reg ) ); }
+	// @0x439810 -- rule order shoot > rocket > grenade > reload, each required = CSign(bCanDo). SHOOT is PLAIN
+	// (required-only). The ThrowGrenade rule carries BOTH regular votes (overkill-defer
+	// CSign(shoot.bKillTargetCertainly,F,F,F) + bad-group-health CSign(grenade.bBadGroupHealth,T,T,T)) -- the
+	// same release pattern as the attack/guard/retreat grenade rules in this file (was the predecessor split:
+	// !bKillTargetCertainly on Shoot, bBadGroupHealth alone on Grenade).
+	{ vector< CPtr<ISign> > req, reg; req.push_back( new CSign<bool>( &shoot.bCanDo, true, true, true ) );    pDecision->AddRule( new CRule<CAIAction*>( pShoot.GetPtr(), req, reg ) ); }
 	{ vector< CPtr<ISign> > req, reg; req.push_back( new CSign<bool>( &rocket.bCanDo, true, true, true ) );   pDecision->AddRule( new CRule<CAIAction*>( pLaunchRocket.GetPtr(), req, reg ) ); }
-	{ vector< CPtr<ISign> > req, reg; req.push_back( new CSign<bool>( &grenade.bCanDo, true, true, true ) );  reg.push_back( new CSign<bool>( &grenade.bBadGroupHealth, true, true, true ) ); pDecision->AddRule( new CRule<CAIAction*>( pThrowGrenade.GetPtr(), req, reg ) ); }
+	{ vector< CPtr<ISign> > req, reg; req.push_back( new CSign<bool>( &grenade.bCanDo, true, true, true ) );
+	  reg.push_back( new CSign<bool>( &shoot.bKillTargetCertainly, false, false, false ) );   // overkill-defer (moved off Shoot)
+	  reg.push_back( new CSign<bool>( &grenade.bBadGroupHealth, true, true, true ) );          // save grenades for wounded groups
+	  pDecision->AddRule( new CRule<CAIAction*>( pThrowGrenade.GetPtr(), req, reg ) ); }
 	{ vector< CPtr<ISign> > req, reg; req.push_back( new CSign<bool>( &reload.bCanDo, true, true, true ) );   pDecision->AddRule( new CRule<CAIAction*>( pReload.GetPtr(), req, reg ) ); }
 	CAIAction *pBest = pDecision->GetBestAction();
-	if ( pBest )
+	if ( IsValid( pBest ) )
 		DoAction( pBest );
 	else
-		CAIJob::Finish();   // defence holds position
+		CAILogic::Finish();   // @0x439810 -- no live winner ends the whole LOGIC (CAILogic::Finish, NOT CAIJob::Finish)
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // operator& for the two instantiated logics. Parent-only like Guard/Retreat/AfterCombat: the action +
@@ -296,7 +466,22 @@ void CAIDefenceLogic::MakeDecision()
 // Defence's commanded place) need persisting. build-settle: if save/load of in-combat logics must
 // preserve per-action SActionInfo caches, serialize the CObj members explicitly (tags 3..N).
 int CAIAttackLogic::operator&( CStructureSaver &f )  { f.Add( 2, (CAICombatLogic*)this ); return 0; }
-int CAIDefenceLogic::operator&( CStructureSaver &f ) { f.Add( 2, (CAICombatLogic*)this ); f.Add( 3, &attackPlace ); return 0; }
+// @0x43a1a0 -- SAVE-FORMAT (converging, mirrors CAIAfterCombatLogic::operator&): the release serializes the
+// FULL repertoire, NOT parent-only. tags: base(2), currentPlaceSource(3), pShoot(4), pThrowGrenade(5),
+// pLaunchRocket(6), pReload(7), attackPlace(8, 4-byte DataChunk). The CObj members are the SAME objects as in
+// the base's pChoosePlace.actions / placeSources, so the framework writes them by ref-id. Was parent-only
+// base(2)+attackPlace(3).
+int CAIDefenceLogic::operator&( CStructureSaver &f )
+{
+	f.Add( 2, (CAICombatLogic*)this );
+	f.Add( 3, &currentPlaceSource );
+	f.Add( 4, &pShoot );
+	f.Add( 5, &pThrowGrenade );
+	f.Add( 6, &pLaunchRocket );
+	f.Add( 7, &pReload );
+	f.Add( 8, &attackPlace );
+	return 0;
+}
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // Guard / Retreat / AfterCombat - ctors + MakeDecisions structural (same engine; decisions.c@0x0044ed00/
 // 0x00494a10/0x00414440 for the rule sets). Build-settle.
@@ -430,7 +615,25 @@ CAIRetreatLogic::CAIRetreatLogic( IAIUnit *pUnit, const SPathPlace &_pos ):
 	pMelee        = AddAction( new CAIMeleeAction( u ),        retreatPlaceSource );
 	pMove         = AddAction( new CAIMoveToEnemyAction( u ),  retreatPlaceSource );
 }
-int  CAIRetreatLogic::operator&( CStructureSaver &f ) { f.Add( 2, (CAICombatLogic*)this ); f.Add( 3, &pos ); return 0; }
+// @0x495910 -- SAVE-FORMAT (converging, mirrors CAIAfterCombatLogic::operator&): the release serializes the
+// FULL state (NOT base+pos only like the predecessor): base(2) + pos(3, 4-byte DataChunk) + retreatPlaceSource(4)
+// + pShoot(5) + pThrowGrenade(6) + pLaunchRocket(7) + pReload(8) + pThrowKnife(9) + pMelee(10) + pMove(11). The
+// CObj members are the SAME objects as in the base's pChoosePlace.actions / placeSources, so the framework
+// writes them by ref-id; serializing them here preserves the member pointers.
+int  CAIRetreatLogic::operator&( CStructureSaver &f )
+{
+	f.Add(  2, (CAICombatLogic*)this );
+	f.Add(  3, &pos );
+	f.Add(  4, &retreatPlaceSource );
+	f.Add(  5, &pShoot );
+	f.Add(  6, &pThrowGrenade );
+	f.Add(  7, &pLaunchRocket );
+	f.Add(  8, &pReload );
+	f.Add(  9, &pThrowKnife );
+	f.Add( 10, &pMelee );
+	f.Add( 11, &pMove );
+	return 0;
+}
 // @0x00494a10 - ARRIVAL-GATED: finishes once the unit's control point is within 0.5 of the retreat
 // place's (release ends ONLY by arriving -- no finish-on-no-best). Otherwise the attack rule set over
 // the path-to-retreat places (shoot > rocket > grenade > knife > reload > melee > move), but the release
@@ -566,7 +769,10 @@ IAILogic* CreateAIRetreatLogic( IAIUnit *pUnit, const SPathPlace &pos )         
 }
 IAILogic* CreateAIGuardLogic( IAIUnit *pUnit, CUnitArea *pArea )                          // @0x004506f0
 {
-	return IsValid( pUnit ) ? new CAIGuardLogic( pUnit, pArea ) : 0;
+	// @0x506f0 -- gate BOTH the unit AND the area (each: non-null + not-destroyed). The release
+	// returns 0 unless the guarded area is live; the predecessor checked only the unit (disasm
+	// @0x506f0: in_EDX != 0 && (*(uint*)&pArea->nObjData & 0x80000000) == 0).
+	return ( IsValid( pUnit ) && IsValid( pArea ) ) ? new CAIGuardLogic( pUnit, pArea ) : 0;
 }
 bool IsAttackLogic( IAILogic *pLogic )   { return CDynamicCast<CAIAttackLogic>( pLogic ) != 0; }   // @0x00420e70
 bool IsDefenceLogic( IAILogic *pLogic )  { return CDynamicCast<CAIDefenceLogic>( pLogic ) != 0; }  // @0x00439480

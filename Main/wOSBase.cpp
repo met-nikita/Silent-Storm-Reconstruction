@@ -103,6 +103,30 @@ bool CObjectServerBase::CheckStability()
 	return true;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail @0x384100 -- play the CURRENT destroy stage's container-model destroy sound (CContainerModel::
+// pDestroySound, +0x7c) at the object's position. Throttled: silent when the PREVIOUS stage change was
+// less than 100 ticks ago (retail |now - tStageChange| > 99), so a rapid multi-stage cascade doesn't stack
+// booms; callers re-stamp tStageChange AFTER calling this (cf. SetDestroyStage / ProcessAttack). Retail
+// quirk kept faithfully: the loop walks the DB child chain but always reads THIS object's
+// pModels[GetDestroyStage()] -- an N-child chain plays the same sound N times.
+void CObjectServerBase::MakeDestroySound()
+{
+	int nSinceStageChange = int( GetWorld()->GetAimTime()->GetValue() - tStageChange );
+	if ( abs( nSinceStageChange ) <= 99 )
+		return;
+	for ( NDb::CObject *pO = pDbObject; pO; pO = pO->pChild )
+	{
+		NDb::CContainerModel *pCont = pDbObject->pModels[ pRPG->GetDestroyStage() ];
+		if ( pCont && IsValid( pCont->pDestroySound ) )
+		{
+			static SRand rnd;
+			NDb::CSoundVariant *pSVar = pCont->pDestroySound->GetSound( &rnd );
+			if ( IsValid( pSVar ) && IsValid( pSVar->pSound ) )
+				pWorld->MakeSound( position.ptPos, pSVar->pSound );
+		}
+	}
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 void CObjectServerBase::SetDestroyStage( int nStage )
 {
 	// retail @0x384d40: the side effects run ONLY when the destroy stage actually changes, and tStageChange is
@@ -110,13 +134,24 @@ void CObjectServerBase::SetDestroyStage( int nStage )
 	// throttle; the aim clock is constant within one physics step, so without the stamp a breakable pane spanning
 	// many triangles would re-bump on every contact and jump straight to its max stage in a single frame. Stamp
 	// with GetWorld()->GetAimTime()->GetValue() -- the SAME clock GetTimeSinceLastStageChange compares against
-	// (cf. Kill / ProcessAttack). (Faithful subset: retail also MakeDestroySound + bumps a CActionCounter here;
-	// those are omitted -- the pane currently breaks silently. See commit note / [PENDING runtime validation].)
+	// (cf. Kill / ProcessAttack). Retail also plays the new stage's destroy sound (MakeDestroySound @0x384100,
+	// BEFORE the re-stamp so the throttle compares against the PREVIOUS change) and bumps the world's action
+	// counter -- this is what makes a SCRIPTED stage change audible (e.g. the GFirst bank-safe blast, zone
+	// script 95: ObjectSetDestroyStage(safe,1) -- the stage-1 effect was visible but the boom never played).
 	int nPrevStage = pRPG->GetDestroyStage();
 	pRPG->SetDestroyStage( nStage );
 	if ( nPrevStage != pRPG->GetDestroyStage() )
 	{
+		MakeDestroySound();
 		tStageChange = GetWorld()->GetAimTime()->GetValue();
+		// retail @0x384d40 (disasm-verified): the bumped action counter is held in a SCOPED AddRef/Release
+		// pair (nObjData+1 ... CObjectBase::ReleaseObj on function exit) -- the lasting effect is only the
+		// 10-segment action LAG; an otherwise-unowned counter DIES at scope end. The previous bare call
+		// leaked an unowned CActionCounter (refcount never reaches zero) that pinned the world's weak
+		// pActiveCount forever -> IsAction() stuck true with no performing unit -> the TBS pump never
+		// fetched another command (the GFirst first-enemy-turn hang; the safe's scripted
+		// ObjectSetDestroyStage runs exactly this line).
+		CObj<CActionCounter> pStageAction = GetWorld()->GetActiveCounter( 10 );
 		bindGlobal.Update();
 	}
 }
@@ -173,6 +208,17 @@ void CObjectServerBase::UpdateLight()
 	bindGlobal.Update();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail BeAddedToVisitiors [sic] (release-added; oracle src/s2_nscript_scriptobject.h -- the object-
+// pocket pair calls it with false on pocketing and true on restore): (dis)connect the object's global
+// vis binding, so a pocketed object stops being visited by the render/AI/sound sync consumers.
+void CObjectServerBase::BeAddedToVisitiors( bool bAdd )
+{
+	if ( bAdd )
+		bindGlobal.Link( pWorld->GetActive(), this );
+	else
+		bindGlobal.Unlink();
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 void CObjectServerBase::Kill( const CVec3 &ptDir )
 {
 	//pCurrentWorld->AddActionLocator( new CActionLocator( CActionLocator::TYPE_DIE, this, position.ptPos ), 1000 );
@@ -213,19 +259,9 @@ int CObjectServerBase::ProcessAttack( int nUserID, NRPG::CAttackPortion *pAttack
 	int nRes = pAtk->ProcessAttack( nUserID, pAttack, pArmor );
 	if ( nPrevStage != pRPG->GetDestroyStage() )
 	{
-		for ( NDb::CObject *pO = pDbObject; pO; pO = pO->pChild )
-		{
-			NDb::CContainerModel *pCont = pDbObject->pModels[pRPG->GetDestroyStage()];
-			if ( pCont && IsValid( pCont->pDestroySound ) )
-			{
-				static SRand rnd;
-				NDb::CSoundVariant *pSVar = pCont->pDestroySound->GetSound( &rnd );
-				if ( IsValid( pSVar ) && IsValid( pSVar->pSound ) )
-				{
-					pWorld->MakeSound( position.ptPos, pSVar->pSound );
-				}
-			}
-		}
+		// retail @0x785xxx stage-change block: MakeDestroySound @0x384100 (the throttled helper -- a burst of
+		// hits landing within 100 ticks plays ONE boom), then re-stamp the clock + counter + vis re-sync.
+		MakeDestroySound();
 		/*
 		if ( pRPG->IsDead() )
 			Kill( ptDir );
@@ -238,7 +274,9 @@ int CObjectServerBase::ProcessAttack( int nUserID, NRPG::CAttackPortion *pAttack
 		}
 		*/
 		tStageChange = pCurrentWorld->GetAimTime()->GetValue();
-		pCurrentWorld->GetActiveCounter( 10 );
+		// retail stage-change block: scoped counter hold, same as SetDestroyStage @0x384d40 -- see the
+		// comment there (a bare GetActiveCounter leaks an unowned counter and pins IsAction() forever).
+		CObj<CActionCounter> pStageAction = pCurrentWorld->GetActiveCounter( 10 );
 		bindGlobal.Update();
 	}
 	// (A) retail @0x785242 -- detonate a grenade already ARMED on this object. NOTE this is deliberately

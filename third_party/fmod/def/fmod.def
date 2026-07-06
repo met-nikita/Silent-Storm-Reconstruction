@@ -37,6 +37,8 @@ EXPORTS
     _FSOUND_IsPlaying@4
     _FSOUND_SetVolume@8
     _FSOUND_SetVolumeAbsolute@8
+    _FSOUND_SetCurrentPosition@8
+    _FSOUND_GetFrequency@4
     _FSOUND_GetVolume@4
     _FSOUND_SetPaused@8
     _FSOUND_SetPan@8
@@ -51,5 +53,6 @@ EXPORTS
     _FSOUND_Stream_Stop@4
     _FSOUND_Stream_SetTime@8
     _FSOUND_Stream_GetTime@4
+    _FSOUND_Stream_GetLengthMs@4
     _FSOUND_Stream_SetPosition@8
     _FSOUND_Stream_SetSyncCallback@12

@@ -180,10 +180,12 @@ void CTopBar::Draw( const STime &sTime, NGScene::I2DGameView *pView )
 		CPtr<NDb::CString> pString;
 		if ( pMission->GetWorld()->IsInterrupt() )
 			pString = NDb::GetString( 904 );
-		else if ( ( eMode == ENEMY_TURN ) || ( eMode == ALLY_TURN ) )
-			pString = NDb::GetString( 905 );
+		else if ( eMode == ENEMY_TURN )
+			pString = NDb::GetString( 905 );	// 'Enemy Turn'
+		else if ( eMode == ALLY_TURN )
+			pString = NDb::GetString( 19328 );	// retail @0x24d010 (disasm 0x64d274): the ally turn has its OWN v1.x string 'Allies Turn' -- the Jan03 code reused 905
 		else if ( eMode == PLAYER_TURN )
-			pString = NDb::GetString( 903 );
+			pString = NDb::GetString( 903 );	// 'Player's Turn'
 
 		if ( IsValid( pString ) )
 		{

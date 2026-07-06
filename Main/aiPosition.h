@@ -22,6 +22,19 @@ enum ECheckMove
 	CM_INACTIVE,
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// @PDB NAI::EPassable (gen/include/s2_types.h:2367) -- the granular per-place passability verdict that
+// retail's IPathNetwork::GetPassability( const SPathPlace& ) returns (path-net vtbl+0x3c). The dev
+// engine collapsed this to bool IsPassable; NWorld::CDumbUnitServer::CheckPassable maps it 1:1 to
+// ECanMoveRes (AIP_LOCKED->CMR_LOCKED, AIP_DOOR->CMR_DOOR, ...). Ordinal-sensitive (a jump table).
+enum EPassable
+{
+	AIP_YES          = 0,
+	AIP_NOT_PASSABLE = 1,
+	AIP_CANNOT_LAY   = 2,
+	AIP_LOCKED       = 3,
+	AIP_DOOR         = 4,
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
 enum ETransitionType
 {
 	TT_NO_WAY,
@@ -34,6 +47,8 @@ enum ETransitionType
 	TT_CLIMB_3,
 	TT_CLIMB_4,
 	TT_JUMP,
+	TT_JUMP_BACK,	// @PDB ordinal 10 (retail) -- a downward jump where the unit FACES away from the move
+					// direction; shifts TT_POSE..TT_LADDER_MOVE to retail ordinals 11..16 (transient, not serialized).
 	TT_POSE,
 	TT_INTERGRID_SAME,
 	TT_INTERGRID,
@@ -135,6 +150,14 @@ struct SPathPlaceHash
 {
 	int operator()( const SPathPlace &a ) const { return a.GetData(); }
 };
+// @0x00473da0 -- masked place equality: compare the packed SPathPlace bits under nMask. The SHARED 3-arg form
+// the release uses everywhere; the a5dll previously had only file-local 2-arg copies (UnitTracker.cpp:90,
+// aiDefenceReaction.cpp). CAICombatLogic::DoAction passes 0xc1feffff = tile+layer+POSE (0x1feffff | the pose
+// bits 30-31); most other callers use 0x1feffff (tile+layer only). Pass the mask explicitly (retail has no default).
+inline bool IsSamePlace( const SPathPlace &a, const SPathPlace &b, unsigned nMask )
+{
+	return ( ( a.GetData() ^ b.GetData() ) & (int)nMask ) == 0;
+}
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 typedef CTPoint<int> SPoint;
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -332,6 +355,10 @@ public:
 	virtual void ChangeDynamicLocks( CObjectBase *pUnit, const vector<SPathPlace> &points ) = 0;
 	virtual bool IsValidDestination( const SPathPlace &p ) = 0;
 	virtual bool IsPassable( const SPathPlace &p ) = 0;
+	// @0x42e30 (retail path-net vtbl+0x3c): the granular per-place verdict. IsPassable( p ) is exactly
+	// ( GetPassability( p ) == AIP_YES ). Added AFTER IsPassable rather than at the retail slot index --
+	// functional rebuild, no ABI/vtable-offset constraint (CPathNetwork is the only IPathNetwork impl).
+	virtual EPassable GetPassability( const SPathPlace &p ) = 0;
 	virtual bool IsNativePassable( const SPathPlace &p ) = 0;
 	virtual void GetNearPlaces( const SSphere &s, vector<SPathPlace> *pRes, bool bTakeAll = false ) = 0;
 	//virtual void ForceLayersRecalc( const SSphere &s ) = 0;

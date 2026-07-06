@@ -212,6 +212,8 @@ class CStream: public CObjectBase
 	float fFadeVolume;
 	float fFadeSpeed;
 	bool bFadeOut;
+	bool bFadeIn;       // retail CStream+0x30: volume ramping up (SetSwitchStream / PlayStream fade-in)
+	float fFadeInTime;  // retail CStream+0x34: fade-in length sec (retail Music data has FadeIn=0, so normally inert)
 	bool bLoop;
 	bool bSwitch;
 	CPtr<CStream> pSwitch;
@@ -221,28 +223,49 @@ public:
 	int nChannel;
 	bool bReset;
 
-	CStream( string szFile = "", bool _bLoop = false ): pStream(0), bFadeOut(false), fFadeSpeed(0), bReset(false), bLoop(_bLoop), szFileName(szFile), bSwitch(false), bClose(false) {}
+	CStream( string szFile = "", bool _bLoop = false ): pStream(0), bFadeOut(false), bFadeIn(false), fFadeInTime(0), fFadeVolume(0), fFadeSpeed(0), bReset(false), bLoop(_bLoop), szFileName(szFile), bSwitch(false), bClose(false), nChannel(-1) {}
 	~CStream() { if ( pStream ) FSOUND_Stream_Close( pStream ); }
 
 	string GetFileName() const { return szFileName; }
 	bool IsLooped() const { return bLoop; }
-	void PlayStream( const char *pszFileName, bool _bLoop )
+	// retail CStream::PlayStream @0x3dce00: (fileName, bLoop, startMs, fadeInTime)
+	void PlayStream( const char *pszFileName, bool _bLoop, int nStartMs = 0, float _fFadeInTime = 0 )
 	{
 		szFileName = pszFileName;
+		fFadeInTime = _fFadeInTime;
 		bLoop = _bLoop;
 		int nFlags = FSOUND_2D;
 		nFlags = bLoop ? nFlags | FSOUND_LOOP_NORMAL : nFlags;
 		pStream = FSOUND_Stream_Open( pszFileName, nFlags, 0, 0 );
 		ASSERT( pStream );
-		bool bRet;
 		if ( pStream )
 		{
-			bRet = FSOUND_Stream_SetSyncCallback( pStream, &SynchCallback, (int)this );
+			// retail: a start offset past the clip end aborts playback entirely (the unplayed
+			// stream is erased by the next NFMSound::Update)
+			if ( FSOUND_Stream_GetLengthMs( pStream ) < nStartMs )
+				return;
+			FSOUND_Stream_SetSyncCallback( pStream, &SynchCallback, (int)this );
 			nChannel = FSOUND_Stream_Play( 0, pStream );
 			ASSERT( nChannel != -1 );
+			if ( nStartMs > 0 )
+				FSOUND_Stream_SetTime( pStream, nStartMs );
 			FSOUND_SetPan( nChannel, FSOUND_STEREOPAN );
 		}
-		SetVolume( nMusicVolume );
+		// retail volume/fade priming: an explicit fade-in starts silent and ramps in Update; a
+		// pending SetSwitchStream fade-in (bFadeIn already set) also starts at its ramp volume
+		int nVolume;
+		if ( _fFadeInTime <= 0 )
+			nVolume = bFadeIn ? (int)fFadeVolume : nMusicVolume;
+		else
+		{
+			bFadeIn = true;
+			fFadeVolume = 0;
+			fFadeSpeed = (float)nMusicVolume / _fFadeInTime;
+			nVolume = 0;
+		}
+		SetVolume( nVolume );
+		if ( FP_EPSILON < fFadeInTime )
+			fFadeSpeed = (float)nMusicVolume / fFadeInTime;   // retail's redundant recompute (tracks volume changes)
 	}
 	void FadeOut( float dSec )
 	{
@@ -256,21 +279,47 @@ public:
 	{
 		bFadeOut = false;
 		SetVolume( nMusicVolume );
+		if ( FP_EPSILON < fFadeInTime )
+			fFadeSpeed = (float)nMusicVolume / fFadeInTime;   // retail @0x3db720
 	}
+	// retail CStream::Update @0x3dcae0: fade-out ramp (stopping at silence), else fade-in ramp
 	void Update( double dInterval )
 	{
 		if ( bFadeOut )
 		{
 			fFadeVolume -= fFadeSpeed * dInterval;
 			SetVolume( fFadeVolume );
+			if ( FP_EPSILON < fFadeInTime )
+				fFadeSpeed = (float)nMusicVolume / fFadeInTime;
 			if ( fFadeVolume < FP_EPSILON )
+			{
 				FSOUND_Stream_Stop( pStream );
+				FSOUND_StopSound( nChannel );
+			}
+		}
+		else if ( bFadeIn )
+		{
+			fFadeVolume += fFadeSpeed * dInterval;
+			if ( nMusicVolume <= fFadeVolume )
+				bFadeIn = false;
+			int nVolume = (int)fFadeVolume;
+			if ( nVolume >= nMusicVolume )
+				nVolume = nMusicVolume;
+			SetVolume( nVolume );
+			if ( FP_EPSILON < fFadeInTime )
+				fFadeSpeed = (float)nMusicVolume / fFadeInTime;
 		}
 		if ( bReset )
 		{
 			FSOUND_Stream_SetTime( pStream, 104 );
 			bReset = false;
 		}
+	}
+	unsigned long GetTime()
+	{
+		if ( !pStream )
+			return 0xFFFFFFFF;
+		return FSOUND_Stream_GetTime( pStream );
 	}
 	bool Reset()
 	{
@@ -296,12 +345,20 @@ public:
 	{
 		return (FSOUND_IsPlaying( nChannel ) || bSwitch) && !bClose;
 	}
-	void SetSwitchStream( CStream *pNew )
+	// retail CStream::SetSwitchStream @0x3dd190: queue the replacement; a positive switch time
+	// primes the NEW stream's fade-in ramp (the retail "crossfade" -- the old side is closed hard)
+	void SetSwitchStream( CStream *pNew, float fFadeInSec = 0 )
 	{
 		bSwitch = true;
 		pSwitch = pNew;
 		pNew->bSwitch = true;
-		Switch(); // CRAP
+		if ( fFadeInSec > 0 )
+		{
+			pNew->fFadeVolume = 0;
+			pNew->bFadeIn = true;
+			pNew->fFadeSpeed = (float)nMusicVolume / fFadeInSec;
+		}
+		Switch(); // CRAP (retail @0x3dd190 does the same immediate switch)
 	}
 	void Switch()
 	{
@@ -309,7 +366,9 @@ public:
 			return;
 		if ( IsValid( pSwitch ) )
 		{
-			pSwitch->PlayStream( pSwitch->GetFileName().c_str(), pSwitch->IsLooped() );
+			// retail Switch @0x3dcf60: target plays its own file from 0 with fadeInTime=0 -- a
+			// fade-in primed by SetSwitchStream survives (PlayStream starts it at ramp volume)
+			pSwitch->PlayStream( pSwitch->GetFileName().c_str(), pSwitch->IsLooped(), 0, 0 );
 			pSwitch->bSwitch = false;
 		}
 		bClose = true;
@@ -567,7 +626,22 @@ CSound3D *Play3DSound( const SPlayParams &params )
 	{
 		FSOUND_3D_SetAttributes( nChannel, &vFPos.x, 0 );
 		FSOUND_SetVolume( nChannel, params.bFadeIn ? 0 : params.nVolume );
-		FSOUND_SetPaused( nChannel, false );
+		// retail tStartTime semantics: seek nStartMs into the sample; a start past the sample end
+		// means the sound already finished in world time -- keep it silent (stop the channel).
+		if ( params.nStartMs > 0 && !bLoop )
+		{
+			int nFreq = FSOUND_GetFrequency( nChannel );
+			unsigned int nOffsetSamples = (unsigned int)( (__int64)nFreq * params.nStartMs / 1000 );
+			if ( nOffsetSamples >= FSOUND_Sample_GetLength( *params.pSample ) )
+			{
+				FSOUND_StopSound( nChannel );
+				nChannel = -1;
+			}
+			else
+				FSOUND_SetCurrentPosition( nChannel, nOffsetSamples );
+		}
+		if ( nChannel != -1 )
+			FSOUND_SetPaused( nChannel, false );
 	}
 	CSound3D *pSound = new CSound3D( params.pSample, params.position, vFPos, params.nVolume, params.nLoops );
 	pSound->SetFadeOut( params.bFadeIn, params.bFadeOut, params.nFadeSamples );
@@ -577,27 +651,37 @@ CSound3D *Play3DSound( const SPlayParams &params )
 	return pSound;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CStream* PlayStream( const char *pszName, bool bLoop )
+// retail NFMSound::PlayStream @0x3db990: gates on FMOD init, a non-zero music volume and a name;
+// bUseExisting adopts an already-open stream of the SAME file (cross-scene music continuity).
+CStream* PlayStream( const char *pszName, bool bUseExisting, int nStartMs, bool bLoop, float fFadeInSec )
 {
-	if ( !bIsFMODInitialized )
+	if ( !bIsFMODInitialized || nMusicVolume == 0 || !pszName )
 		return 0;
+	if ( bUseExisting )
+	{
+		for ( CStreamList::iterator i = streams.begin(); i != streams.end(); ++i )
+			if ( IsValid( *i ) && (*i)->GetFileName() == pszName )
+				return *i;
+	}
 	CStream *pRes = new CStream;
-	pRes->PlayStream( pszName, bLoop );
+	pRes->PlayStream( pszName, bLoop, nStartMs, fFadeInSec );
 	streams.push_back( pRes );
 	return pRes;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CStream* SwitchStream( CStream *pOldStream, const char *pszNameNewStream, bool bLoop )
+// retail NFMSound::SwitchStream @0x3dbb50: replace pOldStream with a new stream of the given file;
+// an invalid old stream falls through to PlayStream (WITH the adopt-existing search, per retail).
+CStream* SwitchStream( CStream *pOldStream, const char *pszNameNewStream, bool bLoop, float fFadeInSec )
 {
 	if ( !IsValid( pOldStream ) )
-		return PlayStream( pszNameNewStream, bLoop );
+		return PlayStream( pszNameNewStream, true, 0, bLoop, fFadeInSec );
 	for ( CStreamList::iterator i = streams.begin(); i != streams.end(); ++i )
 	{
 		if ( IsValid( *i ) && (*i).GetPtr() == pOldStream )
 		{
 			CStream *pNew = new CStream( pszNameNewStream, bLoop );
 			streams.push_back( pNew );
-			pOldStream->SetSwitchStream( pNew );
+			pOldStream->SetSwitchStream( pNew, fFadeInSec );
 			return pNew;
 		}
 	}
@@ -630,6 +714,18 @@ bool IsPlaying( CStream *pStream )
 			return pStream->IsPlaying();
 	}
 	return false;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail: current playback position ms of a live stream (NSound::CMusic captures it at save time
+// so a load can resume mid-track); 0xFFFFFFFF when the stream is gone.
+unsigned long GetStreamTime( CStream *pStream )
+{
+	for ( CStreamList::iterator i = streams.begin(); i != streams.end(); ++i )
+	{
+		if ( IsValid( *i ) && (*i).GetPtr() == pStream )
+			return pStream->GetTime();
+	}
+	return 0xFFFFFFFF;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void SetSFXMasterVolume( int nSFX )

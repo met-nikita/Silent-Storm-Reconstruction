@@ -260,9 +260,15 @@ void CWindow::PlaySound( NDb::CSound *pSound )
 	if ( !IsValid ( pSound ) )
 		return;
 
-	NSound::ISoundScene *pSoundScene = GetInterface()->GetSound();
-	if ( IsValid( pSoundScene ) )
-		pSoundScene->Add2DSound( pSound );
+	// retail @0x327380: route through the OWNING interface's sound scene. Retail ALWAYS has one --
+	// CInterface self-creates a scene when none is handed in (ctor @0x31dbd0, now mirrored in
+	// UIInterface.cpp), which is why the retail recruit-menu click is audible.
+	NSound::ISoundScene *pSoundScene = GetInterface() ? GetInterface()->GetSound() : 0;
+	if ( !IsValid( pSoundScene ) )
+	{
+		return;
+	}
+	NSound::ISound2D *p2D = pSoundScene->Add2DSound( pSound );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CWindow::SendMessage( CWindow *_pTarget, const SEvent &sEvent )

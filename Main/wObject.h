@@ -8,6 +8,7 @@
 namespace NDb
 {
 	class CRPGGrenade;
+	class CRPGEngGrenade;
 }
 namespace NRPG
 {
@@ -52,7 +53,17 @@ class CWindowDoor: public CAnimObjectServerBase, public IWindowDoor, public IMin
 		CDBPtr<NDb::CRPGGrenade> pGrenade;
 		int nDC;
 		CVec3 vPos;
-		ZEND int operator&( CStructureSaver &f ) { f.Add(2,&pGrenade); f.Add(3,&nDC); f.Add(4,&vPos); return 0; }
+		// retail SAttachedGrenade::operator& @0x383880 grew past the Jan03 form with tags 5/6/7: the placer's
+		// explosive-perk damage modifiers (applied at door-trap detonation in GoBoom), plus the engineer-grenade
+		// descriptor + its panzerklein-capacity value for the eng-grenade door trap. sMineModifiers is populated
+		// (SetTrap) and applied (GoBoom) now; pEngGrenade/nEngSkill serialize for retail save-format parity but are
+		// populated only once the eng-grenade trap runtime lands (deferred -- blocked on the absent
+		// SPanzerkleinCapacity accessor + the world AddEngGrenadeExplosion path @0x381d60/world-vtbl+0x120).
+		SPerkMineModifiers sMineModifiers;
+		CDBPtr<NDb::CRPGEngGrenade> pEngGrenade;
+		int nEngSkill;
+		ZEND int operator&( CStructureSaver &f ) { f.Add(2,&pGrenade); f.Add(3,&nDC); f.Add(4,&vPos); f.Add(5,&sMineModifiers); f.Add(6,&pEngGrenade); f.Add(7,&nEngSkill); return 0; }
+		SAttachedGrenade() : nEngSkill( 0 ) {}   // sMineModifiers self-defaults {1,1,false}, pEngGrenade -> 0; old saves (tags 2-4) load clean
 	};
 	ZDATA_(CAnimObjectServerBase)
 	bool bIsOpen;
@@ -88,7 +99,7 @@ public:
 	virtual bool Segment();
 	virtual void Visit( IAIVisitor *p );
 	//
-	bool SetTrap( NDb::CRPGGrenade *pGrenade, int nDC );
+	bool SetTrap( NDb::CRPGGrenade *pGrenade, int nDC, const SPerkMineModifiers *pMods = 0 );   // @0x381ee0 (pMods=0 for map-authored traps: no placer perks)
 	// 
 	int ProcessAttack( int nUserID, NRPG::CAttackPortion *pAttack, NDb::CRPGArmor *pArmor );
 };

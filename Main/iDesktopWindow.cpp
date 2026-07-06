@@ -17,9 +17,12 @@ const int
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CAckEvent
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CAckEvent::Set( const STime &sTime, NWorld::CAckEvent *_pEvent )
+// retail NUI::CAckEvent::Set @0x1d0cf0: flip bReady so the deferred voice+lipsync can fire, and
+// arm the TTL floor. pEvent (the world-side ack) is seeded by the ctor now, not here.
+void CAckEvent::Set( const STime &sTime )
 {
-	pEvent = _pEvent;
+	bReady = true;
+	bComplete = false;
 	sEndTime = sTime + N_ASK_TTL;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -57,11 +60,18 @@ CWindow* CDesktopWindow::GetClientWindow() const
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CDesktopWindow::PlayAck( NWorld::CAckEvent *pEvent )
 {
-	if ( IsValid( pActiveEvent ) && ( pActiveEvent->GetAckEvent()->nPriority > pEvent->nPriority ) )
+	// retail @0x1d0e60: a new ack is accepted only if STRICTLY higher priority than both the
+	// active and the queued one -- an equal-priority bark arriving while one plays is DROPPED.
+	// The dev's strict-greater test let every equal-priority bark REPLACE the current one each
+	// segment: constant churn, no cooldown, and the portrait state machine re-armed forever.
+	if ( IsValid( pActiveEvent ) && ( pActiveEvent->GetAckEvent()->nPriority >= pEvent->nPriority ) )
+	{
 		return;
-	if ( IsValid( pNextAckEvent ) && ( pNextAckEvent->nPriority > pEvent->nPriority ) )
+	}
+	if ( IsValid( pNextAckEvent ) && ( pNextAckEvent->nPriority >= pEvent->nPriority ) )
+	{
 		return;
-
+	}
 	pNextAckEvent = pEvent;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -91,7 +101,10 @@ void CDesktopWindow::Draw( const STime &sTime, NGScene::I2DGameView *pView )
 		pActiveEvent = PlayAckEvent( sTime, pNextAckEvent );
 		pNextAckEvent = 0;
 	}
-	if ( IsValid( pActiveEvent ) && ( pActiveEvent->GetEndTime() < sTime ) )
+	// retail CDesktopWindow::Draw @0x1d0ef0: retire the active ack only once it is truly COMPLETE
+	// (bReady && TTL elapsed && the voice has finished), not on a fixed end-time -- the deferred
+	// voice may start well after the event was queued (once the speaker's face is on screen).
+	if ( IsValid( pActiveEvent ) && pActiveEvent->IsComplete( sTime ) )
 		pActiveEvent = 0;
 
 	CWindow::Draw( sTime, pView );

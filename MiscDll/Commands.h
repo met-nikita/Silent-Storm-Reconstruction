@@ -23,6 +23,7 @@ public:
 	CValue( const wstring &szVal );
 
 	float GetFloat() const;
+	int GetInt() const;      // v1.2 (new helper, v1.2 VA 0x7ce990): FLD/FISTP round-to-nearest
 	const wstring& GetString() const;
 
 	operator float () const { return fVal; }

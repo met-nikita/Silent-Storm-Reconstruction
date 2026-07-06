@@ -39,6 +39,14 @@ const float F_REAL_CUBE_SIZE = N_REAL_CUBE_SIZE * F_VOXEL_SIZE;
 const float F_WAVE_ATTENUATION_COEFF = 0.4f;
 const float F_IGNITION_OBJECT_DAMAGE_MULT = 10.0f;   // Game.exe VA 0x8c9fc4: a trapped object self-amplifies its own blast
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// release NWorld::nBreakCalcs -- the engine-wide "explosion work spent this segment" budget. Every 16^3
+// explosion-cube voxel trace bumps it (release CExplosionCube::Recalc @0x355080 tail); CWorld::Segment
+// resets it once per world segment (release ResetBreakExplCalcs @0x3549f0, done at the top of
+// CExplosionMaster::Segment @0x3571d0). Once MORE than one cube got traced in a segment, the blast's
+// damage pass (and any further blast stepping) is postponed to the NEXT segment -- together with the
+// inter-ring S_WAIT lag this is what paces retail's slow radial destruction ripple.
+void ResetBreakExplCalcs();
+////////////////////////////////////////////////////////////////////////////////////////////////////
 // CExplCube
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CExplCube: public CObjectBase
@@ -159,6 +167,7 @@ public:
 	CExplCube *GetExplCube( CVec3 ptCoords );
 	bool IsFinished() { return bFinished; }
 	void Segment();
+	void MakeDamage();   // release CVoxelExpl::MakeDamage @0x356580: the ring's damage, applied in a SEPARATE per-segment pass
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CVoxelExplTracker
@@ -190,13 +199,18 @@ public:
 private:
 	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&nWave); f.Add(3,&ptCenter); f.Add(4,&pGrenade); f.Add(5,&pThrower); f.Add(6,&nEnemyUnitsKilled); f.Add(7,&nObjectsDestroyed); f.Add(8,&pAction); f.Add(9,&pWorld); f.Add(10,&pExpl); f.Add(11,&damagedUnits); f.Add(12,&damagedObjects); f.Add(13,&drawDecals); f.Add(14,&pIgnitionObject); return 0; }
 	//
+	int nLag;                            // retail inter-ring wait: CExplosionMaster::Segment @0x3571d0 parks in S_WAIT with
+	                                     // nLag=2 segments after each ring's damage before spawning the next CVoxelExpl.
+	                                     // Transient (NOT serialized -- retail keeps it on the master, which this build
+	                                     // doesn't have; a mid-blast load just resumes without the residual wait).
+	//
 	void ExplodeFragments();
 	void ApplyWaveDamageToUnits();
 	//
 public:
 	//
-	CVoxelExplTracker() {}
-	CVoxelExplTracker( CVec3 _ptCenter, NDb::CRPGGrenade *_pGrenade, CUnitServer *_pThrower, CWorld *_pWorld, CObjectBase *_pIgnitionObject = 0 );
+	CVoxelExplTracker(): nLag( 0 ) {}
+	CVoxelExplTracker( CVec3 _ptCenter, NDb::CRPGGrenade *_pGrenade, CUnitServer *_pThrower, CWorld *_pWorld, CObjectBase *_pIgnitionObject = 0, const SPerkMineModifiers *_pMods = 0 );
 	//
 	virtual bool Segment();
 };

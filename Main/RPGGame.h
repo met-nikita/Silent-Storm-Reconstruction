@@ -25,6 +25,10 @@ namespace NBuilding
 {
 	class CBuildingGrid;
 }
+namespace NDb
+{
+	class CRPGChestReal;	// rolled chest loot (DataChest.h)
+}
 #include "RPGAttackMech.h"
 namespace NRPG
 {
@@ -121,7 +125,9 @@ public:
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 IUnitMission* CreateUnit( CUnit *pSrc );
-IUnitMission* CreateUnit( NDb::CRPGPers *pSrc );
+// pInHandItem/pBackpack = rolled chest-loot equipment (retail @0x2c4f50 params 4/5, from
+// SMapUnit); null = pers defaults
+IUnitMission* CreateUnit( NDb::CRPGPers *pSrc, NDb::CRPGItem *pInHandItem = 0, NDb::CRPGChestReal *pBackpack = 0 );
 IObject* CreateObject( int nStages, NDb::CModel *pModel, int nStartStage = 0 ); // pModel - ��� �������� hit-�� �������
 IObject* CreateObject( NDb::CObject *pDBObject, int nStartStage = 0 );
 CObjectBase* CreateBuilding( NBuilding::CBuildingGrid *pGrid );

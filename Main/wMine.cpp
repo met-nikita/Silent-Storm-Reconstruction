@@ -15,8 +15,8 @@ namespace NWorld
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CMine
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CMine::CMine( CWorld *_pWorld, const CVec3 &_vPlace, NDb::CRPGMine *_pMine, int _nDC, int _nFloor )
-: pWorld(_pWorld), vPlace(_vPlace), pMine(_pMine), nDC(_nDC), nFloor(_nFloor)
+CMine::CMine( CWorld *_pWorld, const CVec3 &_vPlace, NDb::CRPGMine *_pMine, int _nDC, int _nFloor, CUnitServer *_pMaster )
+: pWorld(_pWorld), vPlace(_vPlace), pMine(_pMine), nDC(_nDC), nFloor(_nFloor), pMaster(_pMaster)
 {
 	SRand rnd;
 	pModel = pMine->pItem->pModel->CreateModel( &rnd );
@@ -73,7 +73,7 @@ void CMine::GoBoom( CUnitServer *pWho )
 		return;
 	ASSERT( pMine->pExplosion );
 	if ( pMine->pExplosion )
-		pWorld->AddGrenadeExplosion( GetMinePos(), pMine->pExplosion );
+		pWorld->AddGrenadeExplosion( GetMinePos(), pMine->pExplosion, pMaster, 0, &sPerkModifiers );   // retail @0x37e400: credit the placer (pMaster) for the blast
 	pWorld->RemoveMine( this );
 	NScript::luaCallFunction( "OnMineTriggered", "p", IsValid( pWho ) ? CastToObjectBase( pWho ) : 0 );
 	CMObj<CMine> pHold(this);
@@ -164,6 +164,8 @@ CMinesWorld::CMinesWorld( bool /*bRegister*/ )
 void CMinesWorld::AddMine( IMine *pMine )
 {
 	// retail @0x37b780: dedup linear scan, then unconditional tail append.
+	// v1.2 UNCHANGED (verified: true v1.2 AddMine @VA 0x77bbb0 keeps this guard; the V12_DELTA
+	// "guard removed" row was a ghidriff BSIM collision with CUnitServer::MarkInterrupted @0x7721c0).
 	if ( find( trappedObjects.begin(), trappedObjects.end(), pMine ) != trappedObjects.end() )
 		return;
 	trappedObjects.push_back( pMine );

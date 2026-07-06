@@ -92,6 +92,12 @@ struct IRenderVisitor
 	virtual void AddHead( NDb::CComplexHead *pHead, CFuncBase<SFBTransform> *pPosition, const NGScene::SRoomInfo &room ) {}
 	// Release-new: a standalone head with a LIVE macro-muscle morph (the advanced FaceGen editor).
 	virtual void AddHead( NDb::CComplexHead *pHead, CFuncBase<SFBTransform> *pPosition, const NGScene::SRoomInfo &room, NLSHead::CHeadTransformInfo *pTransformInfo, CPtrFuncBase<NGfx::CTexture> *pFaceTexture = 0 ) {}
+	// release @0x2cda30 (CSetRender vtbl slot 0x50): arm ambient facial idling (blinks) for the unit's
+	// shown head. The visited fake unit calls this every Visit, AFTER its AddMesh/AddHead created the
+	// head animator record; the destination registers the returned idle token so idling stops when no
+	// view renders the head any more. KEYING DEVIATION: retail passes the unit's NLSHead::CHeadInfo*;
+	// this tree keys head animators by NWorld::CUnit* (see CHeadsController::PlayIdle).
+	virtual void AddHeadIdleAnimator( CUnit *pUnit ) {}
 	virtual void AddOccluder( NDb::CAIGeometry *pAIGeom, const SFBTransform &pos, int nFloor ) {}
 	virtual void AddOccluder( NDb::CAIGeometry *pAIGeom, NDb::CSkeleton *pSkeleton, CFuncBase<NAnimation::SSkeletonPose> *pAnimation, int nFloor ) {}
 	virtual NGScene::CDecalTarget* CreateDecalTarget( const vector<CObjectBase*> &targets, const NGScene::SDecalMappingInfo &_info ) { return 0; }

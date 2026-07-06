@@ -87,6 +87,7 @@ Script::SRegFunction pRegList[] =
 	REG_FUNCTION( UnitIsUnconscious ),
 	REG_FUNCTION( UnitSayAck ),
 	REG_FUNCTION( UnitSetToHit ),
+	REG_FUNCTION( UnitLockPose ),   // retail @0x2fc850
 	REG_FUNCTION( UnitIsSeeUnit ),
 	REG_FUNCTION( UnitReload ),
 	REG_FUNCTION( UnitCheat ),
@@ -217,6 +218,9 @@ Script::SRegFunction pRegList[] =
 	REG_FUNCTION( ObjectLockDoor ),
 	REG_FUNCTION( ObjectUnlockDoor ),
 	REG_FUNCTION( ItemUnload ),
+	REG_FUNCTION( ObjectPlaceInPocket ),      // retail @0x2e9000 (training-script target hiding)
+	REG_FUNCTION( ObjectRestoreFromPocket ),  // retail @0x2e9130
+	REG_FUNCTION( ItemSetToWaypoint ),        // retail @0x2e86c0
 	REG_FUNCTION( AttachEffectToWaypoint ),
 	REG_FUNCTION( AttachEffectToUnitBone ),
 	// ===== LUA convergence PART A (cheap remainders) =====

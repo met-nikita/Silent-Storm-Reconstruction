@@ -33,6 +33,8 @@ class IAIUnit;
 class CAIFireArmsWeapon;
 class CAIFireArmsWeaponClip;
 class CAIGrenadeWeapon;
+class CAIThrowingWeapon;
+class CAIMeleeWeapon;
 class IAIInventoryItem;
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 //	IAILogRecord
@@ -107,6 +109,29 @@ class CAILogShot: public CAILogRecord
 public:
 	CAILogShot() {}
 	CAILogShot(	IAIUnit *_pAIUnit, IAIUnit *_pTarget, NAI::EHitLocation _eHitLocation );
+	// IAILogRecord
+	virtual void GetCommands( list< CPtr<NWorld::CCommand> > *Commands );
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// CAILogMelee - AI melee strike (release-new; retail id 0x52533166). Mirrors CAILogShot but carries the
+// melee weapon used (pWeapon) beyond the target enemy + aimed hit location. GetCommands emits the same
+// CCmdShootObject( pEnemy->GetUnitServer(), 0, eHitLocation ) as the shot record -- the replayed command is
+// identical; this dedicated record exists for save-format fidelity (the melee weapon is preserved). Faithful
+// to the matched-release decode (ctor @0x45c900, GetWorldCommands @0x460d20, operator& tags 2/pAIUnit,
+// 3/pEnemy, 4/pWeapon, 5/eHitLocation). Emitted by CAIMeleeAction::Do @0x41d5b0 with hitLoc = HL_HEAD (=1).
+////////////////////////////////////////////////////////////////////////////////////////////////////
+class CAILogMelee: public CAILogRecord
+{
+	OBJECT_BASIC_METHODS(CAILogMelee);
+	ZDATA
+	ZPARENT(CAILogRecord)
+	CPtr<IAIUnit> pEnemy;
+	CPtr<CAIMeleeWeapon> pWeapon;
+	NAI::EHitLocation eHitLocation;
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,(CAILogRecord*)this); f.Add(3,&pEnemy); f.Add(4,&pWeapon); f.Add(5,&eHitLocation); return 0; }
+public:
+	CAILogMelee() {}
+	CAILogMelee( IAIUnit *_pAIUnit, IAIUnit *_pEnemy, CAIMeleeWeapon *_pWeapon, NAI::EHitLocation _eHitLocation );
 	// IAILogRecord
 	virtual void GetCommands( list< CPtr<NWorld::CCommand> > *Commands );
 };
@@ -468,6 +493,31 @@ class CAILogThrowGrenade: public CAILogRecord
 public:
 	CAILogThrowGrenade() {}
 	CAILogThrowGrenade(	IAIUnit *_pUnit, CVec3 _ptTarget, CAIGrenadeWeapon *_pGrenade );
+	// IAILogRecord
+	virtual void RollBack();
+	virtual void Commit();
+	virtual void GetCommands( list< CPtr<NWorld::CCommand> > *Commands );
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// CAILogThrowKnife - throw a knife at the enemy (release-new; retail NAI::CAILogThrowKnife @0x45c770).
+// GetCommands (retail GetWorldCommands @0x460c30) emits the SAME weapon-agnostic CCmdShootObject as
+// CAILogShot(pEnemy,HL_ANY) -- eHL is PINNED to -1/HL_ANY (a knife throw is not aimed at a body zone).
+// UNLIKE CAILogShot it ALSO carries the thrown knife, so Commit (retail ModifyState @0x45c7f0) removes it
+// from the AI inventory and empties the hand -- the simulated-state effect CAILogShot's base no-op Commit
+// silently dropped. Members mirror the decode: pEnemy @+0x10, pWeapon @+0x14, eHitLocation @+0x18. Reg 0x52533165.
+////////////////////////////////////////////////////////////////////////////////////////////////////
+class CAILogThrowKnife: public CAILogRecord
+{
+	OBJECT_BASIC_METHODS(CAILogThrowKnife);
+	ZDATA
+	ZPARENT(CAILogRecord)
+	CPtr<IAIUnit> pEnemy;
+	CPtr<CAIThrowingWeapon> pWeapon;
+	NAI::EHitLocation eHitLocation;
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,(CAILogRecord*)this); f.Add(3,&pEnemy); f.Add(4,&pWeapon); f.Add(5,&eHitLocation); return 0; }
+public:
+	CAILogThrowKnife() {}
+	CAILogThrowKnife( IAIUnit *_pAIUnit, IAIUnit *_pEnemy, CAIThrowingWeapon *_pWeapon, NAI::EHitLocation _eHitLocation );
 	// IAILogRecord
 	virtual void RollBack();
 	virtual void Commit();

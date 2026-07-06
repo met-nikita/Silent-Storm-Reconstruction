@@ -2,6 +2,7 @@
 #include "GAutoDetect.h"
 #include "..\MiscDll\Commands.h"   // NGlobal::GetVar / SetVar / CValue
 #include "..\Misc\HPTimer.h"       // NHPTimer::GetClockRate
+#include <math.h>                  // fabs -- v1.2 @0xf69b0 epsilon preset match
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 namespace NGScene
 {
@@ -104,7 +105,7 @@ EConfigValue FindCfgMode( SCfgValue **modes, int count )
 		for ( ; e->pszName != 0; ++e )
 		{
 			float fLive = NGlobal::GetVar( e->pszName, NGlobal::CValue( e->fValue ) ).GetFloat();
-			if ( !( fLive == e->fValue ) )   // mismatch (also for NaN operands)
+			if ( !( fabs( fLive - e->fValue ) < 1e-12 ) )   // v1.2 @0xf69b0: epsilon compare (was exact ==); mismatch also for NaN operands
 			{
 				bMatch = false;
 				break;

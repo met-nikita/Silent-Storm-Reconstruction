@@ -7,6 +7,7 @@
 #include "TerrainInfo.h"
 #include "MapBuildingInfo.h"
 #include "..\Misc\RandomGen.h"
+#include "..\DBFormat\DataChest.h"	// NDb::CRPGChestReal (SMapUnit::pBackpack), NDb::CTRPGChest
 
 struct SRandomSeed;
 namespace NBuilding
@@ -38,7 +39,7 @@ struct SMapElement
 	CPtr<NDb::CObject> pObject;
 	SMapPosition pos;
 	int nRelFloor;
-	bool bLightmap;								// тип источника света в контейнере
+	bool bLightmap;								// пїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅ пїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ
 	CVec2 ptAlignTo;
 	bool bOpen;
 	int nPassageZoneID;
@@ -50,10 +51,19 @@ struct SMapElement
 	bool bBorder;
 	int nDC;
 	CPtr<NDb::CRPGGrenade> pGrenade;
-	SMapElement(): bOpen(false), nObjectPhase(0), bBorder( false ) {}
+	// release door/chest lock params (retail folds pGrenade + these into a nested SMapDoorParams;
+	// kept flat here so existing consumers of pGrenade stay untouched):
+	bool bIsLocked;
+	int nKeyID;
+	int nLockHardness;
+	bool bIsChest;				// the element carries a loot chest (CFinalElement::pChest)
+	bool bIsTransparentIfOpen;	// chest containers turn transparent when open
+	SMapElement(): bOpen(false), nObjectPhase(0), bBorder( false ), nDC(0),
+		bIsLocked(false), nKeyID(0), nLockHardness(0), bIsChest(false), bIsTransparentIfOpen(false) {}
 	SMapElement( NDb::CObject *_pObject, SMapPosition _pos, bool _bBorder = false ):
 		pObject( _pObject ), pos( _pos ), bOpen( false ), nObjectPhase( 0 ),
-		ptAlignTo( CVec2( _pos.ptPos.x, _pos.ptPos.y ) ), bBorder( _bBorder ), nDC(0) {}
+		ptAlignTo( CVec2( _pos.ptPos.x, _pos.ptPos.y ) ), bBorder( _bBorder ), nDC(0),
+		bIsLocked(false), nKeyID(0), nLockHardness(0), bIsChest(false), bIsTransparentIfOpen(false) {}
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 struct SMapRPGElement
@@ -66,7 +76,10 @@ struct SMapRPGElement
 	string szName;
 	int nDC;
 	bool bArmed;
-	SMapRPGElement(): bOpen(false), nDC(0) {}
+	// release chest-loot tail (retail SMapRPGElement +69/+70; ctor @0x279c10 inits both false):
+	bool bVertical;		// items stand upright inside the chest (CRPGChestLayout::bVertical)
+	bool bFromChest;	// this placed item was spilled out of a loot chest at map build
+	SMapRPGElement(): bOpen(false), nDC(0), bVertical(false), bFromChest(false) {}
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CMapWaypoint: public CObjectBase
@@ -99,6 +112,9 @@ struct SMapUnit
 	bool bFearUseToHit;
 	CVec2 ptAlignTo;
 	CDBPtr<NDb::CAnimation> pGuardAnimation;
+	// release loot-chest tail (retail SMapUnit +108/+112; copy ctor @0x27af50, default ctor @0x27b420):
+	CDBPtr<NDb::CRPGItem> pInHandItem;			// rolled from CRPGPers::pHandWeapon at map build
+	CObj<NDb::CRPGChestReal> pBackpack;			// rolled from CRPGPers::pBackpackWeapon (+ clips from the hand chest)
 	SMapUnit() : bSlot(false), nDiplomacy(0), nScenarioPlayer(0), nRelativeLevel(0), nRoamingRadius(0) {}
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -169,13 +185,20 @@ struct SMapInfo
 	vector<SClueSlot> slots;
 	unordered_map<int, SUnitGroup> groups;
 	bool bShowTerrain;
+	// retail SMapInfo carries the variant's NoAttack flag next to bShowTerrain (TraverseTemplateTree
+	// @0x276c60 copies both at the nDepth==1 root); CWorld::CreateRandom @0x36d0b0 turns it into
+	// CWorld::bAttackAllowed = !bNoAttack (combat prohibited inside base zones, e.g. Gbase4 NoAttack=1).
+	bool bNoAttack = false;
 
 	SMapInfo() {}
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void ConvertFlags( vector<int> *pFlags, const vector<string> &strParams );
-bool BuildMap( int nPlacementID, const vector<string> &strParams, 
-	NAI::IPathNetwork *pNet, SMapInfo *pInfo, int nDepth = -1, SRandomSeed sSeed = SRandomSeed() );
+// nRelativeLevel: the map/mission relative level (retail free BuildMap @0x2788b0 stores it into the
+// builder; it gates chest-loot rolls [max(0,lvl-4)..lvl, or 0..100 when lvl==0] and lock hardness).
+bool BuildMap( int nPlacementID, const vector<string> &strParams,
+	NAI::IPathNetwork *pNet, SMapInfo *pInfo, int nDepth = -1, SRandomSeed sSeed = SRandomSeed(),
+	int nRelativeLevel = 0 );
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool BuildTerrain( int nMapID, SMapInfo *pInfo, int nDepth, bool bResetPins, bool bShowHoles ); // MapEdit
 bool BuildMapEditMap( int nMapID, NAI::IPathNetwork *pNet, SMapInfo *pInfo, int nDepth, const SMapPosition &pos, 

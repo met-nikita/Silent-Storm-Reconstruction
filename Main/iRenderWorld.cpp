@@ -53,15 +53,23 @@ void CRenderBaseInterface::Initialize( int nTemplateID )
 	pCommander = new NWorld::CCommander;
 	pPlayer = pWorld->AddPlayer( L"Goga mega player", NRPG::CreateGlobalPlayer(), pCommander );
 
-	CPtr<NDb::CMusic> pAmbientMelody = NDb::GetMusic( 1 );
+	// retail semantics: ambient is a MusicTemplates POOL (default GetTMusic(1), variant override),
+	// the track is a roulette pick from it -- see CMission::Initialize for the mainline version.
+	NDb::CTMusic *pAmbientPool = NDb::GetTMusic( 1 );
 	CPtr<NDb::CTemplVariant> pVar = NDb::GetTemplVariant( nVariantID );
 	if ( IsValid( pVar ) && IsValid( pVar->pAmbientMusic ) )
-		pAmbientMelody = pVar->pAmbientMusic;
+		pAmbientPool = pVar->pAmbientMusic;
+	CPtr<NDb::CMusic> pAmbientMelody;
+	if ( IsValid( pAmbientPool ) )
+	{
+		SRand musicRand;
+		pAmbientMelody = pAmbientPool->GetMusic( &musicRand );
+	}
 
 	pScene = NGScene::CreateNewView();
 	pSoundScene = NSound::CreateSoundScene( pAmbientMelody );
-	pRender = NRender::CreateRenderGame( pWorld, pScene );
-	pRenderSound = NRender::CreateRenderSound( pWorld, pSoundScene );
+	// retail CRenderBaseInterface::Initialize @0x22ef80: the sound mixers are owned by the render game
+	pRender = NRender::CreateRenderGame( pWorld, pScene, pSoundScene );
 
 	NDb::CAmbientLightReal *pLight = pWorld->GetDefaultLight();
 	if ( pLight )
@@ -122,8 +130,7 @@ void CRenderBaseInterface::SetLightMode( int _nLightMode )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CRenderBaseInterface::OnGetFocus()
 {
-	pRender->ResetTiming();
-	pRenderSound->ResetTiming();
+	pRender->ResetTiming();	// retail @0x2cb190 forwards to both sound mixers
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CRenderBaseInterface::ProcessEvent( const NInput::SEvent &sEvent )
@@ -152,8 +159,7 @@ void CRenderBaseInterface::Step()
 	}
 	else
 	{
-		pRender->ResetTiming();
-		pRenderSound->ResetTiming();
+		pRender->ResetTiming();	// retail @0x2cb190 forwards to both sound mixers
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -164,7 +170,7 @@ void CRenderBaseInterface::RenderFrame( const STime &sTime, ICamera *pCamera )
 	CTransformStack ts;
 	pCamera->GetTransform( &ts, pScene->GetScreenRect() );
 
-	pRenderSound->Update( &ts, sTime );
+	pRender->UpdateSound( &ts, sTime );
 
 	const CTRect<float> &rScreen = pCamera->GetScreenRect();
 	if ( ( rScreen.Width() != 0 ) && ( rScreen.Height() != 0 ) )

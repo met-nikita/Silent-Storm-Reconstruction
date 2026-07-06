@@ -10,6 +10,7 @@
 #include "../DBFormat/DataDifficulty.h"
 #include "../DBFormat/DataMisc.h"   // NDb::CMedal (CMedalsGainer base)
 #include "../Misc/RandomGen.h"      // SRandomSeed (CUnit::bindSeed)
+#include "RPGMedals.h"              // NRPG::EMedalPointCases (CMedalsGainer::AddMedalPoints sink)
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 namespace NAI
 {
@@ -18,6 +19,10 @@ namespace NAI
 namespace NLSHead
 {
 	class CHeadInfo;   // CUnit::pHeadInfo (live head; full type in LSHead.h)
+}
+namespace NDb
+{
+	class CRPGChestReal;   // rolled chest loot (DataChest.h; CUnit ctor pBackpack param)
 }
 namespace NRPG
 {
@@ -34,6 +39,7 @@ class IInventoryItem;
 class CWeaponItem;
 class CMeleeWeaponItem;
 class CPerksTree;
+class CGlobalGame;   // CMedalsGainer::AddMedalPoints sink (held only by pointer)
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 const int N_MAX_SKILL = 140;
 const int N_MAX_VP = 250;
@@ -197,6 +203,18 @@ public:
 	// decomp/src/s2_medalsgainer.h). See docs/CONVERGENCE_PROGRESS.md.
 	void GetGainedMedals( vector<CDBPtr<NDb::CMedal> >* /*pOut*/ ) {}
 	bool HasNewMedalToShow() const { return false; }
+
+	// @0x2ac660 -- credit medal-progress points for one combat/utility event (EMedalPointCases).
+	// This is the DIRECT SINK the medal awards funnel into (disarm-trap MPC_DISARM_TRAP @0x3a84f0,
+	// CGlobalPlayer::AddMedalPointsForClue, AddMedalPointsForNoticedMines, and the rpgAttackSession
+	// tally, all call it as (CMedalsGainer*)(unit+0x38)->AddMedalPoints(game,case,amount)).
+	// The release body loops medalInfos, but medalInfos is ALWAYS EMPTY in this tree (the side-driven
+	// CMedalsGainer ctor @0x2ac9b0 that fills it needs NDb::CSide::medals, still absent), so every
+	// iteration is skipped and the only release-observable effect is two csSystem log lines. Landed as a
+	// behaviour-neutral no-op so those award sites link build-safe. Faithful body ready in
+	// decomp/src/s2_medalsgainer.h; restore it together with the side-driven ctor + ThrowCheck when
+	// NDb::CSide::medals lands. (CMedalsGainer has no vtable -> no layout/save impact.)
+	void AddMedalPoints( CGlobalGame* /*pGame*/, EMedalPointCases /*eCase*/, float /*fAmount*/ ) {}
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 //! CUnit holds a unit's stats/skills and the items it carries.
@@ -265,7 +283,11 @@ public:
 	}
 	//
 	CUnit();
-	CUnit( NDb::CRPGPers *pPers, NDb::CComplexHead *pHead = 0, bool _bHero = false, NDb::CModel *pOverrideModel = 0 );
+	// pInHandItem/pBackpack: the map builder's rolled loot (retail CUnit ctor @0x2bc980 params 7/8,
+	// from SMapUnit +108/+112) -- when set they REPLACE the persona's default hand weapon / item
+	// list; null keeps the pers defaults (the only path before the chest-loot subsystem).
+	CUnit( NDb::CRPGPers *pPers, NDb::CComplexHead *pHead = 0, bool _bHero = false, NDb::CModel *pOverrideModel = 0,
+		NDb::CRPGItem *pInHandItem = 0, NDb::CRPGChestReal *pBackpack = 0 );
 
 	void AddXP( float nXPToAdd );
 	bool UseSkill( const int eSkill, const int nAddValue );
@@ -276,6 +298,10 @@ public:
 	NLSHead::CHeadInfo* GetHeadInfo() const { return pHeadInfo; }
 	SRandomSeed GetHeadSeed() const;             // per-unit head-randomization seed (retail CreateLSHead source)
 	int GetRPGPersID() const;                    // live read of pPers->nRPGPersID
+	// retail GetAckHolder @0x2ba8f0 (pers-id form): the pers whose ACK rows this unit's barks use.
+	// A HERO maps per-VOICE to the donor pers of its voice family (same Side + gender, nVoice
+	// match); everyone else -- and a hero with no donor -- uses the own pers id.
+	int GetAckPersID() const;
 
 	void SetHead( NDb::CComplexHead *pNewHead );  // build pHeadInfo from a CComplexHead template
 	void SetHeadInfo( NLSHead::CHeadInfo *pNewHead ); // install a live head directly (@0x192070; advanced FaceGen)

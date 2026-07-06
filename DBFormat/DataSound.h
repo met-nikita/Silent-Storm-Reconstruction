@@ -56,12 +56,24 @@ public:
 	CSoundVariant* GetSound( SRand *pRand, const vector<int> &params ) const;
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-enum EMusicType
+enum EMusicType : int	// fixed underlying type so Sound.h can forward-declare it (opaque enum)
 {
 	MT_AMBIENT,
 	MT_PRECOMBAT,
 	MT_COMBAT
 };
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// CMusic -- retail record (serializer @0x41d4d0, byte-exact tag table):
+//   1=CDBRecord base, 2=szFileName, 3=flags (vector<SVariantFlags>), 4=nFadeIn, 5=nFadeOut,
+//   6=nPlayTime, 7=nRndPlayTime, 8=nSilence, 9=nRndSilence.  All times are MILLISECONDS.
+// The retail music machine (NSound::CSoundScene) is data-driven off these:
+//   nFadeIn      -- fade-in / crossfade-in sec*1000 when the track starts (retail data: 0)
+//   nFadeOut     -- FadeOutMusic fade length (@0x304c20 reads +0x2c; retail data: 20000 = 20s)
+//   nPlayTime  + rnd(nRndPlayTime)  -- play window before the track is faded (@0x304ae0)
+//   nSilence   + rnd(nRndSilence)   -- silence window before the next track starts (@0x304b80)
+// Retail Steam game.db carries these columns (FadeIn/FadeOut/PlayTime/RndPlayTime/Silence/
+// RndSilence, e.g. Music 1 "Ambient" = 0/20000/180000/120000/60000/120000); the member defaults
+// below are those retail-typical values for a (dev) db lacking the columns.
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CMusic: public CDBRecord
 {
@@ -70,7 +82,14 @@ public:
 	ZDATA_(CDBRecord)
 	string szFileName;
 	EMusicType eType;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CDBRecord*)this); f.Add(2,&szFileName); f.Add(10,&eType); return 0; }	// retail CMusic (release @0x41d4d0) uses tag 3 for a flags vector, not eType; reading it at 3 decoded the vector's bytes as the enum. eType is a dev field with no retail tag -> park it at 10 (retail uses only 1-9) so retail-read defaults it to MT_AMBIENT instead of garbage.
+	vector<SVariantFlags> flags;
+	int nFadeIn = 0;
+	int nFadeOut = 20000;
+	int nPlayTime = 180000;
+	int nRndPlayTime = 120000;
+	int nSilence = 60000;
+	int nRndSilence = 120000;
+	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CDBRecord*)this); f.Add(2,&szFileName); f.Add(3,&flags); f.Add(4,&nFadeIn); f.Add(5,&nFadeOut); f.Add(6,&nPlayTime); f.Add(7,&nRndPlayTime); f.Add(8,&nSilence); f.Add(9,&nRndSilence); f.Add(10,&eType); return 0; }	// tags 1-9 = retail @0x41d4d0. eType is a dev field with no retail tag -> parked at 10 (retail uses only 1-9) so retail-read defaults it to MT_AMBIENT instead of garbage.
 
   virtual void Import();
 };
@@ -130,6 +149,7 @@ public:
 CTSound* GetTSound( int nTSoundID );
 CSound* GetSound( int nID );
 CMusic* GetMusic( int nID );
+CTMusic* GetTMusic( int nID );	// retail @0x3f98c0 -- the MusicTemplates pool; mission ambient/combat music resolve THROUGH this table
 CSoundEffect* GetSoundEffect( int nID );
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 }

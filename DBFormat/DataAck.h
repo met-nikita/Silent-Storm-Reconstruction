@@ -2,6 +2,7 @@
 #define __DATAACK_H_
 
 #include "..\ADOImport\BasicDB.h"
+#include "DataFaceGen.h"	// EFaceExpression (retail SAckVoice carries the phrase's facial expression)
 
 namespace NDb
 {
@@ -36,10 +37,14 @@ struct SAckVoice
 	ZDATA
 	CPtr<CSound> pSound; // ����
 	CPtr<CSequence> pSequence; // ��� ������
-	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&pSound); f.Add(3,&pSequence); return 0; }
+	// retail SAckVoice +0x8 (sizeof 12, gen/include/s2_types.h:13221): the phrase's facial
+	// expression -- one "FaceExpression" column seeds it for all six voice slots (Import @0x42d280);
+	// the dialog UI resolves it to an emotion sequence via GetSequenceByExpression @0x42cf30.
+	EFaceExpression eExpression;
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&pSound); f.Add(3,&pSequence); f.Add(4,&eExpression); return 0; }
 	//
-	SAckVoice() {}
-	SAckVoice( CSound *_pSound, CSequence *_pSequence ): pSound( _pSound ), pSequence( _pSequence ) {}
+	SAckVoice(): eExpression( FE_NORMAL ) {}
+	SAckVoice( CSound *_pSound, CSequence *_pSequence ): pSound( _pSound ), pSequence( _pSequence ), eExpression( FE_NORMAL ) {}
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CDBAckInfo: public CDBRecord
@@ -78,11 +83,19 @@ class CDBAck: public CDBRecord
 public:
 	float fProbability; // ����������� ����������
 	int nRPGPersID; // ��� ����������� �������
-	CPtr<CDBAckSequence> pAckSequence; // ������������������ ack	
+	CPtr<CDBAckSequence> pAckSequence; // ������������������ ack
 	string sParam[N_ACK_MAX_PARAM_COUNT]; // ��������� �������
 	int nConditionID; // ����� ������������ ������� ( ������������� ������ )
+	// retail CDBAck::pCondition (+0x40; Import @0x42d0b0 resolves the SAME "ConditionID" column as a
+	// RECORD REF via ImportField<CDBAckCondition>; operator& @0x42d110 tag 9). CRITICAL with the
+	// Steam game.db: EVERY AckSeqs row has Priority 0 -- the retail ack priorities (death=10,
+	// order-confirm=1, ...) and the per-condition probability FACTORS (order-confirm 0.1,
+	// enemy-visible 0.2, ...) live ONLY on these AckConditions records (retail GetAckPriority
+	// @0x338e40 / roulette weight @0x339230). Without this link the dev ack competition ran at
+	// all-zero priority / raw weight.
+	CPtr<CDBAckCondition> pCondition;
 
-	int operator&( CStructureSaver &f ); 
+	int operator&( CStructureSaver &f );
 	virtual void Import();
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////

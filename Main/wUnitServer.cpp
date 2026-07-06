@@ -123,14 +123,16 @@ void CPathViewer::GetPoints( vector<SPathPoint> *pRes )
 // CUnitServer
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CUnitServer::CUnitServer():
-	registerOnNewPlayerTurnOrTime( this, &CUnitServer::OnNewPlayerTurnOrTime )
+	registerOnNewPlayerTurnOrTime( this, &CUnitServer::OnNewPlayerTurnOrTime ),
+	registerOnNewPlayerFastTurnOrTime( this, &CUnitServer::OnNewPlayerFastTurnOrTime )
 {
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CUnitServer::CUnitServer( CWorld *pWorld, NRPG::IUnitMission *_pRPG, NDb::CModel *pModel, 
 	CPlayer *_pPlayer, const NAI::SUnitPosition &pos )
 	:CDumbUnitServer( pWorld, _pRPG, pModel, pos ), bIsPK( false ),
-	registerOnNewPlayerTurnOrTime( this, &CUnitServer::OnNewPlayerTurnOrTime ), bCanTalk( false ), nDialog( 0 )
+	registerOnNewPlayerTurnOrTime( this, &CUnitServer::OnNewPlayerTurnOrTime ),
+	registerOnNewPlayerFastTurnOrTime( this, &CUnitServer::OnNewPlayerFastTurnOrTime ), bCanTalk( false ), nDialog( 0 )
 {
 	pPlayer = _pPlayer;
 	bCallTimeLabel = false;
@@ -147,6 +149,13 @@ CUnitServer::CUnitServer( CWorld *pWorld, NRPG::IUnitMission *_pRPG, NDb::CModel
 		animPos.pos.p.SetPose( NAI::CRAWL );
 		animator.PlaceUnit( animPos );
 	}
+	// retail @0x3c3cc0 (disasm 0x7c4072): seed this unit's per-unit diplomacy mask from the zone's
+	// CGlobalDiplomacy row for its player. Every zone loads its OWN table and CreateUnit() rebuilds
+	// the CUnitMission wrapper with a zeroed mask -- and DS_ENEMY == 0, i.e. "enemy toward all".
+	// Without this ctor seed, any unit not otherwise touched (party deploy in AddPlayer, base-dialog
+	// recruits via CCmdAddUnit) keeps the all-enemy default and paints ALLIES red / triggers combat.
+	if ( IsValid( pPlayer ) && pPlayer->GetScenarioPlayerID() >= 0 )
+		_pRPG->SetDiplomacy( pWorld->GetDiplomacy()->GetPlayerDiplomacy( pPlayer->GetScenarioPlayerID() ) );
 	tPrev = GetWorld()->GetTime()->GetValue();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -174,7 +183,8 @@ void CUnitServer::OnUnitMadeUnconscious( bool bFromScript )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CUnitServer::OnUnitDied( CUnitServer *pUS )
 {
-	GetWorld()->AddUICommand( new CUICmdUnit( this ) );
+	// @0x3bf470 -- retail DROPPED the Jan03 GetWorld()->AddUICommand( new CUICmdUnit( this ) )
+	// here (redundant per-observer UI refresh on every death); body is only the self-skip + forward.
 	if ( pUS != this )
 		pState->OnUnitDied( pUS );
 }
@@ -199,6 +209,26 @@ void CUnitServer::Die( bool bRemove )
 		//
 		GetWorld()->GetAISignalManager()->Add( NAI::CreateAICorpseSignal( this ) );
 	}
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CUnitServer::AddImpulse( const CRay &rImpulse )
+{
+	// retail @0x3c0370 gate cascade (disasm-verified against the CUnit-base vftable @0x4cd084):
+	//   CUnit vtbl+0x10 IsEmptyPK  -> TRUE skips (an empty shell doesn't ragdoll);
+	//   server vtbl+0x34 GetWearingPK -> live shell skips (the PK armor absorbs the wave);
+	//   vtbl+0x3c/+0x40 IsDead || IsUnconscious -> one must hold (only downed bodies get pushed);
+	//   CUnit vtbl+0x24 GetCorpseCarrier -> being carried skips.
+	if ( IsEmptyPK() )
+		return;
+	if ( IsValid( GetWearingPK() ) )
+		return;
+	if ( !IsDead() && !IsUnconscious() )
+		return;
+	if ( GetCorpseCarrier() )
+		return;
+	CVec3 vDir = rImpulse.ptDir;
+	Normalize( &vDir );
+	animator.Die( GetPosition(), vDir, false );   // clipless ragdoll launch (bPlayDeath=false)
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CUnitServer::ProcessCritical( NDb::ECritical eCA )
@@ -275,7 +305,14 @@ void CUnitServer::CheckCmdExecState()
 	if ( pExec->GetState() != CCommandExecute::RUNNING )
 	{
 		//ASSERT( pExec->GetState() != CCommandExecute::FAILED );
-		if ( pExec->GetState() == CCommandExecute::FINISHED && !bIsRunningForcedAction )
+		// retail release semantics (same rationale as the session-6 TBS_STOP fix @0x3c2a90 port: when an
+		// executor is released, the command it executed is GONE with it -- the unit's route/logic
+		// re-decides from scratch): a FAILED retire must ALSO drop the command. Keeping it made
+		// CTask::GetCommand's HasCommand() branch pump CCmdContinue forever, re-Running the dead
+		// command's executor every segment (the GFirst RF1 wedge) and starving every later task of the
+		// same commander through the one-decision-per-segment latch.
+		if ( ( pExec->GetState() == CCommandExecute::FINISHED || pExec->GetState() == CCommandExecute::FAILED )
+			&& !bIsRunningForcedAction )
 			pCurrentCmd = 0;
 		pExec = 0;
 		bIsRunningForcedAction = false;
@@ -298,9 +335,15 @@ void CUnitServer::Do( CCommand *_pCmd )
 	ASSERT( CanFight() );
 	if ( !CanFight() )
 		return;
+	// TURN-STUCK FIX (dev-bugs s7): retail CUnitServer::Do @0x3c2390 has NO bIsRunningForcedAction
+	// refusal -- its only gate is CanFight + not-cannon (oracle s2_unitserver.h Do mirror). The Jan03
+	// early-return here was FATAL when the flag leaked: any direct pExec=0 drop of a RUNNING forced
+	// critical executor (e.g. the old TBS_RECALC_COMMAND arm, fired by OnPassControl right after
+	// turn-start bleed damage rolled a critical) left bIsRunningForcedAction latched TRUE with no
+	// executor -- and with this gate the unit then silently ignored EVERY later command forever
+	// (CheckCmdExecState, the only place that clears the flag, is unreachable without an executor).
+	// Retail self-heals instead: commands are accepted, and the next executor retire clears the flag.
 	ASSERT( !bIsRunningForcedAction );
-	if ( bIsRunningForcedAction )
-		return;
 	CDynamicCast<CCmdCancel> pCancel(_pCmd);
 	if (pCancel)
 	{
@@ -454,6 +497,17 @@ EUnitCommandResult CUnitServer::CanDo( CCmd *p, int *pnStartAP, int *pnFullAP )
 	}
 	*/
 	//
+	// @0x3c1570 -- retail PK-ban (absent in Jan03; FOLLOW THE DECOMP): a fight-capable unit that
+	// is CROUCHing may NOT be given a look-around (CCmdLook) command -> UCR_PK_BAN. Placed here
+	// because a CCmdLook is never a CCmdContinue, so the decode's "not continue" gate is implicit.
+	// (The binary computes a CCmdPath cast too, but it does NOT gate this return; in this tree
+	// CCmdLook : CCmd, so the CCmdLook cast alone is the faithful gate.)
+	{
+		CDynamicCast<CCmdLook> pLook( p );
+		if ( pLook && CanFight() && GetPosition().GetPose() == NAI::CROUCH )
+			return UCR_PK_BAN;
+	}
+	//
 	CDynamicCast<CCmdContinue> pContinue(p);
 	if (pContinue)
 	{
@@ -595,6 +649,7 @@ void CUnitServer::CancelAction()
 		pExec->Cancel();
 	else
 	{
+		// NOTE: this DROP branch keeps pCurrentCmd (retail @0x3c0a20 does the same).
 		//		pCurrentCmd = 0;
 		pExec = 0;
 	}
@@ -631,7 +686,7 @@ void CUnitServer::ForcedMove()
 	int pose = GetPosition().pos.p.GetPose();
 	if ( pose == NAI::CM_INACTIVE )
 		pose = NAI::CM_CROUCH;
-	float fMaxFall = GetMaxFallDist();
+	float fMaxFall = GetMaxFallDist( fLastHeight );   // retail @0x3c0b80 passes fLastHeight as the ray-origin z
 	for ( int i = 0; i < res.size(); ++i )
 	{
 		res[i].SetPose( pose );
@@ -738,8 +793,64 @@ void CUnitServer::OnTBSEvent( ETBSEvent event )
 			CancelAction();
 			break;
 		case TBS_RECALC_COMMAND:
-			// is called when something happens that might affect current command execution plan
-			pExec = 0;
+			// is called when something happens that might affect current command execution plan.
+			// TURN-STUCK FIX (dev-bugs s7): retail @0x3c2a90 does NOT drop the executor unconditionally:
+			//   if ( !cannon && IsCancelableExec( pExec ) ) {           // NWorld::IsCancelableExec @0x392fe0
+			//       if ( CanFight() && visible ) animator.PlaceUnit( GetPosition() );  // re-seat the model
+			//       pExec = 0;
+			//   }
+			// The dev bare `pExec = 0` (a) dropped cannon actions a recalc must NOT drop, and (b) never
+			// re-seated a unit whose move executor it released, leaving the model mid-stride off its
+			// grid cell. NOTE: dropping a RUNNING forced-critical executor here (RECALC fires from
+			// OnPassControl right after turn-start bleed damage rolls a critical) leaves
+			// bIsRunningForcedAction latched in retail too -- retail tolerates that because its Do()
+			// accepts commands regardless and the next executor retire clears the flag; the matching
+			// dev-only hard refusal in Do() is removed this session (see the comment there).
+			// (The cannon-action guard is carried by IsCancelableExec's CExecCannon check.)
+			// DEV DEVIATION (hold-aim safety): the PlaceUnit re-seat is gated on the exec being an
+			// IExecMove (same pattern as the TBS_STOP arm below). Retail's arm re-seats whenever
+			// visible, but retail coalesces RECALC through its deferred STBSEvent queue -- this dev
+			// tree fires RecalcCurrentPlayerCommands on EVERY action-end edge, which would re-seat a
+			// FINISHED shoot executor holding its aiming pose after every shot. Re-seating is only
+			// MEANT for a dropped mid-stride mover; non-movers are dropped without a re-seat exactly
+			// as the pre-session dev code did (hold-aim visuals confirmed working under that drop).
+			if ( IsCancelableExec( pExec ) )
+			{
+				if ( CDynamicCast<IExecMove>( pExec ) && CanFight() && IsAddedToVisitor() )
+					animator.PlaceUnit( GetPosition() );
+				pExec = 0;
+			}
+			break;
+		case TBS_STOP_MOVE_AND_CANCEL_ACTION:
+			// retail CUnitServer::OnTBSEvent @0x3c2a90 snaps a unit interrupted MID-MOVE to its current grid
+			// cell (animator.PlaceUnit) and then RELEASES its move executor (pExec = 0), so it ends on a
+			// valid, pathable place -- not mid-stride/off-grid with a half-cancelled CExecMove that would
+			// make every later move order FindPath-fail and silently drop.
+			//
+			// HOWEVER: in this tree the sighting interrupt can fire RE-ENTRANTLY from inside the unit's own
+			// move processing (CExecMove::DoCommand -> ... -> AddInterrupt -> CancelAllAction -> here), so
+			// releasing the executor outright would FREE it while its own DoCommand is still on the call
+			// stack -> use-after-free (double-free of pCurCmd in CObjectBase::ReleaseObj, then heap
+			// corruption). Retail can free here because it never delivers the interrupt re-entrantly. So we
+			// keep the SNAP (PlaceUnit is already invoked mid-exec safely by IsWaitingForPath) but tear the
+			// move down the SAFE way via CancelAction -> CExecMove::Cancel(), which only MARKS the exec
+			// FAILED (no free); CheckCmdExecState then drops pExec on a later Segment tick. Same on-grid end
+			// state, no re-entrant free.
+			if ( CDynamicCast<IExecMove>( pExec ) && CanFight() && IsAddedToVisitor() )
+				animator.PlaceUnit( GetPosition() );
+			CancelAction();
+			// TURN-STALL FIX (dev-bugs s6 retest#5, bug B): retail @0x3c2a90 RELEASES the move executor
+			// here, so the interrupted move COMMAND is gone with it. The dev tree keeps pExec alive (the
+			// re-entrant-free hazard documented above) but must still abandon the command: CancelAction's
+			// own `pCurrentCmd = 0` is commented out and CheckCmdExecState clears pCurrentCmd only on
+			// FINISHED -- so a move cancelled by this global broadcast (WantTurnBased ->
+			// GlobalSituationHasChanged -> CancelAllAction, i.e. the real-time -> turn-based transition)
+			// left a STALE pCurrentCmd. CAICombatLogic::HasCommandToExecute() (@0x432da0) reads it via
+			// HasCommand(), which made the unit's think-job IsIdleJob()==true forever (@0x4331c0), the
+			// job manager never ran it, the tactical commander's WaitForJob dependency never finished,
+			// bEndOfTurn never latched -- the AI player's first turn never ended. Clearing the command
+			// here mirrors retail's executor release; the unit's route/logic re-decides from scratch.
+			pCurrentCmd = 0;
 			break;
 		default:
 			ASSERT( 0 );
@@ -764,7 +875,28 @@ void CUnitServer::GetVisible( vector<CPtr<CUnit> > *pTarget ) const
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CUnitServer::GetInfo( NRPG::SUnitInfo *pInfo ) const
 {
+	// retail @0x3bfd50: base CUnitMission fill, then overlay the PK-HP bar.
+	pInfo->bPKInfo = false;
+	pInfo->bUnitInfo = false;
 	GetUnitRPG()->GetInfo( GetPose(), pInfo );
+	if ( IsEmptyPK() )
+	{
+		// the unit's body literally IS a Panzerklein -> PK-HP == the unit's own HP.
+		pInfo->nPKHP = pInfo->nHP;
+		pInfo->nMaxPKHP = pInfo->nMaxHP;
+		pInfo->bPKInfo = true;
+		return;
+	}
+	pInfo->bUnitInfo = true;
+	if ( IsValid( pWearingPK ) )
+	{
+		// a soldier piloting a PK -> the PK-HP bar shows the worn PK unit's HP.
+		NRPG::SUnitInfo tmp = {};
+		pWearingPK->GetUnitRPG()->GetInfo( GetPose(), &tmp );
+		pInfo->nPKHP = tmp.nHP;
+		pInfo->nMaxPKHP = tmp.nMaxHP;
+		pInfo->bPKInfo = true;
+	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 IPlayer* CUnitServer::GetPlayer() const 
@@ -777,45 +909,56 @@ NRPG::IUnitMissionInfo* CUnitServer::GetRPG() const
 	return GetUnitRPG(); 
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// The path-conflict remover of this unit's current executor (pExec -> IExecMove), or null. Used by
+// CExecMove::CheckLockerState to step the who-locks-whom chain onto the locking unit's own remover.
+CPathConflictsRemover* CUnitServer::GetPathConflictsRemover()
+{
+	return IsValid( pExec ) ? pExec->GetPathConflictsRemover() : 0;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 void CUnitServer::Segment()
 {
 	STime tCur = GetWorld()->GetTime()->GetValue();
 	int nDoNotFreeze = 0;
 	while ( IsValid( pExec ) && pExec->IsExecuting() )
 	{
-		NAI::SUnitPosition p;
-		if ( pExec->IsWaitingForPath( &p ) )
+		// Service the move wait-state (path-conflict recovery) each tick. The Jan03 inline locker/reroute
+		// pump now lives in CExecMove::CheckCanDoMove/CheckLockerState/TryToSetNewPath, driven from
+		// CPathConflictsRemover::Segment (@0x3cc670). Still waiting after servicing -> hold this tick.
+		pExec->Segment();
+		// RETAIL RETIRE PREDICATE (disasm @0x3c2f00, re-derived dev-bugs s7 after the hold-aim
+		// regression): the retail pump retires an executor (AnimationFinished vtbl+0x20 +
+		// CheckCmdExecState @0x3c08b0) ONLY at an animation edge -- `if (tCur < animator.TimeEnd
+		// [this+0x5c]) break;` guards both calls, and the loop's only other exits are pExec
+		// null/zombie, !IsExecuting (vtbl+0x28) and the PCR wait probe (vtbl+0x14). There is NO
+		// state-based reap anywhere in the retail loop: a FINISHED executor installed while the
+		// animator's end-time stays ahead IS retail's hold-aim -- the shoot exec goes FINISHED at
+		// the shot and keeps the aiming pose until the anim edge / a new command tears it down.
+		// (The first s7 attempt reaped ANY non-RUNNING exec every pass; that retired healthy
+		// FINISHED attack execs instantly = pose reset after every shot. REGRESSION -- narrowed.)
+		//
+		// Two dev-necessary deviations remain, both because dev cancels DEFER the release (the TBS
+		// stop paths here cannot free the exec re-entrantly the way retail @0x3c2a90 does), so a
+		// DEAD exec can linger installed where retail structurally cannot:
+		//   (s7) FAILED = cancelled/failed -- never a hold-pose state (hold-aim is FINISHED,
+		//        regression-trace-proven) -> reap promptly. This is the wedge net for a cancelled
+		//        exec (e.g. a queue Cancel latching FAILED while its front's clip still plays)
+		//        sitting under an ever-ahead TimeEnd, swallowing MOVE re-aims until an attack.
+		if ( pExec->GetState() == CCommandExecute::FAILED )
 		{
-			CObjectBase* locker = GetWorld()->GetPathNetwork()->GetWhoLocksThisPlace( p.pos.p );
-			CDynamicCast<CUnitServer> pUS(locker);
-			if ( IsValid( pUS ) && !pUS->IsMoving() )
-			{
-				if ( pUS.GetPtr() == this ) // BUG - unit locks himself
-				{
-					ASSERT(0);
-				}
-				// set new path
-				CDynamicCast<IExecMove> pMove(pExec);
-				if (pMove)
-				{
-					NAI::SPathPlace desired;
-					NAI::EFindPathParams eParams;
-					pMove->GetDesiredPlace( &desired, &eParams );
-					vector<NAI::SPathPlace> dst;
-					dst.push_back( desired );
-					NAI::SPathPlace src;
-					pMove->GetSearchFromPosition( &src );
-					CPtr<NAI::CPath> pPath = FindPath( GetWorld()->GetPathNetwork(), this, src, dst, 0, true, eParams, IsStrafing() );
-					if ( IsValid( pPath ) )
-						pMove->SetNewPath( pPath, eParams );
-					else
-					{
-						CancelAction();
-						pMove->FullCancel();
-						pCurrentCmd = 0;
-					}
-				}
-			}
+			CheckCmdExecState();
+			break;
+		}
+		if ( pExec->IsWaitingForPath() )
+		{
+			//   (s6, retest#5 bug B) a wait-PARKED mover whose move already terminated
+			//        (TryToSetNewPath found no route -> FullCancel latched state=FINISHED but,
+			//        retail-faithfully, left bWaiting set) can never reach the animation pump
+			//        below, so it was NEVER reaped: its CObj<CActionCounter> pinned
+			//        CTBSWorld::IsAction() true forever and froze the first enemy turn. Reap the
+			//        dead park; only a still-RUNNING park (live 10-tick locker retry) holds the tick.
+			if ( pExec->GetState() != CCommandExecute::RUNNING )
+				CheckCmdExecState();
 			break;
 		}
 		if ( bCallTimeLabel && tCur >= animator.GetTimeLabel1() )
@@ -865,7 +1008,7 @@ void CUnitServer::Segment()
 void CUnitServer::HearUnit( CUnitServer *pSource )
 {
 	vector<CObj<CTimedObject> > stuff;
-	GetWorld()->CreateSoundStuff( &stuff, pSource->GetPosition().GetCP() );
+	GetWorld()->CreateSoundStuff( pSource, &stuff, pSource->GetPosition().GetCP() );
 	HearSound( stuff, pSource, pSource->GetPosition().pos.p );
 	SetAudible( pSource, true );
 }
@@ -1225,7 +1368,7 @@ int CUnitServer::ProcessAttack( int nUserID, NRPG::CAttackPortion *pAttack, NDb:
 				FlipPanzerklein( 0 );
 				if ( GetUnitRPG()->IsDead() )
 				{
-					animator.Die( GetPosition(), VNULL3 );
+					animator.Die( GetPosition(), VNULL3, true );   // retail @0x3c33a0: PK self-explosion DOES play the pilot death clip (bPlayDeath=true)
 					GetWorld()->GetPathNetwork()->Unlock( this );
 				}
 			}
@@ -1324,7 +1467,7 @@ bool CUnitServer::GetBarrelDir( CRay *pRay )
 		return false;
 	//
 	NAnimation::SBonePose barrel;
-	if ( !animator.GetBarrelPos( pDBWeapon->GetModel()->pGeometry, &barrel ) )
+	if ( !animator.GetBarrelPos( pDBWeapon->GetModel()->pGeometry, &barrel, false ) )
 		return false;
 	//
 	pRay->ptOrigin = barrel.pos;
@@ -1458,6 +1601,15 @@ bool CUnitServer::IsDead() const
 	return CDynamicCast<CUnitStateDeath>( pState );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+void CUnitServer::OnNewPlayerFastTurnOrTime( const CEventOnNewPlayerFastTurnOrTime &event )
+{
+	// retail @0x3c0300: re-arm hiding at the start of THIS unit's own player fast-turn (or a player-less
+	// forced-real-time tick). Pairs with Hide()'s bCanHide=false-on-unhide so a unit that unhid can hide again
+	// only after its next turn -- WITHOUT this the gate would permanently lock out re-hiding.
+	if ( !IsValid( event.pPlayer ) || event.pPlayer == GetPlayer() )
+		EnableHide();
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 void CUnitServer::OnNewPlayerTurnOrTime( const CEventOnNewPlayerTurnOrTime &event )
 {
 	if ( CanFight() && ( !IsValid( event.pPlayer ) || event.pPlayer == GetPlayer() ) )
@@ -1505,21 +1657,22 @@ bool CUnitServer::IsAIUnit() const
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool BeginDeactivatingItem( CUnitServer *pUS, NDb :: EItemSubType subType )
 {
-	bool bActive = pUS->animator.IsActiveItem();
-	if ( bActive && subType != NDb::SUBTYPE_NONE )
-	{
-		if ( subType == NDb::SUBTYPE_HEAVY || subType == NDb::SUBTYPE_MINE_DETECTOR )
-			pUS->animator.DeactivateItem( pUS->GetPosition(), true, true, NDb::BELT_M1 );
-		else
-		{
-			NRPG::IInventory *pInventory = pUS->GetUnitRPG()->GetInventory();
-			int nPlace = pInventory->GetPlaceBySubType( subType );
-			pUS->animator.DeactivateItem( pUS->GetPosition(), false, nPlace == -1, (NDb::EItemPlace)nPlace );
-		}
-		return true;
-	}
-	else
+	// @0x3bf800 -- retail deactivates the active item for ANY subtype (incl. SUBTYPE_NONE,
+	// which short-circuits to the "no place" sentinel -1 -> stowed to backpack, WITHOUT querying
+	// the inventory). Jan03's `subType != SUBTYPE_NONE` outer gate (returned false for NONE) was
+	// dropped; follow the decode (authoritative).
+	if ( !pUS->animator.IsActiveItem() )
 		return false;
+	if ( subType == NDb::SUBTYPE_HEAVY || subType == NDb::SUBTYPE_MINE_DETECTOR )
+		pUS->animator.DeactivateItem( pUS->GetPosition(), true, true, NDb::BELT_M1 );
+	else
+	{
+		int nPlace = -1;
+		if ( subType != NDb::SUBTYPE_NONE )
+			nPlace = pUS->GetUnitRPG()->GetInventory()->GetPlaceBySubType( subType );
+		pUS->animator.DeactivateItem( pUS->GetPosition(), false, nPlace == -1, (NDb::EItemPlace)nPlace );
+	}
+	return true;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 }

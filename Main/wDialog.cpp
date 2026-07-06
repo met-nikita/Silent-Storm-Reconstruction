@@ -39,7 +39,14 @@ static void GetDialogSequence( int nDialogID, vector< CDBPtr<NDb::CDBAckInfo> > 
 	//
 	sort( tmpRes.begin(), tmpRes.end(), CompateDialogSeqs );
 	for ( vector< CDBPtr<NDb::CDBDialogSeq> >::iterator r = tmpRes.begin(); r != tmpRes.end(); ++ r )
-		pSeq->push_back( (*r)->pAckInfo.GetPtr() );
+	{
+		// retail GetDialogSequence @0x34d400: skip rows whose pAckInfo is null/destroyed. The retail
+		// game.db has DialogSeq rows with dangling AckInfo refs (e.g. dialog 132 GBaseG1a, the German
+		// base radio briefing); MakeDialogData reads ack+0x10 (nRPGPersID) with no null guard, relying
+		// entirely on this filter -- without it the first such dialog crashes on base entry.
+		if ( IsValid( (*r)->pAckInfo ) )
+			pSeq->push_back( (*r)->pAckInfo.GetPtr() );
+	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 static NWorld::CUnit* GetUnitForDialog( int nPersID, CWorld *pWorld, vector< CPtr<NWorld::CUnit> > *pFakeUnits )
@@ -123,7 +130,7 @@ static void MakeDialogData(  CWorld *pWorld, int nDialogID,
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // Build (but do NOT queue) the play-dialog command -- so a script caller can AddUICommandWithID it and
 // get back a wait id for WaitForUI(DialogPlay(...)). Returns 0 if the dialog id is invalid.
-NWorld::CUICmdPlayDialog* MakePlayDialogCommand( CWorld *pWorld, int nDialogID )
+NWorld::CUICmdPlayDialog* MakePlayDialogCommand( CWorld *pWorld, int nDialogID, bool bHeroOnLeft )
 {
 	CDBPtr<NDb::CDBDialog> pDBDialog = NDb::GetDBDialog( nDialogID );
 	if ( !IsValid( pDBDialog ) )
@@ -131,11 +138,24 @@ NWorld::CUICmdPlayDialog* MakePlayDialogCommand( CWorld *pWorld, int nDialogID )
 	vector< CPtr<NWorld::CAckEvent> > phrases;
 	vector< CObj<NWorld::CUnit> > units;
 	MakeDialogData( pWorld, nDialogID, &phrases, &units );
+	// retail NWorld::SortUnits @0x34dd10 (called by PlayDialog @0x34dd70): the rotate first->back
+	// runs ONLY when its bSkip arg is false. That arg is the lua DialogPlay 2nd param HeroOnLeft
+	// (luaDialogPlay @0x2e64b0, format "sb[true]" -- defaults TRUE = skip). So by default the hero,
+	// front-inserted by MakeDialogData (index 0, views created L/R/L/R and bound by index), stays
+	// on the LEFT; a script passes HeroOnLeft=false to demote him off the left slot. (The rotate is
+	// NOT an always-on normalization: with hero at the back his side would flip with speaker-count
+	// parity, which is exactly the left/right flip this replaces.)
+	if ( !bHeroOnLeft && units.size() >= 2 )
+	{
+		CObj<NWorld::CUnit> pFirst = units.front();
+		units.erase( units.begin() );
+		units.push_back( pFirst );
+	}
 	return new NWorld::CUICmdPlayDialog( pDBDialog->szCode, units, phrases );
 }
-void PlayDialog( CWorld *pWorld, int nDialogID )
+void PlayDialog( CWorld *pWorld, int nDialogID, bool bHeroOnLeft )
 {
-	NWorld::CUICmdPlayDialog *pCmd = MakePlayDialogCommand( pWorld, nDialogID );
+	NWorld::CUICmdPlayDialog *pCmd = MakePlayDialogCommand( pWorld, nDialogID, bHeroOnLeft );
 	if ( pCmd )
 		pWorld->AddUICommand( pCmd );
 }

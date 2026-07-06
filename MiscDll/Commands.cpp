@@ -71,6 +71,13 @@ float CValue::GetFloat() const
 	return fVal;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// v1.2 (new helper, v1.2 VA 0x7ce990): FLD fVal / FISTP -- round-to-nearest(-even) under the
+// default FPU control word; Float2Int is the tree's exact FLD/FISTP idiom.
+int CValue::GetInt() const
+{
+	return Float2Int( fVal );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 const wstring& CValue::GetString() const
 {
 	return szVal;

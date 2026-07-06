@@ -31,7 +31,8 @@ NRPG::EAction GetMoveActionType( const NAI::IPathNetwork *pNet, const NAI::SUnit
 		case NAI::TT_CLIMB_2:  return NRPG::AC_CLIMB_2;
 		case NAI::TT_CLIMB_3:  return NRPG::AC_CLIMB_3;
 		case NAI::TT_CLIMB_4:  return NRPG::AC_CLIMB_4;
-		case NAI::TT_JUMP:     return NRPG::AC_JUMP;
+		case NAI::TT_JUMP:
+		case NAI::TT_JUMP_BACK: return NRPG::AC_JUMP;   // @0x...GetMoveActionType -- jump-back costs the same AC_JUMP
 		case NAI::TT_POSE:
 			{
 				switch ( dst.GetPose() )

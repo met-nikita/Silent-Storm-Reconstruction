@@ -11,7 +11,13 @@ bool TraceTile( IWorld *pWorld, const CRay &ray, NAI::SPosition *pRes, int nMaxF
 		return false;
 	CVec3 ptDst;
 	vector<NAI::SInterval> intervals;
-	pWorld->GetAIMap()->Trace( ray, &intervals, TS_PASS_BLOCKER, NAI::CFloorsSet(), NAI::IAIMap::STH_SPLIT_TERR_HG );
+	// retail NWorld::Trace @0x37d760 (the cursor pick; this function's sole caller is
+	// CMission::TraceCursor) traces TS_PICK|TS_PASS_BLOCKER for the tile result -- Jan03's
+	// TS_PASS_BLOCKER-only set missed clickable walkable surfaces whose hull carries only
+	// TS_PICK (e.g. a lower-floor surface), so a click on one fell through past the gate
+	// and resolved to the wrong (current-floor) tile. Interval order stays nearest-first
+	// (CAIMap::Trace sorts unconditionally), matching retail's first-in-gate tile pick.
+	pWorld->GetAIMap()->Trace( ray, &intervals, TS_PICK|TS_PASS_BLOCKER, NAI::CFloorsSet(), NAI::IAIMap::STH_SPLIT_TERR_HG );
 	ptDst = ray.ptOrigin - ray.ptDir * ( (ray.ptOrigin.z - 1) / ray.ptDir.z );
 	bool bRet = false;
 	for ( int k = 0; k < intervals.size(); ++k )

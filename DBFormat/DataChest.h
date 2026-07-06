@@ -21,6 +21,7 @@ class CDBDifficulty;
 class CRPGChest;
 class CTRPGChest;
 class CRPGLootInstances;
+class CRPGChestReal;
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CRPGLootInstances - one item-with-quantity entry that belongs to a CRPGChest (ChestID relation).
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -38,6 +39,28 @@ public:
 	virtual void Import();
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// SLootItem - one rolled loot entry of a materialized chest (retail NDb::SLootItem, 12 bytes:
+// pItem @+0, nQuantity @+4, pDifficulty @+8). Runtime-only, never serialized.
+////////////////////////////////////////////////////////////////////////////////////////////////////
+struct SLootItem
+{
+	CPtr<CRPGItem> pItem;
+	int nQuantity;
+	CPtr<CDBDifficulty> pDifficulty;
+	SLootItem(): nQuantity(0) {}
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// CRPGChestReal - a materialized ("rolled") chest: the concrete loot list produced from a
+// CTRPGChest template by CreateChest (retail NDb::CRPGChestReal, sizeof 0x18: CObjectBase + the
+// items vector @+0xc). Runtime-only (not in the retail saveload class registry).
+////////////////////////////////////////////////////////////////////////////////////////////////////
+class CRPGChestReal: public CObjectBase
+{
+	OBJECT_BASIC_METHODS( CRPGChestReal );
+public:
+	vector<SLootItem> items;
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
 // CTRPGChest - weighted random pool of CRPGChest variants. Serialization is inherited from CRndPtr.
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CTRPGChest : public CRndPtr<CRPGChest>
@@ -46,6 +69,10 @@ class CTRPGChest : public CRndPtr<CRPGChest>
 public:
 	ZDATA_(CRndPtr<CRPGChest>)
 	ZEND
+	// retail NDb::CTRPGChest::CreateChest @0x3fbf70: roll one chest variant whose nLevel fits
+	// [nMinLevel, nMaxLevel] (weighted by the template roulette); if none fits, fall back to the
+	// eligible variant with the HIGHEST nLevel below nMinLevel; materialize its loot instances.
+	CRPGChestReal* CreateChest( SRand *pRand, const vector<int> &reqFlags, int nMinLevel, int nMaxLevel );
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CRPGChest - a concrete chest variant (a row of RPGChests). Pushes itself into pTemplate's pool.

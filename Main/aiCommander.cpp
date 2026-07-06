@@ -51,10 +51,17 @@ void CAICommander::OnUnitAdded( NWorld::CUnitServer *pUnitServer )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CAICommander::GenerateCommand()
 {
+	// retail @0x353d0 gate (commandTracker.bCommandGiven / nAILag): at most ONE AI decision per world
+	// segment. CTBSWorld::FetchPlayerCommands loops GetCommand->GenerateCommand until the commander yields
+	// nothing; a task that regenerates the same no-progress command (CCmdContinue for a unit a cinematic
+	// sequence blocks) would otherwise refill the queue forever inside ONE segment -- world time frozen.
+	if ( bCommandGiven )
+		return;
 	// �������� �� ����� ����
 	if ( bForbidAI || IsEndOfTurn() && !pWorld->IsRealTime() )
 	{
 		Do( new NWorld::CCmdEndOfTurn() );
+		bCommandGiven = true;
 		return;
 	}
 	// ���� ����������� �����-���� ��������, �� ������ �� �����
@@ -76,6 +83,7 @@ void CAICommander::GenerateCommand()
 			{
 				Do( pCmdUnit );
 				Do( new NWorld::CCmdSetCommand( pCmdUnit->pUnit, new NWorld::CCmdContinue() ) );
+				bCommandGiven = true;
 			}
 		}
 	}
@@ -158,6 +166,9 @@ void CAICommander::OnPassControl( NWorld::CPlayer *_pPlayer )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CAICommander::Segment()
 {
+	// retail SAICommandTracker::OnSegment @0x338b0 (called from Segment @0x347e0 BEFORE any gate):
+	// re-arm the one-decision-per-segment latch every world tick, bForbidAI included.
+	bCommandGiven = false;
 	if ( bForbidAI )
 		return;
 	// release CAICommander::OnAISegment @0x346f0: tick EVERY commanded unit each segment so every unit lazily builds
@@ -167,9 +178,13 @@ void CAICommander::Segment()
 	//
 	if ( bWantTurnBased )
 	{
-		if ( !pWorld->IsRealTime() )
-			bWantTurnBased = false;
-		else
+		// retail: a turn-based request fires ONCE and does NOT survive a cinematic sequence --
+		// CTBSWorld::WantTurnBased @0x375b10 bails on IsSequence (the ownerless-top interrupt), and the
+		// CWorld::willWantTBS records (WillWantTBS @0x3683e0) are REMOVED when their countdown fires,
+		// swallowed or not. The dev latch retried every segment while the sequence gate ate the call, so
+		// a request armed mid-cutscene detonated into an instant turn-based switch on the EndSequence edge.
+		bWantTurnBased = false;
+		if ( pWorld->IsRealTime() && !pWorld->IsSequence() )
 			pWorld->WantTurnBased( pPlayer );
 	}
 	//
@@ -227,11 +242,13 @@ void CAICommander::OnTBSEvent( NWorld::ETBSEvent event )
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CAICommander::OnSeeUnit( NWorld::CUnitServer *pWatcher, NWorld::CUnitServer *pTarget ) 
+void CAICommander::OnSeeUnit( NWorld::CUnitServer *pWatcher, NWorld::CUnitServer *pTarget )
 {
 	if ( bForbidAI )
 		return;
 	//
+	// retail swallows every sighting during a sequence (CWorld::CheckInterrupt @0x3684c0 IsSequence
+	// gate); here the per-watcher CHEAT_SCRIPTSEQUENCE is the analog.
 	if ( pWatcher->IsCheatEnabled( NRPG::CHEAT_SCRIPTSEQUENCE ) )
 		return;
 	//
@@ -324,14 +341,16 @@ CSequenceCommander::CSequenceCommander( NWorld::CWorld *_pWorld ): CAICommander(
 {
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// CSequenceCommander::GenerateCommand @0x358d0 -- the release auto-drives the human commander only while
+// CSequenceCommander::GenerateCommand @0x358d0 -- the release auto-drives the human commander ONLY while
 // the world runs a cinematic sequence ( if ( pWorld->IsSequence() ) CAICommander::GenerateCommand(); ).
-// This dev snapshot has no world-level sequence predicate (wTurnBased.h:427), so the gate cannot be
-// reconstructed against a real method; the override is a documented no-op here (a human commander never
-// auto-drives) -- the release-direction-preserving choice. The distinct vtable slot is preserved.
+// The world-level sequence predicate now exists (CWorld::IsSequence == IsForcedRealTime, wMain.h @0x376ff0
+// note), so the retail gate is reconstructed for real. Still parity-only: nothing in this snapshot
+// instantiates a CSequenceCommander.
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CSequenceCommander::GenerateCommand()
 {
+	if ( GetWorld()->IsSequence() )
+		CAICommander::GenerateCommand();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 START_REGISTER(aiCommander)

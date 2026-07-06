@@ -25,7 +25,8 @@ namespace NWorld
 {
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 const float F_HEIGHT_MAP_SIZE = 2.5f;
-const float F_DEFAULT_TURN_SPEED = 700.0f;
+// retail CUnitAnimator::Rotate @0x33d0f0: 3*PI rad/s (~540 deg/s). Dev's old 700.0 was ~74x too fast.
+const float F_DEFAULT_TURN_SPEED = 9.42477798f;
 const float F_DEFAULT_MOVE_SPEED = 1.f;
 const float F_DEFAULT_AIM_SPEED = 0.8f;
 			STime N_DEFAULT_TRANSIT_TIME = 300;
@@ -254,7 +255,7 @@ bool CUnitAnimator::GetHipPos( CVec3 *pRes )
 	return false;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-bool CUnitAnimator::GetBarrelPos( NDb::CGeometry *pWeaponGeometry, NAnimation::SBonePose *pRes )
+bool CUnitAnimator::GetBarrelPos( NDb::CGeometry *pWeaponGeometry, NAnimation::SBonePose *pRes, bool bLeft )
 {
 	*pRes = NAnimation::SBonePose();
 	if ( IsValid( pCannon ) )
@@ -275,7 +276,7 @@ bool CUnitAnimator::GetBarrelPos( NDb::CGeometry *pWeaponGeometry, NAnimation::S
 	{
 		const char *pszBoneName = 0;
 		if ( bHasPKSkeleton )
-			pszBoneName = "R_Weapon";
+			pszBoneName = bLeft ? "L_Weapon" : "R_Weapon";   // @0x33b720: dual-mount PK alternates barrels
 		else
 		{
 			switch ( eAnimationWeaponType )
@@ -1565,7 +1566,25 @@ void CUnitAnimator::StartNewTurn( const NAI::SUnitPosition &cmdPos )
 		Stand( cmdPos, bAimedStrafe );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CUnitAnimator::Die( const NAI::SUnitPosition &cmdPos, const CVec3 &ptDir )
+// retail NWorld::GetDeathType @0x33a660: rotate the killing-blow direction into the unit's facing
+// frame and pick the directional death clip by quadrant (VNULL3 dir resolves to DEATH_LEFT -- retail
+// FallAsIfDead @0x350770 passes VNULL3 here, the directional push arrives separately via the
+// ProcessAttack corpse-push / AddImpulse bPlayDeath=false entries).
+static NDb::CAnimation::EType GetDeathType( const NAI::SUnitPosition &cmdPos, const CVec3 &ptDir )
+{
+	float fFacing = cmdPos.GetDirection();
+	float c = cos( fFacing ), s = sin( fFacing );
+	float x = c * ptDir.x - s * ptDir.y;   // damage direction in the unit frame
+	float y = c * ptDir.y + s * ptDir.x;
+	if ( x >= y )
+		return x + y > 0 ? NDb::CAnimation::DEATH_FRONT : NDb::CAnimation::DEATH_LEFT;
+	return x + y > 0 ? NDb::CAnimation::DEATH_RIGHT : NDb::CAnimation::DEATH_BACK;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail @0x33bb90. The death CLIP is optional (bPlayDeath + idle gates + data), the ragdoll
+// handoff (AddDynamics) is UNCONDITIONAL -- a death that skips it leaves the corpse frozen in
+// its last animation pose with the render transform stuck at the death spot.
+void CUnitAnimator::Die( const NAI::SUnitPosition &cmdPos, const CVec3 &ptDir, bool bPlayDeath )
 {
 	bool bWasCannon = false;
 	if ( IsValid( pCannon ) )
@@ -1576,23 +1595,38 @@ void CUnitAnimator::Die( const NAI::SUnitPosition &cmdPos, const CVec3 &ptDir )
 	}
 	STime tCur = pTime->GetValue();
 	CPtr<NAnimation::CAnimation> pDeath;
-	if ( !bAimed && !bWalking && !bAimedStrafe && !bWasCannon )
+	// retail clip gate adds !bInactivePose && bPlayDeath to the Jan03 idle tests
+	if ( !bAimed && !bWalking && !bAimedStrafe && !bWasCannon && !bInactivePose && bPlayDeath )
 	{
+		// retail: directional death first (GetDeathType), plain DEATH when the directional
+		// variant is absent from the skeleton's animation set (Ghidra mistyped the CPtr local;
+		// disasm-confirmed the fallback condition is !IsValid(pDeath))
 		pDeath = pAnimator->CreateAnimation(
-			pSkeleton->GetAnimation( NDb::CAnimation::DEATH, nAnimFlagsPoseWeapon, 0, nAnimFlagsClassSex, pSide ),
+			pSkeleton->GetAnimation( GetDeathType( cmdPos, ptDir ), nAnimFlagsPoseWeapon, 0, nAnimFlagsClassSex, pSide ),
 				tCur );
+		if ( !IsValid( pDeath ) )
+			pDeath = pAnimator->CreateAnimation(
+				pSkeleton->GetAnimation( NDb::CAnimation::DEATH, nAnimFlagsPoseWeapon, 0, nAnimFlagsClassSex, pSide ),
+					tCur );
+		// retail enqueues the clip only on an INTEGRAL place (packed pos byte+2 bit0 == nIntegral --
+		// a real tile, not a ladder step); otherwise the body goes straight to dynamics with ptDir.
+		if ( pDeath && !cmdPos.pos.p.IsIntegral() )
+			pDeath = 0;
 	}
 	STime tDeathTime = 0;
 	if ( pDeath )
 	{
 		pDeath->SetStand( tCur, cmdPos.GetCPNoHeight(), cmdPos.GetDirection() );
 		pAnimator->AddAnimator( tCur, PutOnTerrain(pDeath) );
-		tCur = pDeath->GetTimeLabel1();
+		// retail does NOT advance to GetTimeLabel1() -- the dynamics window is the WHOLE clip
+		// [tNow, tNow+len] so the ragdoll can take over mid-clip on collision; the old
+		// label1-based window delayed the physics takeover past the clip end.
 		tDeathTime = pDeath->GetTime();
 	}
 
-	STime tMaxInput = tCur + tDeathTime;
-	pAnimator->AddDynamics( tCur, tMaxInput, ptDir, pAIMap, pFloor );
+	// retail impact: VNULL3 while a clip is standing the body (it settles from the clip pose),
+	// the raw impulse dir only on the clipless instant-ragdoll path.
+	pAnimator->AddDynamics( tCur, tCur + tDeathTime, pDeath ? VNULL3 : ptDir, pAIMap, pFloor );
 	pAnimator->AddMemorizer( tCur + 10000 );
 	IdleOff();
 }
@@ -1610,12 +1644,16 @@ const char *pszActivateAnimParams[ NDb::N_ITEM_PLACES ] =
 	"WaistBeltR1",
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CUnitAnimator::ActivateItem( const NAI::SUnitPosition &cmdPos, 
-	bool bHeavy, bool bBackpack, NDb::EItemPlace place, 
-	NDb::EWeaponType eAWT, bool bInstantly )
+void CUnitAnimator::ActivateItem( const NAI::SUnitPosition &cmdPos,
+	bool bHeavy, bool bBackpack, NDb::EItemPlace place,
+	NDb::EWeaponType eAWT, bool bHide, bool bInstantly )
 {
 	Stand( cmdPos );
-	bActiveItem = true;
+	// retail @0x33e800: bHide hides the just-activated item (bActiveItem=!bHide) and forces the unarmed
+	// animation set (eAnimationWeaponType = bHide ? WT_DEFAULT : eAWT).
+	bActiveItem = !bHide;
+	if ( bHide )
+		eAWT = NDb::WT_DEFAULT;
 	bool bTransit = false;
 	CPtr<NAnimation::CAnimation> pAnim;
 	if ( bHeavy )
@@ -1909,6 +1947,7 @@ void CUnitAnimator::DropCorpse( const NAI::SUnitPosition &cmdPos )
 void CUnitAnimator::BeTaken( CUnit *_pCarrier, CUnitAnimator *pTaker )
 {
 	pCarrier = _pCarrier;
+	bIsCarried = true;   // retail @0x33bea0 (read by the ProcessAttack corpse-push gate @0x350e20)
 	STime t = pTime->GetValue();
 	int nIndex;
 
@@ -1918,12 +1957,13 @@ void CUnitAnimator::BeTaken( CUnit *_pCarrier, CUnitAnimator *pTaker )
 	NAnimation::CABoneFilter *pChestAnim = new NAnimation::CABoneFilter;
 	pChestAnim->pSource = pTaker->pAnimator;
 	pChestAnim->nIndex = nIndex;
-	pAnimator->AddDynamics( t, t, VNULL3, pAIMap, pFloor, pChestAnim ); 
+	pAnimator->AddDynamics( t, t, VNULL3, pAIMap, pFloor, pChestAnim );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CUnitAnimator::BeDropped()
 {
 	pCarrier = 0;
+	bIsCarried = false;   // retail @0x33b1b0
 	STime t = pTime->GetValue();
 	pAnimator->AddDynamics( t, t, VNULL3, pAIMap, pFloor );
 }
@@ -2167,6 +2207,30 @@ void CUnitAnimator::StartHealing( const NAI::SUnitPosition &cmdPos, NAI::EBlowHe
 		ASSERT(0);
 		DefaultAction( cmdPos );
 		return;
+	}
+	PlayAnimation( cmdPos, NDb::CAnimation::START_HEAL, pszParams );
+	HealOn( cmdPos, pszParams );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CUnitAnimator::StartHealing( const NAI::SUnitPosition &cmdPos, NAI::EBlowHeight eBHeight,
+	bool bPanzerklein, bool bRepairKit )
+{
+	// @0x3401b0 -- power-armour REPAIR overload of StartHealing. When the heal target is a
+	// Panzerklein (bPanzerklein) the clip params are the fixed PK-repair strings ("PKHealGer" if a
+	// dedicated repair kit / bRepairKit is active, else "PKHealEng"); otherwise this is identical to
+	// the 2-arg StartHealing above (height-derived params, DefaultAction on lookup failure).
+	bHealing = true;
+	const char *pszParams;
+	if ( bPanzerklein )
+		pszParams = bRepairKit ? "PKHealGer" : "PKHealEng";
+	else
+	{
+		pszParams = GetAnimHeightParams( cmdPos, eBHeight );
+		if ( !pszParams )
+		{
+			DefaultAction( cmdPos );   // bWalking=true; tLabel1=tEnd; Stand(cmdPos) -- matches decode inline
+			return;
+		}
 	}
 	PlayAnimation( cmdPos, NDb::CAnimation::START_HEAL, pszParams );
 	HealOn( cmdPos, pszParams );

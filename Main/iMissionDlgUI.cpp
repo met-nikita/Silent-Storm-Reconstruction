@@ -24,9 +24,11 @@
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 namespace NUI
 {
+// retail CMissionDlgUI::UpdateDesktop @0x207490: every dialog fade/move stage runs 500 ms
+// (oracle s2_cmissiondlgui.h kFadeStageTime/kMoveStageTime), not the dev's old 1000.
 const int
-	N_FADE_STAGE_TIME	= 1000,
-	N_MOVEUNITVIEW_STAGE_TIME = 1000;
+	N_FADE_STAGE_TIME	= 500,
+	N_MOVEUNITVIEW_STAGE_TIME = 500;
 const int
 	N_DISPLACE_DISTANCE = 200;
 const int
@@ -61,7 +63,10 @@ CAnimUnitView::CAnimUnitView( const SWindowInfo &sInfo, NRender::IRenderGame *pR
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CAnimUnitView::SetUnit( NWorld::CUnit *pUnit )
 {
-	CUnitView::SetUnit( pUnit, pCamera );
+	// release CMissionDlgUI unit rebind (s2_cmissiondlgui.h @0x1c03d0 site): SetUnit(unit, camera,
+	// false, true, false) -- bItems=false (no weapon stance in the talking-body view), bShowCap=true,
+	// bPlayIdle=false (dialog animations drive the body, not the interface idle).
+	CUnitView::SetUnit( pUnit, pCamera, false, true, false );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CAnimUnitView::SetCoeff( float fCoeff )
@@ -98,9 +103,23 @@ void CMissionDlgUI::ShowDesktop()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CMissionDlgUI::HideDesktop()
 {
-	eStage = FINISH;
-
-	csSystem << "WARNING: Dialog end!" << endl;
+	// retail @0x205660: once the dialog is ALREADY closing (eStage >= FINISH) a skip/ESC is a no-op. Without this
+	// guard, pressing ESC during the MOVEUNITVIEWOUT/FADEOUT stages snaps eStage back to FINISH and UpdateDesktop
+	// restarts the heads' slide-out, so holding ESC keeps re-triggering it and the dialog never ends.
+	if ( eStage < FINISH )
+	{
+		eStage = FINISH;
+		// retail: closing/skipping the dialog stops the active voiceline (pSound CObj release) AND the
+		// speaking head's lipsync (pSequenceHolder clear) immediately -- without this the head keeps
+		// silently lipsyncing through the slide-out and after.
+		pSound = 0;
+		if ( IsValid( pSequenceHolder ) )
+		{
+			pSequenceHolder->SetSequence( 0 );
+			pSequenceHolder = 0;
+		}
+		csSystem << "WARNING: Dialog end!" << endl;
+	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CMissionDlgUI::UpdateDesktop( const STime &sTime )
@@ -297,9 +316,25 @@ void CMissionDlgUI::SetStage( int _nStage )
 
 		unitViewsSet[nTemp]->SetLight( NDb::GetTAmbientLight( 7 ) );
 		if ( IsValid( sEvent.pSound ) )
-			PlaySound( sEvent.pSound );
+		{
+			// retail @0x2059c0: STORE the voiceline handle in the pSound member -- reassigning the CObj releases the
+			// prior handle, STOPPING the previous section's voiceline. Continuation pages of the SAME phrase carry a
+			// null pSound (UpdatePhrases first-page gate, retail bVar9), so paging "Next" through a long subtitle
+			// keeps the one voiceline playing instead of restarting it.
+			NSound::ISoundScene *pScene = GetInterface()->GetSound();
+			if ( IsValid( pScene ) )
+				pSound = pScene->Add2DSound( sEvent.pSound );
+		}
 		if ( IsValid( sEvent.pSequence ) )
-			unitViewsSet[nTemp]->SetSequence( sEvent.pSequence );
+		{
+			// retail @0x2059c0: stop the PREVIOUS speaker's head before starting the new phrase's
+			// lipsync -- without this a skipped voiceline keeps silently lipsyncing. Continuation
+			// pages (null pSequence) skip this block, so in-phrase paging never cuts the mouth.
+			if ( IsValid( pSequenceHolder ) )
+				pSequenceHolder->SetSequence( 0 );
+			unitViewsSet[nTemp]->SetSequence( sEvent.pSequence, sEvent.pExpression );
+			pSequenceHolder = unitViewsSet[nTemp];
+		}
 	}
 
 	bool bBegPhrase = nStage == 0;
@@ -330,6 +365,11 @@ void CMissionDlgUI::UpdatePhrases( NGScene::I2DGameView *pView )
 
 		SPoint sRealSize( 0, 0 );
 		wstring wsText = GetDBString( 11209 ) + GetDBString( pEvent->pAckInfo->pText );
+		// retail UpdatePhrases @0x206d60 (the bVar9 gate): the sound/lipsync/expression attach to the
+		// FIRST page of each phrase only; continuation pages carry nulls so SetStage neither restarts
+		// the voiceline nor re-triggers the head on "Next".
+		bool bFirstPage = true;
+		NDb::CSequence *pExpression = NDb::GetSequenceByExpression( sVoice.eExpression );
 		do
 		{
 			pML->SetText( wsText, 0 );
@@ -385,9 +425,14 @@ void CMissionDlgUI::UpdatePhrases( NGScene::I2DGameView *pView )
 						SAckEvent &sEvent = *parsedPhrasesSet.insert( parsedPhrasesSet.end(), SAckEvent());
 						sEvent.pUnit = pEvent->pUnit;
 						sEvent.wsText = wsText.substr( 0, nCursor );
-						sEvent.pSound = sVoice.pSound;
 						sEvent.nPriority = pEvent->nPriority;
-						sEvent.pSequence = sVoice.pSequence;
+						if ( bFirstPage )
+						{
+							sEvent.pSound = sVoice.pSound;
+							sEvent.pSequence = sVoice.pSequence;
+							sEvent.pExpression = pExpression;
+							bFirstPage = false;
+						}
 
 						wsText = wsText.substr( nCursor );
 					}
@@ -398,9 +443,14 @@ void CMissionDlgUI::UpdatePhrases( NGScene::I2DGameView *pView )
 				SAckEvent &sEvent = *parsedPhrasesSet.insert( parsedPhrasesSet.end(), SAckEvent());
 				sEvent.pUnit = pEvent->pUnit;
 				sEvent.wsText = wsText;
-				sEvent.pSound = sVoice.pSound;
 				sEvent.nPriority = pEvent->nPriority;
-				sEvent.pSequence = sVoice.pSequence;
+				if ( bFirstPage )
+				{
+					sEvent.pSound = sVoice.pSound;
+					sEvent.pSequence = sVoice.pSequence;
+					sEvent.pExpression = pExpression;
+					bFirstPage = false;
+				}
 			}
 
 		} while( !wsText.empty() && ( sRealSize.y > pDialog->GetSize().y ) );

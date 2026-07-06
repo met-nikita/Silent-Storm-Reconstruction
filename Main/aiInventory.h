@@ -61,6 +61,7 @@ public:
 	void RemoveGrenade( CAIGrenadeWeapon *pGrenade );
 	void AddMeleeWeapon( CAIMeleeWeapon *pWeapon );
 	void AddThrowingWeapon( CAIThrowingWeapon *pWeapon );
+	void RemoveThrowingWeapon( CAIThrowingWeapon *pWeapon );
 	void AddFirstAid( CAIFirstAid *pFirstAid );
 	void AddClip( CAIFireArmsWeaponClip *pClip );
 	//

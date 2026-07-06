@@ -151,12 +151,20 @@ namespace NDatabase
 		}
 	inline CDBTableBase* GetTableByRecord( CDBRecord *p ) { return GetTable( GetRecordTypes().GetObjectTypeID( p ) ); }
 	void Serialize( CDataStream &file, CStructureSaver::EMode mode );
+	// release BasicDB.obj @0x3570 -- drop all tables/records/relations, then re-create one empty
+	// table entry per registered descriptor (CModManager::Activate teardown before the DB reload)
+	void ClearDatabaseTables();
 	//
-	void ImportField( const char *pszFieldName, int *pData );
-	void ImportField( const char *pszFieldName, bool *pData );
-	void ImportField( const char *pszFieldName, float *PData );
-	void ImportField( const char *pszFieldName, std::string *pData );
-	void ImportField( const char *pszFieldName, std::wstring *pData );
+	// v1.2 @0x7ef6d0-family: scalar field imports report success (the v1.2 IOLETable
+	// getters @0x401900..0x402740 return a bool and yield the value via out-param).
+	// A missing column returns false and leaves *pData UNTOUCHED, so guarded call
+	// sites keep the record's previous value when a (mod) db lacks the column.
+	// The record-reference overloads below keep the v1.1 always-assign form.
+	bool ImportField( const char *pszFieldName, int *pData );
+	bool ImportField( const char *pszFieldName, bool *pData );
+	bool ImportField( const char *pszFieldName, float *PData );
+	bool ImportField( const char *pszFieldName, std::string *pData );
+	bool ImportField( const char *pszFieldName, std::wstring *pData );
 	// simple reference
 	void ImportField( const char *pszFieldName, CDBRecord **pRef, CDBTableBase *pDestTable );
 	template< class T >

@@ -81,7 +81,10 @@ class CGlobalAck: public IAck
 	bool IsContainUnit( const list< CPtr<CUnit> > &visibleUnits, int nRPGPersID );
 	bool IsSequenceVisible( const list< CPtr<CUnit> > &visibleUnits, NDb::CDBAckSequence *pSequence );
 	void RemoveInvisibleSequences( IPlayer *pPlayer );
-	void FetchHighestAcks();
+	// retail @0x339150: prune to the top-priority set (priority = seq.nPriority>0 else CONDITION
+	// priority) and return that highest (>= 0). With the Steam game.db all AckSeqs priorities are 0,
+	// so the condition fallback IS the retail priority system.
+	int FetchHighestAcks();
 public:
 	CGlobalAck() {}
 	// ���������� � vAck
@@ -89,7 +92,12 @@ public:
 	// ���������� � sequences
 	void AddAckSequence( CUnitServer *pUnit, NDb::CDBAck *pAck ); 
 	// �������� ��������� �� ����������� sequence � ������ ����, ��� �������
-	virtual NDb::CDBAckSequence *GetSequence( IPlayer *pPlayer ); 
+	// retail @0x339230 hands back the SPEAKER too (bool GetSequence(CUnitServer**, CDBAckSequence**, int*)):
+	// the ack ROWS are keyed by the voice-DONOR pers id (GetAckPersID), which belongs to no live unit,
+	// so the speaker can only come from the queued SAck itself -- re-deriving it by pers id finds nobody.
+	// pnPriority = the retail int* out param: the FetchHighestAcks highest (the CONDITION-backed
+	// priority CheckForAcks must seed the CAckEvent with -- the sequence's own field is always 0).
+	virtual NDb::CDBAckSequence *GetSequence( IPlayer *pPlayer, CUnitServer **ppSpeaker = 0, int *pnPriority = 0 );
 	void RemoveUnitAcks( CUnitServer *pUnit );
 	// IAck
 	virtual void OnSegment();
@@ -117,6 +125,9 @@ public:
 	virtual void OnCannotFinishHeal( CUnitServer *pHealer, CUnitServer *pTarget );
 	virtual void OnHealFinished( CUnitServer *pHealer, CUnitServer *pTarget );
 	virtual void SayAck( CUnitServer *pWho, int nConditionID );
+	// does any listener in vAck belong to this unit? (save-migration probe -- CWorld::CreateRestored
+	// re-runs AddAck for listener-less units restored from a pre-AcksHolder-fix save)
+	bool HasAcksFor( CUnitServer *pUnit );
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CAckBase

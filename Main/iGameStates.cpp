@@ -1,6 +1,7 @@
 #include "StdAfx.h"
 #include "Gfx.h"
 #include "wInterface.h"
+#include "wMisc.h"			// NWorld::GetDMeshUnit/GetDMeshPos -- heard-noise-marker attack target
 #include "GView.h"
 #include "Sound.h"
 #include "RWGame.h"
@@ -26,6 +27,9 @@
 #include "..\DBFormat\DataFormat.h"
 #include "..\DBFormat\DataMap.h"
 #include "iMissionUI.h"
+#include "UICommCtrls.h"		// NUI::CTextFrame -- the retail unit-hover tooltip window ("enemyToolTip")
+#include "UIInterface.h"		// NUI::CInterface / CWindow ScreenToClient
+#include "RPGUnitInfo.h"		// NRPG::SUnitInfo (feeds SEnemyInfo)
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CSelectionWindow
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -92,6 +96,21 @@ const CVec4
 	V_SELECTIONCOLOR_OBJECT				= CVec4( 0.1f, 1, 0.1f, 0.5f ),
 	V_SELECTIONCOLOR_NEUTRAL			= CVec4( 0.1f, 1, 1, 0.5f );
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail NGame::SayAckForAll @0x1d96d0: an ORDER handler pairs its ShowError/success with a
+// per-selected-unit NWorld::CCmdPlayAck dispatched on the ONE-ARG mission Command channel
+// (mission vtbl+0x2c -> world commander queue -> CWorld::ExecuteCommand -> CGlobalAck). It must
+// NOT use Command(unit, cmd): that wraps the ack in CCmdSetCommand -> CUnitServer::Do, which
+// CANCELS the unit's running executor (the "orders die after one step" regression).
+// Retail success barks (IA_CONFIRMATION) exist ONLY for orders that move the unit somewhere:
+// move/rotate/use/set-trap/set-mine/first-aid. Attack/pick-item/untrap confirm NOTHING.
+static void SayAckForAll( IMission *pMission, NWorld::EInterfaceAcks eAck )
+{
+	vector< CPtr<NGame::IUnitTracker> > unitsSet;
+	pMission->GetSelectedUnits( &unitsSet );
+	for ( vector< CPtr<NGame::IUnitTracker> >::iterator i = unitsSet.begin(); i != unitsSet.end(); ++i )
+		pMission->Command( new NWorld::CCmdPlayAck( (*i)->GetUnit(), eAck ) );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 // EUnitCommandResult -> Wide String
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void ShowError( IMission *pMission, NWorld::EUnitCommandResult eResult )
@@ -130,10 +149,25 @@ void ShowError( IMission *pMission, NWorld::EUnitCommandResult eResult )
 	case NWorld::UCR_TARGET_OUT_OF_RANGE:
 		csGame << L"<color=beige>Can't reach target" << endl;
 		break;
+	case NWorld::UCR_CANT_HEAL:
+		// @0x1d5fc0 (retail ShowError case 0x10): heal target's CanHeal() failed -> feedback message + error sound.
+		csGame << L"<color=beige>Can't heal this unit" << endl;
+		break;
 
 	case NWorld::UCR_INVENTORY_NO_PLACE:
 		csGame << L"<color=beige>No place in inventory" << endl;
 		break;
+	case NWorld::UCR_NEED_HIGHER_SKILL:
+		csGame << L"<color=beige>Skill too low" << endl;
+		break;
+	case NWorld::UCR_NOT_ALL_UNITS_NEAR_PASSAGE:
+		csGame << L"<color=beige>Not all units are near the passage" << endl;
+		break;
+	case NWorld::UCR_PK_BAN:
+		// @0x1d5fc0 (retail ShowError case 0x13 -> caseD_5): crouch+look ban is a FULLY silent
+		// no-op -- no message AND no error sound. Return before the unconditional Add2DSound below.
+		return;
+	// UCR_NOT_HERO: deliberately no message -- retail treats it as a silent no-op
 	}
 
 	//// Error sound
@@ -288,6 +322,88 @@ bool CStateTeam::OnLButtonUp( int nX, int nY )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CStateFriend
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail NGame::MakeUnitStateToolTip @0x1d7b10: fill + position the hover tooltip for a unit. Full
+// parity with the shipped binary: the text is the FOG-OF-WAR view (SEnemyInfo) -- the unit's name
+// (format string 19329), and, per available block, either the exact HP "%d/%d" (when a roster perk /
+// own-unit reveals it) or a localized health-CONDITION label (19202..19207 unit, 19208..19213 PK). The
+// frame is positioned ABOVE the unit's projected screen position (raised 3.6 world units, centred), and
+// HIDDEN when the unit is dead/off-screen. Used by every tactical state that hovers a unit.
+static void MakeUnitStateToolTip( IMission *pMission, NWorld::CUnit *pUnit, NUI::CTextFrame *pFrame )
+{
+	if ( !IsValid( pFrame ) )
+		return;
+	if ( !IsValid( pUnit ) )
+	{
+		pFrame->SetStyle( NUI::STYLE_VISIBLE, false );
+		return;
+	}
+
+	// --- screen projection: raise the anchor 3.6 units above the unit, project to screen; off-screen -> hide
+	CVec3 vWorld = pUnit->GetPosition().GetCP();
+	vWorld.z += 3.6f;   // retail constant 0x40666666 (raise above the unit)
+	CVec2 vScreenRect = pMission->GetScene()->GetScreenRect();
+	CTransformStack sTS = pMission->GetCameraTransform();
+	CVec2 vScreen;
+	if ( !TestRayInFrustrum( vWorld, &sTS, vScreenRect, &vScreen ) )
+	{
+		pFrame->SetStyle( NUI::STYLE_VISIBLE, false );
+		return;
+	}
+	vScreen.x = vScreen.x * 1024 / vScreenRect.x;
+	vScreen.y = vScreen.y * 768 / vScreenRect.y;
+
+	// --- text: what the active player may learn about this unit
+	NWorld::SEnemyInfo info;
+	pMission->GetActivePlayer()->GetPlayer()->GetEnemyUnitInfo( pUnit, &info );
+
+	wstring wsText = NUI::GetDBString( 19329 );   // "EnemyTooltip Name Format" header
+	wsText += info.wsName;
+
+	if ( info.bUnitInfo )                     // Character (unit) VP row
+	{
+		wsText += L"<br>";
+		wsText += NUI::GetDBString( 19199 );       // "Character VP"
+		if ( !info.bCanSeeUnitHP )
+			wsText += NUI::GetDBString( 19202 + (int)info.eUnitCondition );   // 0..5 -> Healthy..Unconscious
+		else
+		{
+			WCHAR wsHP[64];
+			swprintf( wsHP, L"%d/%d", info.nUnitHP, info.nMaxUnitHP );
+			wsText += wsHP;
+		}
+	}
+	if ( info.bPKInfo )                        // Panzerklein (PK) VP row
+	{
+		wsText += L"<br>";
+		wsText += NUI::GetDBString( 19200 );        // "PK VP"
+		if ( !info.bCanSeePKHP )
+			wsText += NUI::GetDBString( 19208 + (int)info.ePKCondition );     // 0..5 -> Intact..Destroyed
+		else
+		{
+			WCHAR wsHP[64];
+			swprintf( wsHP, L"%d/%d", info.nPKHP, info.nMaxPKHP );
+			wsText += wsHP;
+		}
+	}
+
+	pFrame->SetText( wsText );
+	pFrame->SetStyle( NUI::STYLE_VISIBLE, true );
+
+	// --- position: centre the frame horizontally on the projected unit point (client-space)
+	NUI::SPoint sPos;
+	pFrame->GetParent()->ScreenToClient( NUI::SPoint( vScreen.x, vScreen.y ), &sPos );
+	sPos.x -= pFrame->GetSize().x / 2;
+	pFrame->SetPosition( sPos );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail CStateFriend::UpdateToolTipInfo @0x1d8290: refill the cached tooltip from the traced unit.
+void CStateFriend::UpdateToolTipInfo()
+{
+	CDynamicCast<NWorld::CUnit> pUnit( GetMission()->GetTraceObject() );
+	if ( IsValid( pUnit ) && IsValid( pUnitToolTip ) )
+		MakeUnitStateToolTip( GetMission(), pUnit, pUnitToolTip );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CStateFriend::Initialize( IMission *pMission )
 {
 	CStateBase::Initialize( pMission );
@@ -300,7 +416,9 @@ bool CStateFriend::Initialize( IMission *pMission )
 	if ( !IsValid( pUnit ) )
 		return false;
 
-	NDb::EDiplomacyState eState = GetMission()->GetWorld()->GetDiplomacyState( pUnit, GetMission()->GetActivePlayer()->GetPlayer() );
+	// retail CStateFriend::Initialize @0x1d90c0 (world vtbl+0xbc = (IPlayer,IPlayer)): the ACTIVE
+	// player's stance toward the target's player -- not the target's stance toward me.
+	NDb::EDiplomacyState eState = GetMission()->GetWorld()->GetDiplomacyState( GetMission()->GetActivePlayer()->GetPlayer(), pUnit->GetPlayer() );
 	if ( ( eState != NDb::DS_ALLY ) && ( eState != NDb::DS_NEUTRAL ) )
 		return false;
 
@@ -312,15 +430,30 @@ bool CStateFriend::Initialize( IMission *pMission )
 	if ( !pUnit->CanTalk() )
 		sCursorInfo = NUI::SCursorInfo( NDb::GetUITexture( N_CURSOR_NORMAL ) );
 	else
-		sCursorInfo = NUI::SCursorInfo( NDb::GetUITexture( N_CURSOR_OPEN_CLOSE ) );
+		sCursorInfo = NUI::SCursorInfo( NDb::GetUITexture( N_CURSOR_TALK ) );	// retail @0x1d90c0: UICursors row 20 "talk" (Talk.cur), not open/close
+
+	// retail CStateFriend::Initialize @0x1d90c0: the "enemyToolTip" CTextFrame, parented to the
+	// mission desktop's client window (NOT the interface/cursor), then filled by UpdateToolTipInfo.
+	pUnitToolTip = new NUI::CTextFrame( NUI::SWindowInfo( GetMission()->GetDesktop()->GetClientWindow(),
+		NUI::SPoint( 0, 0 ), NUI::SPoint( 0, 0 ), "enemyToolTip", NUI::STYLE_ENABLED | NUI::STYLE_VISIBLE | NUI::STYLE_TRANSPARENT | NUI::STYLE_TOPMOST ) );
+	UpdateToolTipInfo();
 
 	return true;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CStateFriend::Step()
+{
+	CStateBase::Step();
+	// retail: refresh the tooltip each frame (MakeUnitStateToolTip re-projects + re-positions it above
+	// the unit; it also hides itself when the unit dies or leaves the screen).
+	UpdateToolTipInfo();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CStateFriend::Terminate()
 {
 	CStateBase::Terminate();
 	pTraceSelection = 0;
+	pUnitToolTip = 0;   // release the tooltip window (unparents from the interface)
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CStateFriend::OnLButtonUp( int nX, int nY )
@@ -425,6 +558,7 @@ void CStateMove::DoMove( bool bInstant )
 	if ( !GetMission()->GetTracePosition( &pos ) )
 	{
 		ShowError( GetMission(), NWorld::UCR_PATH_NOT_FOUND );
+		SayAckForAll( GetMission(), NWorld::IA_IMPOSSIBLE_TO_PERFORM );	// retail CStateMove::DoMove @0x1dbb10
 		return;
 	}
 
@@ -433,6 +567,7 @@ void CStateMove::DoMove( bool bInstant )
 	if ( !GetMission()->GetWorld()->GetPathNetwork()->IsNativePassable( p ) )
 	{
 		ShowError( GetMission(), NWorld::UCR_PATH_NOT_FOUND );
+		SayAckForAll( GetMission(), NWorld::IA_IMPOSSIBLE_TO_PERFORM );
 		return;
 	}
 
@@ -447,6 +582,10 @@ void CStateMove::DoMove( bool bInstant )
 
 	for ( int nUnit = 0; nUnit < unitsSet.size(); ++nUnit )
 		unitsSet[nUnit]->SetTargetPosition( unitPlaces[nUnit], bInstant );
+
+	// retail barks only when the per-unit SetTargetPosition results aggregate to success; the
+	// unconditional bark is an accepted approximation (dev SetTargetPosition returns void)
+	SayAckForAll( GetMission(), NWorld::IA_CONFIRMATION );	// retail: "order acknowledged" on a move order
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CStateMove::UpdateCursor()
@@ -510,11 +649,15 @@ bool CStateAttack::Initialize( IMission *pMission )
 		if ( !IsValid( pObject ) )
 			return false;
 
+		// retail CStateAttack::Initialize @0x1dd240 accepts CUnit OR IObject OR IAISound targets;
+		// the heard-noise marker (dev CDMesh) is the IAISound case. The own-unit check applies to
+		// real units only (the marker skips it, exactly retail).
 		NWorld::CUnit* pUnit = dynamic_cast<NWorld::CUnit*>( pObject );
-		if ( !IsValid( pUnit ) )
+		bool bHeardMarker = ( NWorld::GetDMeshUnit( pObject ) != 0 );
+		if ( !IsValid( pUnit ) && !bHeardMarker )
 			return false;
 
-		if ( pUnit->GetPlayer() == GetMission()->GetActivePlayer()->GetPlayer() )
+		if ( IsValid( pUnit ) && pUnit->GetPlayer() == GetMission()->GetActivePlayer()->GetPlayer() )
 			return false;
 	}
 
@@ -522,13 +665,31 @@ bool CStateAttack::Initialize( IMission *pMission )
 	UpdateBlockedState();
 	UpdateCursorInfo();
 	UpdateCursor();
+
+	// retail CStateAttack::Initialize @0x1dd240: the "enemyToolTip" CTextFrame over the aimed enemy
+	// (only the non-FORCED aim-at-unit state has a real unit target).
+	if ( GetType() != FORCED )
+	{
+		pUnitToolTip = new NUI::CTextFrame( NUI::SWindowInfo( GetMission()->GetDesktop()->GetClientWindow(),
+			NUI::SPoint( 0, 0 ), NUI::SPoint( 0, 0 ), "enemyToolTip", NUI::STYLE_ENABLED | NUI::STYLE_VISIBLE | NUI::STYLE_TRANSPARENT | NUI::STYLE_TOPMOST ) );
+		UpdateToolTipInfo();
+	}
 	return true;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail CStateAttack::UpdateToolTipInfo @0x1d8540: refill from the aimed (state-target) unit.
+void CStateAttack::UpdateToolTipInfo()
+{
+	CDynamicCast<NWorld::CUnit> pUnit( GetMission()->GetStateTarget() );
+	if ( IsValid( pUnit ) && IsValid( pUnitToolTip ) )
+		MakeUnitStateToolTip( GetMission(), pUnit, pUnitToolTip );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CStateAttack::Terminate()
 {
 	CStateBase::Terminate();
 	pTraceSelection = 0;
+	pUnitToolTip = 0;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 IState::EType CStateAttack::GetType() const
@@ -550,6 +711,11 @@ bool CStateAttack::OnLButtonUp( int nX, int nY )
 	if ( !sInfo.bAvailable || !sInfo.bOk )
 	{
 		ShowError( GetMission(), sInfo.eResult );
+		// retail CStateAttack::OnLButtonUp @0x1dbec0: the out-of-ammo result (retail raw code 10)
+		// barks "weapon empty", any other failure "impossible to perform". Dev's enum diverged
+		// from the retail ordinals -- the semantic equivalent is UCR_NEED_RELOAD.
+		SayAckForAll( GetMission(), sInfo.eResult == NWorld::UCR_NEED_RELOAD ?
+			NWorld::IA_WEAPON_EMPTY : NWorld::IA_IMPOSSIBLE_TO_PERFORM );
 		return false;
 	}
 
@@ -557,6 +723,9 @@ bool CStateAttack::OnLButtonUp( int nX, int nY )
 	GetMission()->GetSelectedUnits( &unitsSet );
 	for ( vector< CPtr<NGame::IUnitTracker> >::iterator iTemp = unitsSet.begin(); iTemp != unitsSet.end(); iTemp++ )
 		GetMission()->Command( (*iTemp)->GetUnit(), pCmd );
+
+	// retail plays NO success confirmation for an attack order ("order acknowledged" is
+	// reserved for orders that move the unit somewhere)
 
 	if ( GetType() == FORCED )
 		GetMission()->ResetState();
@@ -573,7 +742,17 @@ NWorld::CCmd* CStateAttack::GetTargetCmd()
 {
 	CObjectBase* pTargetObject = GetMission()->GetStateTarget();
 	if ( IsValid( pTargetObject ) )
+	{
+		// retail @0x1d9e20: a heard-noise marker is attacked as a TILE at the noise position
+		// (z + 1.0) -- never as an object and never as the (hidden) unit.
+		CVec3 posMarker;
+		if ( NWorld::GetDMeshPos( pTargetObject, &posMarker ) )
+		{
+			posMarker.z += 1.0f;
+			return new NWorld::CCmdShootTile( posMarker );
+		}
 		return new NWorld::CCmdShootObject( pTargetObject, 0, eHitLocation );
+	}
 
 	CVec3 pos;
 	if ( !GetMission()->GetTracePosition( &pos ) )
@@ -739,12 +918,24 @@ void CStateAttack::UpdateCursorInfo()
 						CDynamicCast<NRPG::IMeleeWeaponItem> pMelee((*iTemp)->GetUnit()->GetRPG()->GetInventoryInfo()->GetActive());
 						if (pMelee)
 						{
-							if (pMelee->GetDBMeleeWeapon()->bThrowing)
-								nToHit = pWorld->GetGame()->GetTileCompositeToHit((*iTemp)->GetUnit(), pos.GetCP(), NAI::THL_MIDDLE, pWorld->IsFirstTurn());
+							// retail UpdateCursorInfo @0x1da200 routes EVERY weapon at a tile target
+							// through the same NRPG::GetToHit tile overload (via the CCmdShootTile
+							// target command) -- the throwing-vs-swinging dispatch happens inside
+							// RPGUnitGetTileToHit @0x2b4df0 (TH_THROWING -> knife calcer, TH_MELEE ->
+							// 100 when the cover walk connects). The old bThrowing-only gate left
+							// nToHit at 0 for a swung melee weapon aimed at ground/walls/objects.
+							nToHit = pWorld->GetGame()->GetTileCompositeToHit((*iTemp)->GetUnit(), pos.GetCP(), NAI::THL_MIDDLE, pWorld->IsFirstTurn());
 						}
 					}
 				}
 			}
+
+			// retail UpdateCursorInfo @0x1da200: the composite to-hit returns the -1 sentinel for an
+			// impossible attack (melee swing out of arm's reach, blocked direction); such units are
+			// EXCLUDED from the min/max fold, and when EVERY selected unit reports -1 no percentage
+			// is shown at all (`if (iVar6 != -1)` around the fold, `if (iVar9 != -1)` around the print).
+			if ( nToHit == -1 )
+				continue;
 
 			nMin = min( nMin, nToHit );
 			nMax = max( nMax, nToHit );
@@ -804,6 +995,10 @@ void CStateAttack::Step()
 	}
 
 	UpdateCursor();
+
+	// retail: refresh the aimed enemy's tooltip each frame (MakeUnitStateToolTip re-projects/positions
+	// it above the unit and hides it when the target dies or leaves the screen)
+	UpdateToolTipInfo();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CStateUse
@@ -829,12 +1024,25 @@ bool CStateUse::Initialize( IMission *pMission )
 		return false;
 
 	bool bRet = false;
+	// retail CStateUse::Initialize @0x1d85a0 cursor pick, DISASM-verified (Ghidra drops the ECX
+	// literal ids -- read straight off the binary):
+	//   @0x5d8a01  mov ecx,0x15 -> GetUICursor(21) "use"          = Use.cur     -- the DEFAULT: cannon
+	//              MOUNT, carry-body, and any non-door/non-passage use target show the Use hand
+	//   @0x5d8988  mov ecx,0x16 -> GetUICursor(22) "usetool"      = UseTool.cur -- ONLY for a
+	//              window/door whose IWindowDoor::IsLockedDoor() (vtbl+0x14, @0x5d897c) is true
+	//              (locked door = the lockpick/tool cursor)
+	//   @0x5d89ab/@0x5d89de  mov ecx,0x17 -> GetUICursor(23) "use_openclose"    -- unlocked
+	//              window/door and IPassageObject (hatch/ladder)
+	// The dev tree instead showed UseTool.cur when manning a cannon/mounted gun and never showed
+	// the lockpick cursor on locked doors.
+	int nCursorID = N_CURSOR_USE;
 	CVec4 vHilightColor( V_SELECTIONCOLOR_OBJECT );
 	CDynamicCast<NWorld::CUnit> pDeadUnit(pObject);
 	if (pDeadUnit)
 	{
 		bRet = pDeadUnit->IsDead() || pDeadUnit->IsUnconscious();
 		vHilightColor = V_SELECTIONCOLOR_CORPSE;
+		nCursorID = N_CURSOR_USE;			// carry body -> Use.cur (hand): retail default branch, id 21
 	}
 	else {
 		CDynamicCast<NWorld::IObject> pTempObject(pObject);
@@ -843,15 +1051,25 @@ bool CStateUse::Initialize( IMission *pMission )
 			vHilightColor = V_SELECTIONCOLOR_OBJECT;
 			CDynamicCast<NWorld::ICannon> pCannon(pTempObject.GetPtr());
 			if (pCannon)
+			{
 				bRet = !pCannon->IsBroken();
+				nCursorID = N_CURSOR_USE;		// mount a cannon/turret -> Use.cur (hand): retail id 21 (@0x5d8a01)
+			}
 			else {
 				CDynamicCast<NWorld::IWindowDoor> pWindowDoor(pTempObject.GetPtr());
 				if (pWindowDoor)
+				{
 					bRet = !pWindowDoor->IsBroken();
+					// retail @0x5d897c: IsLockedDoor() -> UseTool.cur (lockpick, id 22) else UseOpen&Close.cur (id 23)
+					nCursorID = pWindowDoor->IsLockedDoor() ? N_CURSOR_USE_TOOL : N_CURSOR_OPEN_CLOSE;
+				}
 				else {
 					CDynamicCast<NWorld::IPassageObject> pPassage(pTempObject.GetPtr());
 					if (pPassage)
+					{
 						bRet = !pPassage->IsBroken();
+						nCursorID = N_CURSOR_OPEN_CLOSE;	// hatch/ladder passage -> UseOpen&Close.cur: retail id 23 (@0x5d89de)
+					}
 				}
 			}
 		}
@@ -872,7 +1090,7 @@ bool CStateUse::Initialize( IMission *pMission )
 		WCHAR wsBuffer[1024] = L"";
 		if ( !GetMission()->IsRealTime() )
 			swprintf( wsBuffer, L"AP: %d", sInfo.nActionAP );
-		sCursorInfo = NUI::SCursorInfo( NDb::GetUITexture( N_CURSOR_OPEN_CLOSE ), wsBuffer );
+		sCursorInfo = NUI::SCursorInfo( NDb::GetUITexture( nCursorID ), wsBuffer );
 	}
 	else
 		sCursorInfo = NUI::SCursorInfo( NDb::GetUITexture( N_CURSOR_BLOCK ) );
@@ -897,6 +1115,7 @@ bool CStateUse::OnLButtonUp( int nX, int nY )
 	if ( !sInfo.bAvailable || !sInfo.bOk )
 	{
 		ShowError( GetMission(), sInfo.eResult );
+		// retail CStateUse::OnLButtonUp barks NOTHING on failure
 		return false;
 	}
 
@@ -907,6 +1126,7 @@ bool CStateUse::OnLButtonUp( int nX, int nY )
 		return false;
 
 	GetMission()->Command( unitsSet.front()->GetUnit(), pCmd );
+	SayAckForAll( GetMission(), NWorld::IA_CONFIRMATION );	// retail: use IS a go-there order
 	return true;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1011,6 +1231,8 @@ bool CStatePickItem::OnLButtonUp( int nX, int nY )
 	if ( !sInfo.bAvailable || !sInfo.bOk )
 	{
 		ShowError( GetMission(), sInfo.eResult );
+		// retail CStatePickItem @0x1dc7b0 barks nothing here (its gated call passes the raw
+		// eResult, which falls outside PlayAck's 0..3 switch -- effectively silent; retail quirk)
 		return false;
 	}
 
@@ -1021,12 +1243,13 @@ bool CStatePickItem::OnLButtonUp( int nX, int nY )
 		return false;
 
 	GetMission()->Command( unitsSet[0]->GetUnit(), pCmd );
+	// retail plays NO success confirmation for pick-item
 	return true;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 NUI::SCursorInfo CStatePickItem::GetCursorInfo() const
 {
-	return NUI::SCursorInfo( NDb::GetUITexture( N_CURSOR_OPEN_CLOSE ) );
+	return NUI::SCursorInfo( NDb::GetUITexture( N_CURSOR_PICKITEM ) );	// retail @0x1dc570: UICursors row 18 "pickitem"
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 NWorld::CCmd* CStatePickItem::GetTargetCmd()
@@ -1204,6 +1427,7 @@ bool CStateUntrap::OnLButtonUp( int nX, int nY )
 	if ( !sInfo.bAvailable || !sInfo.bOk )
 	{
 		ShowError( GetMission(), sInfo.eResult );
+		// retail CStateUntrap barks nothing, success or failure
 		return false;
 	}
 
@@ -1397,11 +1621,13 @@ bool CStateRotate::OnLButtonUp( int nX, int nY )
 
 	for ( vector< CPtr<NGame::IUnitTracker> >::iterator iTemp = unitsSet.begin(); iTemp != unitsSet.end(); iTemp++ )
 	{
-		NAI::EDirection eDir = GetMission()->GetWorld()->GetPathNetwork()->GetClosestDir( (*iTemp)->GetUnit()->GetPosition().pos.p, pos.p );	
+		NAI::EDirection eDir = GetMission()->GetWorld()->GetPathNetwork()->GetClosestDir( (*iTemp)->GetUnit()->GetPosition().pos.p, pos.p );
 		NAI::SPosition sPos = (*iTemp)->GetUnit()->GetPosition().pos;
 		sPos.p.SetDirection( eDir );
 		GetMission()->Command( (*iTemp)->GetUnit(), new NWorld::CCmdLook( sPos ) );
 	}
+
+	SayAckForAll( GetMission(), NWorld::IA_CONFIRMATION );	// retail CStateRotate::OnLButtonUp @0x1daf70
 
 	GetMission()->ResetState();
 	return true;
@@ -1456,6 +1682,7 @@ bool CStateSetTrap::OnLButtonUp( int nX, int nY )
 	if ( !sInfo.bAvailable || !sInfo.bOk )
 	{
 		ShowError( GetMission(), sInfo.eResult );
+		// retail CStateSetTrap barks nothing on failure
 		return false;
 	}
 
@@ -1464,6 +1691,8 @@ bool CStateSetTrap::OnLButtonUp( int nX, int nY )
 
 	for ( vector< CPtr<NGame::IUnitTracker> >::iterator iTemp = unitsSet.begin(); iTemp != unitsSet.end(); iTemp++ )
 		GetMission()->Command( (*iTemp)->GetUnit(), pCmd );
+
+	SayAckForAll( GetMission(), NWorld::IA_CONFIRMATION );	// retail: set-trap is a go-there order
 
 	if ( GetType() == FORCED )
 		GetMission()->ResetState();
@@ -1514,6 +1743,7 @@ bool CStateSetMine::OnLButtonUp( int nX, int nY )
 	if ( !sInfo.bAvailable || !sInfo.bOk )
 	{
 		ShowError( GetMission(), sInfo.eResult );
+		// retail CStateSetMine @0x1db3a0 barks nothing on failure
 		return false;
 	}
 
@@ -1522,6 +1752,8 @@ bool CStateSetMine::OnLButtonUp( int nX, int nY )
 
 	for ( vector< CPtr<NGame::IUnitTracker> >::iterator iTemp = unitsSet.begin(); iTemp != unitsSet.end(); iTemp++ )
 		GetMission()->Command( (*iTemp)->GetUnit(), pCmd );
+
+	SayAckForAll( GetMission(), NWorld::IA_CONFIRMATION );	// retail: set-mine is a go-there order
 
 	if ( GetType() == FORCED )
 		GetMission()->ResetState();
@@ -1619,6 +1851,7 @@ bool CStateFirstAid::OnLButtonUp( int nX, int nY )
 	if ( !sInfo.bAvailable || !sInfo.bOk )
 	{
 		ShowError( GetMission(), sInfo.eResult );
+		// retail CStateFirstAid @0x1db550 barks nothing on failure
 		return false;
 	}
 
@@ -1627,6 +1860,8 @@ bool CStateFirstAid::OnLButtonUp( int nX, int nY )
 
 	for ( vector< CPtr<NGame::IUnitTracker> >::iterator iTemp = unitsSet.begin(); iTemp != unitsSet.end(); iTemp++ )
 		GetMission()->Command( (*iTemp)->GetUnit(), pCmd );
+
+	SayAckForAll( GetMission(), NWorld::IA_CONFIRMATION );	// retail: first-aid is a go-there order
 
 	if ( GetType() == FORCED )
 		GetMission()->ResetState();

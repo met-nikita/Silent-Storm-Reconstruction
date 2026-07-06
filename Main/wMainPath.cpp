@@ -76,8 +76,10 @@ void PrepareAllPaths( NAI::IPathNetwork *pPathNetwork, NAI::CMultiMovesTable *pT
 	nCosts[ NAI::MT_LADDER_MOVE ] = pRPG->GetActionAP( NAI::WALK, NRPG::AC_LADDER_MOVE );
 	nCosts[ NAI::MT_ZERO ] = 1;
 	
+	// retail PrepareAllPaths @0x37d1b0 passes CannotFreelyChangePoses() as the move-only flag (same
+	// as FindPath) -- corpse-carry, live PK, or a script pose-lock -> the table omits pose transitions.
 	pTable->PrepareAllPaths( pResult, pPathNetwork, ptSrc, nCosts, nPriceLimit, vis,
-		bCheckSuicide, pUS->IsCarryingCorpse() );
+		bCheckSuicide, pUS->CannotFreelyChangePoses() );
 
 	pPathNetwork->Lock( pWho, pUS->GetPosition().pos.p );
 }
@@ -115,7 +117,10 @@ NAI::CPath* FindPath( NAI::IPathNetwork *pPathNetwork, CUnit *pWho, const NAI::S
 		vis.remove( pIgnore );
 	}
 
-	bool bMoveOnly = pUS->IsCarryingCorpse() || pUS->IsWearingPK();
+	// retail FindPath @0x37cbd0 passes CannotFreelyChangePoses() (@0x37d550) as the pathfinder's
+	// move-only flag -- carrying a corpse, in a live PK, OR a script pose-lock (luaUnitLockPose). A
+	// move-only path never inserts pose transitions, so a locked unit keeps its pose along the walk.
+	bool bMoveOnly = pUS->CannotFreelyChangePoses();
 	if ( bCheckSuicide )
 	{
 		int nMax = 10;

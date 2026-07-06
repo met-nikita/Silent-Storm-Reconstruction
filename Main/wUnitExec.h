@@ -17,6 +17,10 @@ CCommandExecute* CreateExecutor( CUnitServer *pUnit, CCmd *pCmd, EUnitCommandRes
 CCommandExecute* CreateLostWeapon( CUnitServer *pUS, bool bOnlyTwoHanded );
 CCommandExecute* CreateAccidentalShot( CUnitServer *pUS );
 bool IsExecStartCombat( CCommandExecute* pExec );
+// retail NWorld::IsCancelableExec @0x392fe0 -- a cannon action (or a queue whose HEAD is a
+// cannon action) is NOT cancelable; everything else is. Used by the TBS_RECALC_COMMAND arm
+// of CUnitServer::OnTBSEvent (retail @0x3c2a90) to decide whether the executor may be dropped.
+bool IsCancelableExec( CCommandExecute* pExec );
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 } // NAMESPACE

@@ -332,4 +332,13 @@ public:
 	static bool GetResult( int nMask ) { return nMask == 3; }
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail CBoolSyncSrc<IVisObj,CSubtractFunc> (BoolSwitch @0x2d2d70: `nMask == 1`): in source A (bit 1)
+// and NOT in source B (bit 2). CRenderGame::UpdateVisible @0x2cee50 uses it in the no-viewer
+// (show-all / cinematic) branch: GetUnits() MINUS the world's heard-marker set (GetAllSoundStuff).
+class CSubtractFunc
+{
+public:
+	static bool GetResult( int nMask ) { return nMask == 1; }
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
 #endif

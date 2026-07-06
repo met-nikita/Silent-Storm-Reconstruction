@@ -62,6 +62,11 @@ public:
 	float GetFloat( const char *pszField ) { return GetFloat( GetFieldIndex( pszField ) ); }
 	_bstr_t GetString( const char *pszField ) { return GetString( GetFieldIndex( pszField ) ); }
 	const string& GetFieldName( int n ) { return fields[n]; }
+	// v1.2 @0x401900..0x402740: the v1.2 getters report success; this column-presence
+	// probe backs that flag. Does NOT touch the GetFieldIndex replay cache (a column's
+	// presence is constant per table, so skipping a missing column keeps the per-row
+	// cached index sequence consistent).
+	bool HasField( const char *pszField ) const { return find( fields.begin(), fields.end(), pszField ) != fields.end(); }
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CDBTableDataStorage - the release/Steam runtime DB-load representation.
@@ -147,6 +152,11 @@ public:
 			return std::wstring();
 		return records_wstring[nCurrentRecord][n];
 	}
+	// v1.2 @0x7ef6d0-family: column-presence probes backing ImportField's success flag
+	// (bool columns are stored in the int arrays, so they probe intFileds)
+	bool HasIntField( const char *psz )    { return FindIndex( intFileds, psz ) >= 0; }
+	bool HasFloatField( const char *psz )  { return FindIndex( floatFileds, psz ) >= 0; }
+	bool HasStringField( const char *psz ) { return FindIndex( stringFileds, psz ) >= 0; }
 };
 REGISTER_SAVELOAD_CLASS( 0xa1843130, CDBTableDataStorage )
 // when set, the Import path reads from this columnar storage instead of the ADO COLETable
@@ -461,6 +471,24 @@ void NDatabase::AddRelation( const char *pszTableName )
 	rel.szTable = pszTableName;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// ClearDatabaseTables (release BasicDB.obj @0x3570, a release-only free function) -- drop every live
+// DB table/record + relation so CModManager::Activate can re-import a fresh game.db (+ mod overlays)
+// into a clean database. After clearing, one EMPTY table entry is re-created per registered
+// descriptor (the same `tables[id]` idiom AddTable uses), so GetTable() keeps resolving during the
+// reload. The relations list is refilled by the next Serialize(READ) (v1 chunk 2).
+// NOTE: the release also clears NDatabase::GetStorageTables() here; this dev Serialize keeps the
+// columnar storage hash as a Serialize-local and drops it after import, so there is no dev-side
+// storage-tables global to clear.
+void NDatabase::ClearDatabaseTables()
+{
+	CTablesHash &tables = GetTables();
+	tables.clear();
+	GetRelations().clear();
+	list<STableDescr> &tableDescrs = GetTableDescrs();
+	for ( list<STableDescr>::iterator i = tableDescrs.begin(); i != tableDescrs.end(); ++i )
+		tables[ i->nTableID ];
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 static string RelationField2TableName( const string &src )
 {
 	ASSERT( src.substr( src.length() - 2, 2 ) == "ID" );
@@ -556,42 +584,87 @@ void NDatabase::Refresh( int nTableID )
 	CloseConnection();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void NDatabase::ImportField( const char *pszFieldName, int *pData )
-{
-	if ( pStorageSource ) { *pData = pStorageSource->GetInt( pszFieldName ); return; }
-	*pData = table.GetInt( pszFieldName );
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-void NDatabase::ImportField( const char *pszFieldName, bool *pData )
-{
-	if ( pStorageSource ) { *pData = pStorageSource->GetBool( pszFieldName ); return; }
-	*pData = table.GetBool( pszFieldName );
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-void NDatabase::ImportField( const char *pszFieldName, float *pData )
-{
-	if ( pStorageSource ) { *pData = pStorageSource->GetFloat( pszFieldName ); return; }
-	*pData = table.GetFloat( pszFieldName );
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-void NDatabase::ImportField( const char *pszFieldName, std::string *pData )
+// v1.2 @0x7ef6d0-family: the scalar ImportFields now report success -- a missing
+// column returns false and leaves *pData untouched (v1.1 zero-filled on the storage
+// path / asserted + read column 0 on the ADO path), so a runtime mod db lacking a
+// column preserves the record's previous field value.
+bool NDatabase::ImportField( const char *pszFieldName, int *pData )
 {
 	if ( pStorageSource )
 	{
+		if ( !pStorageSource->HasIntField( pszFieldName ) )
+			return false;
+		*pData = pStorageSource->GetInt( pszFieldName );
+		return true;
+	}
+	if ( !table.HasField( pszFieldName ) )
+		return false;
+	*pData = table.GetInt( pszFieldName );
+	return true;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+bool NDatabase::ImportField( const char *pszFieldName, bool *pData )
+{
+	if ( pStorageSource )
+	{
+		if ( !pStorageSource->HasIntField( pszFieldName ) )   // bools live in the int columns
+			return false;
+		*pData = pStorageSource->GetBool( pszFieldName );
+		return true;
+	}
+	if ( !table.HasField( pszFieldName ) )
+		return false;
+	*pData = table.GetBool( pszFieldName );
+	return true;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+bool NDatabase::ImportField( const char *pszFieldName, float *pData )
+{
+	if ( pStorageSource )
+	{
+		if ( !pStorageSource->HasFloatField( pszFieldName ) )
+			return false;
+		*pData = pStorageSource->GetFloat( pszFieldName );
+		return true;
+	}
+	if ( !table.HasField( pszFieldName ) )
+		return false;
+	*pData = table.GetFloat( pszFieldName );
+	return true;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+bool NDatabase::ImportField( const char *pszFieldName, std::string *pData )
+{
+	if ( pStorageSource )
+	{
+		if ( !pStorageSource->HasStringField( pszFieldName ) )
+			return false;
 		// narrow strings are stored as wstrings in the columnar storage (ASCII content)
 		std::wstring ws = pStorageSource->GetWString( pszFieldName );
 		pData->resize( ws.size() );
 		for ( int i = 0; i < (int)ws.size(); ++i )
 			(*pData)[i] = (char)ws[i];
-		return;
+		return true;
 	}
+	if ( !table.HasField( pszFieldName ) )
+		return false;
 	*pData = (const char*)table.GetString( pszFieldName );
+	return true;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void NDatabase::ImportField( const char *pszFieldName, std::wstring *pData )
+bool NDatabase::ImportField( const char *pszFieldName, std::wstring *pData )
 {
-	if ( pStorageSource ) { *pData = pStorageSource->GetWString( pszFieldName ); return; }
+	if ( pStorageSource )
+	{
+		if ( !pStorageSource->HasStringField( pszFieldName ) )
+			return false;
+		*pData = pStorageSource->GetWString( pszFieldName );
+		return true;
+	}
+	if ( !table.HasField( pszFieldName ) )
+		return false;
 	*pData = (const wchar_t*)table.GetString( pszFieldName );
+	return true;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void NDatabase::ImportRelation( CDBRecord *pSrc, CDBTableBase *pDestTable, std::vector< CPtr<CDBRecord> > *pRefs )

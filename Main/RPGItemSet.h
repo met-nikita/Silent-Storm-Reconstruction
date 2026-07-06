@@ -214,6 +214,9 @@ public:
 	void SetMode( EGrenadeMode _eMode ) { eMode = _eMode; }
 
 	NDb::CRPGGrenade *GetDBGrenade() const { return pDBGrenade; }
+	// @0x2a3c70 -- engineer-grenade DB descriptor accessor (returns the already-serialized pDBEngGrenade,
+	// operator& tag 4). Consumed by CExecSetTrap's engineer-grenade trap branch.
+	NDb::CRPGEngGrenade *GetDBEngGrenade() const { return pDBEngGrenade; }
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // Potion

@@ -14,6 +14,7 @@
 #include "DataInterface.h"
 #include "DataLight.h"
 #include "DataAI.h"
+#include "DataChest.h"
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 externA5 CVec3 GetColor( DWORD dwColor );
@@ -151,6 +152,12 @@ void CTemplVariant::Import()
 	}
 	NDatabase::ImportField( "DiplomacyID", &pDiplomacy );
 	NDatabase::ImportField( "ShowTerrain", &bShowTerrain );
+	// retail Import @0x423dd0 tail: the per-variant cut-floor range (see DataMap.h note)
+	NDatabase::ImportField( "NoAttack", &bNoAttack );
+	NDatabase::ImportField( "MinCutFloor", &nMinCutFloor );
+	NDatabase::ImportField( "MaxCutFloor", &nMaxCutFloor );
+	// (weatherType tag 24 / nExitBorder tag 25 are read from the retail game.db via operator&;
+	// the SQL mirror carries "Weather" as a string and has no ExitBorder column, so no import.)
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CRectangle
@@ -266,6 +273,12 @@ void CFinalElement::Import()
 	NDatabase::ImportField( "ObjRadius", &fObjRadius );
 	NDatabase::ImportField( "Grenade", &pGrenade );
 	NDatabase::ImportField( "Armed", &bArmed );
+	// release chest/lock tail (retail CFinalElement::Import @0x4235c0)
+	NDatabase::ImportField( "IsLocked", &bIsLocked );
+	NDatabase::ImportField( "KeyID", &nKeyID );
+	NDatabase::ImportField( "LockHardness", &nLockHardness );
+	NDatabase::ImportField( "RPGChestID", &pChest );
+	NDatabase::ImportField( "LightShadow", &bLightShadow );
 	//
 	if ( IsValid( pVariant ) )
 	{

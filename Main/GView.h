@@ -130,6 +130,18 @@ public:
 	virtual CVec2 GetScreenRect() = 0;
 	virtual int  GetCutFloor() = 0;
 	virtual void SetCutFloor( int nFloor ) = 0;
+	// retail CBaseCamera::SetCutFloorRange @0xcba10: install the INCLUSIVE [min,max] cut-floor
+	// range (the mission adopts it from the template variant, @0x200690) and re-clamp the current
+	// floor into it; every later SetCutFloor clamps against this range (retail @0xd0050).
+	virtual void SetCutFloorRange( int nMinFloor, int nMaxFloor ) = 0;
+	// retail CBaseCamera::GetCutFloorRange (the level-switch bar reads it every Draw @0x254420 to
+	// recompute the 8 buttons' floor/basement + visible/hidden image states)
+	virtual void GetCutFloorRange( int *pMinFloor, int *pMaxFloor ) = 0;
+	// retail SetCutFloor @0xd0050 opens with `cmp [this+0xd4],0; jg ret` -- while the camera is
+	// FROZEN (script CameraLock -> FreezeCamera @0xcffc0) every floor change is a hard NO-OP.
+	// Dev keeps floors on the scene, so the freeze count is MIRRORED here from the CUICmdLockCamera
+	// dispatch. This is the base's one-floor lock: EBase's OnEnterZone calls CameraLock() once.
+	virtual void SetCutFloorLock( bool bLock ) = 0;
 	virtual bool GetParticleShow() = 0;
 	virtual void SetParticleShow( bool bNewState ) = 0;
 	virtual void SetAmbient( const CVec3 &vBottomAmbientColor, const CVec3 &vTopAmbientColor ) = 0;

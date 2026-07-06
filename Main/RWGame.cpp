@@ -28,6 +28,8 @@
 
 #include "LSHead.h"
 #include "LSController.h"
+#include "Sync.h"
+#include "RWSound.h"
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 #include "MemObject.h"
 vector<SSphere> sphereParticles;	// test sphere visualization
@@ -122,6 +124,7 @@ public:
 	virtual void AddHead( NWorld::CUnit *pUnit, CFuncBase<SFBTransform> *pPosition, const NGScene::SRoomInfo &room );
 	virtual void AddHead( NDb::CComplexHead *pHead, CFuncBase<SFBTransform> *pPosition, const NGScene::SRoomInfo &room );
 	virtual void AddHead( NDb::CComplexHead *pHead, CFuncBase<SFBTransform> *pPosition, const NGScene::SRoomInfo &room, NLSHead::CHeadTransformInfo *pTransformInfo, CPtrFuncBase<NGfx::CTexture> *pFaceTexture = 0 );
+	virtual void AddHeadIdleAnimator( NWorld::CUnit *pUnit );
 	virtual void AddOccluder( NDb::CAIGeometry *pAIGeom, const SFBTransform &pos, int nFloor );
 	virtual void AddOccluder( NDb::CAIGeometry *pAIGeom, NDb::CSkeleton *pSkeleton, CFuncBase<NAnimation::SSkeletonPose> *pAnimation, int nFloor );
 	virtual NGScene::CDecalTarget* CreateDecalTarget( const vector<CObjectBase*> &targets, const NGScene::SDecalMappingInfo &_info );
@@ -402,11 +405,28 @@ void CSetRender::AddHead( NDb::CComplexHead *pHead, CFuncBase<SFBTransform> *pPo
 	if ( !pAnimator )
 		return;
 	pAnimator->SetHeadTransformInfo( pTransformInfo );
+	// retail: the editor preview head plays the ambient facial idles too (CHeadTransformInfo ctor
+	// @0x2606e0 arms bPlayIdle; the dev morph rides CHeadAnimator, whose idle machine keys on
+	// eIdleType) -- without this the AdvFaceGen head sits frozen between slider drags.
+	pAnimator->SetIdleType( NLSHead::IDLE_NORMAL );
 
 	bool bHasCap = false;
 	// pFaceTexture is the caller's PERSISTENT live texture-preview node (CFakeRPGUnit owns one across re-Visits,
 	// which happen on every slider move / rotation) -- the head material samples it so the preview retints live.
 	Register( pScene->CreateLSHead( pHead, pAnimator, pTime, pPosition, false, SRandomSeed( pHead->GetRecordID() ), bHasCap, room, pFaceTexture ) );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// release @0x2cda30: fetch-or-create the head's ambient-idle token (CHeadsController::PlayIdle) and
+// register it into this visit's objects, so the token -- and with it the animator's IDLE_NORMAL state
+// and the armed blink sequences -- lives exactly as long as some view renders the head. A null return
+// (no animator record: the unit has no head) registers nothing.
+void CSetRender::AddHeadIdleAnimator( NWorld::CUnit *pUnit )
+{
+	if ( !IsValid( pHeadsController ) )
+		return;
+	CObjectBase *pIdler = pHeadsController->PlayIdle( pUnit );
+	if ( pIdler )
+		RegisterBase( pIdler );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CSetRender::AddOccluder( NDb::CAIGeometry *pAIGeom, const SFBTransform &pos, int nFloor )
@@ -592,18 +612,38 @@ class CFakeWorldUnit: public NWorld::IVisObj
 	CPtr< CFuncBase<STime> > pTime;
 	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&nAnimFlags); f.Add(3,&fAngle); f.Add(4,&bindGlobal); f.Add(5,&pAnimator); f.Add(6,&pUnit); f.Add(7,&pTime); return 0; }
 	bool bNoAnimationUpdate;	// non-serialized: set by PlayAnimation() to suppress Update's auto-pose reset
+	// release CFakeWorldUnit layout +0x0c/+0x0d/+0x31, seeded by ctor @0x2ce440 params 4-6. Runtime-only
+	// here (kept OUT of operator& to preserve the dev save format, same pattern as bNoAnimationUpdate);
+	// after a load they re-default and the owning view rebinds the show unit on the next SetUnit anyway.
+	//   bItems    -- pose with the active item's weapon anim flags (release Update @0x2cc1a0 gates the
+	//                weapon read on it; false = the bare-stand body pose the HUD face uses)
+	//   bPlayIdle -- stand animation type = INTERFACE_IDLE instead of POSE (release @0x2cbe30)
+	//   bShowCap  -- release Visit @0x2cc650 threads it into the bound-mesh build (cap suppression);
+	//                dev GetItemsBindPlaces has no cap flag yet, and every decoded retail caller of this
+	//                class passes true, so it is stored but not consumed by Visit for now
+	bool bItems;
+	bool bPlayIdle;
+	bool bShowCap;
+	// release CFakeWorldUnit 'sEndTime' (@0x2cbe30 tail: `sEndTime = anim->tLength + curTime`): expiry
+	// of the current stand/idle clip. Update (@0x2cc1a0) re-rolls the weighted-random clip ONLY when
+	// now passes it. Runtime-only (kept OUT of operator&, same as the flags above); after a load it
+	// re-defaults to 0 so the first Update re-rolls once -- harmless.
+	STime sEndTime;
 public:
-	CFakeWorldUnit() {}
-	CFakeWorldUnit( CSyncSrc<NWorld::IVisObj> *pSrc, NWorld::CUnit *_pUnit, CFuncBase<STime>* _pTime );
+	CFakeWorldUnit(): bNoAnimationUpdate( false ), bItems( true ), bPlayIdle( false ), bShowCap( true ), sEndTime( 0 ) {}
+	CFakeWorldUnit( CSyncSrc<NWorld::IVisObj> *pSrc, NWorld::CUnit *_pUnit, CFuncBase<STime>* _pTime,
+		bool _bItems, bool _bPlayIdle, bool _bShowCap );
 
 	virtual void Visit( NWorld::IRenderVisitor *p );
 	void Update( float fAngle );
 	void PlayAnimation( NDb::CAnimation *pAnim, bool bLoop );
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CFakeWorldUnit::CFakeWorldUnit( CSyncSrc<NWorld::IVisObj> *pSrc, 
-	NWorld::CUnit *_pUnit, CFuncBase<STime>* _pTime )
-: pUnit( _pUnit ), pTime( _pTime ), fAngle( 0 ), nAnimFlags( -1 ), bNoAnimationUpdate( false )
+// release @0x2ce440: __thiscall(pSrc, pUnit, pTime, bool bItems, bool bPlayIdle, bool bShowCap)
+CFakeWorldUnit::CFakeWorldUnit( CSyncSrc<NWorld::IVisObj> *pSrc,
+	NWorld::CUnit *_pUnit, CFuncBase<STime>* _pTime, bool _bItems, bool _bPlayIdle, bool _bShowCap )
+: pUnit( _pUnit ), pTime( _pTime ), fAngle( 0 ), nAnimFlags( -1 ), bNoAnimationUpdate( false ),
+	bItems( _bItems ), bPlayIdle( _bPlayIdle ), bShowCap( _bShowCap ), sEndTime( 0 )
 {
 	bindGlobal.Link( pSrc, this );
 	Update( 0 );
@@ -623,34 +663,59 @@ void CFakeWorldUnit::Update( float _fAngle )
 	}
 	CPtr<NRPG::IInventoryItem> pActiveItem = pUnit->GetRPG()->GetInventoryInfo()->GetActive();
 	NDb::EWeaponType eWeaponType = NDb::WT_DEFAULT;
-	if ( IsValid( pActiveItem ) )
+	// release Update @0x2cc1a0: the active item's weapon shapes the pose only in item mode (bItems);
+	// in body mode (the HUD face) the flags degrade to the bare-stand key.
+	const bool bHaveItem = bItems && IsValid( pActiveItem );
+	if ( bHaveItem )
 		eWeaponType = pActiveItem->GetWeaponType();
 
 	int nNewAnimFlags = NDb::CAnimation::POSE_STAND;
-	nNewAnimFlags |= NDb::WeaponTypeToAnimFlags( eWeaponType, IsValid( pActiveItem ), false );
+	nNewAnimFlags |= NDb::WeaponTypeToAnimFlags( eWeaponType, bHaveItem, false );
 
 	int nAnimFlagsClassSex = NDb::CAnimation::IN_REALTIME;
 	nAnimFlagsClassSex |=	pUnit->GetRPG()->GetRPGPers()->bIsFemale? NDb::CAnimation::SEX_FEMALE : NDb::CAnimation::SEX_MALE;
 
-	if ( ( fAngle != _fAngle ) || ( nNewAnimFlags != nAnimFlags ) )
+	// release Update @0x2cc1a0: rebuild the animation only on a state change OR when the current clip
+	// EXPIRES (`sEndTime < now`). The expiry re-roll is what rotates the weighted INTERFACE_IDLE clips:
+	// CSkeleton::GetAnimation random-picks per call (roulette over fRndWeight, DataFormat.cpp), so it
+	// must run ONCE per clip lifetime -- never per frame, or the face flip-flops between clips.
+	STime tNow = pTime->GetValue();
+	if ( ( fAngle != _fAngle ) || ( nNewAnimFlags != nAnimFlags ) || ( sEndTime < tNow ) )
 	{
 		NDb::CModel* pModel = pUnit->GetModel();
 		pAnimator = new NAnimation::CSkeletonAnimator( pModel->pSkeleton );
 		pAnimator->pTime = pTime;
 		pAnimator->bServer = false;
 
-		NAnimation::CAnimation *pAnimation;
-		pAnimation = pAnimator->CreateAnimation( pModel->pSkeleton->GetAnimation( NDb::CAnimation::POSE, nNewAnimFlags, 0, nAnimFlagsClassSex ), 0, true );
-		if ( !pAnimation )
-		{
-			nNewAnimFlags = NDb::CAnimation::POSE_STAND;
-			pAnimation = pAnimator->CreateAnimation( pModel->pSkeleton->GetAnimation( NDb::CAnimation::POSE, nNewAnimFlags ), 0, true );
-		}
+		// release CreateAnimation @0x2cbe30: EType = bPlayIdle ? INTERFACE_IDLE : POSE, then the
+		// three-key fallback chain (EType,flags,classSex) -> (EType,POSE_STAND) -> (POSE,POSE_STAND).
+		// The last leg rescues units whose skeleton has no InterfaceIdle clips (only skeleton 8 -- the
+		// human rig -- carries them; a PK-mounted unit falls back to its static stand pose).
+		// The new clip starts at tNow (retail passes curTime into CreateAnimation/AddAnimator/SetStand),
+		// so an expiry re-roll begins at the clip's first key instead of a mid-phase snap.
+		const NDb::CAnimation::EType eType = bPlayIdle ? NDb::CAnimation::INTERFACE_IDLE : NDb::CAnimation::POSE;
 
-		fAngle = _fAngle;
-		nAnimFlags = nNewAnimFlags;
-		pAnimator->AddAnimator( 0, pAnimation );
-		pAnimation->SetStand( 0, CVec3( 0, 0, 0 ), fAngle );
+		NAnimation::CAnimation *pAnimation;
+		pAnimation = pAnimator->CreateAnimation( pModel->pSkeleton->GetAnimation( eType, nNewAnimFlags, 0, nAnimFlagsClassSex ), tNow, true );
+		if ( !pAnimation )
+			pAnimation = pAnimator->CreateAnimation( pModel->pSkeleton->GetAnimation( eType, NDb::CAnimation::POSE_STAND ), tNow, true );
+		if ( !pAnimation && eType != NDb::CAnimation::POSE )
+			pAnimation = pAnimator->CreateAnimation( pModel->pSkeleton->GetAnimation( NDb::CAnimation::POSE, NDb::CAnimation::POSE_STAND ), tNow, true );
+
+		// release @0x2cbe30 tail: commit state ONLY on success, and store the REQUESTED flags
+		// (retail does `this->nAnimFlags = param_1` no matter which fallback leg supplied the clip).
+		// JITTER FIX: the old code stored the DEGRADED fallback key (POSE_STAND) into nAnimFlags, so
+		// whenever leg 1 missed (HUD face requests POSE_STAND|WEAPON_NONE = 0x101, the InterfaceIdle
+		// rows only carry 0x1) the change-gate mismatched every frame -> per-frame animator rebuild ->
+		// per-frame roulette re-roll flip-flopping between the two RndWeight>0 idle clips.
+		if ( pAnimation )
+		{
+			fAngle = _fAngle;
+			nAnimFlags = nNewAnimFlags;
+			pAnimator->AddAnimator( tNow, pAnimation );
+			pAnimation->SetStand( tNow, CVec3( 0, 0, 0 ), fAngle );
+			sEndTime = pAnimation->GetTime() + tNow;	// release @0x2cbe30: sEndTime = tLength + curTime
+		}
 	}
 
 	bindGlobal.Update();
@@ -685,6 +750,10 @@ void CFakeWorldUnit::Visit( NWorld::IRenderVisitor *p )
 	vector<NWorld::IRenderVisitor::SBoundMesh> boundMeshes;
 	NWorld::GetItemsBindPlaces( &boundMeshes, pUnit->GetRPG(), 0, pUnit->GetWearingDBPK() );
 	p->AddMesh( pUnit->GetModel(), pAnimator, 0, boundMeshes, 0, 0, pUnit );
+	// release @0x2cc650 tail: unconditionally arm the ambient facial idle (blink) token for the shown
+	// head, AFTER AddMesh's internal AddHead created the animator record. This is what makes the
+	// mission-HUD face (and every other shown world unit) blink between spoken sequences.
+	p->AddHeadIdleAnimator( pUnit );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 struct SCreateSyncSrc
@@ -708,7 +777,7 @@ public:
 	CShowRPGUnit() {}
 	CShowRPGUnit( NGScene::IGameView *pView, NRPG::CUnit *_pUnit, CFuncBase<STime>* _pTime, NLSHead::CHeadsController *pHdController );
 	void Update( float fAngle );
-	void SetSequence( NDb::CSequence *pSequence );
+	void SetSequence( NDb::CSequence *pSequence, NDb::CSequence *pExpression = 0 );
 	void SetLSHeadParam( const char *szName, float fValue );
 	float GetLSHeadParam( const char *szName );
 	NLSHead::CHeadInfo* CreateLSHeadInfo();
@@ -728,7 +797,7 @@ void CShowRPGUnit::Update( float fAngle )
 	r.Sync();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CShowRPGUnit::SetSequence( NDb::CSequence *pSequence )
+void CShowRPGUnit::SetSequence( NDb::CSequence *pSequence, NDb::CSequence *pExpression )
 {
 	ASSERT( 0 && "Unsupported!" );
 }
@@ -775,18 +844,22 @@ class CShowWorldUnit: public IShowUnit, public SCreateSyncSrc
 	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(SCreateSyncSrc*)this); f.Add(2,&r); f.Add(3,&pUnit); f.Add(4,&pFakeUnit); f.Add(5,&pController); return 0; }
 public:
 	CShowWorldUnit() {}
-	CShowWorldUnit( NGScene::IGameView *pView, NWorld::CUnit *_pUnit, CFuncBase<STime>* _pTime, NLSHead::CHeadsController *pHdController );
+	CShowWorldUnit( NGScene::IGameView *pView, NWorld::CUnit *_pUnit, CFuncBase<STime>* _pTime, NLSHead::CHeadsController *pHdController,
+		bool bItems = true, bool bPlayIdle = false, bool bShowCap = true );
 	void Update( float fAngle );
-	void SetSequence( NDb::CSequence *pSequence );
+	void SetSequence( NDb::CSequence *pSequence, NDb::CSequence *pExpression = 0 );
 	void PlayAnimation( NDb::CAnimation *pAnim, bool bLoop );
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CShowWorldUnit::CShowWorldUnit( NGScene::IGameView *pView, NWorld::CUnit *_pUnit, CFuncBase<STime>* _pTime, NLSHead::CHeadsController *pHdController )
+// release @0x2ce850: ctor(view, unit, time, controller, b1, b2, b3) forwards the three bools verbatim
+// into the CFakeWorldUnit ctor (@0x2ce440: pushes syncsrc, unit, time, b1, b2, b3, 1).
+CShowWorldUnit::CShowWorldUnit( NGScene::IGameView *pView, NWorld::CUnit *_pUnit, CFuncBase<STime>* _pTime, NLSHead::CHeadsController *pHdController,
+	bool bItems, bool bPlayIdle, bool bShowCap )
 : r( pShow, pView ), pUnit( _pUnit ), pController( pHdController )
 {
 	r.SetTimer( _pTime, _pTime );
 	r.SetHeadsController( pHdController );
-	pFakeUnit = new CFakeWorldUnit( pShow, _pUnit, _pTime );
+	pFakeUnit = new CFakeWorldUnit( pShow, _pUnit, _pTime, bItems, bPlayIdle, bShowCap );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CShowWorldUnit::Update( float fAngle )
@@ -795,9 +868,9 @@ void CShowWorldUnit::Update( float fAngle )
 	r.Sync();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CShowWorldUnit::SetSequence( NDb::CSequence *pSequence )
+void CShowWorldUnit::SetSequence( NDb::CSequence *pSequence, NDb::CSequence *pExpression )
 {
-	pController->PlaySequence( pUnit, pSequence );
+	pController->PlaySequence( pUnit, pSequence, pExpression );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CShowWorldUnit::PlayAnimation( NDb::CAnimation *pAnim, bool bLoop )
@@ -805,7 +878,13 @@ void CShowWorldUnit::PlayAnimation( NDb::CAnimation *pAnim, bool bLoop )
 	pFakeUnit->PlayAnimation( pAnim, bLoop );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-IShowUnit* CreateShowUnit( NGScene::IGameView *pView, NWorld::CUnit *pUnit, CFuncBase<STime>* pTime, IRenderGame *pRenderGame )
+// release @0x2ce9c0: CreateShowUnit(view, unit, time, renderGame, b1=bItems, b2=bPlayIdle, b3=bShowCap).
+// KNOWN DELTA: when the render game is valid, retail REPLACES the passed pTime with pRenderGame->GetTime()
+// (decomp: param_2->vtbl[0x14] before GetHeadController). The dev show units already animate correctly on
+// the caller-passed CUnitView timer (proven by the ack PlayAnimation bridge), so the pass-through is kept
+// rather than risking a clock swap across every unit-view host.
+IShowUnit* CreateShowUnit( NGScene::IGameView *pView, NWorld::CUnit *pUnit, CFuncBase<STime>* pTime, IRenderGame *pRenderGame,
+	bool bItems, bool bPlayIdle, bool bShowCap )
 {
 	CPtr<NLSHead::CHeadsController> pController;
 	if ( IsValid( pRenderGame ) )
@@ -813,7 +892,7 @@ IShowUnit* CreateShowUnit( NGScene::IGameView *pView, NWorld::CUnit *pUnit, CFun
 	else
 		pController = new NLSHead::CHeadsController;
 
-	return new CShowWorldUnit( pView, pUnit, pTime, pController );
+	return new CShowWorldUnit( pView, pUnit, pTime, pController, bItems, bPlayIdle, bShowCap );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CShowUnitHead
@@ -830,7 +909,7 @@ public:
 	CShowUnitHead() {}
 	CShowUnitHead( NGScene::IGameView *pView, NWorld::CUnit *pUnit, NLSHead::CHeadsController *pController, CFuncBase<SFBTransform> *pTransform );
 
-	void SetSequence( NDb::CSequence *pSequence );
+	void SetSequence( NDb::CSequence *pSequence, NDb::CSequence *pExpression = 0 );
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CShowUnitHead::CShowUnitHead( NGScene::IGameView *pView, NWorld::CUnit *_pUnit, NLSHead::CHeadsController *_pController, CFuncBase<SFBTransform> *pTransform ):
@@ -843,9 +922,9 @@ CShowUnitHead::CShowUnitHead( NGScene::IGameView *pView, NWorld::CUnit *_pUnit, 
 	pRenderNode = pView->CreateLSHead( pUnit->GetDBHead(), pAnimator, pController->GetTime(), pTransform, true, pUnit->GetHeadSeed(), false, NGScene::SRoomInfo(), pFaceTex, pHI );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CShowUnitHead::SetSequence( NDb::CSequence *pSequence )
+void CShowUnitHead::SetSequence( NDb::CSequence *pSequence, NDb::CSequence *pExpression )
 {
-	pController->PlaySequence( pUnit, pSequence );
+	pController->PlaySequence( pUnit, pSequence, pExpression );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 IShowUnitHead* CreateShowUnitHead( NGScene::IGameView *pView, NWorld::CUnit *pUnit, NLSHead::CHeadsController *pController, CFuncBase<SFBTransform> *pTransform )
@@ -890,27 +969,36 @@ class CRenderGame: public IRenderGame, public SVisibleHolder
 	CObj<NGScene::CGrass> pGrass;
 	CObj<NLSHead::CHeadsController> pHeadsController;
 	list<SBombSelection> bombSelections;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(SVisibleHolder*)this); f.Add(2,&testSpheres); f.Add(3,&pWorld); f.Add(4,&pScene); f.Add(5,&timer); f.Add(6,&r); f.Add(7,&rUnits); f.Add(8,&bPrevShowUnits); f.Add(9,&pPrevViewFrom); f.Add(10,&pGrass); f.Add(11,&pHeadsController); f.Add(12,&bombSelections); return 0; }
+	// retail @0x2ceae0: the two sound mixers live IN CRenderGame -- pSound over the always-on
+	// GetActive() (world/misc sounds), pUnitSounds over GetUnits() (unit-emitted sounds --
+	// CDumbUnitServer::AttachMiscObject attaches voice/footstep C3DSounds to GetUnits), so
+	// UpdateVisible can re-point pUnitSounds at the same visibility-filtered source as rUnits.
+	CObj<NRender::IRenderSound> pSound;
+	CObj<NRender::IRenderSound> pUnitSounds;
+	// retail operator& @0x2d5110 tags: 15=pSound, 16=pUnitSounds (13/14 weather + 17-19
+	// sun/rain lights + tWeatherChange are retail members the dev doesn't carry yet).
+	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(SVisibleHolder*)this); f.Add(2,&testSpheres); f.Add(3,&pWorld); f.Add(4,&pScene); f.Add(5,&timer); f.Add(6,&r); f.Add(7,&rUnits); f.Add(8,&bPrevShowUnits); f.Add(9,&pPrevViewFrom); f.Add(10,&pGrass); f.Add(11,&pHeadsController); f.Add(12,&bombSelections); f.Add(15,&pSound); f.Add(16,&pUnitSounds); return 0; }
 	//
 	void UpdateVisible( NWorld::IPlayer *pViewFrom, bool bShowUnits );
 public:
 	CRenderGame() {}
-	CRenderGame( NWorld::IWorld *_pWorld, NGScene::IGameView *_pScene );
-	
+	CRenderGame( NWorld::IWorld *_pWorld, NGScene::IGameView *_pScene, NSound::ISoundScene *_pSoundScene );
+
 	CObjectBase* Select( CObjectBase *pSelect, const CVec4 &vColor );
-	
+
 	CCTime* GetTime() { return timer.GetTime(); }
 	NLSHead::CHeadsController* GetHeadController() const { return pHeadsController; }
-	
+
 	void UpdateViewWorld( bool bAdvanceTime, STime currentTime, NWorld::IPlayer *pViewFrom, bool bShowAllUnits );
 	void FastUpdate( STime currentTime );
 	void ResetTiming();
+	void UpdateSound( CTransformStack *pTS, STime currentTime );
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CRenderGame::CRenderGame( NWorld::IWorld *_pWorld, NGScene::IGameView *_pScene )
-: 
-r( _pWorld->GetActive(), _pScene ), 
-rUnits( _pWorld->GetUnits(), _pScene ), 
+CRenderGame::CRenderGame( NWorld::IWorld *_pWorld, NGScene::IGameView *_pScene, NSound::ISoundScene *_pSoundScene )
+:
+r( _pWorld->GetActive(), _pScene ),
+rUnits( _pWorld->GetUnits(), _pScene ),
 pWorld(_pWorld), pScene(_pScene), bPrevShowUnits( true )
 {
 	r.SetTimer( timer.GetTime(), pWorld->GetAimTime() );
@@ -923,6 +1011,13 @@ pWorld(_pWorld), pScene(_pScene), bPrevShowUnits( true )
 	pHeadsController = new NLSHead::CHeadsController;
 	r.SetHeadsController( pHeadsController );
 	rUnits.SetHeadsController( pHeadsController );
+
+	// retail @0x2ceae0 tail: two mixers, sources mirroring r/rUnits (GetActive / GetUnits)
+	if ( _pSoundScene )
+	{
+		pSound = CreateRenderSound( pWorld->GetActive(), _pSoundScene );
+		pUnitSounds = CreateRenderSound( pWorld->GetUnits(), _pSoundScene );
+	}
 /*
 	if ( pScene != 0 )
 	{
@@ -954,9 +1049,23 @@ CObjectBase* CRenderGame::Select( CObjectBase *pSelect, const CVec4 &vColor )
 	return 0;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail @0x2cb190: the mixers' private timers reset with the render timer
 void CRenderGame::ResetTiming()
 {
 	timer.ResetTiming();
+	if ( IsValid( pSound ) )
+		pSound->ResetTiming();
+	if ( IsValid( pUnitSounds ) )
+		pUnitSounds->ResetTiming();
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail @0x2cb1c0
+void CRenderGame::UpdateSound( CTransformStack *pTS, STime currentTime )
+{
+	if ( IsValid( pSound ) )
+		pSound->Update( pTS, currentTime );
+	if ( IsValid( pUnitSounds ) )
+		pUnitSounds->Update( pTS, currentTime );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CRenderGame::UpdateVisible( NWorld::IPlayer *pViewFrom, bool bShowUnits )
@@ -964,7 +1073,13 @@ void CRenderGame::UpdateVisible( NWorld::IPlayer *pViewFrom, bool bShowUnits )
 	if ( !bShowUnits )
 	{
 		if ( bPrevShowUnits != bShowUnits )
-			rUnits.SetNewSource( new CSetSyncSrc<NWorld::IVisObj>() );
+		{
+			// retail @0x2cee50: the unit-sound mixer follows rUnits onto the SAME (empty) source
+			CPtr<CSyncSrc<NWorld::IVisObj> > pNewSrc = new CSetSyncSrc<NWorld::IVisObj>();
+			rUnits.SetNewSource( pNewSrc );
+			if ( IsValid( pUnitSounds ) )
+				pUnitSounds->SetNewSource( pNewSrc );
+		}
 
 		bPrevShowUnits = bShowUnits;
 		return;
@@ -979,15 +1094,42 @@ void CRenderGame::UpdateVisible( NWorld::IPlayer *pViewFrom, bool bShowUnits )
 	}
 	if ( pPrevViewFrom != pViewFrom || bPrevShowUnits != bShowUnits )
 	{
+		// retail @0x2cee50: whatever source rUnits gets, pUnitSounds shares the SAME instance --
+		// that intersection (GetUnits AND the viewer's visible+heard set, filled below) is the
+		// voice fog-of-war gate: an unseen+unheard unit's grunt C3DSound sits on GetUnits only,
+		// so the mixer drops it; a visible unit's sounds ride in via AddVisitableChildren/
+		// AddMiscObjects and a heard unit's via GetSounds.
+		// retail's no-viewer branch (show-all cheat / cinematic view): NOT raw GetUnits but
+		// CBoolSyncSrc<IVisObj,CSubtractFunc>( GetUnits(), pVisible ) with pVisible re-fed each call
+		// from the world's heard-marker set (GetAllSoundStuff, IWorld vtbl+0xac) -- every real unit
+		// is already shown, so the heard-not-seen CDMesh silhouettes must NOT draw.
+		CPtr<CSyncSrc<NWorld::IVisObj> > pNewSrc;
 		if ( pViewFrom )
-			rUnits.SetNewSource( 
-				new CBoolSyncSrc<NWorld::IVisObj, CIntersectionFunc>( pWorld->GetUnits(), pVisible )  
-				);
+			pNewSrc = new CBoolSyncSrc<NWorld::IVisObj, CIntersectionFunc>( pWorld->GetUnits(), pVisible );
 		else
-			rUnits.SetNewSource( pWorld->GetUnits() );
+			pNewSrc = new CBoolSyncSrc<NWorld::IVisObj, CSubtractFunc>( pWorld->GetUnits(), pVisible );
+		rUnits.SetNewSource( pNewSrc );
+		if ( IsValid( pUnitSounds ) )
+			pUnitSounds->SetNewSource( pNewSrc );
 		pPrevViewFrom = pViewFrom;
 	}
-	if ( pViewFrom )
+	if ( !pViewFrom )
+	{
+		// retail @0x2cee50 no-viewer tail (runs EVERY call, not only on a source switch): pVisible :=
+		// the world's live heard-marker weak refs, so freshly created markers are subtracted too.
+		vector<CPtr<NWorld::IVisObj> > soundStuff;
+		pWorld->GetAllSoundStuff( &soundStuff );
+		vector<NWorld::IVisObj*> vis;
+		vis.reserve( soundStuff.size() );
+		for ( int k = 0; k < soundStuff.size(); ++k )
+		{
+			NWorld::IVisObj *p = soundStuff[k];
+			if ( p )
+				vis.push_back( p );
+		}
+		pVisible->Set( vis );
+	}
+	else
 	{
 		list<CPtr<NWorld::CUnit> > res;
 		pViewFrom->GetVisible( &res );
@@ -1069,9 +1211,9 @@ void CRenderGame::UpdateViewWorld( bool bAdvanceTime, STime currentTime, NWorld:
 	rUnits.Sync();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-IRenderGame* CreateRenderGame( NWorld::IWorld *_pWorld, NGScene::IGameView *_pScene )
+IRenderGame* CreateRenderGame( NWorld::IWorld *_pWorld, NGScene::IGameView *_pScene, NSound::ISoundScene *_pSoundScene )
 {
-	return new CRenderGame( _pWorld, _pScene );
+	return new CRenderGame( _pWorld, _pScene, _pSoundScene );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 }

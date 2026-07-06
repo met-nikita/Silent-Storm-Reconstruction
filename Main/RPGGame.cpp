@@ -16,6 +16,14 @@
 #include "wUnitServer.h"   // NWorld::CUnitServer::GetDiplomacyState -- friendly-fire ally block in cover penetration
 #include "wObject.h"       // NWorld::CCannon::GetCurrentUnit -- resolve a cannon/mech shooter for the ally block
 
+// NWorld::CanMeleeAttack @0x3a1db0 (wUnitAttackExec.cpp) -- melee-swing reach gate in the composite
+// tile to-hit. Prototyped here instead of including wUnitAttackExec.h (that header needs the full
+// executor type set this TU does not pull in).
+namespace NWorld
+{
+	bool CanMeleeAttack( CUnitServer *pUS, const NAI::SUnitPosition &from, const CVec3 &ptTarget );
+}
+
 //#define OUTPUT_GRID_TO_FILE
 
 const float F_TILE_HALF_VIEW_BOUND = 1.25f;
@@ -198,28 +206,33 @@ static void AddGridToCovers( CCoverInfo *pRes, const NAI::CFastRenderer &res, co
 				continue;
 			}
 
+			// retail NRPG::CanHitTarget @0x290b70, inlined: the walk is penetrate-by-DEFAULT — it breaks
+			// UNCONDITIONALLY once fEnter reaches the target range (`if (!(fEnter < fMaxRange)) break;`
+			// — tiles too; CalcCoversForTile's fDistance pullback keeps the target tile's own ground
+			// surface past fTestDistance so it can never count as its own cover), and only an explicit
+			// block clears the penetrate: CanDealDmg-false cover, an ALLY of the shooter in the line,
+			// or armour-piercing exhaustion. The previous dev walk (a) gated hulls on TS_UNITS where
+			// retail tests 0x200 == TS_COVER, so terrain/wall nodes were skipped before the tile-
+			// penetrate branch could run — every bare-ground ray ended not-penetrating -> GetHitCover's
+			// -1 blocked sentinel -> 0% for all ground aiming; and (b) required an in-loop condition to
+			// MARK tile penetration instead of retail's default-open shape.
 			float fTempPiercing = _fArmorPiercingAbility;
 			float fTestDistance = fDistance / fRayProjection;
+			bool bBlocked = false, bTargetReached = false;
 			vector<const CObjectBase*> ignore;
 			ignore.push_back( pIgnore );
 			for ( const NAI::CFastRenderer::SResult *p = res.resGrid[y][x]; p; p = p->pNext )
 			{
-				if ( pTarget && p->fEnter >= fTestDistance )
+				if ( p->fEnter >= fTestDistance )
 					break;
-				if ( p->fExit < 0 )
+				if ( p->fExit < fMinClearDistance )		// retail @0x290b70 (was fExit < 0)
 					continue;
-				// retail NRPG::CanHitTarget @0x290b70: ONLY unit hulls (TS_UNITS) block/attenuate the bullet here.
-				// Non-unit geometry (a unit's held gear, or soft world cover it stands in front of, past the muzzle
-				// clear distance) is invisible to penetration -- hard cover was already handled by the obstacle
-				// pre-loop. The dev had inlined CanHitTarget WITHOUT this gate, so a front unit's accompanying
-				// non-unit hulls broke the ray before it reached the target -> 0% to-hit on an enemy standing behind
-				// another unit. This gate restores retail's "bullets pass through units" behaviour.
-				if ( ( p->GetInfo().nTSFlags & NWorld::TS_UNITS ) == 0 )
+				if ( ( p->GetInfo().nTSFlags & NWorld::TS_COVER ) == 0 )	// retail 0x200 == TS_COVER, NOT TS_UNITS
 					continue;
 				if ( find( ignore.begin(), ignore.end(), p->GetInfo().pUserData ) != ignore.end() )
 					continue;
-				CDynamicCast<NWorld::CUnit> pTargetUnit( p->GetInfo().pUserData );
-				if ( pTargetUnit || p->GetInfo().pUserData == pTarget )   // retail also seeds the target into ignore (@0x290c5e)
+				CDynamicCast<NWorld::CUnit> pHitUnit( p->GetInfo().pUserData );
+				if ( pHitUnit || p->GetInfo().pUserData == pTarget )   // retail also seeds the target into ignore (@0x290c5e)
 					ignore.push_back( p->GetInfo().pUserData );
 				//
 				NDb::CRPGArmor *pArmor = p->GetInfo().pArmor;
@@ -228,16 +241,17 @@ static void AddGridToCovers( CCoverInfo *pRes, const NAI::CFastRenderer &res, co
 				if ( !att.IsArmorIgnored( pArmor ) )
 				{
 					// retail checks the TARGET hit FIRST (@0x290c98): reaching the target is an UNCONDITIONAL
-					// penetrate; CanDealDmg only vetoes intervening NON-target units. The dev had these two reversed,
-					// so a target whose own armour gave CanDealDmg==false was wrongly un-hittable.
+					// penetrate; CanDealDmg only vetoes intervening NON-target cover.
 					if ( pTarget && p->GetInfo().pUserData == pTarget )
 					{
-						pRes->fSummAPA += fTempPiercing;
-						ray.isPenetrate = true;
+						bTargetReached = true;
 						break;
 					}
 					if ( !att.CanDealDmg( pArmor ) )
+					{
+						bBlocked = true;
 						break;
+					}
 					// retail CanHitTarget @0x290cce: never penetrate THROUGH a unit that is an ALLY of the shooter
 					// (friendly fire). Enemies/neutrals pass with armour-piercing attrition; allies hard-stop the
 					// ray (diplomacy DS_ALLY). pAttackerSrv is resolved above even for cannon/mech shooters.
@@ -245,21 +259,25 @@ static void AddGridToCovers( CCoverInfo *pRes, const NAI::CFastRenderer &res, co
 					{
 						CDynamicCast<NWorld::CUnitServer> pHitSrv( p->GetInfo().pUserData );
 						if ( pHitSrv && pAttackerSrv->GetDiplomacyState( pHitSrv ) == NDb::DS_ALLY )
+						{
+							bBlocked = true;
 							break;
+						}
 					}
 				}
 				//
-				if ( pTarget || p->fEnter < fTestDistance ) 
-					fTempPiercing -= GetAPASubstraction( p->fEnter, p->fExit, pArmor );
-				// tile
-				if ( !pTarget && ( p->fEnter >= fTestDistance || ( fTempPiercing > 0 && !p->pNext ) ) )
-				{
-					pRes->fSummAPA += fTempPiercing;
-					ray.isPenetrate = true;
-				}
+				fTempPiercing -= GetAPASubstraction( p->fEnter, p->fExit, pArmor );
 				// ���� �������� � ������ ������� �� �����
 				if ( fTempPiercing <= 0 )
+				{
+					bBlocked = true;
 					break;
+				}
+			}
+			if ( bTargetReached || !bBlocked )		// retail: CanHitTarget true && bCanHit
+			{
+				pRes->fSummAPA += fTempPiercing;
+				ray.isPenetrate = true;
 			}
 			pRes->hitRays.push_back( ray );
 #ifdef OUTPUT_GRID_TO_FILE
@@ -505,7 +523,12 @@ bool PeekRay( CCoverInfo *pCover, CRay *pRes, float fHit, bool *bIsMiss, bool bS
 		ASSERT( pCover->hitRays.size() > 0 );	// super strange: cover is only passed here once at least 20 rays have been collected
 		if ( pCover->hitRays.empty() )
 		{
-			// translated dev diagnostic (the original Russian text was U+FFFD-corrupted in the dev copy)
+			// translated dev diagnostic (the original Russian text was U+FFFD-corrupted in the dev copy).
+			// RETAIL-AUTHENTIC: NRPG::RealPeekRay @0x2b3f00 prints the same (Russian) line under the
+			// identical condition -- a guaranteed-hit ray requested while hitRays is empty (target fully
+			// obstructed) -- and returns false. The print is benign; the real bug was upstream: the
+			// ToHit calcer gate had `< 0` where retail has `<= 0` (see RPGToHit.cpp GetToHit overloads),
+			// so a fully-blocked target still showed a non-zero % and the shot could be ordered at all.
 			csRPG << "Kick the programmers!!! Do it right now!!!" << endl;
 			return false;
 		}
@@ -576,7 +599,22 @@ int GetHitCover( const NWorld::CUnit *pAttacker, CCoverInfo *pCover )
 	pRealAttacker->CreateAttack( &attack, false );
 	if ( attack.empty() )
 		return 0;
-	float fAverageAPA = ( pCover->fSummAPA / float(nPenetrateCount) ) / attack.front().nK;
+	// Rays were cast but NONE penetrate: the target/tile is fully walled off. Report the BLOCKED
+	// sentinel. NOTE (2026-07-05): the retail calcer gate @0x2b85e0/0x2b86c0/0x2b8a50 is
+	// `fHitCover <= 0 -> 0%` (fcomp vs the 0.0f global @0x8d54dc, disasm-verified), so retail's
+	// plain 0.0 return covers this case AND the empty-hitRays case (all rays muzzle-obstructed --
+	// the RealPeekRay @0x2b3f00 "Kick the programmers" scenario, where we fall through below and
+	// return 0). The -1 sentinel is kept as a stronger-typed BLOCKED marker; both -1 and 0 now
+	// zero the displayed chance, matching retail. The old unguarded 0/0-NaN ->
+	// int(0*NaN)=INT_MIN accidentally produced this for blocked tiles while ALSO poisoning open
+	// ground; the plain 0.0f guard alone lost the blocked case (good % through two walls).
+	if ( !pCover->hitRays.empty() && nPenetrateCount == 0 )
+		return -1;
+	// retail GetHitCover @0x2b4390 (disasm 0x6b4467): the average-APA division runs ONLY when
+	// nPenetrateCount > 0, else it defaults to 0.0f.
+	float fAverageAPA = 0.0f;
+	if ( nPenetrateCount > 0 )
+		fAverageAPA = ( pCover->fSummAPA / float(nPenetrateCount) ) / attack.front().nK;
 	// ������� �������� �����
 	int nHitCover = 0;
 	if ( !pCover->hitRays.empty() )
@@ -694,10 +732,32 @@ int CGame::GetTileCompositeToHit(  NWorld::CUnit *pAttacker, CVec3 ptTilePos,
 	if ( attack.empty() )
 		return 0;
 	//
-	CVec3 ptFrom = pAttacker->GetAttackOrigin( pAttacker->GetPosition() );
+	// retail composite tile to-hit @0x2b54a0 + RealCalcTileCovers @0x2b4700: a SWUNG melee weapon
+	// (TH_MELEE) first gates on NWorld::CanMeleeAttack -- out of arm's reach returns the -1
+	// sentinel (the retail cursor @0x1da200 SKIPS -1 results instead of printing them) -- and its
+	// cover walk starts at the blow-height melee attack pos (GetMeleeAttackPos) with NO min-clear
+	// pullback. Only ranged types (and thrown knives, TH_THROWING) cast from GetAttackOrigin with
+	// GetMinClearDistance. The previous unconditional muzzle-origin+min-clear walk produced no
+	// usable hit rays at melee range, so GetHitCover fed a constant 0 into the TH_MELEE 0/100
+	// rule of GetTileToHit (@0x2b4df0) -> melee at ground/walls/objects always displayed 0%.
+	CVec3 ptFrom;
+	float fMinClearDistance;
+	if ( GetToHitType( pAttacker ) == TH_MELEE )
+	{
+		CDynamicCast<NWorld::CUnitServer> pUS( pAttacker );
+		if ( pUS && !NWorld::CanMeleeAttack( pUS, pAttacker->GetPosition(), ptTilePos ) )
+			return -1;
+		ptFrom = GetMeleeAttackPos( pAttacker, ptTilePos );
+		fMinClearDistance = 0;
+	}
+	else
+	{
+		ptFrom = pAttacker->GetAttackOrigin( pAttacker->GetPosition() );
+		fMinClearDistance = pAttacker->GetMinClearDistance();
+	}
 	//
 	CObj<NRPG::CCoverInfo> pCover = CalcCoversForTile( ptFrom, attack[0], pAttacker,
-		ptTilePos, pAttacker->GetMinClearDistance() );
+		ptTilePos, fMinClearDistance );
 	int nHitCover = GetHitCover( pAttacker, pCover );
 	//
 	return NRPG::GetTileToHit( pAttacker, pAttacker->GetPose(), nDistance, pAttacker->GetPosition().GetCP(),

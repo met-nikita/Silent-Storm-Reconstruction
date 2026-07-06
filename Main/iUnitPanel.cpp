@@ -13,12 +13,14 @@
 #include "..\DBFormat\DataSound.h"
 #include "..\DBFormat\DataFormat.h"
 #include "..\DBFormat\DataInterface.h"
+#include "..\DBFormat\DataCamera.h"    // NDb::GetDBCamera -- the HUD face camera (release @0x254cc0: record 0x13a1)
 #include "Sound.h"
 #include "iMission.h"
 #include "Interface.h"
 #include "iCommonUI.h"
 #include "iMissionUI.h"
 #include "iUnitPanel.h"
+#include "iCriticalIcons.h"
 #include "iUnitIconBar.h"
 #include "iGameStates.h"
 #include "iActionDecorator.h"
@@ -286,6 +288,10 @@ private:
 	CObj<NUI::CImage> pRedImage;
 	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(TBaseClass*)this); f.Add(2,&pUnit); f.Add(3,&sEventTime); f.Add(4,&eStage); f.Add(5,&pEvent); f.Add(6,&pAckEffect); f.Add(7,&bDoNotPlayEffect); f.Add(8,&pFaceUnit); f.Add(9,&pRedImage); return 0; }
 
+	// release CUnitFace::SetUnitFace @0x254cc0: point the 3D face at a raw world unit (the ack speaker
+	// -- may NOT be the selected/tracked unit, even an enemy) and play its talk gesture.
+	void SetUnitFace( NWorld::CUnit *pWorldUnit );
+
 public:
 	CUnitFace() {}
 	CUnitFace( const SWindowInfo &sInfo, NGame::IMission *pMission );
@@ -294,6 +300,9 @@ public:
 	CObjectBase* GetTarget();
 
 	void SetUnit( NGame::IUnitTracker *pUnit );
+	// release CUnitFace::PlayAckEvent @0x254ba0: arm the ack-effect state machine (Draw @0x254df0)
+	void PlayAckEvent( const STime &sTime, NUI::CAckEvent *pEvent );
+	bool IsPlayingAck() const { return eStage != ST_NONE; }
 
 	bool ProcessMessage( const SEvent &sEvent );
 	void Draw( const STime &sTime, NGScene::I2DGameView *pView );
@@ -302,6 +311,19 @@ public:
 CUnitFace::CUnitFace( const SWindowInfo &sInfo, NGame::IMission *_pMission ):
 	TBaseClass( sInfo, _pMission )
 {
+	// PORTRAIT-LIPSYNC ROOT CAUSE: CActionDecorator's ctor constructs the wrapped CUnitView with
+	// Type(sInfo) only, leaving CUnitView::pRenderGame NULL. SetUnit -> NRender::CreateShowUnit(
+	// ..., pRenderGame=0 ) then builds a PRIVATE `new CHeadsController` for the portrait head, so
+	// (a) nothing ever Advance()s it (only the mission CRenderGame's own controller is advanced in
+	// UpdateViewWorld, RWGame.cpp) -- the portrait head's sequence clock is frozen -- and (b) it is
+	// NOT the controller CAckIcon::PlayAck lipsyncs through (pMission->GetRenderGame()->
+	// GetHeadController()), so the ack sequence played only on the invisible world-model head.
+	// Retail parity: retail CRenderGame::PlaySequence @0x2cb150 keys the ONE shared controller by
+	// the pers' CHeadInfo (+0x90) -- shared between the world unit and the portrait clone. Dev keys
+	// by NWorld::CUnit* (LSController.h), equivalent PROVIDED the controller instance is shared --
+	// which this line restores.
+	if ( IsValid( _pMission ) )
+		pRenderGame = _pMission->GetRenderGame();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CUnitFace::CanHandleState( NGame::IState *pState ) const
@@ -318,13 +340,28 @@ void CUnitFace::SetUnit( NGame::IUnitTracker *_pUnit )
 {
 	// Guard on change (retail SetUnit @0x254c80): the dev called this every frame, re-creating the
 	// show-unit and resetting the skeletal animation to frame 0 -> the face looked frozen. Build the
-	// face model once per unit so its looping POSE_STAND idle (CFakeWorldUnit::Update) can play out.
+	// face model once per unit so its looping idle (CFakeWorldUnit::Update) can play out.
 	if ( pUnit == _pUnit )
 		return;
 
 	pUnit = _pUnit;
+	// retail SetUnit @0x254c80: a unit change while an ack is in flight arms ST_ACK_TERMINATE --
+	// Draw restores the (new) unit's face and retires the event; setting the view here directly
+	// would clobber the speaker's face mid-crossfade.
+	if ( eStage != ST_NONE )
+	{
+		eStage = ST_ACK_TERMINATE;
+		return;
+	}
 	if ( IsValid( pUnit ) )
-		CUnitView::SetUnit( pUnit->GetUnit() );
+	{
+		// release CUnitFace::SetUnitFace @0x254cc0: pFaceUnit = unit; then
+		// CUnitView::SetUnit(unit, GetDBCamera(0x13a1 = 5025 "PersInventory"), false, true, true)
+		// -> bItems=false, bShowCap=true, bPlayIdle=true: the face body plays the looping
+		// INTERFACE_IDLE clip instead of a frozen POSE stand.
+		pFaceUnit = pUnit->GetUnit();
+		CUnitView::SetUnit( pUnit->GetUnit(), NDb::GetDBCamera( 5025 ), false, true, true );
+	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CUnitFace::ProcessMessage( const SEvent &sEvent )
@@ -343,10 +380,239 @@ bool CUnitFace::ProcessMessage( const SEvent &sEvent )
 	return CWindow::ProcessMessage( sEvent );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// release CUnitFace::SetUnitFace @0x254cc0: bind the 3D face to a raw world unit (bItems=false,
+// bShowCap=true, bPlayIdle=true -> INTERFACE_IDLE) and record it as the face unit. Used by the ack
+// state machine to swap the portrait to the speaker (who may be a non-selected unit or an enemy).
+void CUnitFace::SetUnitFace( NWorld::CUnit *pWorldUnit )
+{
+	pFaceUnit = pWorldUnit;
+	if ( IsValid( pWorldUnit ) )
+		CUnitView::SetUnit( pWorldUnit, NDb::GetDBCamera( 5025 ), false, true, true );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail ack-crossfade overlay ramp (CUnitFace::Draw @0x254df0; disasm-verified 0x654e5c..0x654e7f
+// fade-out and 0x654f3b..0x654f59 fade-in): the "ackeffect" CImage (UITexture 951 "AckSwitch",
+// chunk-verified in the Steam game.db) sits TOPMOST over the portrait and is WHITE-modulated with
+//   alpha = t/500 * 255           while a face fades OUT  (SOURCE_HIDE / TARGET_HIDE)
+//   alpha = (1 - t/500) * 255     while a face fades IN   (TARGET_SHOW / SOURCE_SHOW)
+// (retail constants 0.002f @0x8b9d8c and 255.0f @0x8b56b8; color dword (a<<24)|0xFFFFFF). The head
+// SWAP happens behind the fully-opaque overlay -- that is the retail "crossfade" the instant cut
+// was missing. Retail truncates the alpha to AL (movzx al) -- the stage flips before it can wrap;
+// we clamp instead so a frame hitch cannot flash-wrap.
+static void SetAckEffectRamp( CImage *pImg, const STime &sTime, const STime &sEventTime, bool bFadeToWhite )
+{
+	if ( !IsValid( pImg ) )
+		return;
+	float f = float( sTime - sEventTime ) * 0.002f;
+	if ( !bFadeToWhite )
+		f = 1.f - f;
+	int nA = int( f * 255.f );
+	if ( nA < 0 ) nA = 0;
+	if ( nA > 255 ) nA = 255;
+	pImg->SetColor( NGfx::SPixel8888( 0xFF, 0xFF, 0xFF, (unsigned char)nA ) );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// release CUnitFace::PlayAckEvent @0x254ba0: arm the ack. The effect is suppressed (bDoNotPlayEffect)
+// when the speaker is ALREADY the shown unit -- then the portrait just plays the talk gesture without
+// the swap-out/swap-in. Otherwise the state machine (Draw) hides the current face, shows the speaker's,
+// waits out the bark, then restores the selected unit.
+void CUnitFace::PlayAckEvent( const STime &sTime, NUI::CAckEvent *_pEvent )
+{
+	pEvent = _pEvent;
+	if ( !IsValid( pEvent ) )
+		return;
+
+	// retail ctor @0x256610 creates the crossfade overlay up front: CImage "ackeffect", full face
+	// rect, style TOPMOST only (starts hidden), skinned with UITexture 951 "AckSwitch" (disasm
+	// literal `mov ecx,0x3b7` @0x6567ae -- the Ghidra output register-noised the id). Created
+	// LAZILY here instead so worlds restored from pre-crossfade saves (serialized tag 6 = null)
+	// heal themselves on the first bark.
+	if ( !IsValid( pAckEffect ) )
+	{
+		pAckEffect = new CImage( SWindowInfo( this, SPoint( 0, 0 ), GetSize(), "ackeffect", STYLE_TOPMOST ) );
+		pAckEffect->SetImage( NDb::GetUITexture( 951 ) );
+	}
+
+	// retail PlayAckEvent @0x254ba0: play the full portrait "turn to camera + talk" dance ONLY when
+	// there is a valid tracked face AND a valid speaker; otherwise fall through to the FALLBACK below.
+	NWorld::CAckEvent *pInner = pEvent->GetAckEvent();
+	if ( IsValid( pUnit ) && IsValid( pInner ) && IsValid( pInner->pUnit ) )
+	{
+		bDoNotPlayEffect = ( pInner->pUnit.GetPtr() == pUnit->GetUnit() );
+		sEventTime = sTime;
+		eStage = ST_SOURCE_HIDE;
+		// retail @0x254ba0 tail: show the flash overlay for the dance (hidden when the speaker IS
+		// the shown unit); Draw's per-frame ramp drives the alpha from ~0.
+		if ( IsValid( pAckEffect ) )
+		{
+			pAckEffect->SetStyle( STYLE_VISIBLE, !bDoNotPlayEffect );
+			pAckEffect->SetColor( NGfx::SPixel8888( 0xFF, 0xFF, 0xFF, 0 ) );
+		}
+		return;
+	}
+
+	// retail FALLBACK (@0x254ba0 tail: CAckEvent::Set): the dance can't play, but we MUST still flip
+	// bReady so the ack's voice + subtitle still play (without the portrait dance). CRITICAL under the
+	// deferred scheme: skipping Set() here leaves bReady=false and the voice NEVER starts.
+	pEvent->Set( sTime );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 void CUnitFace::Draw( const STime &sTime, NGScene::I2DGameView *pView )
 {
-	// life bars removed for retail parity (see class comment). The ack-effect Draw state
-	// machine (retail @0x254df0) is the deferred behavior; base CUnitView draws the portrait.
+	// release CUnitFace::Draw @0x254df0 -- the FULL 6-stage ack-effect machine. Retail stage order
+	// (each transition 500ms): SOURCE_HIDE -> [SetUnitFace(speaker) + StartTalk, non-loop] ->
+	// TARGET_SHOW -> [PoseTalk LOOP] -> ACK_WAIT (bark TTL) -> [EndTalk = turn away] ->
+	// TARGET_HIDE -> [SetUnitFace(selected) + PlayAnimation(null) = reset to idle] ->
+	// SOURCE_SHOW -> NONE. There is NO head-yaw API -- the signature "turns her head to the
+	// screen" IS a skeletal clip. DISASM CORRECTION (@0x654f06/0x655000/0x65505d): the Ghidra
+	// decomp printed GetAnimation(0)/(1) but DROPPED the fastcall ECX id (same lie as the
+	// GetDBCamera(0)-vs-0x13a1 one in SetUnitFace @0x254cc0). The REAL retail ids -- all three
+	// verified present in the Steam game.db Animations table, skeleton 8, clip
+	// Characters\Skeletons01\BaseSkeleton\Clips\Weapons\NoWeapon\Special\TalkInterface.ma:
+	//   0x11c2 = 4546 "StartTalk" (frames   0- 500, non-loop) -- TURN head to the camera
+	//   0x11c4 = 4548 "PoseTalk"  (frame  500- 500, LOOP)     -- hold the facing pose while talking
+	//   0x11c3 = 4547 "EndTalk"   (frames 500-1000, non-loop) -- turn back away
+	// bDoNotPlayEffect gates only the pAckEffect crossfade image (unported cosmetics), NEVER
+	// the animations. Life bars were removed for retail parity (see class comment).
+	const int N_ANIM_START_TALK = 4546;	// 0x11c2 "StartTalk" -- turn-to-camera gesture
+	const int N_ANIM_END_TALK   = 4547;	// 0x11c3 "EndTalk"   -- turn-away gesture
+	const int N_ANIM_POSE_TALK  = 4548;	// 0x11c4 "PoseTalk"  -- held facing pose (looped)
+	const STime N_ACK_STEP = 500;
+	switch ( eStage )
+	{
+	case ST_SOURCE_HIDE:
+		if ( !IsValid( pEvent ) )
+		{
+			eStage = ST_TARGET_HIDE;	// cancelled mid-fade: fall through the restore path (retail @0x654e3e)
+			sEventTime = sTime;
+			break;
+		}
+		// retail @0x654e5c: fade the CURRENT face TO WHITE over the 500ms step.
+		SetAckEffectRamp( pAckEffect, sTime, sEventTime, true );
+		if ( sTime - sEventTime > N_ACK_STEP )
+		{
+			// swap the portrait to the speaker + play the turn-to-camera gesture (retail
+			// GetAnimation(0x11c2) "StartTalk" @0x654f06, non-loop). The mouth/visemes are the
+			// separate CHeadsController lipsync driven from CAckIcon::PlayAck (started by the
+			// bReady handshake below); THIS skeletal clip is what visibly rotates the head/neck
+			// bones toward the screen for the bark.
+			// retail @0x654ecb: pin the overlay FULLY OPAQUE (0xffffffff) so the head swap happens
+			// behind solid white -- this is what makes it a crossfade instead of an instant cut.
+			if ( IsValid( pAckEffect ) )
+				pAckEffect->SetColor( NGfx::SPixel8888( 0xFF, 0xFF, 0xFF, 0xFF ) );
+			NWorld::CAckEvent *pInner = pEvent->GetAckEvent();
+			if ( IsValid( pInner ) && IsValid( pInner->pUnit ) )
+				SetUnitFace( pInner->pUnit );
+			PlayAnimation( NDb::GetAnimation( N_ANIM_START_TALK ), false );
+			eStage = ST_TARGET_SHOW;
+			sEventTime = sTime;
+		}
+		break;
+	case ST_TARGET_SHOW:
+		if ( !IsValid( pEvent ) )
+		{
+			eStage = ST_TARGET_HIDE;
+			sEventTime = sTime;
+			break;
+		}
+		// retail @0x654f3b: reveal the SPEAKER from white -- alpha (1 - t/500)*255.
+		SetAckEffectRamp( pAckEffect, sTime, sEventTime, false );
+		// retail @0x654f84: if the event went bReady early (another component Set() it -- e.g. a
+		// terminate elsewhere), abort the dance: full white, restore the selected face, fade out.
+		if ( pEvent->IsReady() )
+		{
+			if ( IsValid( pAckEffect ) )
+				pAckEffect->SetColor( NGfx::SPixel8888( 0xFF, 0xFF, 0xFF, 0xFF ) );
+			if ( IsValid( pUnit ) )
+				SetUnitFace( pUnit->GetUnit() );
+			eStage = ST_SOURCE_SHOW;
+			sEventTime = sTime;
+			break;
+		}
+		if ( sTime - sEventTime > N_ACK_STEP )
+		{
+			// retail ST_TARGET_SHOW -> ACK_WAIT @0x254df0: the speaker's face is now on screen, so
+			// flip bReady (CAckEvent::Set) -- THIS is the handshake that starts the voice + the
+			// CHeadsController lipsync over in CAckIcon::PlayAck.
+			pEvent->Set( sTime );
+			// retail @0x654fc6-region: overlay OFF for the talking hold (SetStyle(VISIBLE,false) +
+			// color alpha 0).
+			if ( IsValid( pAckEffect ) )
+			{
+				pAckEffect->SetStyle( STYLE_VISIBLE, false );
+				pAckEffect->SetColor( NGfx::SPixel8888( 0xFF, 0xFF, 0xFF, 0 ) );
+			}
+			// retail GetAnimation(0x11c4) "PoseTalk" @0x655000, LOOPED: hold the turned-to-camera
+			// pose (frame 500 of TalkInterface.ma) for the whole bark.
+			PlayAnimation( NDb::GetAnimation( N_ANIM_POSE_TALK ), true );
+			eStage = ST_ACK_WAIT;
+			sEventTime = sTime;
+		}
+		break;
+	case ST_ACK_WAIT:
+		// hold the speaker until the ack is truly COMPLETE (bReady && TTL elapsed && voice finished --
+		// retail IsComplete @0x1d0dc0) or it is cancelled; NOT a fixed end-time.
+		if ( !IsValid( pEvent ) || pEvent->IsComplete( sTime ) )
+		{
+			// retail @0x655040-region: re-show the flash overlay for the fade-back (same
+			// bDoNotPlayEffect gate as the way in).
+			if ( IsValid( pAckEffect ) )
+				pAckEffect->SetStyle( STYLE_VISIBLE, !bDoNotPlayEffect );
+			// retail GetAnimation(0x11c3) "EndTalk" @0x65505d, non-loop: turn the head back away.
+			PlayAnimation( NDb::GetAnimation( N_ANIM_END_TALK ), false );
+			eStage = ST_TARGET_HIDE;
+			sEventTime = sTime;
+		}
+		break;
+	case ST_TARGET_HIDE:
+		// retail: fade the SPEAKER to white over the 500ms step.
+		SetAckEffectRamp( pAckEffect, sTime, sEventTime, true );
+		if ( sTime - sEventTime > N_ACK_STEP )
+		{
+			// retail: pin full white for the swap back, then restore the selected unit's face;
+			// SetUnitFace's bPlayIdle rearms INTERFACE_IDLE (retail plays a null clip here).
+			if ( IsValid( pAckEffect ) )
+				pAckEffect->SetColor( NGfx::SPixel8888( 0xFF, 0xFF, 0xFF, 0xFF ) );
+			if ( IsValid( pUnit ) )
+				SetUnitFace( pUnit->GetUnit() );
+			eStage = ST_SOURCE_SHOW;
+			sEventTime = sTime;
+		}
+		break;
+	case ST_SOURCE_SHOW:
+		// retail: reveal the restored face from white.
+		SetAckEffectRamp( pAckEffect, sTime, sEventTime, false );
+		if ( sTime - sEventTime > N_ACK_STEP )
+		{
+			pEvent = 0;
+			eStage = ST_NONE;
+			// retail @0x6551xx: overlay OFF once the dance is over.
+			if ( IsValid( pAckEffect ) )
+				pAckEffect->SetStyle( STYLE_VISIBLE, false );
+		}
+		break;
+	case ST_ACK_TERMINATE:
+		// retail SetUnit @0x254c80: the tracked unit changed while an ack was in flight -- restore the
+		// (new) unit's face immediately and retire the event from the face machine. FALLBACK: still
+		// flip bReady (Set) so the ack's voice/subtitle play out through CAckIcon even though the
+		// portrait dance was aborted -- Cancel() alone would leave bReady=false and hang the un-played
+		// ack (its voice would NEVER start under the deferred scheme). CAckIcon keeps its own ref to
+		// the same event, so the voice continues there after we drop ours.
+		// retail ACK_TERMINATE @0x655xxx: overlay OFF.
+		if ( IsValid( pAckEffect ) )
+			pAckEffect->SetStyle( STYLE_VISIBLE, false );
+		if ( IsValid( pUnit ) )
+			SetUnitFace( pUnit->GetUnit() );
+		if ( IsValid( pEvent ) )
+			pEvent->Set( sTime );
+		pEvent = 0;
+		eStage = ST_NONE;
+		break;
+	default:
+		break;
+	}
+
 	TBaseClass::Draw( sTime, pView );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -727,158 +993,6 @@ void CInfoPanelSpecialSlot::Draw( const STime &sTime, NGScene::I2DGameView *pVie
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CInfoPanelSingleUnit
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-class CInfoPanelCritical: public CImage
-{
-	OBJECT_BASIC_METHODS(CInfoPanelCritical)
-private:
-	ZDATA_(CImage)
-	CPtr<NRPG::ICriticalInfo> pCritical;
-	////
-	CObj<CToolTip> pToolTip;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CImage*)this); f.Add(2,&pCritical); f.Add(3,&pToolTip); return 0; }
-
-public:
-	CInfoPanelCritical() {}
-	CInfoPanelCritical( const SWindowInfo &sInfo );
-
-	void Set( NRPG::ICriticalInfo *pCritical );
-
-	void Draw( const STime &sTime, NGScene::I2DGameView *pView );
-};
-////////////////////////////////////////////////////////////////////////////////////////////////////
-CInfoPanelCritical::CInfoPanelCritical( const SWindowInfo &sInfo ):
-	CImage( sInfo )
-{
-	pToolTip = new CToolTip( SWindowInfo( GetInterface(), SPoint( 0, 0 ), SPoint( 0, 0 ), "tooltip", STYLE_ENABLED ) );
-	SetToolTip( pToolTip );
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-void CInfoPanelCritical::Set( NRPG::ICriticalInfo *_pCritical )
-{
-	if ( pCritical == _pCritical )
-		return;
-
-	pCritical = _pCritical;
-
-	switch ( pCritical->GetCriticalType() )
-	{
-	case NDb::C_AP_REDUCTION:
-		SetImage( NDb::GetUITexture( 617 ) );
-		pToolTip->SetText( GetDBString( 11177 ) );
-		break;
-	case NDb::C_BLIND:
-		SetImage( NDb::GetUITexture( 616 ) );
-		pToolTip->SetText( GetDBString( 11178 ) );
-		break;
-	case NDb::C_WEAPONSKILL_REDUCTION:
-		SetImage( NDb::GetUITexture( 615 ) );
-		pToolTip->SetText( GetDBString( 11179 ) );
-		break;
-	case NDb::C_VP:
-		SetImage( NDb::GetUITexture( 614 ) );
-		pToolTip->SetText( GetDBString( 11180 ) );
-		break;
-	case NDb::C_MOTIONLESS:
-		SetImage( NDb::GetUITexture( 613 ) );
-		pToolTip->SetText( GetDBString( 11181 ) );
-		break;
-	case NDb::C_ENCUMBRANCE:
-		SetImage( NDb::GetUITexture( 612 ) );
-		pToolTip->SetText( GetDBString( 11182 ) );
-		break;
-	case NDb::C_ACCIDENTAL_SHOT:
-		SetImage( NDb::GetUITexture( 611 ) );
-		pToolTip->SetText( GetDBString( 11183 ) );
-		break;
-	case NDb::C_LOST_WEAPON:
-		SetImage( NDb::GetUITexture( 610 ) );
-		pToolTip->SetText( GetDBString( 11184 ) );
-		break;
-	case NDb::C_IDLE_HAND:
-		SetImage( NDb::GetUITexture( 609 ) );
-		pToolTip->SetText( GetDBString( 11185 ) );
-		break;
-	case NDb::C_STUN:
-		SetImage( NDb::GetUITexture( 608 ) );
-		pToolTip->SetText( GetDBString( 11186 ) );
-		break;
-	case NDb::C_DAMAGE_WEAPON:
-		SetImage( NDb::GetUITexture( 607 ) );
-		pToolTip->SetText( GetDBString( 11187 ) );
-		break;
-	case NDb::C_PATIENT:
-		SetImage( NDb::GetUITexture( 606 ) );
-		pToolTip->SetText( GetDBString( 11188 ) );
-		break;
-	case NDb::C_DEAF:
-		SetImage( NDb::GetUITexture( 605 ) );
-		pToolTip->SetText( GetDBString( 11189 ) );
-		break;
-	case NDb::C_BLEEDING:
-		SetImage( NDb::GetUITexture( 604 ) );
-		pToolTip->SetText( GetDBString( 11190 ) );
-		break;
-	}
-
-	switch( pCritical->GetCriticalLocation() )
-	{
-	case NDb::CL_HEAD:
-		pToolTip->SetVal( L"location", GetDBString( 11191 ) );
-		break;
-	case NDb::CL_TORSO:
-		pToolTip->SetVal( L"location", GetDBString( 11192 ) );
-		break;
-	case NDb::CL_ARMS:
-		pToolTip->SetVal( L"location", GetDBString( 11193 ) );
-		break;
-	case NDb::CL_LEGS:
-		pToolTip->SetVal( L"location", GetDBString( 11194 ) );
-		break;
-	case NDb::CL_ANY:
-		pToolTip->SetVal( L"location", GetDBString( 11195 ) );
-		break;
-	default:
-		ASSERT( 0 );
-	}
-
-	pToolTip->SetVal( L"difficulty", pCritical->GetDifficultyClass() );
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-void CInfoPanelCritical::Draw( const STime &sTime, NGScene::I2DGameView *pView )
-{
-	/// UpdateCritical Values
-	CImage::Draw( sTime, pView );
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-// CMissionCriticalBleedingFake
-////////////////////////////////////////////////////////////////////////////////////////////////////
-// A transient stand-in NRPG::ICriticalInfo the single-unit panel uses to draw a permanent
-// "bleeding" critical icon (a mission-scripted wound not backed by a real NRPG::CCritical).
-// Every accessor is a hard-coded constant except the displayed value, carried as nValue.
-// (release iCriticalIcons.obj; nValue@+12, sizeof 16). GetDifficultyClass returns -1 -- in the
-// release it was COMDAT-folded with GetRemainingTime (both `return -1`), hence no distinct RVA.
-class CMissionCriticalBleedingFake: public NRPG::ICriticalInfo
-{
-	OBJECT_BASIC_METHODS(CMissionCriticalBleedingFake)
-private:
-	ZDATA
-	int nValue;
-	ZEND int operator&( CStructureSaver &f ) { f.Add( 1, &nValue ); return 0; }
-
-public:
-	CMissionCriticalBleedingFake(): nValue( 0 ) {}
-	CMissionCriticalBleedingFake( int _nValue ): nValue( _nValue ) {}
-
-	int GetRemainingTime() const { return -1; }
-	float GetValue() const { return (float)nValue; }
-
-	virtual int GetDifficultyClass() const { return -1; }
-	virtual NDb::ECritical GetCriticalType() const { return NDb::C_BLEEDING; }
-	virtual NDb::ECriticalLocation GetCriticalLocation() const { return NDb::CL_ANY; }
-};
-////////////////////////////////////////////////////////////////////////////////////////////////////
-// CInfoPanelSingleUnit
-////////////////////////////////////////////////////////////////////////////////////////////////////
 class CInfoPanelSingleUnit: public CWindow
 {
 	OBJECT_BASIC_METHODS(CInfoPanelSingleUnit)
@@ -900,6 +1014,9 @@ private:
 public:
 	CInfoPanelSingleUnit() {}
 	CInfoPanelSingleUnit( const SWindowInfo &sInfo, NGame::IMission *pMission );
+
+	// release CInfoPanelSingleUnit::PlayAckEvent @0x256360 -> forward to the unit face's ack animation
+	void PlayAckEvent( const STime &sTime, NUI::CAckEvent *pEvent ) { if ( IsValid( pUnitFace ) ) pUnitFace->PlayAckEvent( sTime, pEvent ); }
 
 	bool ProcessMessage( const SEvent &sEvent );
 	void Draw( const STime &sTime, NGScene::I2DGameView *pView );
@@ -948,22 +1065,7 @@ void CInfoPanelSingleUnit::Draw( const STime &sTime, NGScene::I2DGameView *pView
 
 	pUnit = unitsSet[0];
 
-	int nCount = 0;
-	list<CPtr<NRPG::ICriticalInfo> > criticalsList;
-	pUnit->GetUnit()->GetRPG()->GetCriticalsList( &criticalsList );
-	for( list<CPtr<NRPG::ICriticalInfo> >::const_iterator iTemp = criticalsList.begin(); iTemp != criticalsList.end(); iTemp++ )
-	{
-		if ( nCount >= criticalIconsSet.size() )
-			break;
-
-		CInfoPanelCritical *pIcon = criticalIconsSet[nCount];
-		pIcon->Set( *iTemp );
-		pIcon->SetStyle( STYLE_VISIBLE, true );
-
-		nCount++;
-	}
-	for ( int nTemp = nCount; nTemp < criticalIconsSet.size(); nTemp++ )
-		criticalIconsSet[nTemp]->SetStyle( STYLE_VISIBLE, false );
+	UpdateCriticalIcons( pUnit, criticalIconsSet ); // release @0x1cda90 shared helper (iCriticalIcons)
 
 
 	CPtr<NRPG::IWeaponItemInfo> pItem = pUnit->GetUnit()->GetRPG()->GetCannonItemInfo();
@@ -984,7 +1086,10 @@ void CInfoPanelSingleUnit::Draw( const STime &sTime, NGScene::I2DGameView *pView
 	pLeftSlot->Set( pUnit->GetUnit() );
 	pRightSlot->Set( pUnit->GetUnit() );
 	pSpecialSlot->Set( pUnit->GetUnit() );
-	pUnitFace->SetUnit( pUnit );
+	// while an ack is playing, the face is showing the SPEAKER (state machine owns it); don't yank it
+	// back to the selected unit every frame -- the ack's ST_SOURCE_SHOW step restores it on finish.
+	if ( !pUnitFace->IsPlayingAck() )
+		pUnitFace->SetUnit( pUnit );
 
 	CWindow::Draw( sTime, pView );
 }
@@ -1070,10 +1175,17 @@ class CLevelSwitchBar: public CWindow
 {
 	OBJECT_BASIC_METHODS(CLevelSwitchBar)
 private:
+	// retail CLevelSwitchBar (ctor @0x258cc0, Draw @0x254420): ALWAYS 8 buttons (geometry from the
+	// "levelswitch" template), but each button's image state is recomputed EVERY Draw from the live
+	// cut-floor range: floor_i = min+i; below-ground floors use the basement textures. That is what
+	// makes the bar look "refitted" per map (a 2-floor map renders 2 live slots + 6 hidden-texture
+	// slots). Slot -> floor mapping is min+i, NOT the old fixed i-N_BASELEVEL.
 	enum
 	{
-		STATE_VISIBLE,
-		STATE_HIDDEN
+		STATE_FLOOR_VISIBLE    = 0,
+		STATE_FLOOR_HIDDEN     = 1,
+		STATE_BASEMENT_VISIBLE = 2,
+		STATE_BASEMENT_HIDDEN  = 3
 	};
 	ZDATA_(CWindow)
 	CPtr<NGame::IMission> pMission;
@@ -1102,34 +1214,28 @@ bool CLevelSwitchBar::ProcessMessage( const SEvent &sEvent )
 	{
 	case EVENT_NOTIFY:
 		{
-			int nSelectedFloor = -1;
+			// retail: up/down step the cut floor; level_N maps slot->floor as rangeMin + (N-1).
+			// Clamping is fully delegated to the scene's SetCutFloor (@0xd0050 range clamp).
+			int nRangeMin = 0, nRangeMax = 0;
+			pMission->GetScene()->GetCutFloorRange( &nRangeMin, &nRangeMax );
 			if ( sEvent.szID.compare( "up" ) == 0 )
-				nSelectedFloor = pMission->GetScene()->GetCutFloor() + 1 + N_BASELEVEL;
-			else if ( sEvent.szID.compare( "down" ) == 0  )
-				nSelectedFloor = pMission->GetScene()->GetCutFloor() - 1 + N_BASELEVEL;
-			else if ( sEvent.szID.compare( "level_1" ) == 0  )
-				nSelectedFloor = 0;
-			else if ( sEvent.szID.compare( "level_2" ) == 0  )
-				nSelectedFloor = 1;
-			else if ( sEvent.szID.compare( "level_3" ) == 0  )
-				nSelectedFloor = 2;
-			else if ( sEvent.szID.compare( "level_4" ) == 0  )
-				nSelectedFloor = 3;
-			else if ( sEvent.szID.compare( "level_5" ) == 0  )
-				nSelectedFloor = 4;
-			else if ( sEvent.szID.compare( "level_6" ) == 0  )
-				nSelectedFloor = 5;
-			else if ( sEvent.szID.compare( "level_7" ) == 0  )
-				nSelectedFloor = 6;
-			else if ( sEvent.szID.compare( "level_8" ) == 0  )
-				nSelectedFloor = 7;
-
-			if ( nSelectedFloor != -1 )
 			{
-				pMission->GetScene()->SetCutFloor( nSelectedFloor - N_BASELEVEL );
+				pMission->GetScene()->SetCutFloor( pMission->GetScene()->GetCutFloor() + 1 );
 				return true;
 			}
-
+			if ( sEvent.szID.compare( "down" ) == 0 )
+			{
+				pMission->GetScene()->SetCutFloor( pMission->GetScene()->GetCutFloor() - 1 );
+				return true;
+			}
+			for ( int nBtn = 0; nBtn < N_MAXLEVELS_COUNT; ++nBtn )
+			{
+				if ( sEvent.szID.compare( NStr::Format( "level_%d", nBtn + 1 ) ) == 0 )
+				{
+					pMission->GetScene()->SetCutFloor( nRangeMin + nBtn );
+					return true;
+				}
+			}
 			break;
 		}
 	case EVENT_TEMPLATELOADCOMPLETE:
@@ -1139,19 +1245,15 @@ bool CLevelSwitchBar::ProcessMessage( const SEvent &sEvent )
 			pDown = GetUIWindow<CButton>( this, "down" );
 			pDown->AddImageState( 0, NDb::GetUITexture( 398 ) );
 
+			// retail: every button carries ALL FOUR image states -- which slot is a basement
+			// depends on the LIVE range (min+i < 0), decided per frame in Draw, not per slot here.
 			for ( int nTemp = 0; nTemp < buttonsSet.size(); nTemp++ )
 			{
 				buttonsSet[nTemp] = GetUIWindow<CButton>( this, NStr::Format( "level_%d", ( nTemp + 1 ) ) );
-				if ( nTemp < N_BASELEVEL )
-				{
-					buttonsSet[nTemp]->AddImageState( STATE_VISIBLE, NDb::GetUITexture( 405 ) );
-					buttonsSet[nTemp]->AddImageState( STATE_HIDDEN, NDb::GetUITexture( 407 ) );
-				}
-				else
-				{
-					buttonsSet[nTemp]->AddImageState( STATE_VISIBLE, NDb::GetUITexture( 404 ) );
-					buttonsSet[nTemp]->AddImageState( STATE_HIDDEN, NDb::GetUITexture( 406 ) );
-				}
+				buttonsSet[nTemp]->AddImageState( STATE_FLOOR_VISIBLE,    NDb::GetUITexture( 404 ) );
+				buttonsSet[nTemp]->AddImageState( STATE_FLOOR_HIDDEN,     NDb::GetUITexture( 406 ) );
+				buttonsSet[nTemp]->AddImageState( STATE_BASEMENT_VISIBLE, NDb::GetUITexture( 405 ) );
+				buttonsSet[nTemp]->AddImageState( STATE_BASEMENT_HIDDEN,  NDb::GetUITexture( 407 ) );
 			}
 
 			break;
@@ -1163,14 +1265,20 @@ bool CLevelSwitchBar::ProcessMessage( const SEvent &sEvent )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CLevelSwitchBar::Draw( const STime &sTime, NGScene::I2DGameView *pView )
 {
-	int nSelectedFloor = pMission->GetScene()->GetCutFloor();
+	// retail Draw @0x254420: floor_i = rangeMin + i; basement (floor_i < 0) picks the basement
+	// texture pair; floors above the current cut render "hidden". With the base's [0,1] range this
+	// gives 2 live slots + 6 hidden slots -- the "refitted" bar look.
+	int nCut = pMission->GetScene()->GetCutFloor();
+	int nRangeMin = 0, nRangeMax = 0;
+	pMission->GetScene()->GetCutFloorRange( &nRangeMin, &nRangeMax );
 
 	for ( int nTemp = 0; nTemp < buttonsSet.size(); nTemp++ )
 	{
-		if ( nTemp - N_BASELEVEL <= nSelectedFloor )
-			buttonsSet[nTemp]->SetActiveState( STATE_VISIBLE );
+		int nFloor = nRangeMin + nTemp;
+		if ( nFloor < 0 )
+			buttonsSet[nTemp]->SetActiveState( nFloor > nCut ? STATE_BASEMENT_HIDDEN : STATE_BASEMENT_VISIBLE );
 		else
-			buttonsSet[nTemp]->SetActiveState( STATE_HIDDEN );
+			buttonsSet[nTemp]->SetActiveState( nFloor > nCut ? STATE_FLOOR_HIDDEN : STATE_FLOOR_VISIBLE );
 	}
 
 	CWindow::Draw( sTime, pView );
@@ -1181,6 +1289,13 @@ void CLevelSwitchBar::Draw( const STime &sTime, NGScene::I2DGameView *pView )
 CUnitPanel::CUnitPanel( const SWindowInfo &sInfo, NGame::IMission *_pMission ):
 	CWindow( sInfo ), pMission( _pMission )
 {
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// release CUnitPanel::PlayAckEvent @0x2563e0: forward the ack to the single-unit face panel.
+void CUnitPanel::PlayAckEvent( const STime &sTime, CAckEvent *pEvent )
+{
+	if ( IsValid( pInfoPanelSingleUnit ) )
+		pInfoPanelSingleUnit->PlayAckEvent( sTime, pEvent );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CUnitPanel::ProcessMessage( const SEvent &sEvent )
@@ -1212,6 +1327,13 @@ bool CUnitPanel::ProcessMessage( const SEvent &sEvent )
 
 			pBackgroundSingleUnit = GetUIWindow<CImage>( this, "background_single" );
 			pBackgroundMultipleUnits = GetUIWindow<CImage>( this, "background_multi" );
+			// release @0x2592c0: the THIRD backdrop, "background_empty" (retail-added ctrl 2726,
+			// tex 962, depth 2, template-VISIBLE). It sits ABOVE background_single/multi, so if it
+			// is never toggled off it covers them with its plain plate every frame -- wiping the
+			// portrait frame + criticals-grid art that is baked into background_single's texture.
+			// (Control exists in the retail/Steam game.db the runtime loads; a dev-generated db
+			// lacks it -> the fetch logs a "not found" UI-ERROR dummy there, which is harmless.)
+			pBackgroundEmpty = GetUIWindow<CImage>( this, "background_empty" );
 			break;
 		}
 	}
@@ -1252,6 +1374,10 @@ void CUnitPanel::Draw( const STime &sTime, NGScene::I2DGameView *pView )
 	pInfoPanelMultipleUnits->SetStyle( STYLE_VISIBLE, bMultiPanel );
 	pBackgroundMultipleUnits->SetStyle( STYLE_VISIBLE, bMultiPanel );
 
+	// release CUnitPanel::Draw @0x2542e0: the 3-way backdrop toggle -- the empty plate shows only
+	// with NO selection; without this it stays template-visible and overdraws the other two.
+	pBackgroundEmpty->SetStyle( STYLE_VISIBLE, nCountSelected == 0 );
+
 	CWindow::Draw( sTime, pView );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1268,5 +1394,4 @@ REGISTER_SAVELOAD_CLASS( 0xB0521158, CUnitPanel );
 REGISTER_SAVELOAD_CLASS( 0xB0521159, CSlotReloadButton );
 REGISTER_SAVELOAD_CLASS( 0xB052115A, CInfoPanelSpecialSlot );
 REGISTER_SAVELOAD_CLASS( 0xB0241943, CLevelSwitchBar );
-REGISTER_SAVELOAD_CLASS( 0xB0241944, CInfoPanelCritical );
-REGISTER_SAVELOAD_CLASS( 0xB3515150, CMissionCriticalBleedingFake );
+// 0xB0241944 CInfoPanelCritical + 0xB3515150 CMissionCriticalBleedingFake are registered in iCriticalIcons.cpp

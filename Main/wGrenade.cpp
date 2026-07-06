@@ -91,8 +91,16 @@ CGrenadeServer::CGrenadeServer( CWorld *_pWorld, const CVec3 &vFrom,
 	pSphereSet->pTime = pWorld->GetTime();
 	pSphereSet->pMap = pWorld->GetAIMap();
 	pSphereSet->InitSpheres( spheres );
-	pSphereSet->InitBound( pModel->pGeometry->boundCenter, pModel->pGeometry->boundSize );	
-	pSphereSet->Init( tThrow, vFrom, QNULL, vSpeed, true );
+	pSphereSet->InitBound( pModel->pGeometry->boundCenter, pModel->pGeometry->boundSize );
+	// Never start the ballistic arc in the FUTURE: when a throw clip's release label sits at/after
+	// the clip's natural end (tLabel1 > tEnd), CUnitServer::Segment fires the throw via its
+	// animation-end fallback while tThrow (= tLabel1) is still ahead of the world clock --
+	// CASphereSet::GetFrame then pins the grenade at vFrom until the clock catches up (the
+	// "grenade hovers at the hand for seconds, then flies" freeze). Clamping to `now` is a no-op
+	// for well-formed clips (tLabel1 <= now at fire time) and only corrects the fallback case.
+	// The fuse below stays keyed to the raw tThrow (release label), as retail computes it.
+	STime tFlightStart = Min( tThrow, pWorld->GetTime()->GetValue() );
+	pSphereSet->Init( tFlightStart, vFrom, QNULL, vSpeed, true );
 
 	pRealAnimator = pSphereSet;
 

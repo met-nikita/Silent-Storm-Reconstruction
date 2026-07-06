@@ -223,7 +223,10 @@ bool CEarthControl::ProcessMessage( const SEvent &sEvent )
 CXComMapUI::CXComMapUI( const SWindowInfo &sInfo, NGame::IMission *_pGlobal ):
 	CDesktopWindow( sInfo ), pGlobal( _pGlobal )
 {
-	sCursor = SCursorInfo( NDb::GetUITexture( 492 ) );
+	// retail CXComMapUI ctor @0x23f720: disasm @0x63f7e0 `mov ecx,1` -> NDb::GetUICursor(1) =
+	// UICursors row 1 "xz" (UITexture 295, NormalPen.cur) -- same map-screen default cursor as
+	// the global/chapter maps. (492 was the pre-remap arbitrary id = HitLocationLeftArm.cur.)
+	sCursor = SCursorInfo( NDb::GetUITexture( 295 ) );
 
 	// NOTE (dev-API divergence): retail @0x23f720 finishes by resolving
 	//   pInfo = pGlobal->GetGlobalInfo()   ( an IMission vtbl slot the SHIPPED IMission added ).

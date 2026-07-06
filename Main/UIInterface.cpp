@@ -9,6 +9,7 @@
 #include "..\DBFormat\DataFormat.h"
 #include "..\DBFormat\DataInterface.h"
 #include "Interface.h"
+#include "Sound.h"   // NSound::CreateSoundScene (retail CInterface own-scene fallback @0x31dbd0)
 #include "UIWrap.h"
 #include "UIBaseCtrls.h"
 #include "UICommCtrls.h"
@@ -313,7 +314,17 @@ CInterface::CInterface( ICursor* _pCursor, NSound::ISoundScene *_pSound ):
 	pTimer = sTimer.GetTime();
 	pView = NGScene::CreateNew2DView();
 
+	// retail CInterface ctor @0x31dbd0 (decomp-verified): when NO sound scene is handed in (or it is
+	// dead), the interface CREATES ITS OWN (bOwnSoundScene=true -> NSound::CreateSoundScene) so
+	// CWindow::PlaySound (@0x327380: pInterface->GetSound()->Add2DSound) always has a live target.
+	// The dev ctor left pSound null for every pure-menu screen (TeamMng recruit click, menu button
+	// sounds ...) -> CWindow::PlaySound silently dropped every sample there, while screens hosted on
+	// the mission/render-base interfaces (FaceGen) played fine. Add2DSound starts the buffer
+	// immediately (Sound.cpp: NFMSound::PlaySound inside the call), so an own 2D-only scene needs no
+	// per-frame pump; the CPtr releases it at interface teardown.
 	pSound = _pSound;
+	if ( !IsValid( pSound ) )
+		pSound = NSound::CreateSoundScene( 0 );
 	pCursor = _pCursor;
 	pConsole = new CConsole( SWindowInfo( this, SPoint( 0, 0 ), SPoint( 0, 0 ), "console", STYLE_ENABLED | STYLE_TOPMOST ) );
 	NUI::LoadTemplate( pConsole, NDb::GetUIContainer( 42 ) );

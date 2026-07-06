@@ -7,6 +7,7 @@
 #include "..\MiscDll\LogStream.h"
 #include "..\DBFormat\DataFormat.h"
 #include "..\DBFormat\DataRPG.h"
+#include "..\DBFormat\DataChest.h"	// NDb::CRPGChestReal / SLootItem (ctor pBackpack consumption)
 #include "rpgPerk.h"
 #include "rpgPerkConstants.h"
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -88,7 +89,8 @@ float CUnit::GetXPForSkill( NDb::ESkillType eSkill, int nLvl )
 	return GetXPBySkill( pClass->skills[eSkill], nLvl );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CUnit::CUnit( NDb::CRPGPers *_pPers, NDb::CComplexHead *_pHead, bool _bHero, NDb::CModel *_pOverrideModel ):
+CUnit::CUnit( NDb::CRPGPers *_pPers, NDb::CComplexHead *_pHead, bool _bHero, NDb::CModel *_pOverrideModel,
+	NDb::CRPGItem *_pInHandItem, NDb::CRPGChestReal *_pBackpack ):
 	pPers( _pPers ), nHealedVP( 0 ), nCheats( 0 ),
 	nDeathVP( 0 ), bUnconscious( false ), bHero( _bHero ),
 	fAdaptationCounter( 0 ), fCurrentAdaptation( 0 ), nVoice( 0 )
@@ -122,6 +124,7 @@ CUnit::CUnit( NDb::CRPGPers *_pPers, NDb::CComplexHead *_pHead, bool _bHero, NDb
 
 	pClass = pPers->pClass;
 	pUniform = pPers->pUniform;                    // release-new (CUnit::pUniform)
+	pBiography = pPers->pBiography;                // retail CUnit::CUnit @0x2bc980: seed the unit's bio from the persona record
 	if ( IsValid( pClass ) )                        // cap stays 0 (resize default) for a classless persona
 		for ( int iCap = 0; iCap < NDb::SKILL_TYPE_NUMBERS; ++iCap )
 			cap[iCap] = pClass->skills[iCap];      // CSkilledObject::cap from the class caps
@@ -151,11 +154,20 @@ CUnit::CUnit( NDb::CRPGPers *_pPers, NDb::CComplexHead *_pHead, bool _bHero, NDb
 	//pInventory->Equip( NDb::SLOT_WEAPON, CreateWeaponItem( pPers->pWeapon ) );
 	vector< CPtr<IInventoryItem> > items;
 	CPtr<IInventoryItem> pMainWeapon;
-	if ( IsValid( pPers->pWeapon ) )
+	// retail @0x2bc980 param 7: a rolled in-hand item (from the pers' WeaponInHand chest, via
+	// SMapUnit::pInHandItem) REPLACES the pers' default hand weapon; the pers default is the
+	// fallback only when no rolled item (or one without a successor) was supplied.
+	if ( IsValid( _pInHandItem ) && IsValid( _pInHandItem->pSuccessor ) )
+	{
+		pMainWeapon = CreateItem( _pInHandItem->pSuccessor );
+		if ( IsValid( pMainWeapon ) )
+			pInventory->Equip( NDb::SLOT_1, pMainWeapon );
+	}
+	else if ( IsValid( pPers->pWeapon ) )
 	{
 		pMainWeapon = CreateWeaponItem( pPers->pWeapon );
 		if ( IsValid( pMainWeapon ) )
-			pInventory->Equip( NDb::SLOT_1, pMainWeapon );			
+			pInventory->Equip( NDb::SLOT_1, pMainWeapon );
 	}
 	if ( IsValid( pPers->pPanzerklein ) )
 	{
@@ -165,6 +177,24 @@ CUnit::CUnit( NDb::CRPGPers *_pPers, NDb::CComplexHead *_pHead, bool _bHero, NDb
 		if ( IsValid( pSecondWeapon ) )
 			pInventory->Equip( NDb::SLOT_2, pSecondWeapon );			
 	}
+	// retail @0x2bc980 param 8: a rolled backpack chest (from the pers' WeaponInBackpack chest +
+	// clips migrated off the hand chest, via SMapUnit::pBackpack) REPLACES the pers' default item
+	// list; the pers list fills the backpack only when no chest was rolled.
+	if ( IsValid( _pBackpack ) )
+	{
+		for ( vector<NDb::SLootItem>::const_iterator it = _pBackpack->items.begin(); it != _pBackpack->items.end(); ++it )
+		{
+			if ( !IsValid( it->pItem ) || !IsValid( it->pItem->pSuccessor ) )
+				continue;
+			for ( int i = 0; i < it->nQuantity; ++i )
+			{
+				CPtr<NRPG::IInventoryItem> pItem = CreateItem( it->pItem->pSuccessor );
+				if ( IsValid( pItem ) )
+					pInventory->Place( CTPoint<int>( -1, -1 ), pItem );
+			}
+		}
+	}
+	else
 	for ( vector<NDb::SItemAssign>::const_iterator it = pPers->items.begin(); it != pPers->items.end(); ++it )
 	{
 		const NDb::SItemAssign &assign = *it;
@@ -212,6 +242,47 @@ int CUnit::GetRPGPersID() const
 	if ( IsValid( pPers ) )
 		return pPers->nRPGPersID;
 	return 0;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail NRPG::CUnit::GetAckHolder @0x2ba8f0, pers-id form -- DISASM-DECODED (capstone @0x6ba8f0):
+//   hero (bHero @+0x8c):  pers = pPers(+0x58); side = pers->pSide(+0x7c);
+//                      walk side->defaultPersesSet (the vector at CSide+0x40) and return the FIRST
+//                      entry whose nVoice(+0xb0) == this->nVoice(+0xa4); no match -> NULL holder.
+//                      (The default sets carry ONE donor per voice: side 1 = AxisGrenader v0 /
+//                      AxisSoldier v1 / AxisEngineer v2 / AxisMedicFemale v4 / ... -- voice-unique,
+//                      so the match is deterministic. The previous dev scan over the WHOLE pers
+//                      table by (voice,gender,side) hit an arbitrary hash-order persona: for voice 0
+//                      there are ~49 same-key personas and only ~17 own ack rows, so it usually
+//                      resolved to a bark-less pers.)
+//   non-hero:          return pPers->pAcksHolder (+0xd0, the "AckUnit" column) -- in the retail
+//                      game.db 499/728 personas (every generic enemy/ally/NPC, e.g. all Germ_*
+//                      soldiers -> pers 911) key their ack rows ONLY via that link.
+//   Callers (retail AddAck @0x3396b0 / GetPersAck @0x2452c0): NULL/dead holder -> own GetRPGPersID().
+int CUnit::GetAckPersID() const
+{
+	if ( IsValid( pPers ) )
+	{
+		if ( bHero )
+		{
+			NDb::CSide *pSide = pPers->pSide;	// plain extraction (no ternary over CPtr -- UAF)
+			if ( IsValid( pSide ) )
+			{
+				for ( int k = 0; k < pSide->defaultPersesSet.size(); ++k )
+				{
+					NDb::CRPGPers *p = pSide->defaultPersesSet[k];
+					if ( IsValid( p ) && p->nVoice == nVoice )
+						return p->nRPGPersID;
+				}
+			}
+		}
+		else
+		{
+			NDb::CRPGPers *pHolder = pPers->pAcksHolder;	// plain extraction (no ternary over CPtr -- UAF)
+			if ( IsValid( pHolder ) )
+				return pHolder->nRPGPersID;
+		}
+	}
+	return GetRPGPersID();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // SetHead @0x2bb970 -- replace the unit's live head info from a CComplexHead template, seeding the

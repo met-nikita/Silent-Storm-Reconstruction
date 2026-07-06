@@ -332,6 +332,10 @@ public:
 	virtual bool CanStrafe() = 0;
 	virtual NDb::CPanzerklein *GetWearingDBPK() = 0;
 	virtual CObjectBase* GetAIMapHull() = 0;
+	// release CUnitServer::GetBleeding @0x7c68d0 (int @+0xb0): mission-scripted bleeding counter,
+	// shown as a permanent fake critical icon (NUI::UpdateCriticalIcons). No in-exe writer exists
+	// (trigger/reflection-set); the default 0 = no icon, which matches unscripted play.
+	virtual int GetBleeding() const { return 0; }
 	////
 	NAI::EPose GetPose() const;
 	virtual bool IsUnitVisible( const CUnit *pUnit ) const = 0;
@@ -388,6 +392,32 @@ public:
 	CCmdCancel( CUnit *_pUnit ): CCmdUnit(_pUnit) {}
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail CWorld::PlayAck @0x361e50 ack kinds (jump table 0x761ef4)
+enum EInterfaceAcks
+{
+	IA_WEAPON_EMPTY				= 0,
+	IA_CONFIRMATION				= 1,
+	IA_IMPOSSIBLE_TO_PERFORM	= 2,
+	IA_NO_PLACE_IN_INVENTORY	= 3,
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail NWorld::CCmdPlayAck (ctor @0x1de1c0, saveload 0x23075380): the UI-side "say an interface
+// ack" request. CRITICAL: it is dispatched through the ONE-ARG mission Command channel (world
+// commander queue) and consumed by CWorld::ExecuteCommand -> CGlobalAck -- it must NEVER go through
+// Command(unit, cmd)/CCmdSetCommand: that path lands in CUnitServer::Do, which CANCELS the unit's
+// running executor to install the new command (the "orders die after one step" regression).
+class CCmdPlayAck: public CCmdUnit
+{
+	OBJECT_BASIC_METHODS(CCmdPlayAck);
+	ZDATA_(CCmdUnit)
+	int eAck;
+	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CCmdUnit*)this); f.Add(2,&eAck); return 0; }
+public:
+	CCmdPlayAck(): eAck( IA_CONFIRMATION ) {}
+	CCmdPlayAck( CUnit *_pUnit, EInterfaceAcks _eAck ): CCmdUnit(_pUnit), eAck(_eAck) {}
+	EInterfaceAcks GetAck() const { return (EInterfaceAcks)eAck; }
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
 class CCmdSetCommand : public CCmdUnit
 {
 	OBJECT_BASIC_METHODS(CCmdSetCommand);
@@ -428,6 +458,37 @@ public:
 	CCmdRemoveUnit( IPlayer* _pPlayer, CUnit *_pUnit ): pPlayer( _pPlayer ), pUnit( _pUnit ) {}
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// NWorld::SEnemyInfo (PDB 44 bytes, static_assert-verified) -- what a player currently KNOWS about a
+// unit: perceived person/PK hit-points, whether that info is available + visible, the display name and
+// the derived health-condition enums. Filled by CPlayer::GetEnemyUnitInfo (retail @0x386c20); read by
+// MakeUnitStateToolTip to build the fog-of-war-limited hover tooltip.
+struct SEnemyInfo
+{
+	enum ECondition
+	{
+		CND_HEALTHY_INTACT = 0,
+		CND_LIGHTLY_WOUNDED_DAMAGED = 1,
+		CND_WOUNDED_DAMAGED = 2,
+		CND_HEAVILY_WOUNDED_DAMAGED = 3,
+		CND_CRITICALY_WOUNDED_DAMAGED = 4,
+		CND_UNCONSCIOUS_DESTROYED = 5,
+	};
+	int nPKHP;
+	int nUnitHP;
+	bool bPKInfo;
+	bool bCanSeePKHP;
+	bool bCanSeeUnitHP;
+	wstring wsName;
+	ECondition ePKCondition;
+	ECondition eUnitCondition;
+	bool bUnitInfo;
+	int nMaxPKHP;
+	int nMaxUnitHP;
+	SEnemyInfo(): nPKHP(0), nUnitHP(0), bPKInfo(false), bCanSeePKHP(false), bCanSeeUnitHP(false),
+		ePKCondition(CND_HEALTHY_INTACT), eUnitCondition(CND_HEALTHY_INTACT), bUnitInfo(false),
+		nMaxPKHP(0), nMaxUnitHP(0) {}
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
 class IPlayer: public CObjectBase
 {
 public:
@@ -451,6 +512,10 @@ public:
 	virtual void PlaceStoreItem( NRPG::IInventoryItem *pItem ) = 0;
 	////
 	virtual void GetUnits( CUnitSet *pRes ) const = 0;
+	// retail CPlayer::GetEnemyUnitInfo @0x386c20: fill *out with what THIS player may learn about
+	// pEnemy (fog-of-war HP visibility via perks/own-roster + name + health condition). Default no-op
+	// so non-CPlayer IPlayer implementations need not override.
+	virtual void GetEnemyUnitInfo( CObjectBase *pEnemy, SEnemyInfo *out ) const {}
 	virtual void GetVisible( list< CPtr<CUnit> > *pRes ) const = 0;
 	virtual void GetVisibleObjects( list< CPtr<CObjectBase> > *pRes ) const = 0;
 	virtual void GetTrappedObjectsList( list< CPtr<CObjectBase> > *pRes ) const = 0;
@@ -490,7 +555,10 @@ public:
 		CObj<CPostWorldCreateInfo> *pPostInfo, SRandomSeed sSeed, bool bLeanAndMean = false ) = 0;
 	virtual void RunPostInit( CPostWorldCreateInfo *pPostInfo ) = 0;
 	virtual void CreateDefault() = 0;
-	virtual void CreateRestored() = 0;
+	// retail @0x36e100 takes the LIVE session's CGlobalGame: the zone-reenter save carries only a
+	// dangling weak ref to it, so the loaded world must be re-bound (and every building's parts
+	// refreshed) before StartGame.
+	virtual void CreateRestored( NRPG::CGlobalGame *pGlobalGame ) = 0;
 	virtual IPlayer* AddPlayer( const wstring &wsName, NRPG::CGlobalPlayer *pGlobalPlayer, 
 		CCommander *pCommander, bool bAddOnManyDeploySpots = false ) = 0;
 	virtual void RemovePlayer( IPlayer *pPlayer ) = 0;
@@ -520,6 +588,30 @@ public:
 	// faithful CWorld impl (corpse-cap game-over arming via pGameOverCall) is a separate wMain leg,
 	// deferred with the wCheckTooMuchCorpses arming path.
 	virtual void InformCorpseStop( CUnitServer *pUS ) {}
+	// retail CWorld::IsSequence @0x376ff0 (world vtbl+0x1a8): true while a scripted-interrupt sequence runs.
+	// Default no-op here (same tail-append rationale as InformCorpseStop); CWorld delegates to its existing
+	// CTBSWorld predicate. Consumed by CDumbUnitServer::Segment's track-sequence ORIGINAL-BUG branch.
+	virtual bool IsSequence() const { return false; }
+	// Zone re-entry predicates + prep (tail-appended; retail slots differ). CMission::Terminate
+	// @0x1fbc30 saves the zone world for re-entry when IsBase() (retail vtbl+0x1dc @0x376e20:
+	// the current zone IS the scenario "base") or IsLinkedZone() (vtbl+0x1e0 @0x361c80: the
+	// current zone has MULTIPLE templates) or the script enabled the "reenter" feature; and it
+	// first drops carried corpses (vtbl+0xc4 @0x365900) so they leave with their carrier.
+	virtual bool IsBase() const { return false; }
+	virtual bool IsLinkedZone() const { return false; }
+	virtual void RemoveCarriedCorpses() {}
+	// retail CWorld::IsAttackAllowed @0x376da0 (IWorld vtbl+0xc8): false when the zone template
+	// variant carried NoAttack=1 (base zones, e.g. Gbase4 5376) -- CreateActionExecutor refuses every
+	// attack executor (shoot/melee/grenade/mine -> UCR_GENERAL_FAILURE) while it is false. Default
+	// true matches the retail CWorld ctor seed (@0x36a4b0 sets bAttackAllowed = true).
+	// (Tail-appended like the predicates above; retail slot order differs, dispatch is by name.)
+	virtual bool IsAttackAllowed() const { return true; }
+	// retail CWorld::GetAllSoundStuff @0x3770c0 (IWorld vtbl+0xac): weak refs to the LIVE
+	// heard-not-seen noise markers (CDMesh). CRenderGame::UpdateVisible @0x2cee50 subtracts this set
+	// from GetUnits() in its no-viewer (show-all / cinematic) branch so silhouettes never draw when
+	// every real unit is already shown. Default: leave the (caller-supplied, empty) vector untouched
+	// -- IVisObj is incomplete here, so the body must not instantiate CPtr<IVisObj> destruction.
+	virtual void GetAllSoundStuff( vector< CPtr<IVisObj> > *pRes ) {}
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CWorldSyncSrc: public CSyncSrc<IVisObj>

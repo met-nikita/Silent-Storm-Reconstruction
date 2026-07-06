@@ -30,11 +30,14 @@ namespace NRPG
 	enum EAction;
 	//enum ECriticalAction;
 	class IUnitMission;
+	class IInventoryInfo;   // NWorld::IsActiveItemToShow arg
 }
 struct SStepSound;
 namespace NWorld
 {
 class CWorld;
+// @0x34ef50 -- is the inventory's active item one to SHOW in the unit's hand (its DB record's bPlaceInHand)?
+bool IsActiveItemToShow( NRPG::IInventoryInfo *pInv );
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CPlayer;
 struct SInterruptInfo;
@@ -43,6 +46,21 @@ class CTimedObject;
 class CUnit;
 class CWorld;
 class CMine;
+// @PDB NWorld::ECanMoveRes (gen/include/s2_types.h:3711) -- retail widened the movement
+// gate from bool to this 5-valued verdict so the wait-state recovery can branch on
+// LOCKED (locker chain) vs DOOR (reroute) vs impassable. Values are ordinal-sensitive
+// (CanDoGameMove composes CMR_CANNOT_MOVE==1 via (ECanMoveRes)(CanMove()==0); CheckCanDoMove
+// switches on LOCKED==3 / DOOR==4). NOTE: producing LOCKED/DOOR needs the per-place NAI
+// EPassable subsystem the dev IPathNetwork lacks (see BLUEPRINT_cpathconflicts_ecanmoveres
+// sec 3) -- until then CheckPassable only emits CMR_YES / CMR_NOT_PASSABLE.
+enum ECanMoveRes
+{
+	CMR_YES          = 0,
+	CMR_CANNOT_MOVE  = 1,
+	CMR_NOT_PASSABLE = 2,
+	CMR_LOCKED       = 3,
+	CMR_DOOR         = 4,
+};
 class CDumbUnitServer: public IVisObj, public NRPG::IAttackable
 {
 	ZDATA
@@ -102,8 +120,8 @@ private:
 public:
 	bool IsAddedToVisitor();   // present in the world visitor set (used by the AI WearPK candidate scan)
 private:
-	void FallAsIfDead( const CVec3 &ptDir, bool bDropItemsFromBackPack );
-	void DropItems( bool bHands, bool bBackPack );
+	void FallAsIfDead( const CVec3 &ptDir, bool bDropItemsFromBackPack, bool bPlayDeathAnim );   // retail @0x350770 3-arg
+	void DropItems( bool bDropHands, bool bDropCap, bool bDropBackPack );                        // retail @0x3502c0 3-arg (split bHands -> hands/cap)
 	void BlowUp();
 protected:
 	bool IsLocker();
@@ -117,7 +135,7 @@ protected:
 	CObjectBase* GetAIMapUnitHull() { return pAIMapHull; }
 	NDb::CModel* GetUnitModel() const { return pModel; }
 	bool IsEmptyPK() const;
-	float GetMaxFallDist() const;
+	float GetMaxFallDist( float extraDrop ) const;   // @0x34f1c0: ray-origin z = extraDrop + 0.2f
 public:
 	struct SResItem
 	{
@@ -136,8 +154,8 @@ public:
 	{	position = dst;	}
 	void DoGameMove( const NAI::SUnitPosition &dst );
 	void LockNextPlace( const NAI::SUnitPosition &dst );
-	bool CanDoGameMove( const NAI::SUnitPosition &dst );
-	bool CheckPassable( const NAI::SUnitPosition &dst );
+	ECanMoveRes CanDoGameMove( const NAI::SUnitPosition &dst );  // @0x34f100 retail widened bool->ECanMoveRes
+	ECanMoveRes CheckPassable( const NAI::SUnitPosition &dst );  // @0x34efd0 retail widened bool->ECanMoveRes
 	int GetActionAP( NRPG::EAction action ) const;
 	int GetAP() const;
 	bool CanSpendAP( int nAP ) const;
@@ -158,7 +176,7 @@ public:
 	NAI::EPose GetWishPose() const { return wishPose; }
 	void SetWishPose( NAI::EPose pose ) { wishPose = pose; }
 	
-	void CreateFlash();
+	void CreateFlash( bool bLeft, bool bFirstBullet );   // @0x351630
 	void Update() { bindGlobal.Update(); }
 	// wCheckTooMuchCorpses corpse-density failsafe (compiland wCheckTooMuchCorpses.obj):
 	// flag this unit OUT of the world visitor set (retail bNotAddedToVisitors @+0x12c = 1).
@@ -171,6 +189,11 @@ public:
 	// binding so Visit re-feeds it. A null model clears the held model. (The hand EFFECT half stays deferred --
 	// the dev's IRenderVisitor::SBoundMesh has no effect field.)
 	void SetHandModel( NDb::CModel *_pHandModel ) { pHandModel = _pHandModel; Update(); }
+	// release @0x34fd90 (UnitHoldEffect): park a particle EFFECT in the unit's hand + refresh the vis
+	// binding so Visit re-feeds it; tBegin stamps the effect's start time. Mirror of SetHandModel
+	// @0x34fd50; writes the already-serialized pHandEffect(tag16)/tBeginHandEffect(tag17). The
+	// CDBPtr assignment does the AddRef-new / Release-old the decode shows.
+	void SetHandEffect( NDb::CEffect *_pHandEffect, STime tBegin ) { pHandEffect = _pHandEffect; tBeginHandEffect = tBegin; Update(); }
 	// release @0x6e96e0 (AttachEffectToUnitBone): register a particle effect to play on the unit; Visit feeds it
 	// to the renderer via AddParticleEffect with the unit's skeleton animator (so the effect's glue-to-bone
 	// instances attach to the unit's bones). tBegin = the effect's start time.
@@ -180,6 +203,7 @@ public:
 	// implement IVisObj
 	virtual void Visit( IRenderVisitor* );
 	virtual void Visit( IAIVisitor* );
+	virtual void Visit( ISoundVisitor* );   // @0x34fdd0: PK engine loop + hand-effect 3D sound
 	// implement IAttackable
 	virtual int ProcessAttack( int nUserID, NRPG::CAttackPortion *pAttack, NDb::CRPGArmor *pArmor );
 
@@ -191,13 +215,17 @@ public:
 	bool IsWearingPK() { return IsValid( GetWearingDBPK() ); }
 	virtual NDb::CPanzerklein *GetWearingDBPK() { ASSERT(0); return 0; }
 	bool WearAsPK( bool bWear );
-	void Hide( bool bHide );
+	void Hide( bool bHide, bool bThrowEvent = true );   // @0x34fb10: bCanHide-gated 2-arg form
+	void EnableHide();                                   // @0x34ed00: re-arm hiding (per-fast-turn)
 	bool IsJustUnhided() { return bJustUnhided; }
 	virtual bool IsDead() const = 0;
 	virtual bool IsUnconscious() const = 0;
 	virtual bool CanFight() const = 0;
 };
-void LaunchItem( CWorld *pWorld, const CDumbUnitServer::SResItem &item, const CVec3 &vel = VNULL3 );
+// retail LaunchItem @0x34f500 forwards a CObjectBase* (the launching/dying unit) to AddDebris
+// @0x34ade0 as the fog-gate visibility-parent; non-null routes the flying item to the fog-gated
+// show list and, via the CDItem carrier, keeps its settled frozen form gated too.
+void LaunchItem( CWorld *pWorld, const CDumbUnitServer::SResItem &item, const CVec3 &vel = VNULL3, CObjectBase *pVisibilityParent = 0 );
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 }
 #endif

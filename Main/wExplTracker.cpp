@@ -30,6 +30,19 @@ void FillAttackModifiers( NRPG::CAttackPortion *pAttack, const SPerkMineModifier
 	pAttack->nDmgMax = Float2Int( pAttack->nDmgMax * mods.fAEDmgModifier );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// release NWorld::nBreakCalcs -- the per-segment explosion work budget that paces the destruction ripple.
+// Every 16^3 explosion-cube voxel trace bumps it (release CExplosionCube::Recalc @0x355080 tail; this
+// build's equivalent trace is the CExplCube ctor's TraceVoxelGrid). CWorld::Segment resets it once per
+// world segment (release ResetBreakExplCalcs @0x3549f0, invoked at the top of CExplosionMaster::Segment
+// @0x3571d0). CVoxelExplTracker::Segment reads it: once >1 cube got traced this segment, the ring's
+// damage pass -- and every later blast's stepping -- is postponed to the NEXT segment.
+////////////////////////////////////////////////////////////////////////////////////////////////////
+static int nBreakCalcs = 0;
+void ResetBreakExplCalcs()
+{
+	nBreakCalcs = 0;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 // CExplCube
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 const unsigned short N_INDEX_OBJECT = 0xFFFF;
@@ -41,6 +54,7 @@ CExplCube::CExplCube( CVec3 _ptCenter,
 {
 	renderer.Init( ptCenter, F_REAL_CUBE_SIZE, N_REAL_CUBE_SIZE, &pExplosion->objects, &pExplosion->nObjectsEnd );
 	pAIMap->TraceVoxelGrid( &renderer, NWorld::TS_FRAGMENTED );
+	++nBreakCalcs;   // release CExplosionCube::Recalc @0x355080: each cube voxel-trace spends one unit of the per-segment budget
 	pExplosion->damageInfo.resize( pExplosion->nObjectsEnd, CVoxelExpl::SObjectDamageInfo() );
 	voxels.resize( N_REAL_CUBE_SIZE * N_REAL_CUBE_SIZE * N_REAL_CUBE_SIZE + 1 );
 	neighborCubes.resize( 6 );
@@ -219,9 +233,22 @@ CVoxelExpl::CVoxelExpl( CVec3 _ptCenter, int _nWave, NDb::CRPGGrenade *_pGrenade
 	//
 	if ( IsValid( pGrenade ) )
 	{
-		float fA = 0.66 / ( pGrenade->nWaveNumber - 1 );
-		float fB = 0.33 - fA;
-		nMaxVolume = GetVolume( pGrenade->fWaveRadius * ( fA * nWave + fB ) );
+		// retail CVoxelExpl ctor @0x3562c0 (disasm 0x7563e5: cmp [grenade+0x14],1; jne multi-wave):
+		// a SINGLE-wave grenade takes GetVolume(fWaveRadius) directly -- the 0.66/(nWaveNumber-1)
+		// radius ramp only runs for multi-wave grenades. The unguarded division made every
+		// WaveNumber==1 blast (small gas bottles etc.) compute a NaN -> INT_MIN budget: vol stayed
+		// 0, so those blasts damaged ONLY the pre-seeded source object and contributed ZERO area
+		// damage (an nMaxVolume of INT_MIN in the wave bookkeeping).
+		if ( pGrenade->nWaveNumber == 1 )
+			nMaxVolume = GetVolume( pGrenade->fWaveRadius );
+		else
+		{
+			// dev nWave is 1-based: fA*nWave + (0.33 - fA) == 0.66/(w-1)*(nWave-1) + 0.33 == the
+			// retail 0-based coeff 0.66/(nWaveNumber-1)*nCurrentWave + 0.33 -- keep as is.
+			float fA = 0.66 / ( pGrenade->nWaveNumber - 1 );
+			float fB = 0.33 - fA;
+			nMaxVolume = GetVolume( pGrenade->fWaveRadius * ( fA * nWave + fB ) );
+		}
 	}
 	else
 		nMaxVolume = GetVolume( 5 ); // ��� AI Viewer
@@ -270,7 +297,14 @@ void CVoxelExpl::Segment()
 	tOverrun += NHPTimer::GetTimePassed( &tTmpTime ) - F_EXPLOSION_TIME;
 	//
 	bFinished = bComplete || nVolume >= nMaxVolume;
-	//
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// release CVoxelExpl::MakeDamage @0x356580: the ring's damage is NOT applied while the wave is stepping --
+// the tracker applies it in a separate per-segment damage pass (release CExplosionMaster::Segment @0x3571d0
+// pass 2 -> CVoxelExplTracker::MakeDamage @0x3566d0), one segment AFTER a big ring finished computing.
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CVoxelExpl::MakeDamage()
+{
 	if ( bFinished && IsValid( pGrenade ) )
 	{
 		ApplyWaveDamage();
@@ -281,25 +315,106 @@ void CVoxelExpl::Segment()
 void CVoxelExpl::ExplodeWave()
 {
 	CPtr<CExplCube> pCube = GetExplCube( ptCenter + CVec3( 0, 0, + 1 / 3.f * F_CUBE_SIZE ) );
-	int nXY = N_CUBE_SIZE / 2;
-	int nBaseZ = N_CUBE_SIZE / 2.f - N_CUBE_SIZE / 3.0f;//F_CUBE_SIZE / ( F_VOXEL_SIZE * 3.f );
-	for ( int nDZ = 0; nDZ < 3; ++nDZ )
+	bool bSeeded = false;
+	// retail CVoxelExpl::StartWave @0x355830, PATH 1 -- an OBJECT-ORIGIN blast (gas tank / fuel barrel /
+	// trapped door) seeds the wavefront from the SOURCE OBJECT's OWN voxels (every voxel of the ignition
+	// object within a +/-7-voxel box around the blast centre), and pre-marks the source in damageInfo
+	// (nVolume=1, blast direction straight up) so ApplyWaveDamage's `di.nVolume > 0` gate passes and the
+	// source object is consumed by its own blast via the 10x ignition multiplier. The previous column-only
+	// seeding started the wave deep INSIDE the source's voxels: object voxels don't propagate the front, so
+	// most of the blast was absorbed by the tank's own hull (structures around it barely damaged -- retail
+	// levels half a shed), and -- because the source was first touched while nVolume==0 -- the tank itself
+	// NEVER took wave damage, never advanced a destroy stage, and never played its destroy sound / burning
+	// model swap (grenades 39 "HeavyObjectExplosion" carry NO effect/sound records of their own, so the
+	// destroy sound + visible destruction ARE the retail explosion's audio-visual for those objects).
+	int nMatched = 0, nSeeds = 0;   // ignition entries matched / hull voxels seeded (the fallback sweep below keys on these)
+	if ( IsValid( pIgnitionObject ) )
 	{
-		for ( int nDY = 0; nDY < 2; ++nDY )
+		// local voxel coords of the blast centre inside the (freshly traced) seed cube
+		const float fHalf = F_REAL_CUBE_SIZE * 0.5f;
+		const int nCX = int( ( ptCenter.x - ( pCube->ptCenter.x - fHalf ) ) / F_VOXEL_SIZE );
+		const int nCY = int( ( ptCenter.y - ( pCube->ptCenter.y - fHalf ) ) / F_VOXEL_SIZE );
+		const int nCZ = int( ( ptCenter.z - ( pCube->ptCenter.z - fHalf ) ) / F_VOXEL_SIZE );
+		for ( NAI::CExplVoxelRenderer::CObjectsHash::const_iterator i = objects.begin(); i != objects.end(); ++i )
 		{
-			for ( int nDX = 0; nDX < 2; ++nDX )
+			const NAI::CExplVoxelRenderer::SExplObject &o = i->second;
+			if ( o.bTerrain || !IsValid( o.pUserData ) || o.pUserData.GetPtr() != pIgnitionObject.GetPtr() )
+				continue;
+			if ( o.nObjectID <= NAI::N_VOXEL_TERRAIN || o.nObjectID >= (int)damageInfo.size() )
+				continue;
+			++nMatched;
+			// retail: damageInfo[ignition].nVolume = 1, direction (0,0,1) -- the ignition damage record
+			SObjectDamageInfo &di = damageInfo[ o.nObjectID ];
+			if ( di.nVolume == 0 )
 			{
-				int nX = nXY + nDX;
-				int nY = nXY + nDY;
-				int nZ = nBaseZ + nDZ;
-				// retail StartWave @0x355830 seeds the SOURCE OBJECT's own voxels (not just empty air) so a blast that
-				// ORIGINATES inside an explodable (gas tank/barrel) still starts and expands outward. The old IsEmpty()
-				// gate seeded NOTHING for an object-origin blast (center voxels ARE the object) -> the front never grew
-				// (nVolume stayed 0) and the wave damaged nothing (only the 30 fragments hit). Seed empty OR object
-				// voxels (skip only bare terrain) so the front starts.
-				NAI::SExplVoxel &seedVoxel = pCube->renderer.voxels[nX][nY][nZ];
-				if ( seedVoxel.nIndex == 0 && seedVoxel.nObject != NAI::N_VOXEL_TERRAIN )
-					pCube->Front( nX, nY, nZ );
+				di.nVolume = 1;
+				di.rDir.ptDir = CVec3( 0, 0, 1 );
+				di.rDir.ptOrigin = ptCenter;
+			}
+			// seed every voxel of the source object inside the +/-7 box (retail's scan bounds), clamped to
+			// the cube interior (the outermost layer is the neighbour-cube overlap border)
+			for ( int nZ = Max( 1, nCZ - 7 ); nZ <= Min( N_REAL_CUBE_SIZE - 2, nCZ + 7 ); ++nZ )
+				for ( int nY = Max( 1, nCY - 7 ); nY <= Min( N_REAL_CUBE_SIZE - 2, nCY + 7 ); ++nY )
+					for ( int nX = Max( 1, nCX - 7 ); nX <= Min( N_REAL_CUBE_SIZE - 2, nCX + 7 ); ++nX )
+					{
+						NAI::SExplVoxel &voxel = pCube->renderer.voxels[nX][nY][nZ];
+						if ( voxel.nIndex == 0 && (int)voxel.nObject == o.nObjectID )
+						{
+							pCube->Front( nX, nY, nZ );
+							++nSeeds;
+							bSeeded = true;
+						}
+					}
+		}
+		// Robustness vs retail: retail's +/-7 scan runs in the UNCLAMPED global voxel space (@0x355830 bounds
+		// 1<c<0x3ff), but this build clamps to the single seed cube -- which is raised F_CUBE_SIZE/3 above the
+		// blast centre, so a source hull hugging the cube's bottom/side border can be clipped out of the box.
+		// If the source registered in the trace but the box found none of its voxels, sweep the whole cube
+		// interior for them before giving up on PATH 1.
+		if ( nMatched > 0 && nSeeds == 0 )
+		{
+			for ( NAI::CExplVoxelRenderer::CObjectsHash::const_iterator i = objects.begin(); i != objects.end(); ++i )
+			{
+				const NAI::CExplVoxelRenderer::SExplObject &o = i->second;
+				if ( o.bTerrain || !IsValid( o.pUserData ) || o.pUserData.GetPtr() != pIgnitionObject.GetPtr() )
+					continue;
+				if ( o.nObjectID <= NAI::N_VOXEL_TERRAIN || o.nObjectID >= (int)damageInfo.size() )
+					continue;
+				for ( int nZ = 1; nZ <= N_REAL_CUBE_SIZE - 2; ++nZ )
+					for ( int nY = 1; nY <= N_REAL_CUBE_SIZE - 2; ++nY )
+						for ( int nX = 1; nX <= N_REAL_CUBE_SIZE - 2; ++nX )
+						{
+							NAI::SExplVoxel &voxel = pCube->renderer.voxels[nX][nY][nZ];
+							if ( voxel.nIndex == 0 && (int)voxel.nObject == o.nObjectID )
+							{
+								pCube->Front( nX, nY, nZ );
+								++nSeeds;
+								bSeeded = true;
+							}
+						}
+			}
+		}
+	}
+	// retail StartWave PATH 2 (fallback, also used when the box scan found no source voxel): a thrown/aerial
+	// blast seeds a small central column. Kept from 8eca71e: seed empty OR object voxels (skip only bare
+	// terrain) so a blast resting against geometry still starts.
+	if ( !bSeeded )
+	{
+		int nXY = N_CUBE_SIZE / 2;
+		int nBaseZ = N_CUBE_SIZE / 2.f - N_CUBE_SIZE / 3.0f;//F_CUBE_SIZE / ( F_VOXEL_SIZE * 3.f );
+		for ( int nDZ = 0; nDZ < 3; ++nDZ )
+		{
+			for ( int nDY = 0; nDY < 2; ++nDY )
+			{
+				for ( int nDX = 0; nDX < 2; ++nDX )
+				{
+					int nX = nXY + nDX;
+					int nY = nXY + nDY;
+					int nZ = nBaseZ + nDZ;
+					NAI::SExplVoxel &seedVoxel = pCube->renderer.voxels[nX][nY][nZ];
+					if ( seedVoxel.nIndex == 0 && seedVoxel.nObject != NAI::N_VOXEL_TERRAIN )
+						pCube->Front( nX, nY, nZ );
+				}
 			}
 		}
 	}
@@ -313,6 +428,9 @@ void CVoxelExpl::ApplyWaveDamage()
 	{
 		const NAI::CExplVoxelRenderer::SExplObject &o = i->second;
 		SObjectDamageInfo &di = damageInfo[ o.nObjectID ];
+		// the blast's SOURCE object (retail nIgnitionObjectIdx compare @0x355ba0 == pointer identity here)
+		const bool bIsSource = IsValid( pIgnitionObject ) && IsValid( o.pUserData ) &&
+			o.pUserData.GetPtr() == pIgnitionObject.GetPtr();
 		if ( !di.bPutDecal )
 		{
 			di.bPutDecal = true;
@@ -337,7 +455,7 @@ void CVoxelExpl::ApplyWaveDamage()
 				// retail @0x355ba0: the igniting object (a trapped barrel/door that set off THIS blast) takes 10x wave
 				// damage to itself, so it is reliably consumed by its own explosion (o.nObjectID==nIgnitionObjectIdx ==
 				// pointer identity here -- CWindowDoor's voxel pUserData IS its own CObjectBase, not a building proxy).
-				if ( IsValid( pIgnitionObject ) && o.pUserData.GetPtr() == pIgnitionObject.GetPtr() )
+				if ( bIsSource )
 				{
 					fDamageMin *= F_IGNITION_OBJECT_DAMAGE_MULT;
 					fDamageMax *= F_IGNITION_OBJECT_DAMAGE_MULT;
@@ -370,11 +488,21 @@ void CVoxelExpl::ApplyWaveDamage()
 									++nEnemyUnitsKilled;
 							}
 						}
+						// retail @0x355ba0: on the FIRST wave the blast pushes the body along di.rDir whether or
+						// not it was (still) attackable -- this is what ragdolls corpses/unconscious near a blast
+						// (AddImpulse @0x3c0370 self-gates on downed/uncarried). Dev nWave is 1-based (see the
+						// structure-branch note below): retail nCurrentWave==0 <=> nWave==1.
+						if ( fDamageMax > 0 && nWave == 1 && IsValid( pUS ) )
+							pUS->AddImpulse( di.rDir );
 					}
-					else 
+					else
 					{
 						// ����������� �� Structure
-						fCoeff *= ( pGrenade->nWaveNumber - nWave + 1 ) * pGrenade->fStructureDamageCoeff;
+						// retail @0x355ba0 scales by (nWaveNumber - nCurrentWave + 1) with a 0-BASED wave counter;
+						// the dev nWave is 1-based (the tracker pre-increments before spawning the ring), so convert
+						// nCurrentWave == nWave-1. The previous "- nWave + 1" sat one wave ahead, costing every ring
+						// one step of the structure multiplier (first ring N instead of N+1).
+						fCoeff *= ( pGrenade->nWaveNumber - ( nWave - 1 ) + 1 ) * pGrenade->fStructureDamageCoeff;
 						NRPG::IUnitMission* pRPG = 0;
 						if ( IsValid( pThrower ) )
 							pRPG = pThrower->GetUnitRPG();
@@ -433,12 +561,19 @@ int CVoxelExpl::GetVolume( float fRadius )
 // CVoxelExplTracker
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CVoxelExplTracker::CVoxelExplTracker( CVec3 _ptCenter,
-	NDb::CRPGGrenade *_pGrenade, CUnitServer *_pThrower, CWorld *_pWorld, CObjectBase *_pIgnitionObject ):
+	NDb::CRPGGrenade *_pGrenade, CUnitServer *_pThrower, CWorld *_pWorld, CObjectBase *_pIgnitionObject, const SPerkMineModifiers *_pMods ):
 	ptCenter( _ptCenter ), pGrenade( _pGrenade ), pThrower( _pThrower ),
-	pWorld( _pWorld ), nWave( 0 ), nEnemyUnitsKilled( 0 ), nObjectsDestroyed( 0 ), pIgnitionObject( _pIgnitionObject )
+	pWorld( _pWorld ), nWave( 0 ), nEnemyUnitsKilled( 0 ), nObjectsDestroyed( 0 ), pIgnitionObject( _pIgnitionObject ),
+	nLag( 2 )   // release @0x3571d0: after enqueuing a blast the master parks in S_WAIT (nLag=2) before the first ring spawns
 {
-	// retail @0x356ff0: seed the thrower's explosive-perk modifiers BEFORE ExplodeFragments (which runs here, in the
-	// ctor) so the fragment burst gets the perk bonus too -- not just the later wave damage (no-op if no perks).
+	// A pre-placed source (a mine) supplies the PLACER's perk modifiers explicitly -- the placer may be gone by
+	// detonation, so they are stored on the mine (CMine::sPerkModifiers) and passed in here, not re-derived.
+	if ( _pMods )
+		sMineModifiers = *_pMods;
+	// The a5dll derives a LIVE thrower's (thrown-grenade) modifiers HERE in the ctor rather than at the call site
+	// (retail @0x356ff0 receives an already-Filled struct from AddGrenadeExplosion); functionally equivalent for
+	// grenades. A live thrower overrides any passed mods BEFORE ExplodeFragments (which runs here) so the fragment
+	// burst gets the perk bonus too. No a5dll caller passes BOTH a live thrower and explicit mods, so no double-apply.
 	if ( IsValid( pThrower ) )
 		sMineModifiers.Fill( pThrower->GetRPG()->GetRPGUnit() );
 	if ( IsValid( pGrenade ) )
@@ -448,21 +583,55 @@ CVoxelExplTracker::CVoxelExplTracker( CVec3 _ptCenter,
 	drawDecals[ pWorld->GetTerrainInfo() ];
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail paces each blast as a slow radial ripple -- one destruction ring every ~4 world segments -- via
+// CExplosionMaster::Segment @0x3571d0 (this build has no master object; its single-tracker state machine is
+// reproduced here on the tracker itself):
+//   S_WAIT   after a ring's damage lands, wait nLag=2 segments before the next ring;
+//   step     spawn the next CVoxelExpl ring and drain it (release do{}while(MakeSingleStep @0x3565c0));
+//   budget   if this segment traced >1 explosion cube (nBreakCalcs>1) return BEFORE the damage pass --
+//            a big ring's destruction lands on the NEXT segment (release @0x3571d0 early return);
+//   damage   release CVoxelExplTracker::MakeDamage @0x3566d0 -- apply the finished ring's wave damage,
+//            accumulate the kill/destruction tallies, drop the ring (pExpl=0), then park in S_WAIT.
 bool CVoxelExplTracker::Segment()
 {
-	if ( IsValid( pExpl ) )
-		pExpl->Segment();
+	// ---- S_WAIT: inter-ring lag countdown (release @0x3571d0: state==S_WAIT -> nLag-- and return) ----
+	if ( nLag > 0 )
+	{
+		--nLag;
+		return false;
+	}
+	// ---- budget spent by an earlier blast this segment: the master would already have returned ----
+	if ( nBreakCalcs > 1 )
+		return false;
 	//
-	bool bLastWave = nWave >= pGrenade->nWaveNumber;
-	if ( !bLastWave && ( !IsValid( pExpl ) || pExpl->IsFinished() ) )
+	// ---- step pass: (re)spawn the next ring, then drain it (release MakeSingleStep @0x3565c0 spawns a
+	// fresh CVoxelExpl whenever the previous one was dropped, iterating it in the same pass) ----
+	if ( !IsValid( pExpl ) && nWave < pGrenade->nWaveNumber )
 	{
 		++nWave;
 		pExpl = new CVoxelExpl( ptCenter, nWave, pGrenade, pThrower, pWorld->GetAIMap(), this, pIgnitionObject.GetPtr() );
+	}
+	if ( IsValid( pExpl ) && !pExpl->IsFinished() )
+		pExpl->Segment();
+	//
+	// ---- budget check: >1 cube traced -> damage lands NEXT segment (release @0x3571d0 early return) ----
+	if ( nBreakCalcs > 1 )
+		return false;
+	//
+	// ---- damage pass (release CVoxelExplTracker::MakeDamage @0x3566d0): apply the finished ring's damage,
+	// THEN accumulate its tallies (the old accumulate-at-spawn read a freshly-zeroed ring and lost them all,
+	// so OnGrenadeExplosion always reported 0), drop the ring, and park in S_WAIT for the next one ----
+	if ( IsValid( pExpl ) && pExpl->IsFinished() )
+	{
+		pExpl->MakeDamage();
 		nObjectsDestroyed += pExpl->nObjectsDestroyed;
 		nEnemyUnitsKilled += pExpl->nEnemyUnitsKilled;
+		pExpl = 0;
+		if ( nWave < pGrenade->nWaveNumber )
+			nLag = 2;   // release @0x3571d0: state=S_WAIT; nLag=2
 	}
 	//
-	bool bDone = bLastWave && pExpl->IsFinished();
+	bool bDone = !IsValid( pExpl ) && nWave >= pGrenade->nWaveNumber;
 	if ( bDone )
 	{
 		vector<CObjectBase*> targets;

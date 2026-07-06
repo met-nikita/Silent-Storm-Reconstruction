@@ -23,7 +23,14 @@ NAI::SPosition GetNearestPosition( CVec3 ptPos, IPathNetwork *_pPathNetwork, boo
 		pPathNetwork->GetNearPlaces( sSphere, &vNearestPlaces );
 		for ( vector<SPathPlace>::iterator p = vNearestPlaces.begin(); p != vNearestPlaces.end(); ++p )
 		{
-			if ( bNative ? pPathNetwork->IsNativePassable( *p ) : pPathNetwork->IsPassable( *p ) )
+			// retail RealGetNearestPosition @0x7e830: the NATIVE snap accepts every place that is not
+			// hard-impassable -- GetPassability(p) != AIP_NOT_PASSABLE -- so fundamentally-walkable but
+			// dynamically-blocked cells (AIP_DOOR under a closed door, AIP_LOCKED) still snap. Dev's
+			// IsNativePassable (raw tile CP_* flags) rejected them, so a waypoint on a door threshold
+			// (tutorial DoorsTraining, nFloor=1) snapped to a far/wrong-layer cell and its proximity
+			// trigger could never fire. The non-native arm (IsPassable == AIP_YES) matches retail.
+			if ( bNative ? ( pPathNetwork->GetPassability( *p ) != AIP_NOT_PASSABLE )
+			             : pPathNetwork->IsPassable( *p ) )
 			{
 				SPosition sPlace;
 				sPlace.p = *p;

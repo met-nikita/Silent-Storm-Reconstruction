@@ -14,10 +14,14 @@ class CICInGameMenu: public NMainLoop::CInterfaceCommand
 	OBJECT_BASIC_METHODS(CICInGameMenu);
 private:
 	CPtr<NRPG::CGlobalPlayer> pGlobalPlayer;
+	// retail threads bAllowRestart into CInGameMenuInterface::Initialize @0x1e9940: the "Restart
+	// mission" button is enabled only when the menu was opened FROM A MISSION (the chapter/global
+	// map callers leave it disabled -- there restart.sav belongs to the previous mission).
+	bool bAllowRestart = false;
 
 public:
 	CICInGameMenu() {}
-	CICInGameMenu( NRPG::CGlobalPlayer *pGlobalPlayer );
+	CICInGameMenu( NRPG::CGlobalPlayer *pGlobalPlayer, bool bAllowRestart = false );
 
 	virtual void Exec();
 };

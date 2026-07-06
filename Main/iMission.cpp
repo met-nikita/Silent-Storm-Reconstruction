@@ -2,6 +2,7 @@
 #include "wInterface.h"
 #include "wMain.h"			// NWorld::CWorld::GetOwnScript -- wire the script-UI bridge to the mission HUD
 #include "wMainTrace.h"
+#include "wMisc.h"			// NWorld::GetDMeshUnit -- heard-not-seen noise-marker pick (TraceCursor)
 #include "wUICommands.h"
 #include "A5Script.h"		// NScript::CScript::SetScriptInterface
 #include "Transform.h"
@@ -58,6 +59,8 @@
 #include "iMissionInternal.h"
 #include "iMissionExec.h"
 #include "UnitTracker.h"
+#include "Grid.h"				// FP_GRID_STEP / FP_INV_GRID_STEP / FP_TERRAIN_H_SCALE (camera height source)
+#include "MapBuildTerrain.h"	// GetMeterHeightCheck (camera height source)
 #include "PlayerTracker.h"
 #include "MemObject.h"
 #include "BSchemaViewer.h"
@@ -150,7 +153,7 @@ CMission::CMission():
 	bindCluesMenu( "clues" ), bindObjectivesMenu( "objectives" ), bindGameMenu( "gamemenu" ),
 	bindStartOfTurn( "startofturn" ), bindEndOfTurn( "endofturn" ), 
 	bindSaveMenu( "savemenu" ), bindLoadMenu( "loadmenu" ), 
-	bindMove( "move" ), bindAttack( "attack" ), bindSetMine( "setmine" ), bindSetTrap( "settrap" ), bindFirstAid( "firstaid" ), bindDropCorpse( "dropcorpse" ), bindExitPK( "exitpk" ), bindRotate( "unit_rotate" ), 
+	bindMove( "move" ), bindAttack( "attack" ), bindSetMine( "setmine" ), bindSetTrap( "settrap" ), bindFirstAid( "firstaid" ), bindDropCorpse( "dropcorpse" ), bindExitPK( "exitpk" ), bindRotate( "unit_rotate" ), bindUseTool( "usetool" ),
 	bindSnipeAttack( "snipe_attack" ), bindCollect1AP( "collectap_1ap" ), bindCollect10AP( "collectap_10ap" ), bindCollectMaxAP( "collectap_max" ), bindCollectAllAP( "collectap_all" ),
 	bindNormalPose( "pose_normal" ), bindCrawlPose( "pose_crawl" ), bindCrouchPose( "pose_crouch" ), bindRunPose( "pose_run" ), bindStrafe( "pose_strafe" ), bindHide( "hide" ),
 	bindFocusUnit( "focus_unit" ), bindAddFloor("next_floor"), bindSubFloor("prev_floor"),
@@ -209,36 +212,68 @@ bool CMission::Initialize( int _nTemplateID, int _nVariantID, NScenario::CScenar
 	// NGame::CLoadingCounter [25,50]/[50,75]/[75,100]; here we paint the band boundaries directly).
 	ShowLoadingScreen( 25 );   // pre-world setup done; world load+build occupies the release band [25,50]
 
+	// retail @0x200690: the re-enter save is per zone AND template ("%d_%d.sav") -- a linked
+	// (multi-template) zone saves each sub-map separately; a missing file just leaves pWorld null.
 	if ( IsValid( pZone ) )
-		LoadWorld( NStr::Format( "%d.sav", pZone->GetDBZone()->GetRecordID() ) );
+		LoadWorld( NStr::Format( "%d_%d.sav", pZone->GetDBZone()->GetRecordID(), nTemplateID ) );
 
 	CObj<NWorld::CPostWorldCreateInfo> pPostInfo;
 	if ( !IsValid( pWorld ) )
 	{
 		pWorld = NWorld::CreateWorld( _pGlobalGame );
-		pWorld->CreateRandom( nVariantID, params, true, clues, 
+		pWorld->CreateRandom( nVariantID, params, true, clues,
 			nMobsLevel, &pPostInfo, sSeed );
 	}
 	else
-		pWorld->CreateRestored();
+		pWorld->CreateRestored( pGlobalGame );	// retail @0x36e100: rebind the live global game + refresh buildings
 
 	ShowLoadingScreen( 50 );   // world object built (release counter band boundary [50,75])
 
-	NDb::CMusic *pAmbientMelody = NDb::GetMusic( 1 );
-	pCombatMelody  = NDb::GetMusic( 3 );
+	// retail @0x200690: ambient/combat are MusicTemplates POOLS -- defaults GetTMusic(1)/GetTMusic(3),
+	// overridden by the variant's +0x7c/+0x80 CTMusic refs when non-null -- and the actual track is a
+	// weighted roulette pick from the pool (CTMusic::GetMusic). The old GetMusic(1)/(3) shortcut read
+	// the MUSIC table with a TEMPLATE id: at the allies base (variant 5246, AmbientMusic = template
+	// 124 = the ambient07 pool) it resolved MUSIC record 124 = Combat13.wav, so a combat track
+	// launched as the base's load ambient (with the combat predicate legitimately at 0).
+	NDb::CTMusic *pAmbientPool = NDb::GetTMusic( 1 );
+	NDb::CTMusic *pCombatPool  = NDb::GetTMusic( 3 );
 	NDb::CTemplVariant *pVar = NDb::GetTemplVariant( nVariantID );
 	if ( pVar )
 	{
 		if ( IsValid( pVar->pAmbientMusic ) )
-			pAmbientMelody = pVar->pAmbientMusic;
+			pAmbientPool = pVar->pAmbientMusic;
 		if ( IsValid( pVar->pCombatMusic ) )
-			pCombatMelody  = pVar->pCombatMusic;
+			pCombatPool  = pVar->pCombatMusic;
+		// retail @0x200690: adopt the variant's cut-floor range (max EXCLUSIVE in the db);
+		// an unset variant (min >= max) keeps the engine default [-3,4]
+		if ( pVar->nMinCutFloor < pVar->nMaxCutFloor )
+		{
+			nMinCutFloor = pVar->nMinCutFloor;
+			nMaxCutFloor = pVar->nMaxCutFloor - 1;
+		}
 	}
 
 	pScene = NGScene::CreateNewView();
-	pSoundScene = NSound::CreateSoundScene( pAmbientMelody );
-	pRender = NRender::CreateRenderGame( pWorld, pScene );
-	pRenderSound = NRender::CreateRenderSound( pWorld, pSoundScene );
+	// retail CBaseCamera::SetCutFloorRange @0xcba10: install the variant's inclusive range on the
+	// scene (dev keeps floors on the scene); it re-clamps the current floor and gates EVERY later
+	// SetCutFloor (level-switch bar, UICmdSetFloor, unit focus) like retail SetCutFloor @0xd0050 --
+	// the bar previously bypassed the key-bind-only clamp, letting the base show a second floor.
+	pScene->SetCutFloorRange( nMinCutFloor, nMaxCutFloor );
+	// pick this mission's tracks from the pools (retail keeps the pools on the scene and picks per
+	// launch; dev's scene holds the picked records -- documented adaptation in Sound.cpp) and hand
+	// the scene BOTH slots like retail CreateSoundScene @0x305ad0 (ambient, combat).
+	SRand musicRand;
+	NDb::CMusic *pAmbientMelody = 0;
+	if ( IsValid( pAmbientPool ) )
+		pAmbientMelody = pAmbientPool->GetMusic( &musicRand );
+	pCombatMelody = 0;
+	if ( IsValid( pCombatPool ) )
+		pCombatMelody = pCombatPool->GetMusic( &musicRand );
+	pSoundScene = NSound::CreateSoundScene( pAmbientMelody, pCombatMelody );
+	// retail @0x200690: the two sound mixers (world + fog-gated unit sounds) are owned by the
+	// render game -- the old separate CreateRenderSound(pWorld, pSoundScene) union mixer played
+	// unit voices (pain/death grunts) for units the player couldn't see.
+	pRender = NRender::CreateRenderGame( pWorld, pScene, pSoundScene );
 #ifdef _MAPEDIT
 	pCursor = NUI::ICursor::CreateEditorCursor();
 #else
@@ -303,6 +338,75 @@ bool CMission::Initialize( int _nTemplateID, int _nVariantID, NScenario::CScenar
 
 	pWorld->RunPostInit( pPostInfo );
 
+	// retail zone-entry focus floor: the deploy camera-focus path (CUICmdUnitCameraExec::Update
+	// @0x24eae0 -> CCamera::ShowPlacesFromBestPoint @0xcf1c0 tail) sets the camera cut floor to the
+	// focused party unit's floor BEFORE the zone script's CameraLock() freeze drains below. Dev has
+	// no ShowPlaces* family, so seed the scene cut floor from the party here. Without it a zone with
+	// an unset floor range (Min==Max==0 skips the strict `<` install above, e.g. the Axis base,
+	// variant 5376 Min0/Max0) freezes the fresh-scene default N_MAX_FLOOR = "locked under the ceiling".
+	// NOTE (why the first attempt did nothing): the party MUST be read from the WORLD player
+	// (IPlayer::GetUnits) -- the UI trackers' CPlayerTracker::unitsSet is filled only by
+	// CPlayerTracker::Update() from CMission::Step (first live frame), so a tracker read here is
+	// always EMPTY and the seed silently never fires. The hero is preferred (retail focuses the
+	// party lead); dead units are skipped like CPlayerTracker::Update does.
+	{
+		NWorld::IPlayer::CUnitSet partySet;
+		pActivePlayer->GetPlayer()->GetUnits( &partySet );
+		NWorld::CUnit *pSeedUnit = 0;
+		for ( int nTemp = 0; nTemp < partySet.size(); nTemp++ )
+		{
+			if ( !IsValid( partySet[nTemp] ) || partySet[nTemp]->IsDead() )
+				continue;
+			if ( pSeedUnit == 0 )
+				pSeedUnit = partySet[nTemp].GetPtr();
+			if ( partySet[nTemp]->GetRPG()->IsHero() )
+			{
+				pSeedUnit = partySet[nTemp].GetPtr();
+				break;
+			}
+		}
+		if ( pSeedUnit )
+			GetScene()->SetCutFloor( pSeedUnit->GetPosition().pos.GetFloor() );
+	}
+
+	// retail @0x200690 tail runs ONE CMissionBase::InternalStep (@0x1a29f0) here = ProcessWorldCommands
+	// + ProcessCameraCommands + camera refresh ONLY. The mission-start script (DelayGameStart ->
+	// BeginSequence + the opening CameraSet, Common.l) queued those on the world UI-command list but
+	// WaitForUI is a no-op while G_DelayGameStartFlag, so nothing drained them; retail drains them here
+	// so the mission presents already letterboxed with the opening camera at first paint.
+	// Dev has NO CMissionBase split, and its CMission::InternalStep also runs the interactive frame
+	// (TraceCursor / UpdateState / pState->Step / UpdateSound) -- calling that here gave a live camera /
+	// half-sequence. So drain ONLY the world + camera commands (retail's base-step subset), not the
+	// interactive tail: ExecWorldCommands opens the movieUI letterbox (CUICmdBeginSequence -> nSequenceDepth>0
+	// = input block + camera lock) and builds pCmdExec from the opening CUICmdMoveCamera; one Update
+	// (transitionTime 0) settles it; then refresh the camera transform for the first frame. Also fixes
+	// the tutorial's fixed corner camera (its opening CameraSet was the same undrained command).
+	// retail @0x200690 tail = ONE CMissionBase::InternalStep (@0x1a29f0): a single world-command
+	// drain + one camera-executor pump. NOTE (retail-verified): a zone script that SLEEPS before its
+	// opening CameraSet (the tutorial's GroupAIMode = Sleep(2)/villain) has NOT queued the camera yet
+	// at this point IN RETAIL EITHER -- retail's first frames show the PLAYER/DEPLOY camera and the
+	// scripted camera lands a few live frames later. The dev-only "map corner" first frame is the
+	// deploy-camera SEED being degenerate for script-deployed zones (PlayerTracker/GetDeploySpot),
+	// which is fixed at the seed -- NOT by pumping extra hidden segments here (a prior dev-invented
+	// pump loop was reverted: retail runs no extra warm-up simulation at Initialize).
+	ExecWorldCommands();
+	if ( IsValid( pCmdExec ) && pCmdExec->Update( GetTime() ) )
+	{
+		pCmdExec->Finished();
+		pCmdExec = 0;
+	}
+	pCamera->Update( GetTime() );
+	vCameraCP = pCamera->GetCP();
+	sCameraPos = pCamera->GetPos();
+	pCamera->GetTransform( &sTransform, GetScene()->GetScreenRect() );
+
+	// retail @0x200690 tail: enqueue the mission-start "restart" snapshot (CICSaveRestartMission
+	// @0x20b860 -> writes "restart.sav" @0x1f6a80). Deferred through the command queue ON PURPOSE:
+	// it drains AFTER CICBeginMission::Exec has installed this mission into the interface stack,
+	// so the snapshot contains the fresh mission (an inline save here would capture the OLD stack).
+	// The pause/lose-menu "Restart mission" button loads it back via CICLoadFile.
+	NMainLoop::Command( new NMainLoop::CICSaveFile( "restart.sav" ) );
+
 	ShowLoadingScreen( 100 );  // mission fully initialized (release finish helper @0x1fb600 paints 100%)
 
 	return true;
@@ -310,12 +414,19 @@ bool CMission::Initialize( int _nTemplateID, int _nVariantID, NScenario::CScenar
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CMission::Terminate()
 {
-	if ( IsValid( pZone ) )
+	// retail @0x1fbc30: save this zone's world for re-entry ONLY when it is the scenario base,
+	// a linked (multi-template) zone, or the script enabled the "reenter" feature. Carried
+	// corpses are dropped from the world first (they leave in their carrier's arms), then the
+	// players are pulled out, then the world is saved per zone+template.
+	if ( ( pWorld->IsBase() || pWorld->IsLinkedZone() || bEnableFeatureReenter )
+		&& IsValid( pZone ) )
 	{
+		pWorld->RemoveCarriedCorpses();
+
 		for ( int nTemp = 0; nTemp < playersSet.size(); nTemp++ )
 			pWorld->RemovePlayer( playersSet[nTemp]->GetPlayer() );
 
-		SaveWorld( NStr::Format( "%d.sav", pZone->GetDBZone()->GetRecordID() ) );
+		SaveWorld( NStr::Format( "%d_%d.sav", pZone->GetDBZone()->GetRecordID(), nTemplateID ) );
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -346,10 +457,23 @@ void CMission::StopAction()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CMission::IsReady() const
 {
+	// retail CMissionBase::IsReady @0x1a1e60: NOT ready while a sequence runs -> stops TraceCursor/
+	// UpdateState so units cannot be hover-highlighted / selected during a sequence. Cover BOTH the
+	// client sequence (nSequenceDepth, via CUICmdBeginSequence) AND a world-level / interrupt sequence
+	// (CWorld::IsSequence) -- a cutscene that raises only the world predicate would otherwise leave
+	// hover live.
+	if ( IsSequence() || pWorld->IsSequence() )
+		return false;
+
 	if ( !IsRealTime() && ( IsActionExecuted() || ( pWorld->GetCurrentPlayer() != pActivePlayer->GetPlayer() ) ) )
 		return false;
 
 	return true;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+bool CMission::IsSequence() const
+{
+	return nSequenceDepth > 0;   // retail mission vtbl+0x44 (@0x1a1e60 IsReady + @0x32d520 UnitTracker::Update gate)
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CMission::IsActionExecuted() const
@@ -566,9 +690,17 @@ void CMission::CanDoCommand( NWorld::CCmd *pCmd, bool bNoTarget, SActionInfo *pI
 	case NWorld::UCR_WEAPON_JAMMED:
 	case NWorld::UCR_CRITICALS_BAN:
 	case NWorld::UCR_TARGET_OUT_OF_RANGE:
+	case NWorld::UCR_CANT_HEAL:                    // heal target's CanHeal() failed -- blocked but available (retail @0x1fb680 groups it here)
+	case NWorld::UCR_NEED_HIGHER_SKILL:           // skill too low to use the tool -- blocked but available
+	case NWorld::UCR_NOT_ALL_UNITS_NEAR_PASSAGE:  // not every selected unit is at the passage -- blocked but available
+	case NWorld::UCR_PK_BAN:                      // crouch+look banned (CanDo @0x3c1570) -- blocked but available (retail @0x1fb680)
 		pInfo->bOk = false;
 		pInfo->bEnoughAP = true;
 		pInfo->bAvailable = true;
+		break;
+	case NWorld::UCR_NOT_HERO:                     // can talk but not a hero -- SILENT no-op (no feedback)
+		pInfo->bOk = false;
+		pInfo->bAvailable = false;
 		break;
 	default:
 		ASSERT( 0 );
@@ -650,6 +782,9 @@ void CMission::UpdateActionsInfo()
 	actionsInfoSet[UA_USE].bOk = true;
 	actionsInfoSet[UA_USE].bEnoughAP = true;
 	actionsInfoSet[UA_USE].bAvailable = true;
+	// the use-tool action (retail action 9) is availability-shaped like USE; the icon-bar button
+	// is additionally gated on the unit actually holding a tool (ST_NORMAL_TOOL)
+	actionsInfoSet[UA_USETOOL] = actionsInfoSet[UA_USE];
 
 	CanDoCommand( new NWorld::CCmdShootObject( 0, 0 ), true, &actionsInfoSet[UA_ATTACK] );
 
@@ -689,6 +824,55 @@ void CMission::GetCameraParams( ECameraType *pType, float *pFOV, ICamera::SCamer
 	*pLimits = cameraLimits;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// release CCamera samples the world terrain grids through its CPtr<IWorld> (@+0xF4) for the per-frame
+// focus-height easing (Update @0xcd930) and eye lift-off (CorrectPlacement @0xccd60). The dev camera
+// is world-agnostic, so this source implements the two samplers over the mission world's STerrainInfo
+// (heights in world meters: FP_TERRAIN_H_SCALE * heightMap -- GetMeterHeightCheck's transform).
+class CMissionCameraHeightSource: public ICameraHeightSource
+{
+	OBJECT_BASIC_METHODS(CMissionCameraHeightSource);
+	CPtr<NWorld::IWorld> pWorld;
+public:
+	CMissionCameraHeightSource() {}
+	CMissionCameraHeightSource( NWorld::IWorld *_pWorld ): pWorld( _pWorld ) {}
+	virtual bool GetHeight( float fWorldX, float fWorldY, float *pfHeight )
+	{
+		if ( !IsValid( pWorld ) || pWorld->GetTerrainInfo() == 0 )
+			return false;
+		CDGPtr<CFuncBase<STerrainInfo> > pInfo = pWorld->GetTerrainInfo();
+		pInfo.Refresh();
+		const STerrainInfo &info = pInfo->GetValue();
+		const float fX = fWorldX * FP_INV_GRID_STEP;
+		const float fY = fWorldY * FP_INV_GRID_STEP;
+		if ( fX < 0 || fY < 0 || fX >= (float)info.heightMap.GetXSize() || fY >= (float)info.heightMap.GetYSize() )
+			return false;                                       // off-grid (release GetHeight @0xccc10)
+		*pfHeight = GetMeterHeightCheck( info, fWorldX, fWorldY );
+		return true;
+	}
+	virtual bool EstimateAverageHeight( float fWorldX, float fWorldY, int nHalf, float *pfAvg )
+	{
+		if ( !IsValid( pWorld ) || pWorld->GetTerrainInfo() == 0 )
+			return false;
+		CDGPtr<CFuncBase<STerrainInfo> > pInfo = pWorld->GetTerrainInfo();
+		pInfo.Refresh();
+		const STerrainInfo &info = pInfo->GetValue();
+		// release EstimateAverageHeight @0xcc970: plain mean over the clamped window of grid cells
+		const int nGX = Float2Int( fWorldX * FP_INV_GRID_STEP );
+		const int nGY = Float2Int( fWorldY * FP_INV_GRID_STEP );
+		const int nX1 = Max( nGX - nHalf, 0 ), nX2 = Min( nGX + nHalf, info.heightMap.GetXSize() - 1 );
+		const int nY1 = Max( nGY - nHalf, 0 ), nY2 = Min( nGY + nHalf, info.heightMap.GetYSize() - 1 );
+		if ( nX1 > nX2 || nY1 > nY2 )
+			return false;
+		float fSum = 0;
+		int nCount = 0;
+		for ( int y = nY1; y <= nY2; ++y )
+			for ( int x = nX1; x <= nX2; ++x, ++nCount )
+				fSum += (float)info.heightMap[y][x];
+		*pfAvg = FP_TERRAIN_H_SCALE * fSum / (float)nCount;
+		return true;
+	}
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
 void CMission::SetCameraParams( ECameraType eType, float _fFOV, const ICamera::SCameraLimits &limits )
 {
 	CPtr<ICamera> pNewCamera;
@@ -711,7 +895,26 @@ void CMission::SetCameraParams( ECameraType eType, float _fFOV, const ICamera::S
 		pNewCamera->SetPlacement( sPos );
 	}
 	pNewCamera->SetLimits( cameraLimits );
+	// release: the camera's IWorld handle powers the terrain focus-height legs; installed here
+	// (the only camera-creation path) so camera-type switches keep it too
+	pNewCamera->SetHeightSource( new CMissionCameraHeightSource( GetWorld() ) );
 	pCamera = pNewCamera;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// A raw snapshot reload (CICLoadFile "restart.sav") resumes this mission IN PLACE -- no Initialize
+// runs. Rebuild the two runtime-only caches Initialize normally derives:
+//  - every building's SBuildingInfo shell cache (deliberately never serialized; without the
+//    rebuild the render pipeline re-Builds from an EMPTY cache and the walls/roof/floors vanish)
+//    via CWorld::CreateRestored's building->Update() pass (which also re-binds the world's
+//    pGlobalGame weak ref and restarts the turn -- correct for a mission-start snapshot);
+//  - the camera's terrain height source (runtime-only per Camera.cpp; installed only by
+//    SetCameraParams @ iMission.cpp).
+void CMission::OnSnapshotRestored()
+{
+	if ( IsValid( pWorld ) )
+		pWorld->CreateRestored( pGlobalGame );
+	if ( IsValid( pCamera ) )
+		pCamera->SetHeightSource( new CMissionCameraHeightSource( GetWorld() ) );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CMission::FreezeCamera( bool bState )
@@ -945,8 +1148,7 @@ void CMission::Step()
 	}
 	else
 	{
-		pRender->ResetTiming();
-		pRenderSound->ResetTiming();
+		pRender->ResetTiming();	// retail @0x2cb190 forwards to both sound mixers
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1083,7 +1285,7 @@ bool CMission::ProcessEvent( const NInput::SEvent &sEvent )
 	// "mainmenu" is the F10 key; "gamemenu" is the on-screen Pause-Menu (HUD) button -- both open the in-game menu.
 	if ( bindMainMenu.ProcessEvent( sEvent ) || bindGameMenu.ProcessEvent( sEvent ) )
 	{
-		NMainLoop::Command( new CICInGameMenu( GetActivePlayer()->GetGlobalPlayer() ) );
+		NMainLoop::Command( new CICInGameMenu( GetActivePlayer()->GetGlobalPlayer(), true /*bAllowRestart: opened from a mission*/ ) );
 		return true;
 	}
 	else if ( bindSaveMenu.ProcessEvent( sEvent ) )
@@ -1128,10 +1330,13 @@ bool CMission::ProcessEvent( const NInput::SEvent &sEvent )
 		pScene->SetNextHSRMode();
 	else if ( bindFog.ProcessEvent( sEvent ) )
 		pScene->SetNextFogMode();
+	// retail clamps the cut floor to the template variant's [MinCutFloor, MaxCutFloor) range
+	// (CBaseCamera::SetCutFloor @0xd0050 against the range CMission::Initialize @0x200690 installs);
+	// dev keeps floors on the scene, so the same clamp is applied here.
 	else if ( bindAddFloor.ProcessEvent( sEvent ) )
-		pScene->SetCutFloor( pScene->GetCutFloor() + 1 );
+		pScene->SetCutFloor( Min( pScene->GetCutFloor() + 1, nMaxCutFloor ) );
 	else if ( bindSubFloor.ProcessEvent( sEvent ) )
-		pScene->SetCutFloor( pScene->GetCutFloor() - 1 );
+		pScene->SetCutFloor( Max( pScene->GetCutFloor() - 1, nMinCutFloor ) );
 	else if ( bindShowParticles.ProcessEvent( sEvent ) )
 		pScene->SetParticleShow( !pScene->GetParticleShow() );
 	else if ( bindShowAI.ProcessEvent( sEvent ) )
@@ -1235,10 +1440,16 @@ bool CMission::ProcessEvent( const NInput::SEvent &sEvent )
 	if ( GetDesktop()->ProcessEvent( sEvent ) )
 		return true;
 
-	if ( IsRealTime()
-		|| GetWorld()->GetCurrentPlayer() == GetActivePlayer()->GetPlayer()
-		|| !GetWorld()->CanSeeAction( GetActivePlayer()->GetPlayer() ) )
-		pCamera->ProcessEvent( sEvent );
+	// retail: while a sequence runs the movieUI DESKTOP is the modal top window, so camera bind
+	// events never reach CBaseCamera::ProcessEvent -- no player camera control during cutscenes.
+	// The dev desktop chain passes unconsumed events through, so gate explicitly on the sequence.
+	if ( !IsSequence() && !pWorld->IsSequence() )
+	{
+		if ( IsRealTime()
+			|| GetWorld()->GetCurrentPlayer() == GetActivePlayer()->GetPlayer()
+			|| !GetWorld()->CanSeeAction( GetActivePlayer()->GetPlayer() ) )
+			pCamera->ProcessEvent( sEvent );
+	}
 
 //////////////////////////////////////////
 /// Unit control
@@ -1413,6 +1624,8 @@ bool CMission::ProcessEvent( const NInput::SEvent &sEvent )
 		CommandState( new CStateAttack( true ) );
 	else if ( bindSetMine.ProcessEvent( sEvent ) )
 		CommandState( new CStateSetMine() );
+	else if ( bindUseTool.ProcessEvent( sEvent ) )
+		CommandState( new CStateUntrap() );	// use the held tool on a target (disassemble/disarm/mount)
 	else if ( bindSetTrap.ProcessEvent( sEvent ) )
 		CommandState( new CStateSetTrap() );
 	else if ( bindFirstAid.ProcessEvent( sEvent ) )
@@ -1545,7 +1758,7 @@ void CMission::RenderFrame( int nMode, const STime &sTime, ICamera *pCamera, boo
 		CTransformStack ts;
 		pCamera->GetTransform( &ts, pScene->GetScreenRect() );
 
-		pRenderSound->Update( &ts, sTime );
+		pRender->UpdateSound( &ts, sTime );	// retail CMissionBase::RenderFrame @0x1a19f0 -> @0x2cb1c0
 
 		const CTRect<float> &rScreen = pCamera->GetScreenRect();
 		if ( ( rScreen.Width() != 0 ) && ( rScreen.Height() != 0 ) )
@@ -1670,12 +1883,17 @@ void CMission::UpdateSound()
 	int nVisibleEnemy = 0;
 	pActivePlayer->GetPlayer()->GetVisible( &visible );
 	for ( list< CPtr<NWorld::CUnit> >::const_iterator it = visible.begin(); it != visible.end(); ++it )
-		if ( !(*it)->IsDead() && !(*it)->IsUnconscious() && (*it)->GetPlayer() != pActivePlayer->GetPlayer() )
+		// retail UpdateSound @0x1feb50 counts only DIPLOMACY enemies (per-unit query == DS_ENEMY) --
+		// the old "any other player's unit" identity test made every visible ALLIED NPC (the base
+		// commander, the 3646 mission commander) trigger combat music and the in-combat state.
+		if ( !(*it)->IsDead() && !(*it)->IsUnconscious() && pActivePlayer->GetUnitDiplomacy( *it ) == NDb::DS_ENEMY )
 			++nVisibleEnemy;
-	if ( nEWatch > 0 || nVisibleEnemy > 0 )
-		pSoundScene->SetMusic( pCombatMelody );
-	else
-		pSoundScene->FadeOutMusic();
+
+	// retail @0x1feb50 tail: one edge-triggered SetMusic(EMusicType) call -- the scene's music
+	// machine (Sound.cpp, retail CSoundScene @0x304db0) handles combat/ambient switching, the
+	// record-driven 20s fade, and the play/silence rotation. (The old SetMusic(record)/
+	// FadeOutMusic pair maps onto the same machine via adapters; this is the retail shape.)
+	pSoundScene->SetMusic( ( nEWatch > 0 || nVisibleEnemy > 0 ) ? NDb::MT_COMBAT : NDb::MT_AMBIENT );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CMission::WeaponReload()
@@ -1796,8 +2014,11 @@ void CMission::SetLightMode( int _nLightMode )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CMission::TraceCursor()
 {
-	if ( nFramesSameCameraPosition < 4 )
-		return;
+	// retail TraceCursor @0x1fec80: the tile ray is ALWAYS re-cast against the LIVE camera every ready
+	// frame (no camera-still gate here) -- that blanket early-return froze rTraceRay/sTraceTile at the
+	// pre-move values, so a click while the camera eased pathfound against a stale/off-map tile ->
+	// "Path not found". The camera-still counter gates ONLY the hovered OBJECT (see the tail), matching
+	// retail GetStateTarget @0x1fbd40 (which suppresses sTraceResult.bObjectSet while nFrames <= 3).
 	CTransformStack sTS;
 	pCamera->GetTransform( &sTS, GetScene()->GetScreenRect() );
 	MakeProjectiveRay( &rTraceRay.ptDir, &rTraceRay.ptOrigin, &sTS, GetScene()->GetScreenRect(), GetCursor()->GetPos() );
@@ -1835,6 +2056,32 @@ void CMission::TraceCursor()
 				pTraceObject = *iTemp;
 				break;
 			}
+
+			// retail NWorld::Trace @0x37d760: a heard-not-seen unit's noise marker (CDMesh) is a
+			// valid pick. News gate (retail's sound-interval filter): skip when the heard unit is
+			// one of MINE or is ALREADY VISIBLE, and only accept a marker present in the player's
+			// audible sound set (GetSounds). CRITICAL: the trace object stays THE MARKER (retail
+			// pObject = the IAISound) -- every state except CStateAttack CUnit-casts and bails, so
+			// no name tooltip / carry-body / friend state can spoil the hidden unit's identity.
+			// INTENTIONAL DIVERGENCE from retail: retail targets a heard-not-seen unit ONLY through
+			// its ear icon (CSoundIcon CActionDecorator hover -> SetStateTarget); this world-trace
+			// pick of the silhouette CDMesh itself is an ADDITION so the model is hover-targetable
+			// too. Keep both paths (the ear icon path lives in iMissionUI.cpp CClueIcon).
+			NWorld::CUnit *pHeardUnit = dynamic_cast<NWorld::CUnit*>( NWorld::GetDMeshUnit( *iTemp ) );
+			if ( pHeardUnit )
+			{
+				NWorld::IPlayer::CUnitSet myUnits;
+				GetActivePlayer()->GetPlayer()->GetUnits( &myUnits );
+				vector<NWorld::IVisObj*> soundsList;
+				GetActivePlayer()->GetPlayer()->GetSounds( &soundsList );
+				if ( find( myUnits.begin(), myUnits.end(), pHeardUnit ) == myUnits.end()
+					&& find( visibleList.begin(), visibleList.end(), pHeardUnit ) == visibleList.end()
+					&& find( soundsList.begin(), soundsList.end(), CDynamicCast<NWorld::IVisObj>( *iTemp ) ) != soundsList.end() )
+				{
+					pTraceObject = *iTemp;
+					break;
+				}
+			}
 		}
 	}
 
@@ -1847,6 +2094,12 @@ void CMission::TraceCursor()
 		if ( find( visibleList.begin(), visibleList.end(), pTempUnit ) != visibleList.end() )
 			pTraceObject = pTempUnit;
 	}
+
+	// retail: suppress the hovered OBJECT while the camera is still moving (a moving camera must not
+	// snap-target a unit under the transiently-passing cursor), but leave the tile/point trace live so
+	// a click resolves to the correct ground tile. Do this BEFORE the object snaps the tile below.
+	if ( nFramesSameCameraPosition < 4 )
+		pTraceObject = 0;
 
 	if ( pTraceObject != 0 )
 	{
@@ -1913,12 +2166,18 @@ void CMission::ExecWorldCommands()
 		{
 			PauseGame( !IsGamePaused() );
 		}
-		// LUA convergence PART B: CameraLock(bLock) freezes/unfreezes the camera in place
-		// (retail CMissionBase::ExecWorldCommand @0x1a30c0: CUICmdLockCamera -> camera controller
-		// lock). FreezeCamera(true) captures the current pose and pins to it; (false) releases.
+		// CameraLock(bLock) -> retail ICamera vtbl+0x74 = CBaseCamera::FreezeCamera @0xcffc0 (vftable
+		// dump @0x4b529c; +0x70 is the separate scroll-lock Lock @0xcffa0 -- the round-4 SetLock
+		// routing was ONE SLOT OFF). FreezeCamera is a bare refcount, NO pose pin: CCamera::Update
+		// bails before the movement/approach tail while frozen (SetPlacement stays ungated, so the
+		// HQ per-room CameraSet still lands and HOLDS), and retail's SetCutFloor no-ops while frozen
+		// -- mirrored onto the scene: THAT is the base's one-floor lock (EBase OnEnterZone calls
+		// CameraLock() once and never unlocks; EFirst doesn't, so its two floors switch freely).
 		else if ( CDynamicCast<NWorld::CUICmdLockCamera>( pCmd ) )
 		{
-			FreezeCamera( CDynamicCast<NWorld::CUICmdLockCamera>( pCmd )->bLock );
+			bool bLock = CDynamicCast<NWorld::CUICmdLockCamera>( pCmd )->bLock;
+			pCamera->FreezeCamera( bLock );
+			pScene->SetCutFloorLock( bLock );
 		}
 		// LUA convergence PART B: PlaySound opens a sound channel on the mission's sound scene and
 		// parks the live handle in the command (retail CMissionBase::ExecWorldCommand @0x1a30c0:
@@ -1997,7 +2256,8 @@ void CMission::ExecWorldCommands()
 				if ( IsValid( pZone ) )
 				{
 					vector<string> params;
-					NMainLoop::Command( new CICBeginMission( pZone, -1, params, pGlobalGame ) );
+					// bEmulateChapter=true: direct mission->zone jump, run the leave-zone bookkeeping
+					NMainLoop::Command( new CICBeginMission( pZone, -1, params, pGlobalGame, true ) );
 				}
 				else
 					csSystem << "ERROR: Zone not found " << pBeginZone->szZone << " !" << endl;
@@ -2106,35 +2366,72 @@ void CMission::ExecWorldCommands()
 			CDynamicCast<NWorld::CUICmdBeginSequence> pBeginSequence(pCmd);
 			if (pBeginSequence)
 			{
-				// nested sequences (DelayGameStart + the script's own BeginSequence): only the outermost
-				// begin opens the cinematic; inner begins just bump the depth.
+				// retail CMission::ExecWorldCommand @0x1fd8c0: depth 1 clears the camera limits (saved in
+				// cameraLimits, restored by the matching EndSequence); EVERY begin then pushes the current
+				// camera pose onto the per-mission pose stack AND stacks a fresh movieUI letterbox (nested
+				// dialog sequences fade invisibly over the outer bars) -- EndSequence hides the TOP one.
+				// The retail depth-1 limits are DEFAULT limits with bMovie=TRUE (the decomp's bStack_38
+				// store into the fresh SCameraLimits before scene SetLimits vtbl+0x64): bMovie is what
+				// makes CCamera::Update (@0xcd930) skip the terrain/approach tail so scripted poses HOLD.
+				// The dev SCameraLimits is the frozen 32-byte one, so the flag rides SetMovieMode instead.
 				if (nSequenceDepth++ == 0)
 				{
 					pCamera->SetLimits(ICamera::SCameraLimits());
-					////
-					CPtr<NUI::CMissionMovieUI> pMissionMovieUI = new NUI::CMissionMovieUI(NUI::SWindowInfo(pInterface, NUI::SPoint(0, 0), NUI::SPoint(1024, 768), "movieUI", NUI::STYLE_ENABLED), this, GetDesktop());
-					NUI::LoadTemplate(pMissionMovieUI, NDb::GetUIContainer(364));
-					pMissionMovieUI->ShowDesktop();
+					pCamera->SetMovieMode(true);
 				}
+				////
+				ICamera::SCameraPos sSeqPose;
+				pCamera->GetPlacement(&sSeqPose);
+				sequenceCameraPoses.push_back(sSeqPose);
+				////
+				CPtr<NUI::CMissionMovieUI> pMissionMovieUI = new NUI::CMissionMovieUI(NUI::SWindowInfo(pInterface, NUI::SPoint(0, 0), NUI::SPoint(1024, 768), "movieUI", NUI::STYLE_ENABLED), this, GetDesktop(), pBeginSequence->bSkipFadeOut);
+				// retail loads container 344 ("Movie") for the letterbox; 364 is the DIALOG container --
+				// using it made the bars visibly change when leaving a dialog.
+				NUI::LoadTemplate(pMissionMovieUI, NDb::GetUIContainer(344));
+				pMissionMovieUI->ShowDesktop(pBeginSequence->GetID());
 			}
 			else {
 				CDynamicCast<NWorld::CUICmdEndSequence> pEndSequence(pCmd);
 				if (pEndSequence)
 				{
-					// only the outermost end tears the cinematic down (StartGame()'s EndSequence must NOT end
-					// the script's own enclosing BeginSequence -- that ended the whole cutscene early).
-					if (nSequenceDepth > 0)
-						--nSequenceDepth;
-					if (nSequenceDepth == 0)
+					// retail @0x1fd8c0: EndSequence hides the TOP desktop iff it is a movieUI. Camera pose
+					// semantics: pop the matching BeginSequence pose -- bRestoreCamera ? SetPlacement(popped)
+					// : commit the CURRENT (cutscene-end) pose as the active player's gameplay camera via
+					// SetCamera, so the camera does NOT jump back after a scripted move. Depth 1->0 restores
+					// the saved camera limits.
+					CDynamicCast<NUI::CMissionMovieUI> pMissionMovieUI(GetDesktop());
+					if (pMissionMovieUI)
 					{
-						pCamera->SetLimits(cameraLimits);
-						////
-						for (list<CObj<NUI::CDesktopWindow> >::reverse_iterator iTemp = desktopWindowsList.rbegin(); iTemp != desktopWindowsList.rend(); iTemp++)
+						if (!sequenceCameraPoses.empty())
 						{
-							CDynamicCast<NUI::CMissionMovieUI> pMissionMovieUI(*iTemp);
-							if (pMissionMovieUI)
-								pMissionMovieUI->HideDesktop();
+							if (pEndSequence->bRestoreCamera)
+								pCamera->SetPlacement(sequenceCameraPoses.back());
+							sequenceCameraPoses.pop_back();
 						}
+						if (!pEndSequence->bRestoreCamera)
+						{
+							ICamera::SCameraPos sSeqPose;
+							pCamera->GetPlacement(&sSeqPose);
+							pActivePlayer->SetCamera(sSeqPose);
+						}
+						if (nSequenceDepth == 1)
+						{
+							// retail @0x1fd8c0: the LAST EndSequence restores the saved (bMovie-less)
+							// mission limits -- the terrain/approach tail resumes from the committed pose.
+							pCamera->SetLimits(cameraLimits);
+							pCamera->SetMovieMode(false);
+						}
+						pMissionMovieUI->SetSkipFade(pEndSequence->bSkipFade);
+						pMissionMovieUI->HideDesktop(pEndSequence->GetID());
+						if (nSequenceDepth > 0)
+							--nSequenceDepth;
+					}
+					else
+					{
+						csSystem << CC_RED << "ERROR: unexpected CUICmdEndSequence!" << endl;
+						// dev safety net (retail leaks the id here): release the wait id so lua
+						// WaitForUI(EndSequence()) cannot hang on the dropped command.
+						Command(new NWorld::CCmdInterfaceEvent(pEndSequence->GetID()));
 					}
 				}
 				else {
@@ -2191,8 +2488,14 @@ void CMission::SaveWorld( const string &szFile )
 	try
 //#endif
 	{
+		const string szPath = pSaveManager->GetSlotFilePath( NMainLoop::S_SLOT_ACTIVE, szFile );
+		// retail @0x1a4040: clear + delete any stale zone save before writing (a read-only or
+		// leftover file must not survive and be loaded as the zone's world on the next entry)
+		::SetFileAttributesA( szPath.c_str(), FILE_ATTRIBUTE_NORMAL );
+		::DeleteFileA( szPath.c_str() );
+
 		CFileStream sFile;
-		sFile.OpenWrite( pSaveManager->GetSlotFilePath( NMainLoop::S_SLOT_ACTIVE, szFile ).c_str() );
+		sFile.OpenWrite( szPath.c_str() );
 
 		CStructureSaver sSaver( sFile, CStructureSaver::WRITE );
 		sSaver.Add( 2, &pWorld );
@@ -2799,9 +3102,10 @@ CICBeginMission::CICBeginMission( int _nTemplateID, int _nVariantID, const vecto
 {
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CICBeginMission::CICBeginMission( NScenario::CScenarioZone *_pZone, 
-		int _nTemplateID, const vector<string> &_params, NRPG::CGlobalGame *_pGlobalGame ):
-	pZone( _pZone ), nTemplateID( _nTemplateID ), nVariantID( -1 ), pGlobalGame( _pGlobalGame ), params(_params)
+CICBeginMission::CICBeginMission( NScenario::CScenarioZone *_pZone,
+		int _nTemplateID, const vector<string> &_params, NRPG::CGlobalGame *_pGlobalGame, bool _bEmulateChapter ):
+	pZone( _pZone ), nTemplateID( _nTemplateID ), nVariantID( -1 ), pGlobalGame( _pGlobalGame ), params(_params),
+	bEmulateChapter( _bEmulateChapter )
 {
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -2816,6 +3120,17 @@ void CICBeginMission::Exec()
 		pSplash = pZone->GetDBZone()->pPWLImage;
 	SetLoadingImage( pSplash );
 	ShowLoadingScreen( 0 );
+
+	// retail @0x20ba00 bEmulateChapter arm: a direct mission->zone transition (script BeginZone)
+	// runs the leave-zone bookkeeping the chapter map would have done. The load-bearing call is
+	// UpdateScenarioOnLeaveZone: it clears every merc's deployData.pCorpse, so a CARRIED BODY does
+	// not re-materialize in the next zone (retail's InitPlayerCorpseCarrying on AddPlayer would
+	// otherwise re-spawn it -- e.g. the carried commander duplicating his base instance).
+	if ( bEmulateChapter && IsValid( pGlobalGame ) )
+	{
+		pGlobalGame->HealOnLeaveZone();
+		pGlobalGame->UpdateScenarioOnLeaveZone();
+	}
 
 	CMission *pRes = new CMission();
 	if ( pRes->Initialize( nTemplateID, nVariantID, pZone, params, pGlobalGame ) )

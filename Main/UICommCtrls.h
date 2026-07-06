@@ -235,6 +235,45 @@ public:
 	void Draw( const STime &sTime, NGScene::I2DGameView *pView );
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// CTextFrame -- retail NUI::CTextFrame (module UICommCtrls, saveload id 0xb024196e): a self-sizing
+// 9-image bordered panel owning a CMLText markup label. Same shape/behaviour as CToolTip (retail's
+// CTextFrame is a CFrame + CObj<CText>; this dev tree has no CFrame, so it is built on CWindow with
+// the shared border set). Differs from CToolTip in the retail-exact resize/clamp (SetText @0x3143c0
+// re-fits + re-clamps INSIDE THE PARENT, not the fixed 1024x768 screen). Used by the tactical-state
+// unit tooltip (MakeUnitStateToolTip).
+////////////////////////////////////////////////////////////////////////////////////////////////////
+class CTextFrame: public CWindow
+{
+	OBJECT_NOCOPY_METHODS(CTextFrame);
+private:
+	ZDATA_(CWindow)
+	CObj<CMLText> pText;
+	CObj<CImageDraw> pBackgroundUp;
+	CObj<CImageDraw> pBackgroundDown;
+	CObj<CImageDraw> pBackgroundLeft;
+	CObj<CImageDraw> pBackgroundRight;
+	CObj<CImageDraw> pBackgroundMiddle;
+	CObj<CImageDraw> pBackgroundUpLeft;
+	CObj<CImageDraw> pBackgroundUpRight;
+	CObj<CImageDraw> pBackgroundDownLeft;
+	CObj<CImageDraw> pBackgroundDownRight;
+public:
+	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CWindow*)this); f.Add(2,&pText); f.Add(3,&pBackgroundUp); f.Add(4,&pBackgroundDown); f.Add(5,&pBackgroundLeft); f.Add(6,&pBackgroundRight); f.Add(7,&pBackgroundMiddle); f.Add(8,&pBackgroundUpLeft); f.Add(9,&pBackgroundUpRight); f.Add(10,&pBackgroundDownLeft); f.Add(11,&pBackgroundDownRight); return 0; }
+
+protected:
+	void DrawBackground( const STime &sTime, NGScene::I2DGameView *pView );
+	void UpdateSize();          // retail @0x313950: fit the frame around the label
+	void UpdatePosition();      // retail @0x314160: clamp the frame inside its parent
+
+public:
+	CTextFrame() {}
+	CTextFrame( const SWindowInfo &sInfo );
+
+	void SetText( const wstring &wsText );   // retail @0x3143c0
+
+	void Draw( const STime &sTime, NGScene::I2DGameView *pView );   // retail @0x3143f0
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
 // CSlider
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CSlider: public CWindow

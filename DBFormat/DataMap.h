@@ -52,6 +52,7 @@ namespace NDb
 	class CUITexture;
 	class CAnimation;
 	class CRPGGrenade;
+	class CTRPGChest;
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CGlobalMap: public CDBRecord
 {
@@ -164,12 +165,30 @@ public:
 	vector< CPtr<CWaypoint> > waypoints;
 	CPtr<CScript> pScript;
 	int nBorder;
-	CPtr<CMusic> pAmbientMusic;
-	CPtr<CMusic> pCombatMusic;
+	// retail CTemplVariant::Import @0x423dd0: AmbientMusic/CombatMusic are ImportField<NDb::CTMusic>
+	// -- MusicTemplates POOL refs (+0x7c/+0x80, serializer @0x41ebf0 tags 16/17), NOT Music records.
+	// The old CPtr<CMusic> typing resolved the template id in the MUSIC table: the allies base
+	// (variant 5246, AmbientMusic=template 124 = the ambient07 pool) picked up MUSIC record 124 =
+	// Combat13.wav and launched a combat track as the base's load ambient.
+	CPtr<CTMusic> pAmbientMusic;
+	CPtr<CTMusic> pCombatMusic;
 	CPtr<CDBDiplomacy> pDiplomacy;
 	EHMBlendType eHMBlendType;
 	bool bShowTerrain;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CDBRecord*)this); f.Add(2,&bGrid); f.Add(3,&pLight); f.Add(4,&pColorMap); f.Add(5,&rects); f.Add(6,&pFinalElements); f.Add(7,&pUnits); f.Add(8,&pTemplate); f.Add(10,&explosions); f.Add(11,&terrainSpots); f.Add(12,&flags); f.Add(13,&waypoints); f.Add(14,&pScript); f.Add(15,&nBorder); f.Add(16,&pAmbientMusic); f.Add(17,&pCombatMusic); f.Add(18,&pDiplomacy); f.Add(19,&eHMBlendType); f.Add(20,&bShowTerrain); return 0; }
+	// retail CTemplVariant tail (serializer @0x41ebf0 is authoritative for the game.db chunk tags):
+	//   tag 21 bNoAttack (1 byte, "NoAttack" column), tags 22/23 MinCutFloor/MaxCutFloor,
+	//   tag 24 weatherType ("Weather"), tag 25 nExitBorder.
+	// The cut-floor range is consumed by retail CMission::Initialize @0x200690:
+	//   if (nMinCutFloor < nMaxCutFloor) camera->SetCutFloorRange(nMinCutFloor, nMaxCutFloor - 1)
+	// (max is EXCLUSIVE in the db; unset variants are 0/0 and keep the engine default [-3,4]).
+	// NOTE: dev previously read MinCutFloor at tag 21 / MaxCutFloor at 22 -- i.e. retail's
+	// bNoAttack chunk as the min floor -- so retail-db variants got garbage cut-floor ranges.
+	bool bNoAttack = false;
+	int nMinCutFloor = 0;
+	int nMaxCutFloor = 0;
+	int weatherType = 0;
+	int nExitBorder = 0;
+	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CDBRecord*)this); f.Add(2,&bGrid); f.Add(3,&pLight); f.Add(4,&pColorMap); f.Add(5,&rects); f.Add(6,&pFinalElements); f.Add(7,&pUnits); f.Add(8,&pTemplate); f.Add(10,&explosions); f.Add(11,&terrainSpots); f.Add(12,&flags); f.Add(13,&waypoints); f.Add(14,&pScript); f.Add(15,&nBorder); f.Add(16,&pAmbientMusic); f.Add(17,&pCombatMusic); f.Add(18,&pDiplomacy); f.Add(19,&eHMBlendType); f.Add(20,&bShowTerrain); f.Add(21,&bNoAttack); f.Add(22,&nMinCutFloor); f.Add(23,&nMaxCutFloor); f.Add(24,&weatherType); f.Add(25,&nExitBorder); return 0; }
 
 	virtual void Import();
 };
@@ -231,8 +250,14 @@ public:
 	float fObjRadius; //  
 	CPtr<CRPGGrenade> pGrenade;
 	bool bArmed;
+	// release chest/lock tail (retail CFinalElement::operator& @0x413820 tags 29-33; Import @0x4235c0):
+	bool bIsLocked;
+	int nKeyID;
+	int nLockHardness;
+	CPtr<CTRPGChest> pChest;	// the loot-chest template this placed element spills at map build
+	bool bLightShadow;
 
-	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CDBRecord*)this); f.Add(2,&pObject); f.Add(3,&pVariant); f.Add(4,&fRotation); f.Add(5,&nFloor); f.Add(6,&ptPos); f.Add(7,&fDZ); f.Add(8,&ptScale); f.Add(9,&bOpen); f.Add(10,&bLightmap); f.Add(11,&fPower); f.Add(12,&fRadius); f.Add(13,&nPassageZoneID); f.Add(14,&nPassageObjectID); f.Add(15,&nAPRadius); f.Add(16,&szName); f.Add(17,&vLightCr); f.Add(18,&ptLightPos); f.Add(19,&fLightRadius); f.Add(20,&fFlareRadius); f.Add(21,&pFlareTexture); f.Add(22,&ptFlarePos); f.Add(23,&eTimeOfDay); f.Add(34,&szLightParams); f.Add(24,&nObjectPhase); f.Add(25,&nObjStageDelta); f.Add(26,&fObjRadius); f.Add(27,&pGrenade); f.Add(28,&bArmed); return 0; }
+	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CDBRecord*)this); f.Add(2,&pObject); f.Add(3,&pVariant); f.Add(4,&fRotation); f.Add(5,&nFloor); f.Add(6,&ptPos); f.Add(7,&fDZ); f.Add(8,&ptScale); f.Add(9,&bOpen); f.Add(10,&bLightmap); f.Add(11,&fPower); f.Add(12,&fRadius); f.Add(13,&nPassageZoneID); f.Add(14,&nPassageObjectID); f.Add(15,&nAPRadius); f.Add(16,&szName); f.Add(17,&vLightCr); f.Add(18,&ptLightPos); f.Add(19,&fLightRadius); f.Add(20,&fFlareRadius); f.Add(21,&pFlareTexture); f.Add(22,&ptFlarePos); f.Add(23,&eTimeOfDay); f.Add(34,&szLightParams); f.Add(24,&nObjectPhase); f.Add(25,&nObjStageDelta); f.Add(26,&fObjRadius); f.Add(27,&pGrenade); f.Add(28,&bArmed); f.Add(29,&bIsLocked); f.Add(30,&nKeyID); f.Add(31,&nLockHardness); f.Add(32,&pChest); f.Add(33,&bLightShadow); return 0; }
   
   virtual void Import();
 };

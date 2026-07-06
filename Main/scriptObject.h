@@ -27,6 +27,10 @@ DECLARE_SCRIPT_COMMAND( ObjectGetHP );
 DECLARE_SCRIPT_COMMAND( ObjectLockDoor );
 DECLARE_SCRIPT_COMMAND( ObjectUnlockDoor );
 DECLARE_SCRIPT_COMMAND( ItemUnload );
+// --- LUA convergence batch 3 (dev-bug session 2026-07-03) ---
+DECLARE_SCRIPT_COMMAND( ObjectPlaceInPocket );      // retail @0x2e9000
+DECLARE_SCRIPT_COMMAND( ObjectRestoreFromPocket );  // retail @0x2e9130
+DECLARE_SCRIPT_COMMAND( ItemSetToWaypoint );        // retail @0x2e86c0
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 }
 //

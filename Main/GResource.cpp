@@ -23,38 +23,65 @@ static list<CResourceTracker*>& GetTrackers()
 	return trackers;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-static string szDir;
+// Resource dirs. The release keeps an ORDERED LIST of dirs (file-scope szDirs, vector<string>):
+// ".\res" first, then one dir per active mod (CModManager::Activate appends them); every lookup
+// scans the list LAST-registered-FIRST so mod content overrides the base game. (This dev source
+// had collapsed the list to a single string -- restored to the release shape for mod support.)
+static vector<string> szDirs;
+// release NGScene::AddResourceDir @0x157b30 -- append the dir, enforcing a trailing '\'
 void AddResourceDir( const char *pszName )
 {
-	szDir = pszName;
+	string szDir = pszName;
 	if ( !szDir.empty() && szDir[ szDir.length() - 1 ] != '\\' )
 		szDir += "\\";
+	szDirs.push_back( szDir );
+}
+// release NGScene::ClearResourceDirs @0x157950 -- drop every registered resource dir
+// (CModManager::Activate teardown; it re-registers ".\res" + the chosen mod dirs afterwards)
+void ClearResourceDirs()
+{
+	szDirs.clear();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-typedef unordered_map<string, CPtr<IFilesPackage> > CPackHash;
+typedef unordered_map<string, vector<CPtr<IFilesPackage> > > CPackHash;
 static CPackHash packages;
 static NWin32Helper::CCriticalSection packageWork;
-static IFilesPackage* GetPackage( const char *pszResName )
+// release NGScene::GetPackage @0x157ce0 -- collect (once, then cached) the "<dir><name>.res"
+// package from EVERY resource dir carrying one, in szDirs order (base first, mod dirs after).
+static vector<CPtr<IFilesPackage> >& GetPackages( const char *pszResName )
 {
 	CPackHash::iterator i = packages.find( pszResName );
-	IFilesPackage *pRes;
-	if ( i == packages.end() )
+	if ( i != packages.end() )
+		return i->second;
+	vector<CPtr<IFilesPackage> > &res = packages[pszResName];
+	for ( int k = 0; k < szDirs.size(); ++k )
 	{
-		string szFullPath = szDir + pszResName + ".res";
+		string szFullPath = szDirs[k] + pszResName + ".res";
+		IFilesPackage *pRes;
 		if ( strcmp( pszResName, "LRTextures" ) == 0 )
 			pRes = OpenCachedFilesPackage( szFullPath.c_str() );
 		else
 			pRes = OpenFilesPackage( szFullPath.c_str() );
-#ifndef _MAPEDIT
-		ASSERT( pRes );
-#endif
-		packages[pszResName] = pRes;
-		if ( !pRes )
-			return 0;
+		if ( pRes )
+			res.push_back( pRes );
 	}
-	else
-		pRes = i->second;
-	return pRes;
+#ifndef _MAPEDIT
+	ASSERT( !res.empty() );
+#endif
+	return res;
+}
+// release ::DoesFileExist( vector<CPtr<IFilesPackage>>&, int ) @0x3f33d0 (FilesPackage.obj) -- scan
+// the name's packages LAST-TO-FIRST and return the one carrying nFileID, so an active mod's .res
+// overrides the base package PER FILE (retail CResourceFileOpener goes through exactly this pair).
+static IFilesPackage* GetPackage( const char *pszResName, int nFileID )
+{
+	vector<CPtr<IFilesPackage> > &packs = GetPackages( pszResName );
+	for ( int k = (int)packs.size() - 1; k >= 0; --k )
+	{
+		if ( DoesFileExist( packs[k], nFileID ) )
+			return packs[k];
+	}
+	return 0;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 static void WaitAllPendingLoad();
@@ -75,12 +102,28 @@ static int GetID( const SPartKey &key )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 inline string GetFileResourceName( const char *pszResName, FILE_ID nFileID )
 {
-	// Prefix the resource dir (szDir, e.g. ".\res\") so a loose file resolves as
-	// "<dir>\<ResName>\<id>" - matching the release's GetFileResourceName(dir,name,id).
-	// The dev build had dropped the dir; it only ever mattered as a never-taken package-first
-	// fallback, but loose-overrides-package (below) now needs the real on-disk path.
+	// Prefix a resource dir (e.g. ".\res\") so a loose file resolves as "<dir><ResName>\<id>" -
+	// matching the release's GetFileResourceName(dir,name,id). With several dirs registered the
+	// release probes them LAST-TO-FIRST for the loose file (NGScene::DoesFileExist @0x157780 --
+	// mod dirs override ".\res"); mirror that, falling back to the first (base) dir when no dir
+	// carries the file. With the usual single dir this compiles down to the old single sprintf.
 	char szBuf[1024];
-	sprintf( szBuf, "%s%s\\%d", szDir.c_str(), pszResName, nFileID );
+	if ( szDirs.empty() )
+	{
+		sprintf( szBuf, "%s\\%d", pszResName, nFileID );
+		return szBuf;
+	}
+	for ( int i = (int)szDirs.size() - 1; i > 0; --i )
+	{
+		sprintf( szBuf, "%s%s\\%d", szDirs[i].c_str(), pszResName, nFileID );
+		HANDLE h = CreateFile( szBuf, GENERIC_READ, FILE_SHARE_READ, 0, OPEN_EXISTING, 0, 0 );
+		if ( h != INVALID_HANDLE_VALUE )
+		{
+			CloseHandle( h );
+			return szBuf;
+		}
+	}
+	sprintf( szBuf, "%s%s\\%d", szDirs[0].c_str(), pszResName, nFileID );
 	return szBuf;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -107,14 +150,12 @@ CFileResource::CFileResource( const char *pszResName, FILE_ID nFileID )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 inline bool DoesPackageFileExist( const char *pszResName, int nID )
 {
-	IFilesPackage *pPack = GetPackage( pszResName );
-	return DoesFileExist( pPack, nID );
+	return GetPackage( pszResName, nID ) != 0;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 inline bool DoesPackageFileExist( const char *pszResName, const SPartKey &key )
 {
-	IFilesPackage *pPack = GetPackage( pszResName );
-	return DoesFileExist( pPack, GetID( key ) );
+	return GetPackage( pszResName, GetID( key ) ) != 0;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 static void TypeReq( const char *pszResName, int nID )
@@ -132,7 +173,7 @@ CResourceFileOpener::CResourceFileOpener( const char *pszResName, int nID )
 	if ( DoesLooseFileExist( pszResName, nID ) )
 		pf = new CFileResource( pszResName, nID );
 	else if ( DoesPackageFileExist( pszResName, nID ) )
-		pf = new CPackageResource( GetPackage( pszResName ), nID );
+		pf = new CPackageResource( GetPackage( pszResName, nID ), nID );
 	else
 		pf = new CFileResource( pszResName, nID );
 }
@@ -146,7 +187,7 @@ CResourceFileOpener::CResourceFileOpener( const char *pszResName, const SPartKey
 	if ( DoesLooseFileExist( pszResName, nID ) )
 		pf = new CFileResource( pszResName, nID );
 	else if ( DoesPackageFileExist( pszResName, nID ) )
-		pf = new CPackageResource( GetPackage( pszResName ), nID );
+		pf = new CPackageResource( GetPackage( pszResName, nID ), nID );
 	else
 		pf = new CFileResource( pszResName, nID );
 }
@@ -245,7 +286,7 @@ void CFileRequest::Read()
 		}
 		else if ( DoesPackageFileExist( pszResName, nID ) )
 		{
-			CPackageStream f( GetPackage( pszResName ), nID );
+			CPackageStream f( GetPackage( pszResName, nID ), nID );
 			f.ReadTo( data, f.GetSize() );
 		}
 		data.Seek(0);

@@ -212,37 +212,19 @@ NLSHead::CHeadInfo *CAdvFaceGenUI::CreateLSHeadInfo()
 	return IsValid( pShow ) ? pShow->CreateLSHeadInfo() : 0;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// GetPersVoiceAck -- the per-voice preview sound (retail NUI::GetPersAck @0x2452c0, dev-native form). Find the
-// merc's pers "on-select greeting" acknowledgement (the CDBAck whose nConditionID is the greeting condition 102
-// and whose nRPGPersID matches the merc), take its first ack-info, and return the sound for the merc's CURRENT
-// voice. The dev authors the per-voice sounds in CDBAckInfo::voices[0..5] (the SoundID/SoundID1.. columns), so
-// GetVoice(nVoice) is voice-specific -- no GetAckHolder needed (which the dev lacks). Played on a voice click.
-// The "alt-voice pers" for the picked voice: retail's GetAckHolder maps a hero to a DIFFERENT pers per voice
-// (each pers has a fixed Voice and its own command-ack voices[0]); the per-voice variation is by PERS, not by the
-// voices[] index. The dev has no runtime alt-voice list, so derive it from the data: a hero pers in the merc's
-// "voice family" (same Side + gender) whose nVoice == the picked voice. Falls back to the merc's own pers.
-static int FindVoicePersId( NRPG::CUnit *pMerc, int nVoice )
-{
-	NDb::CRPGPers *pMercPers = pMerc->GetPers();
-	if ( !IsValid( pMercPers ) )
-		return pMerc->GetRPGPersID();
-	CDBTable<NDb::CRPGPers> *pTable = NDatabase::GetTable<NDb::CRPGPers>();
-	if ( pTable )
-	{
-		CDBIterator<NDb::CRPGPers> it( *pTable );
-		while ( it.MoveNext() )
-		{
-			NDb::CRPGPers *p = it.Get();
-			if ( p && p->nVoice == nVoice && p->bIsFemale == pMercPers->bIsFemale
-				&& (NDb::CSide*)p->pSide == (NDb::CSide*)pMercPers->pSide )
-				return p->nRPGPersID;
-		}
-	}
-	return pMerc->GetRPGPersID();
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-// External linkage (declared in iCommonUI.h) so the basic FaceGen screen (iFaceGen.cpp) shares this helper;
-// FindVoicePersId above stays file-static (only this fn calls it). Mirrors retail NUI::GetPersAck @0x2452c0.
+// GetPersVoiceAck -- the click/voice-preview ack sound. RETAIL NUI::GetPersAck @0x2452c0 (oracle
+// s2_cunitcharacterpanel.h:413, decomp-verified), external linkage (iCommonUI.h) shared by the basic
+// FaceGen screen (iFaceGen.cpp) and the recruit menu (iTeamMngMenu.cpp):
+//   persID = GetAckHolder() ? holder->persID : GetRPGPersID();     // == CUnit::GetAckPersID()
+//   scan CDBAck: valid pAckSequence, condition id 0x66 (=102, order-confirmation), nRPGPersID ==
+//   persID -> return pAckSequence->pDBAckInfo[0]->voices[0].pSound.          // voices[0]!
+// The per-voice variation is carried by the RESOLVED PERS (a hero's GetAckHolder @0x2ba8f0 maps the
+// picked voice to the side defaultPersesSet donor), NOT by the voices[] index, so retail always
+// reads voices[0] of the resolved pers' row. The previous dev FindVoicePersId scan (whole pers
+// table by voice/gender/side, hash iteration order) usually resolved to a bark-less persona (voice
+// 0: ~49 same-key personas, only ~17 own ack rows) -> NULL sound -> the recruit-menu click was
+// SILENT. A recruit-menu merc (non-hero, AckUnit=0) now resolves to its OWN pers id -- every
+// hireable persona owns personal cond-102 rows in the retail game.db (verified offline).
 NDb::CSound* GetPersVoiceAck( NRPG::CUnit *pMerc )
 {
 	if ( !IsValid( pMerc ) )
@@ -250,22 +232,21 @@ NDb::CSound* GetPersVoiceAck( NRPG::CUnit *pMerc )
 	CDBTable<NDb::CDBAck> *pTable = NDatabase::GetTable<NDb::CDBAck>();
 	if ( !pTable )
 		return 0;
-	int nVoice = pMerc->GetVoice();
-	int persId = FindVoicePersId( pMerc, nVoice );   // the per-voice pers (NOT the merc's own single-voice pers)
+	const int persId = pMerc->GetAckPersID();   // retail GetAckHolder-or-own resolution
 	CDBIterator<NDb::CDBAck> it( *pTable );
 	while ( it.MoveNext() )
 	{
 		NDb::CDBAck *rec = it.Get();
 		if ( !rec || !IsValid( rec->pAckSequence ) )
 			continue;
-		if ( rec->nConditionID != 102 )          // the on-select greeting condition (retail pCondition id 0x66)
+		if ( rec->nConditionID != 102 )          // retail: pCondition->nID == 0x66
 			continue;
 		if ( rec->nRPGPersID != persId )
 			continue;
 		NDb::CDBAckInfo *info = rec->pAckSequence->pDBAckInfo[0];
 		if ( !IsValid( info ) || info->voices.empty() )
 			continue;
-		return info->GetVoice( nVoice ).pSound;
+		return info->voices[0].pSound;   // retail: voices[0] of the resolved pers' row
 	}
 	return 0;
 }

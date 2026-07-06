@@ -147,20 +147,19 @@ void CAITacticalCommander::ThinkForNextGoodUnit()
 			ASSERT( IsValid( pManager ) );
 			if ( IsValid( pManager ) && IsValid( pLogic ) )
 			{
-				// Phase-7 supersede: the release logic is command-driven. Think() arms the per-turn
-				// decision pipeline; the concrete combat logic IS a CAIJob, so we run it through the job
-				// manager and harvest its generated commands when it finishes (see DoJob).
+				// S3: the release logic OWNS its manager enrolment. CAICombatLogic::Think() now SELF-Adds
+				// its own CAIJob on the manager iff it decides to think (!CanSkip && IsLogicValid). The
+				// commander must NOT Add it too (that would double-insert the job). WaitForJob only records a
+				// dependency + ASSERTs both jobs are already in `jobs` (aiJob.cpp:170-171); gate it on
+				// IsThinking() -- true only when Think Add'd the job -- so a unit whose Think() chose to SKIP
+				// does not stall the turn waiting on a job that was never enqueued (the commander just DoJob's
+				// past it to the next unit).
 				pLogic->Think();
-				CDynamicCast<CAIJob> pLogicJob( pLogic );
-				if ( IsValid( pLogicJob ) )
+				if ( pLogic->IsThinking() )
 				{
-					// WaitForJob only records the dependency (and asserts the expected job is already
-					// active) - it does NOT enqueue it. The logic-job must be Add()ed first or it never
-					// runs, never finishes, and the commander (waiting on it) never resumes -> the turn
-					// stalls with the units doing nothing. (Release: Add then WaitForJob, same as the
-					// chooser sub-job in CAICombatLogic::DoJob.)
-					pManager->Add( pLogicJob );
-					pManager->WaitForJob( this, pLogicJob );
+					CDynamicCast<CAIJob> pLogicJob( pLogic );
+					if ( IsValid( pLogicJob ) )
+						pManager->WaitForJob( this, pLogicJob );
 				}
 			}
 		}

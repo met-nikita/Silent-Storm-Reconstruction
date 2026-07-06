@@ -258,6 +258,7 @@ set(Main_SRC
   "iCluesMenu.cpp"
   "iObjectivesMenu.cpp"
   "iCommonUI.cpp"
+  "iCriticalIcons.cpp"
   "iDesktopWindow.cpp"
   "iExitMenu.cpp"
   "iAdvFaceGen.cpp"

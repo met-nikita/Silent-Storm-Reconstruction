@@ -240,8 +240,8 @@ bool CPath::AddNewPoint( const SPathPlace& point )
 		}
 	}
 	// ���������� ��������� ����
-	if (( tt >= TT_CLIMB_1 ) && ( tt <= TT_JUMP ))
-		bCanDo = false;
+	if (( tt >= TT_CLIMB_1 ) && ( tt <= TT_JUMP ))   // retail @0x48ad67 (cmp ebp,9) DELIBERATELY excludes
+		bCanDo = false;                              // TT_JUMP_BACK(10) -- a moving-origin jump-back stays on the moving-point branch
 	if ( tt == TT_TURN )
 		newDir = point.GetDirection();
 	if ( ( !last.IsMoving() ) && ( lastDir != newDir ) )
@@ -675,19 +675,23 @@ CPath* SPathFinder2::FindPath( CPathNetwork *pNet, const SPathPlace &src, const 
 	list<SPathPlace> points;
 	SPathPlace cur;
 	SPathPlace parent;
-	if ( !bPathFound ) 
+	if ( !bPathFound )
 	{
 		if ( nPriceLimit <= 40 || ( !bCanFindNotExactPath ) )
 			return 0;
-		// � �������� ������ ����� �� �������
-		// ������ ��������� "�������"
+		// retail SPathFinder::FindPath @0x8b080 approximate fallback: a wave-visited place
+		// qualifies ONLY when it is on the SAME FLOOR as the target it approximates or within
+		// sqrt(2) of it (squared distance <= 2.0); the best candidate is tracked by SQUARED
+		// distance alone (no AP term) and accepted only within sqrt(5) (fBest > 5.0 -> no path).
+		// The old dev estimation (sqrt(dist) + koeff*AP, cap 1e7) accepted ANY visited cell, so
+		// a click on a floor the wave never reached (e.g. a -1 basement with a broken descent)
+		// silently produced a long path to the nearest current-floor cell instead of retail's
+		// UCR_PATH_NOT_FOUND -- masking the unreachability instead of reporting it.
 		CPathPlaceTable::CMovesHash::iterator thi;
 		vector<CVec3> dstCP;
 		for ( int i = 0; i < dst.size(); ++i )
 			dstCP.push_back( pNet->GetCP( dst[i] ) );
-		int oneMoveAP = pCosts[ MT_CLIMB_4 ];
-		float fKoeff = ( FP_GRID_STEP / oneMoveAP ); 
-		float fBestEstimation = 1e4;
+		float fBest = 1000.0f;
 		for ( thi = table.data.begin(); thi != table.data.end(); ++thi )
 		{
 			SPathPlace p( thi->first );
@@ -695,22 +699,16 @@ CPath* SPathFinder2::FindPath( CPathNetwork *pNet, const SPathPlace &src, const 
 			for ( int i = 0; i < dst.size(); ++i )
 			{
 				float fDist2 = fabs2( pCP - dstCP[ i ] );
-				int nAP = thi->second.cost;
-				if ( fDist2 > fBestEstimation * fBestEstimation ) // do not calc sqrt if it's not necessary
-					continue;
-				float fTotalEstimation = sqrt( fDist2 ) + fKoeff * nAP;
-				if ( fTotalEstimation < fBestEstimation )
+				if ( ( pNet->GetFloor( dst[i] ) == pNet->GetFloor( p ) || fDist2 <= 2.0f ) &&
+				     fDist2 < fBest )
 				{
-					fBestEstimation = fTotalEstimation;
-					cur = p;	
+					fBest = fDist2;
+					cur = p;
 				}
 			}
 		}
-		if ( fBestEstimation > 1e7 )
-		{
-			ASSERT(0);
-			return 0;
-		}
+		if ( fBest > 5.0f )
+			return 0;	// retail: an unreachable target IS a failed path (no ASSERT -- normal case)
 		parent = cur;
 	}
 	else // path was found

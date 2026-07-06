@@ -454,6 +454,13 @@ CCommandExecute* CreateActionExecutor( CUnitServer *pUS, CCmd *pCmd, EUnitComman
 		CDynamicCast<CCmdShootTile> pAttackTile(pCmd);
 		if (pAttackTile)
 		{
+			// retail @0x39d4f0: every attack branch opens with the world NoAttack gate (base zones) --
+			// !IsAttackAllowed() (IWorld vtbl+0xc8, CWorld::bAttackAllowed) -> UCR_GENERAL_FAILURE, no executor
+			if ( !pUS->GetWorld()->IsAttackAllowed() )
+			{
+				*pError = UCR_GENERAL_FAILURE;
+				return 0;
+			}
 			EActionType eType = GetActionType(pUS);
 			switch (eType)
 			{
@@ -499,6 +506,12 @@ CCommandExecute* CreateActionExecutor( CUnitServer *pUS, CCmd *pCmd, EUnitComman
 			CDynamicCast<CCmdShootObject> pAttackObject(pCmd);
 			if (pAttackObject)
 			{
+				// retail @0x39d4f0 CCmdShootObject entry: the same world NoAttack gate (base zones)
+				if ( !pUS->GetWorld()->IsAttackAllowed() )
+				{
+					*pError = UCR_GENERAL_FAILURE;
+					return 0;
+				}
 				CDynamicCast<NWorld::CUnitServer> pUnitTarget(pAttackObject->pTarget);
 				CDynamicCast<NRPG::IWeaponItem> pWeapon(pUS->GetUnitRPG()->GetInventory()->GetActive());
 				if (pWeapon)
@@ -564,6 +577,12 @@ CCommandExecute* CreateActionExecutor( CUnitServer *pUS, CCmd *pCmd, EUnitComman
 				CDynamicCast<CCmdSetGrenadeOnObject> pSetTrap(pCmd);
 				if (pSetTrap)
 				{
+					// retail @0x39d4f0 CCmdSetGrenadeOnObject entry: world NoAttack gate (base zones)
+					if ( !pUS->GetWorld()->IsAttackAllowed() )
+					{
+						*pError = UCR_GENERAL_FAILURE;
+						return 0;
+					}
 					if (GetActionType(pUS) != AT_GRENADE)
 					{
 						*pError = UCR_INVALID_COMMAND;
@@ -606,6 +625,12 @@ CCommandExecute* CreateActionExecutor( CUnitServer *pUS, CCmd *pCmd, EUnitComman
 						CDynamicCast<CCmdSetMineOnTile> pSetTrap(pCmd);
 						if (pSetTrap)
 						{
+							// retail @0x39d4f0 CCmdSetMineOnTile entry: world NoAttack gate (base zones)
+							if ( !pUS->GetWorld()->IsAttackAllowed() )
+							{
+								*pError = UCR_GENERAL_FAILURE;
+								return 0;
+							}
 							if (GetActionType(pUS) != AT_MINE)
 							{
 								*pError = UCR_INVALID_COMMAND;
@@ -678,7 +703,7 @@ CCommandExecute* CreateActionExecutor( CUnitServer *pUS, CCmd *pCmd, EUnitComman
 													else {
 														CDynamicCast<CCmdTakeCorpseOnDeploy> pCmdCorpse(pCmd);
 														if (pCmdCorpse)
-															return new CExecTakeCorpseOnDeploy(pCmdCorpse->pCarrier, pCmdCorpse->pCorpse, pCmdCorpse->bDead);
+															return new CExecTakeCorpseOnDeploy(pCmdCorpse->pCarrier, pCmdCorpse->pCorpse);
 														else {
 															CDynamicCast<CCmdTakeCorpse> pCmdCorpse(pCmd);
 															if (pCmdCorpse)

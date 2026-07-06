@@ -37,6 +37,9 @@ enum EFaceExpression
 	FE_DISGUST = 9,
 };
 EFaceExpression String2Expression( const string &sz );
+// retail @0x42cf30: first live FaceExpression2Sequences (0x7a) record whose eExpression matches ->
+// its sequence; null on a miss (NO FE_NORMAL special case -- a "Calm" row would resolve too).
+CSequence* GetSequenceByExpression( EFaceExpression eExpression );
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CHeadTexture - base record for the transformable face/eye/eyelash texture variants. Not a table of
 // its own; the three concrete variants below are the registered tables, all sharing this layout.

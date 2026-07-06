@@ -703,7 +703,10 @@ void CExitZoneSector::Draw( const STime &sTime, NGScene::I2DGameView *pView )
 CChapterMapUI::CChapterMapUI( const SWindowInfo &sInfo, NGame::IChapterMap *_pChapter ):
 	CWindow( sInfo ), pChapter( _pChapter )
 {
-	sCursor = SCursorInfo( NDb::GetUITexture( 492 ) );
+	// retail CChapterMapUI ctor @0x1aa1b0: disasm @0x5aa2a3 `mov ecx,1` -> NDb::GetUICursor(1) =
+	// UICursors row 1 "xz" (UITexture 295, NormalPen.cur) -- the chapter-map default cursor.
+	// (492 was the pre-remap arbitrary id = HitLocationLeftArm.cur.)
+	sCursor = SCursorInfo( NDb::GetUITexture( 295 ) );
 
 	CDGPtr<CPtrFuncBase<CChapterInfo> > pChapterInfo = pChapter->GetChapterInfo();
 	pChapterInfo.Refresh();

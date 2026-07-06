@@ -91,13 +91,25 @@ BEGIN_SCRIPT_COMMAND( UnitSayAck, "un" )
 END_SCRIPT_COMMAND
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // retail @0x2fb7e0 ("un[-1]"): record a script-forced to-hit on the unit (CUnitServer+0x1e8; -1 clears).
-// FAITHFUL ELISION: like retail, the field is write-only -- no to-hit path reads it (verified: the only
-// CUnitServer+0x1e8 reads in the decomp are an unrelated vtable call), so scripted shots land via the
-// normal tile/unit to-hit, exactly as in the original. Registered so the binding exists (was nil before).
+// The value IS read: retail NRPG::RPGUnitGetToHit @0x2b4ae0 and RPGUnitGetTileToHit @0x2b4df0 both open
+// with `if (nScriptToHit >= 0) return nScriptToHit;` -- an ABSOLUTE replacement of the whole to-hit
+// computation for that attacker (shoot/melee/throw/rocket; grenades excluded -- no read in the grenade
+// calcer). The earlier "write-only, FAITHFUL ELISION" claim here was a bad audit: it grepped raw +0x1e8
+// offsets, but PDB-typed Ghidra renders the field BY NAME -- grep `nScriptToHit`, not the offset.
 BEGIN_SCRIPT_COMMAND( UnitSetToHit, "un[-1]" )
 	CDynamicCast<NWorld::CUnitServer> pUS( luaParams[ 0 ].p );
 	if ( pUS )
 		pUS->SetScriptToHit( luaParams[ 1 ].n );
+	return 0;
+END_SCRIPT_COMMAND
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail luaUnitLockPose @0x2fc850 ("ub[false]"): set the unit's pose-lock (CUnitServer+0x1f4,
+// bForceNoChangePose). While locked, CannotFreelyChangePoses() forces move-only pathfinding, so the
+// unit keeps its current pose along any walk (used by scripts to hold a unit's stance during a scene).
+BEGIN_SCRIPT_COMMAND( UnitLockPose, "ub[false]" )
+	CDynamicCast<NWorld::CUnitServer> pUS( luaParams[ 0 ].p );
+	if ( pUS )
+		pUS->SetForceNoChangePose( luaParams[ 1 ].b );
 	return 0;
 END_SCRIPT_COMMAND
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -400,14 +412,25 @@ BEGIN_SCRIPT_COMMAND( UnitKill, "u" )
 	return 0;
 END_SCRIPT_COMMAND
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-BEGIN_SCRIPT_COMMAND( UnitPlayAnimation, "unb" )
+// retail luaUnitPlayAnimation @0x2f80f0 ("unbb[false]"): the 3rd bool selects the MODE, not looping.
+// false -> play as a cancellable COMMAND (4th bool = bLoop). true -> install the clip as the unit's
+// CUSTOM IDLE (CUnitAnimator::SetCustomIdleAnimation): no command at all -- the animator plays it
+// whenever the unit idles, it can't be cancelled by commands, and the unit auto-returns to it after
+// any interruption. The old Jan03 "unb" reading (3rd arg = bCircled command loop) turned scripted
+// persistent poses (e.g. EFirst's lying wounded commander, anim 4437) into one-shot commands that
+// the first stray order cancelled forever.
+BEGIN_SCRIPT_COMMAND( UnitPlayAnimation, "unbb[false]" )
 	CDynamicCast<NWorld::CUnitServer> pUS(luaParams[0].p);
 	if (pUS)
 	{
 		int nDBAnimationID = luaParams[ 1 ].n;
-		bool bCircled = luaParams[ 2 ].b;
-		pUS->Do( new NWorld::CCmdSetCommand( pUS, new NWorld::CCmdPlayAnimation( nDBAnimationID, bCircled ) ) );
-		pUS->Do( new NWorld::CCmdSetCommand( pUS, new NWorld::CCmdContinue() ) );
+		if ( !luaParams[ 2 ].b )
+		{
+			pUS->Do( new NWorld::CCmdSetCommand( pUS, new NWorld::CCmdPlayAnimation( nDBAnimationID, luaParams[ 3 ].b ) ) );
+			pUS->Do( new NWorld::CCmdSetCommand( pUS, new NWorld::CCmdContinue() ) );
+		}
+		else
+			pUS->animator.SetCustomIdleAnimation( NDb::GetAnimation( nDBAnimationID ) );
 	}
 	return 0;
 END_SCRIPT_COMMAND

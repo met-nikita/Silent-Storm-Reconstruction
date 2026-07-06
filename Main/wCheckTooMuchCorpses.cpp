@@ -18,17 +18,23 @@
 //                                     (retail bNotAddedToVisitors @+0x12c = 1); the
 //                                     single-oldest path follows it with
 //                                     CDumbUnitServer::Update() (bindGlobal.Update ->
-//                                     guarded CSyncSrc<IVisObj>::Update on +0x30/+0x34),
-//                                     the bulk path does NOT -- release-faithful asymmetry.
+//                                     guarded CSyncSrc<IVisObj>::Update on +0x30/+0x34).
+//                                     The v1.1 bulk path wrote the byte alone; v1.2
+//                                     @0x748140 fixed the asymmetry (full mark in both
+//                                     paths) -- ported below.
 //   * cell of a corpse            -> CUnit::GetPosition().GetCP()  (CUnit-base vtbl +0x44)
 //   * REMOVABLE iff               -> !CanFight() (primary vtbl +0x44)
 //                                 && !IsClueUnit() (CUnit-base vtbl +0x14, retail
 //                                    @0x3c6900 == nClueCount>0)
 //                                 && !IsEmptyPK() (CUnit-base vtbl +0x10)
-//                                 -- a live, quest-clue-carrying or empty-panzerklein
-//                                    object must not vanish. (The answer-key doc-comment
-//                                    guessed "IsActive/IsHeld/IsPossessed"; the real
-//                                    methods were resolved from the Game.exe vtables.)
+//                                 && !IsValid( GetWearingDBPK() ) -- v1.2 @0x748340's
+//                                    fourth gate: the worn Panzerklein must be absent or
+//                                    dead (pPK==0 || nObjData bit31)
+//                                 -- a live, quest-clue-carrying, empty-panzerklein or
+//                                    live-PK-wearing object must not vanish. (The
+//                                    answer-key doc-comment guessed "IsActive/IsHeld/
+//                                    IsPossessed"; the real methods were resolved from
+//                                    the Game.exe vtables.)
 //
 // PARITY SURFACE ONLY -- nothing calls these yet (behaviour-neutral). The release
 // CDumbUnitServer::IsAddedToVisitor() also tested bNotAddedToVisitors, so a freshly
@@ -78,8 +84,10 @@ void RemoveOldestCorpse( vector< CObj< CUnitServer > > &corpses )
 }
 
 // NWorld::TryRemoveCorpses @0x347d00 -- flag the n oldest; when the demand covers the
-// whole list, flag everything. The bulk branch sets the byte only, with NO Update -- the
-// asymmetry vs. RemoveOldestCorpse is release-faithful.
+// whole list, flag everything. v1.2 @0x748140: the bulk branch now performs the FULL mark
+// (byte + guarded vis-sync Update), exactly like RemoveOldestCorpse -- v1.1 wrote the byte
+// alone here, never notifying the vis sync. (The CArray2D overload below calls this
+// function, so it inherits the fix, matching the v1.2 @0x7481e0 de-inlining.)
 void TryRemoveCorpses( vector< CObj< CUnitServer > > &corpses, int n )
 {
 	if ( n < (int)corpses.size() )
@@ -90,7 +98,10 @@ void TryRemoveCorpses( vector< CObj< CUnitServer > > &corpses, int n )
 	else
 	{
 		for ( int i = 0; i < (int)corpses.size(); ++i )
+		{
 			corpses[i]->MarkNotAddedToVisitors();
+			corpses[i]->Update();   // v1.2: full mark (was byte-only in v1.1)
+		}
 	}
 }
 
@@ -107,7 +118,8 @@ void TryRemoveCorpses( CArray2D< vector< CObj< CUnitServer > > > &buckets, int n
 
 // NWorld::FillQuantities @0x347f20 -- bucket every visitor-set corpse into 4m cells
 // (cell = Float2Int((cp - ptMin) * 0.25 + 0.5)), counting all of them in `counts` and
-// collecting the REMOVABLE ones (!CanFight && !IsClueUnit && !IsEmptyPK) in `buckets`.
+// collecting the REMOVABLE ones (!CanFight && !IsClueUnit && !IsEmptyPK && no live worn
+// PK -- the fourth gate is v1.2 @0x748340) in `buckets`.
 // bResize sizes the grids on the first pass; the recount passes just clear them.
 void FillQuantities( int nXSize, int nYSize, const CVec3 &ptMin,
 					 const list< CObj< CUnitServer > > &units, bool bResize,
@@ -135,7 +147,11 @@ void FillQuantities( int nXSize, int nYSize, const CVec3 &ptMin,
 		int nX = Float2Int( ( cp.x - ptMin.x ) * 0.25f + 0.5f );
 		int nY = Float2Int( ( cp.y - ptMin.y ) * 0.25f + 0.5f );
 		counts[nY][nX] += 1;
-		if ( !pUS->CanFight() && !pUS->IsClueUnit() && !pUS->IsEmptyPK() )
+		// v1.2 @0x748340: fourth removability gate -- a corpse still wearing a LIVE
+		// Panzerklein is counted but never auto-removed (worn-PK record must be absent
+		// or dead: pPK==0 || (nObjData & 0x80000000), i.e. !IsValid).
+		if ( !pUS->CanFight() && !pUS->IsClueUnit() && !pUS->IsEmptyPK()
+			 && !IsValid( pUS->GetWearingDBPK() ) )
 			buckets[nY][nX].push_back( pUS );
 	}
 }

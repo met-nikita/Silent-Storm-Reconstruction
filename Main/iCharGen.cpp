@@ -18,6 +18,7 @@
 #include "iCharGen.h"
 #include "iFaceGen.h"
 #include "iGlobalMap.h"
+#include "ModManager.h"      // v1.2 @0x1b5840: CModManager::GetBaseVersion keys the persSet rebuild
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 namespace NUI
 {
@@ -40,16 +41,26 @@ static SClassToID sClassTable[] =
 // NUI::GetPers  @0x1b5840  -- the CharGen model-override roll. Lazily caches every "listable" persona
 // (NDb::CRPGPers::bCanBeListed), then walks a rolling static index by nDirection (+1/-1) to the next
 // persona matching the chosen side + gender. model_left/right step through the cached set.
+// v1.2 @0x1b5840: the once-only guard is version-keyed on CModManager::GetBaseVersion() (bumped by
+// every mod Activate) -- on mismatch persSet is cleared, the cursor reset to 0, and the cache rebuilt
+// from the re-imported CRPGPers table, so no stale pers refs survive a runtime DB reload.
+// v1.2 @0x1b5840 also fixed v1.1's cursor-wrap off-by-one (strict `nSize < nCounter` left the cursor
+// AT nSize -> persSet[nSize] one-past-the-end read); the `nCounter >= nSize` wrap below IS the fixed form.
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 NDb::CRPGPers* GetPers( int nDirection, NDb::CSide *pSide, bool bFemale )
 {
 	static vector<CPtr<NDb::CRPGPers> > persSet;
 	static bool bInitialized = false;
 	static int nCounter = 0;
+	// v1.2 @0x1b5840: function-local static caches the DB version the set was built at
+	static int nBaseVersion = CModManager::GetBaseVersion();
 
-	if ( !bInitialized )
+	if ( !bInitialized || nBaseVersion != CModManager::GetBaseVersion() )
 	{
 		bInitialized = true;
+		nBaseVersion = CModManager::GetBaseVersion();   // v1.2 @0x1b5840
+		persSet.clear();                                // v1.2 @0x1b5840: drop the previous DB's pers refs
+		nCounter = 0;                                   // v1.2 @0x1b5840: cursor reset with the rebuild
 		CDBTable<NDb::CRPGPers> *pTable = NDatabase::GetTable<NDb::CRPGPers>();
 		CDBIterator<NDb::CRPGPers> it( *pTable );
 		while ( it.MoveNext() )
@@ -65,7 +76,7 @@ NDb::CRPGPers* GetPers( int nDirection, NDb::CSide *pSide, bool bFemale )
 	{
 		nCounter += nDirection;
 		if ( nCounter < 0 ) nCounter = nSize - 1;
-		if ( nCounter >= nSize ) nCounter = 0;
+		if ( nCounter >= nSize ) nCounter = 0;   // v1.2 @0x1b5840: `>=` (v1.1 shipped strict `<` swap -- OOB)
 
 		NDb::CSide *pPersSide = persSet[nCounter]->pSide;
 		if ( pPersSide == pSide && persSet[nCounter]->bIsFemale == bFemale )

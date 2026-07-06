@@ -13,7 +13,12 @@ enum ETBSEvent
 	TBS_START_REAL_TIME,
 	TBS_ACTION_FINISH,
 	TBS_CANCEL_ACTION,
-	TBS_RECALC_COMMAND
+	TBS_RECALC_COMMAND,
+	// retail ETBSEvent (its value differs in the binary; transient runtime event, never serialized, so the
+	// enumerator order here is internal). A global situation change / interrupt broadcasts THIS, not
+	// TBS_CANCEL_ACTION: a unit caught MID-MOVE must be snapped to a clean grid cell and have its move
+	// executor released (see CUnitServer::OnTBSEvent @0x3c2a90 / CTBSWorld::CancelAllAction @0x36f820).
+	TBS_STOP_MOVE_AND_CANCEL_ACTION
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // when someone holds CObj on such object then action is in progress
@@ -214,6 +219,11 @@ private:
 	}
 	void RecalcCurrentPlayerCommands()
 	{
+		// forced-RT (sequence): retail's stack top is the OWNERLESS sequence interrupt -- there is no
+		// current player to recalc. With the owned turn now PRESERVED beneath the sequence span, this
+		// must not zap that player's executors (TBS_RECALC pExec=0) on every mid-cutscene action edge.
+		if ( IsForcedRealTime() )
+			return;
 		if ( !interrupts.empty() )
 			interrupts.back().pPlayer->OnTBSEvent( TBS_RECALC_COMMAND );//RecalcCommands();
 	}
@@ -295,8 +305,15 @@ protected:
 	}
 	void CancelAllAction()
 	{
+		// retail CTBSWorld::CancelAllAction @0x36f820 broadcasts TBS_STOP_MOVE_AND_CANCEL_ACTION (NOT
+		// TBS_CANCEL_ACTION). A unit interrupted MID-MOVE must be snapped to a clean grid cell and have its
+		// move executor released; with plain TBS_CANCEL_ACTION the unit is left mid-stride with a live,
+		// half-cancelled CExecMove (still IsExecuting()), so later MOVE orders re-aim that dead exec and are
+		// silently swallowed by CUnitServer::Do's re-route branch -- only an ATTACK (pExec->Cancel()) frees
+		// it. (The lighter per-player TBS_CANCEL_ACTION path -- IsRequestCancel / a human's own non-mutual
+		// sighting -- is unchanged.)
 		for ( TPlayerList::iterator i = players.begin(); i != players.end(); ++i )
-			(*i)->OnTBSEvent( TBS_CANCEL_ACTION );//CancelAction();
+			(*i)->OnTBSEvent( TBS_STOP_MOVE_AND_CANCEL_ACTION );
 	}
 	virtual bool IsTBSRealTimeModePossible() const = 0;
 	virtual void ExecuteCommand( CCommand *_pCmd ) = 0;
@@ -367,6 +384,11 @@ protected:
 	virtual const bool IsForcedRealTime() const = 0;
 	virtual void OnNewTurn() = 0;
 public:
+	// the EndSequence edge: retail luaEndSequence @0x2f1a60 pops the ownerless sequence top via
+	// EndOfTurn (CTBSWorld vtbl+0x1c @0x3776f0), whose !IsRealTime() branch re-fires OnPassControl to
+	// the RESUMED owned turn (its commander re-syncs and thinks: lua OnStartTurn, tactical Think). The
+	// dev forced-RT model REVEALS the preserved turn instead of popping -- fire the same control-pass.
+	void OnSequenceEndPassControl() { if ( !IsRealTime() ) OnPassControl(); }
 	CTBSWorld()
 	{
 		nLastPlayerID = 10000;
@@ -469,11 +491,17 @@ public:
 	}
 	void Segment()
 	{
-		if ( IsForcedRealTime() )
-		{
-			addInterrupts.clear();
-			interrupts.clear();
-		}
+		// retail StartSequence @0x375dd0 pushes an OWNERLESS interrupt ON TOP of any owned turn and
+		// EndSequence pops it back: a turn begun BEFORE the sequence (GFirst starts one at zone load --
+		// Diplomacies record 36 makes 0<->2 hostile, so StartTBSGame finds real time impossible)
+		// SURVIVES the cutscene and RESUMES afterwards -- the enemies do not act while the sequence
+		// fades out and the first post-cutscene turn keeps its retail owner. The Jan03 forced-RT wipe
+		// that used to live here destroyed that turn (and the robbers' WantTurnBased then seized the
+		// first turn on the EndSequence edge). The bForcedRealTime span now PRESERVES the stack:
+		// IsRealTime() is forced-true regardless, the fetch below runs the every-player sequence fetch
+		// (retail FetchNewCommands' sequence branch), and IsTBSUnitActive() opens every unit to script
+		// commands while forced. Nothing can push onto the stack meanwhile (AddInterrupt /
+		// WantTurnBased / StartPlayerTurn / GivePlayerTurn all bail on IsForcedRealTime).
 
 		for ( TPlayerList::iterator i = players.begin(); i != players.end(); ++i )
 			(*i)->GetCommander()->Segment();
@@ -496,6 +524,13 @@ public:
 			{
 				bFirstTurn = true;
 				StartPlayerTurn( addInterrupts.front().pPlayer );
+				// retail folded the addInterrupts staging away entirely (CTBSWorld::AddInterrupt @0x377400 /
+				// WantTurnBased @0x375b10 consume the request synchronously: ONE StartPlayerTurn, ONE
+				// pass-control). Leaving the staged entry here made the NEXT Segment take the else-branch
+				// on the SAME player -- a duplicate OnPassControl that re-entered every commander's
+				// turn-start (double CAICommander::OnPassControl -> double tactical Think / lua OnStartTurn)
+				// one segment after the first, wrecking the just-started AI turn's job bookkeeping.
+				addInterrupts.clear();
 			}
 			else
 			{
@@ -539,8 +574,10 @@ public:
 		}
 		for ( TPlayerList::iterator i = players.begin(); i != players.end(); ++i )
 			(*i)->GetCommander()->ClearRequests();
-		// decide on commands for next segment
-		if ( interrupts.empty() )
+		// decide on commands for next segment. Keyed on IsRealTime() (forced-RT OR empty stack), NOT on
+		// stack emptiness: while a sequence runs over a PRESERVED owned turn the world must fetch from
+		// EVERY player (retail FetchNewCommands' sequence branch), not just the interrupt top.
+		if ( IsRealTime() )
 		{
 			// real time mode
 			// pick commands from every player
@@ -563,7 +600,15 @@ public:
 	}
 	TPlayer* GetTBSCurrentPlayer() const { if ( interrupts.empty() ) return 0; return interrupts.back().pPlayer; }
 	bool IsRealTime() const { return IsForcedRealTime() || interrupts.empty(); }
-	bool IsTBSUnitActive( TUnit *pUnit ) const { if ( interrupts.empty() ) return true; return IsInSet( interrupts.back().units, pUnit ); }
+	// The AI world-executor tri-state (retail CTBSWorld vtbl+0x20/+0x24/+0x28 = IsRealTime/IsSequence/IsTurnBased,
+	// probed by CAICombatLogic IsNeedToThink/IsEndOfTurn/IsIdleJob). IsTurnBased == !IsRealTime (disasm-exact,
+	// @0x00375a50). IsSequence models retail's player-less current interrupt via IsForcedRealTime() -- the a5dll
+	// has no world-level sequence predicate (cf. GivePlayerTurn), a documented minor divergence for the idle probe.
+	bool IsTurnBased() const { return !IsRealTime(); }
+	bool IsSequence() const { return !interrupts.empty() && IsForcedRealTime(); }
+	// forced-RT (sequence) opens EVERY unit to commands -- the dev analog of retail's every-player
+	// sequence fetch; a preserved owned turn must not block other players' scripted moves mid-cutscene.
+	bool IsTBSUnitActive( TUnit *pUnit ) const { if ( IsForcedRealTime() || interrupts.empty() ) return true; return IsInSet( interrupts.back().units, pUnit ); }
 	bool CanPlayerSeeAction( TPlayer *_pPlayer ) const
 	{
 		// check if _pPlayer see any units performing skippable action

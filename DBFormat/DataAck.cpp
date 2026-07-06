@@ -20,7 +20,13 @@ void CDBAckInfo::Import()
 {
 	NDatabase::ImportField( "WhoID", &nRPGPersID );
 	NDatabase::ImportField( "StringID", &pText );
-	voices.resize( 6 );
+	// retail Import @0x42d280: ONE "FaceExpression" column seeds the expression of ALL SIX voice
+	// slots (it is the fill value of the voices resize)
+	string szExpr;
+	NDatabase::ImportField( "FaceExpression", &szExpr );
+	SAckVoice sProto;
+	sProto.eExpression = String2Expression( szExpr );
+	voices.assign( 6, sProto );
 	NDatabase::ImportField( "SoundID", &voices[ 0 ].pSound );
 	NDatabase::ImportField( "HeadSequenceID", &voices[ 0 ].pSequence );
 	NDatabase::ImportField( "SoundID1", &voices[ 1 ].pSound );
@@ -71,6 +77,7 @@ void CDBAck::Import()
 	NDatabase::ImportField( "Probability", &fProbability );
 	NDatabase::ImportField( "AckSeqID", &pAckSequence );
 	NDatabase::ImportField( "ConditionID", &nConditionID );
+	NDatabase::ImportField( "ConditionID", &pCondition );	// retail Import @0x42d0b0: same column, resolved as the AckConditions record ref
 	NDatabase::ImportField( "Param0", &sParam[0] );
 	NDatabase::ImportField( "Param1", &sParam[1] );
 	NDatabase::ImportField( "Param2", &sParam[2] );
@@ -82,10 +89,11 @@ int CDBAck::operator&( CStructureSaver &f )
 	f.Add(2,&fProbability); 
 	f.Add(3,&nRPGPersID);
 	f.Add(4,&pAckSequence); 
-	f.Add(5,&nConditionID); 
-	for ( int i = 0; i < N_ACK_MAX_PARAM_COUNT; ++i )	
+	f.Add(5,&nConditionID);	// dev-only raw id (retail stores no tag 5; kept for dev-save compat + CreateAck/SayAck matching)
+	for ( int i = 0; i < N_ACK_MAX_PARAM_COUNT; ++i )
 		f.Add( 6+i ,&sParam[i] );
-	return 0; 
+	f.Add(9,&pCondition);	// retail CDBAck::operator& @0x42d110 tag 9
+	return 0;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CDBAck* GetDBAck( int nID ) 

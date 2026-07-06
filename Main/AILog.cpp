@@ -127,6 +127,21 @@ void CAILogShot::GetCommands( list< CPtr<NWorld::CCommand> > *Commands )
 	Commands->push_back( new NWorld::CCmdSetCommand( pAIUnit->GetUnitServer(), pCmd ) );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// CAILogMelee (release-new; retail id 0x52533166). Mirror of CAILogShot carrying the melee weapon for save
+// fidelity; GetCommands @0x460d20 emits the identical CCmdShootObject against the enemy (no HL_ANY pin, no
+// validity guard -- exactly the CAILogShot shape, over pEnemy instead of pTarget).
+////////////////////////////////////////////////////////////////////////////////////////////////////
+CAILogMelee::CAILogMelee(	IAIUnit *_pAIUnit, IAIUnit *_pEnemy, CAIMeleeWeapon *_pWeapon, NAI::EHitLocation _eHitLocation )
+	: CAILogRecord(_pAIUnit), pEnemy(_pEnemy), pWeapon(_pWeapon), eHitLocation(_eHitLocation)
+{
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CAILogMelee::GetCommands( list< CPtr<NWorld::CCommand> > *Commands )
+{
+	NWorld::CCmd *pCmd = new NWorld::CCmdShootObject( pEnemy->GetUnitServer(), 0, eHitLocation );
+	Commands->push_back( new NWorld::CCmdSetCommand( pAIUnit->GetUnitServer(), pCmd ) );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 // CAILogShotPoint
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CAILogShotPoint::CAILogShotPoint( IAIUnit *_pAIUnit, CVec3 _ptTarget ):
@@ -498,6 +513,42 @@ void CAILogThrowGrenade::GetCommands( list< CPtr<NWorld::CCommand> > *Commands )
 	Commands->push_back( new NWorld::CCmdSetCommand( pAIUnit->GetUnitServer(), pCmd ) );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// CAILogThrowKnife - retail NAI::CAILogThrowKnife (release-new). Value ctor @0x45c770; Commit == retail
+// ModifyState @0x45c7f0 (knife leaves inventory, hand empties); GetCommands == GetWorldCommands @0x460c30
+// (CCmdShootObject vs the enemy, eHL pinned HL_ANY). RollBack is the a5dll-only inverse of Commit (mirrors
+// CAILogThrowGrenade::RollBack) so the planner's look-ahead can undo a speculative commit.
+////////////////////////////////////////////////////////////////////////////////////////////////////
+CAILogThrowKnife::CAILogThrowKnife( IAIUnit *_pAIUnit, IAIUnit *_pEnemy, CAIThrowingWeapon *_pWeapon, NAI::EHitLocation _eHitLocation )
+	: CAILogRecord( _pAIUnit ), pEnemy( _pEnemy ), pWeapon( _pWeapon ), eHitLocation( _eHitLocation )
+{
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CAILogThrowKnife::RollBack()
+{
+	CPtr<CAIInventory> pInventory = pAIUnit->GetAIInventory();
+	pInventory->AddThrowingWeapon( pWeapon );
+	pInventory->SetCurrentItem( pWeapon );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CAILogThrowKnife::Commit()
+{
+	// retail ModifyState @0x45c7f0: RemoveItem(pWeapon) + SetCurrentItem(0). The a5dll CAIInventory keeps the
+	// knife in its typed throwingWeapons vector, so the generic retail RemoveItem maps to RemoveThrowingWeapon
+	// (mirrors CAILogThrowGrenade::Commit -> RemoveGrenade). The record's own pWeapon CPtr keeps the knife alive.
+	CPtr<CAIInventory> pInventory = pAIUnit->GetAIInventory();
+	pInventory->RemoveThrowingWeapon( pWeapon );
+	pInventory->SetCurrentItem( 0 );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CAILogThrowKnife::GetCommands( list< CPtr<NWorld::CCommand> > *Commands )
+{
+	// @0x460c30 -- CCmdShootObject aimed at the enemy, eHL PINNED to HL_ANY (-1): a knife throw is not aimed at
+	// a body zone (the decode stores -1 outright, ignoring the recorded eHitLocation, which is kept only for
+	// save/load fidelity). Same shape as CAILogShot / CAILogBeginSnipe.
+	NWorld::CCmd *pCmd = new NWorld::CCmdShootObject( pEnemy->GetUnitServer(), 0, HL_ANY );
+	Commands->push_back( new NWorld::CCmdSetCommand( pAIUnit->GetUnitServer(), pCmd ) );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 // CAILogExpediency
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CAILogExpediency::CAILogExpediency(	IAIUnit *_pAIUnit, int nExpediency ):
@@ -685,6 +736,7 @@ using namespace NAI;
 //
 REGISTER_SAVELOAD_CLASS( 0x52822121, CAILogContainer );
 REGISTER_SAVELOAD_CLASS( 0x52822127, CAILogShot );
+REGISTER_SAVELOAD_CLASS( 0x52533166, CAILogMelee );
 REGISTER_SAVELOAD_CLASS( 0x52822122, CAILogPosition );
 REGISTER_SAVELOAD_CLASS( 0x52822125, CAILogSpendAP );
 REGISTER_SAVELOAD_CLASS( 0x52822126, CAILogSpendHP );
@@ -697,6 +749,7 @@ REGISTER_SAVELOAD_CLASS( 0x51362145, CAILogDropItem );
 REGISTER_SAVELOAD_CLASS( 0x51362146, CAILogSpendAmmo );
 REGISTER_SAVELOAD_CLASS( 0x51362147, CAILogHurt );
 REGISTER_SAVELOAD_CLASS( 0x50732172, CAILogThrowGrenade );
+REGISTER_SAVELOAD_CLASS( 0x52533165, CAILogThrowKnife );
 REGISTER_SAVELOAD_CLASS( 0x50172150, CAILogExpediency );
 REGISTER_SAVELOAD_CLASS( 0x50872131, CAILogChangeShootMode );
 REGISTER_SAVELOAD_CLASS( 0x50972130, CAILogChangeMaxToHit );

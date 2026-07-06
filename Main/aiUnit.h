@@ -124,6 +124,13 @@ public:
 	// release CAIUnit::OnAISegment @0xad2c0: per-segment tick that builds + ticks the unit's CAIEventTracker. Non-pure
 	// (default no-op) so non-CAIUnit IAIUnit impls are unaffected and the vtable-order append is harmless.
 	virtual void OnAISegment() {}
+	// release CAIUnit::OnSequenceStarted @0xadec0 / OnSequenceFinished @0xad3f0 -- the per-unit
+	// BeginSequence/EndSequence notify (retail luac_BeginSequence @0x2f1890 / EndSequence @0x2f1a60 run
+	// them via GetAIUnits + CallAIFunc). Started: SetLogic(0), suspend the NORMAL route, drop any stale
+	// sequence route. Finished: SetLogic(0), END the sequence route, RESUME the normal route. Non-pure
+	// defaults (vtable-order append, same pattern as OnAISegment).
+	virtual void OnSequenceStarted() {}
+	virtual void OnSequenceFinished() {}
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 IAIUnit *CreateAIUnit( NWorld::CUnitServer *pUnitServer, bool bUnderAIControl );

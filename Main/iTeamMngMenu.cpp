@@ -15,7 +15,12 @@
 #include "RPGGlobal.h"
 #include "RPGItemInfo.h"
 #include "RPGItem.h"
+#include "RPGPerk.h"					// NRPG::CPerk/CPerksTree (CUnitPerksPanel rows)
+#include "..\DBFormat\DataPerk.h"		// NDb::CDBPerk (perk row icon/tooltip)
+#include "..\DBFormat\DataMisc.h"		// NDb::CMedal (CUnitMedalsPanel rows)
 #include "Interface.h"
+#include "GSceneUtils.h"	// NGScene::CCFBTransform (UIWrap.h dependency)
+#include "UIWrap.h"			// NUI::CImageDraw -- the recruit-card placeholder background
 #include "iCommonUI.h"
 #include "iTeamMngMenu.h"
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -27,12 +32,17 @@ const int
 	N_MAX_PLAYER_UNITS = 5,
 	N_MAXVISIBLE_INVENTORYITEMS = 8;
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail EPanel (CTeamMngUI::Set @0x245c80 switch constants / CButtonsPanel::SetMode @0x2441b0
+// cmp 2..6): the release recruit menu has FIVE tabs -- perks/medals/character/inventory/biography.
 enum EPanel
 {
-	PANEL_DEFAULT,
-	PANEL_NONE,
-	PANEL_CHARACTER,
-	PANEL_INVENTORY
+	PANEL_DEFAULT,		// 0 -- "keep the current tab"
+	PANEL_NONE,			// 1 -- unset (Set() coerces it to PANEL_BIOGRAPHY, the retail default tab)
+	PANEL_PERKS,		// 2
+	PANEL_MEDALS,		// 3
+	PANEL_CHARACTER,	// 4
+	PANEL_INVENTORY,	// 5
+	PANEL_BIOGRAPHY		// 6
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CUnitPortraitView
@@ -42,7 +52,11 @@ class CUnitPortraitView: public CUnitView
 	OBJECT_NOCOPY_METHODS(CUnitPortraitView)
 private:
 	ZDATA_(CUnitView)
-	CObj<CImage> pImage;
+	// retail @0x244470: the card-frame placeholder is a plain CImageDraw drawn FIRST as a
+	// background (retail Draw @0x244130), NOT a child CImage window -- a child window renders
+	// LAST inside CUnitView::Draw's CWindow::Draw tail, covering the 3D head every frame (the
+	// recruitment cards showed only the placeholder "smoke" texture).
+	CObj<CImageDraw> pImage;
 	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CUnitView*)this); f.Add(2,&pImage); return 0; }
 
 public:
@@ -55,8 +69,7 @@ public:
 CUnitPortraitView::CUnitPortraitView( const SWindowInfo &sInfo, NRPG::CUnit *pMerc ):
 	CUnitView( sInfo, 0 )
 {
-	pImage = new CImage( SWindowInfo( this, SPoint( 0, 0 ), GetSize(), "", STYLE_ENABLED | STYLE_VISIBLE | STYLE_BOTTOMMOST ) );
-	pImage->SetImage( NDb::GetUITexture( 535 ) );
+	pImage = new CImageDraw( SRect( 0, 0, GetSize().x, GetSize().y ), NDb::GetUITexture( 535 ) );
 
 	if ( IsValid( pMerc ) )
 		SetUnit( pMerc );
@@ -64,23 +77,11 @@ CUnitPortraitView::CUnitPortraitView( const SWindowInfo &sInfo, NRPG::CUnit *pMe
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CUnitPortraitView::Draw( const STime &sTime, NGScene::I2DGameView *pView )
 {
-	SRect sScrWindow;
-	SPoint sScrPosition;
-	if ( !ClientToScreen( &sScrPosition, &sScrWindow ) )
-		return;
-
-	VirtualToScreen( &sScrPosition, &sScrWindow );
-
-	SRect sDummyRect;
-	SPoint sSize( GetSize() );
-	VirtualToScreen( &sSize, &sDummyRect );
-
-	CRectLayout sLayout;
-	sLayout.AddRect( 0, 0, CTRect<float>( 0, 0, sSize.x, sSize.y ) );
-
-	pView->CreateDynamicClearRects( sLayout, sScrPosition, sScrWindow, 1 );
+	// retail @0x244130: placeholder background FIRST, then the 3D head over it (CUnitView::Draw
+	// does its own clear-rect depth punch and paints any child windows itself).
+	if ( IsValid( pImage ) )
+		pImage->Draw( this, sTime, pView );
 	CUnitView::Draw( sTime, pView );
-	pView->CreateDynamicClearRects( sLayout, sScrPosition, sScrWindow, 0 );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CUnitPortraitState
@@ -586,27 +587,370 @@ void CUnitInventoryPanel::Generate()
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// CUnitPerksPanelItem -- one taken-perk row (icon + description text) of the recruit menu's perks
+// tab. Retail ctor @0x244f80 / ProcessMessage @0x2492b0: TEMPLATELOADCOMPLETE wires the "text"
+// child to GetDBString(pDBPerk->pToolTip) and the "icon" child to pDBPerk->pIcon.
+////////////////////////////////////////////////////////////////////////////////////////////////////
+class CUnitPerksPanelItem: public CWindow
+{
+	OBJECT_NOCOPY_METHODS(CUnitPerksPanelItem)
+private:
+	ZDATA_(CWindow)
+	CPtr<NRPG::CPerk> pPerk;
+	////
+	CPtr<CText> pText;
+	CPtr<CImage> pImage;
+	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CWindow*)this); f.Add(2,&pPerk); f.Add(3,&pText); f.Add(4,&pImage); return 0; }
+
+public:
+	CUnitPerksPanelItem() {}
+	CUnitPerksPanelItem( const SWindowInfo &sInfo, NRPG::CPerk *_pPerk ):
+		CWindow( sInfo ), pPerk( _pPerk )
+	{
+	}
+
+	bool ProcessMessage( const SEvent &sEvent );
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
+bool CUnitPerksPanelItem::ProcessMessage( const SEvent &sEvent )
+{
+	if ( sEvent.nEvent == EVENT_TEMPLATELOADCOMPLETE )
+	{
+		pText = GetUIWindow<CText>( this, "text" );
+		pImage = GetUIWindow<CImage>( this, "icon" );
+
+		NDb::CDBPerk *pDBPerk = IsValid( pPerk ) ? pPerk->GetDBPerk() : 0;
+		if ( IsValid( pDBPerk ) )
+		{
+			pText->SetText( GetDBString( pDBPerk->pToolTip ) );
+			pImage->SetImage( pDBPerk->pIcon );
+		}
+	}
+
+	return CWindow::ProcessMessage( sEvent );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// CUnitPerksPanel -- the recruit menu's "perks" tab: a scroll list of the merc's TAKEN perks.
+// Retail ctor @0x244fc0 / ProcessMessage @0x249410 / Generate @0x2464c0.
+////////////////////////////////////////////////////////////////////////////////////////////////////
+class CUnitPerksPanel: public CWindow
+{
+	OBJECT_NOCOPY_METHODS(CUnitPerksPanel)
+private:
+	ZDATA_(CWindow)
+	CObj<NRPG::CUnit> pMerc;
+	////
+	CObj<CListView> pList;
+	CObj<CScrollWindow<CListView> > pListView;
+	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CWindow*)this); f.Add(2,&pMerc); f.Add(3,&pList); f.Add(4,&pListView); return 0; }
+
+protected:
+	void Generate();
+
+public:
+	CUnitPerksPanel() {}
+	CUnitPerksPanel( const SWindowInfo &sInfo, NRPG::CUnit *_pMerc ):
+		CWindow( sInfo ), pMerc( _pMerc )
+	{
+	}
+
+	bool ProcessMessage( const SEvent &sEvent );
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CUnitPerksPanel::Generate()
+{
+	// retail @0x2464c0: walk ALL perks of the merc's tree, keep the TAKEN ones (first-match scan),
+	// append one templated row per taken perk AT ITS allPerks INDEX, each with a description tooltip.
+	if ( !IsValid( pMerc ) || !IsValid( pList ) )
+		return;
+	NRPG::CPerksTree *pPerksTree = pMerc->GetPerksTree();
+	if ( !IsValid( pPerksTree ) )
+		return;
+
+	vector< CPtr<NRPG::CPerk> > allPerks, takenPerks;
+	pPerksTree->GetAllPerks( &allPerks );
+	pPerksTree->GetTakenPerks( &takenPerks );
+
+	for ( int nTemp = 0; nTemp < allPerks.size(); nTemp++ )
+	{
+		if ( find( takenPerks.begin(), takenPerks.end(), allPerks[nTemp] ) == takenPerks.end() )
+			continue;
+
+		NRPG::CPerk *pPerk = allPerks[nTemp];
+		CPtr<CUnitPerksPanelItem> pItem = new CUnitPerksPanelItem( SWindowInfo( pList, SPoint( 0, 0 ), SPoint( 0, 0 ), "", STYLE_ENABLED | STYLE_VISIBLE ), pPerk );
+		LoadTemplate( pItem, NDb::GetUIContainer( 394 ) );	// retail 0x18a -- the perk-row template
+
+		// retail attaches a perk-description CToolTip (GetDBString(name)+SetPerkParam substitutions);
+		// the dev CDBPerk carries only pToolTip, so use it -- same idiom as the converged CPerkButton.
+		NDb::CDBPerk *pDBPerk = pPerk->GetDBPerk();
+		if ( IsValid( pDBPerk ) )
+		{
+			CPtr<CToolTip> pToolTip = new CToolTip( SWindowInfo( GetInterface(), SPoint( 0, 0 ), SPoint( 0, 0 ), "tooltip", STYLE_ENABLED ) );
+			pToolTip->SetText( GetDBString( pDBPerk->pToolTip ) );
+			pItem->SetToolTip( pToolTip );
+		}
+
+		pList->AddItem( nTemp, pItem );
+	}
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+bool CUnitPerksPanel::ProcessMessage( const SEvent &sEvent )
+{
+	switch( sEvent.nEvent )
+	{
+	case EVENT_TEMPLATELOAD:
+		{
+			pListView = new CScrollWindow<CListView>( sEvent.pLoader->GetControl( "view" ) );
+			pList = pListView->GetClientWindow();
+			Generate();
+			break;
+		}
+	case EVENT_TEMPLATELOADCOMPLETE:
+		{
+			pListView->SetVScroll( GetUIWindow<CScroll>( this, "scroll" ) );
+			break;
+		}
+	}
+
+	return CWindow::ProcessMessage( sEvent );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// CUnitMedalsPanelItem -- one earned-medal row (icon + name) of the recruit menu's medals tab.
+// Retail ctor @0x245000 / ProcessMessage @0x249580: "text" <- GetDBString(pMedal->pName),
+// "icon" <- pMedal->pImage.
+////////////////////////////////////////////////////////////////////////////////////////////////////
+class CUnitMedalsPanelItem: public CWindow
+{
+	OBJECT_NOCOPY_METHODS(CUnitMedalsPanelItem)
+private:
+	ZDATA_(CWindow)
+	CDBPtr<NDb::CMedal> pMedal;
+	////
+	CPtr<CText> pText;
+	CPtr<CImage> pImage;
+	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CWindow*)this); f.Add(2,&pMedal); f.Add(3,&pText); f.Add(4,&pImage); return 0; }
+
+public:
+	CUnitMedalsPanelItem() {}
+	CUnitMedalsPanelItem( const SWindowInfo &sInfo, NDb::CMedal *_pMedal ):
+		CWindow( sInfo ), pMedal( _pMedal )
+	{
+	}
+
+	bool ProcessMessage( const SEvent &sEvent );
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
+bool CUnitMedalsPanelItem::ProcessMessage( const SEvent &sEvent )
+{
+	if ( sEvent.nEvent == EVENT_TEMPLATELOADCOMPLETE )
+	{
+		pText = GetUIWindow<CText>( this, "text" );
+		pImage = GetUIWindow<CImage>( this, "icon" );
+
+		if ( IsValid( pMedal ) )
+		{
+			pText->SetText( GetDBString( pMedal->pName ) );
+			pImage->SetImage( pMedal->pImage );
+		}
+	}
+
+	return CWindow::ProcessMessage( sEvent );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// CUnitMedalsPanel -- the recruit menu's "medals" tab: the merc's earned medals as a scroll list.
+// Retail ctor @0x245040 / ProcessMessage @0x2496e0 / Generate @0x246ab0. NOTE: the row source
+// CMedalsGainer::GetGainedMedals is still the documented dev STUB (empty until NDb::CSide::medals
+// lands) -- the tab lights up and shows the retail "no awards" empty list until then.
+////////////////////////////////////////////////////////////////////////////////////////////////////
+class CUnitMedalsPanel: public CWindow
+{
+	OBJECT_NOCOPY_METHODS(CUnitMedalsPanel)
+private:
+	ZDATA_(CWindow)
+	CObj<NRPG::CUnit> pMerc;
+	////
+	CObj<CListView> pList;
+	CObj<CScrollWindow<CListView> > pListView;
+	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CWindow*)this); f.Add(2,&pMerc); f.Add(3,&pList); f.Add(4,&pListView); return 0; }
+
+protected:
+	void Generate();
+
+public:
+	CUnitMedalsPanel() {}
+	CUnitMedalsPanel( const SWindowInfo &sInfo, NRPG::CUnit *_pMerc ):
+		CWindow( sInfo ), pMerc( _pMerc )
+	{
+	}
+
+	bool ProcessMessage( const SEvent &sEvent );
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CUnitMedalsPanel::Generate()
+{
+	// retail @0x246ab0: one templated row per gained medal, appended at its gained-list index.
+	if ( !IsValid( pMerc ) || !IsValid( pList ) )
+		return;
+
+	vector< CDBPtr<NDb::CMedal> > gainedMedals;
+	pMerc->GetGainedMedals( &gainedMedals );
+
+	for ( int nTemp = 0; nTemp < gainedMedals.size(); nTemp++ )
+	{
+		CPtr<CUnitMedalsPanelItem> pItem = new CUnitMedalsPanelItem( SWindowInfo( pList, SPoint( 0, 0 ), SPoint( 0, 0 ), "", STYLE_ENABLED | STYLE_VISIBLE ), gainedMedals[nTemp] );
+		LoadTemplate( pItem, NDb::GetUIContainer( 416 ) );	// retail 0x1a0 -- the medal-row template
+		pList->AddItem( nTemp, pItem );
+	}
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+bool CUnitMedalsPanel::ProcessMessage( const SEvent &sEvent )
+{
+	switch( sEvent.nEvent )
+	{
+	case EVENT_TEMPLATELOAD:
+		{
+			pListView = new CScrollWindow<CListView>( sEvent.pLoader->GetControl( "view" ) );
+			pList = pListView->GetClientWindow();
+			Generate();
+			break;
+		}
+	case EVENT_TEMPLATELOADCOMPLETE:
+		{
+			pListView->SetVScroll( GetUIWindow<CScroll>( this, "scroll" ) );
+			break;
+		}
+	}
+
+	return CWindow::ProcessMessage( sEvent );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// CUnitBiographyPanel -- the recruit menu's "biography" tab (the retail DEFAULT tab): the persona
+// photo, the scrollable bio prose and the "characteristics" block. Retail ctor @0x244f30 /
+// ProcessMessage @0x248e90: both text blocks are GetDBString(0x4f22 markup header) + the persona's
+// record string; the photo is pPers->pPhoto. (v1.2 appends three award widgets to this panel --
+// not ported yet.)
+////////////////////////////////////////////////////////////////////////////////////////////////////
+class CUnitBiographyPanel: public CWindow
+{
+	OBJECT_NOCOPY_METHODS(CUnitBiographyPanel)
+private:
+	ZDATA_(CWindow)
+	CObj<NRPG::CUnit> pMerc;
+	////
+	CObj<CImage> pPhoto;
+	CObj<CMLText> pText;
+	CObj<CMLText> pCharacteristics;
+	CObj<CScrollWindow<CMLText> > pTextView;
+	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CWindow*)this); f.Add(2,&pMerc); f.Add(3,&pPhoto); f.Add(4,&pText); f.Add(5,&pCharacteristics); f.Add(6,&pTextView); return 0; }
+
+public:
+	CUnitBiographyPanel() {}
+	CUnitBiographyPanel( const SWindowInfo &sInfo, NRPG::CUnit *_pMerc ):
+		CWindow( sInfo ), pMerc( _pMerc )
+	{
+	}
+
+	bool ProcessMessage( const SEvent &sEvent );
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
+bool CUnitBiographyPanel::ProcessMessage( const SEvent &sEvent )
+{
+	switch( sEvent.nEvent )
+	{
+	case EVENT_TEMPLATELOAD:
+		{
+			NDb::CRPGPers *pPers = IsValid( pMerc ) ? pMerc->GetPers() : 0;
+
+			pTextView = new CScrollWindow<CMLText>( sEvent.pLoader->GetControl( "view" ) );
+			pText = pTextView->GetClientWindow();
+			if ( IsValid( pText ) && IsValid( pPers ) )
+			{
+				// retail: GetDBString(0x4f22) markup header + the persona's biography string,
+				// then grow the client to its real text height (width preserved) for the scroll.
+				pText->SetText( GetDBString( 0x4F22 ) + GetDBString( pPers->pBiography ), true );
+				SPoint sRealSize;
+				pText->GetRealSize( &sRealSize );
+				pText->SetSize( SPoint( pText->GetSize().x, sRealSize.y ) );
+			}
+
+			pCharacteristics = new CMLText( sEvent.pLoader->GetControl( "characteristics" ) );
+			if ( IsValid( pPers ) )
+				pCharacteristics->SetText( GetDBString( 0x4F22 ) + GetDBString( pPers->pCharacteristics ), true );
+			break;
+		}
+	case EVENT_TEMPLATELOADCOMPLETE:
+		{
+			pPhoto = GetUIWindow<CImage>( this, "image" );
+			NDb::CRPGPers *pPers = IsValid( pMerc ) ? pMerc->GetPers() : 0;
+			if ( IsValid( pPers ) && IsValid( pPers->pPhoto ) )
+				pPhoto->SetImage( pPers->pPhoto );
+
+			pTextView->SetVScroll( GetUIWindow<CScroll>( this, "scroll" ) );
+			break;
+		}
+	}
+
+	return CWindow::ProcessMessage( sEvent );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// CKIAPanel -- the "killed in action" name plate shown over a dead merc's page. Retail ctor
+// @0x2450d0 / Set @0x244440 / ProcessMessage @0x249850; its template is the SIDE record's
+// pKIAPaper container (CTeamMngUI::ProcessMessage reads side+0x70).
+////////////////////////////////////////////////////////////////////////////////////////////////////
+class CKIAPanel: public CWindow
+{
+	OBJECT_NOCOPY_METHODS(CKIAPanel)
+private:
+	ZDATA_(CWindow)
+	CObj<CText> pName;
+	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CWindow*)this); f.Add(2,&pName); return 0; }
+
+public:
+	CKIAPanel() {}
+	CKIAPanel( const SWindowInfo &sInfo ): CWindow( sInfo ) {}
+
+	void Set( NRPG::CUnit *pUnit );
+
+	bool ProcessMessage( const SEvent &sEvent );
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CKIAPanel::Set( NRPG::CUnit *pUnit )
+{
+	// retail @0x244440: print the merc's full name into the plate's "text" label.
+	if ( !IsValid( pUnit ) || !IsValid( pName ) )
+		return;
+	pName->SetText( pUnit->wsFullName );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+bool CKIAPanel::ProcessMessage( const SEvent &sEvent )
+{
+	if ( sEvent.nEvent == EVENT_TEMPLATELOADCOMPLETE )
+		pName = GetUIWindow<CText>( this, "text" );
+
+	return CWindow::ProcessMessage( sEvent );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 // CTeamMngUI
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail CButtonsPanel (iTeamMngMenu.obj): SEVEN CComplexButtons -- Hire/Fire plus the five tab
+// buttons -- built on EVENT_TEMPLATELOAD from the loader controls (ctor @0x245080, ProcessMessage
+// @0x245450); SetMode @0x2441b0 lights exactly one tab via SetChecked; SetHireMode @0x244220 flips
+// the Hire/Fire pair. The old dev panel used bare CButtons with the DISABLED art (418 medals /
+// 429 biography) as the NORMAL image -- the "always gray" buttons; the retail icons are
+// medals=400, biography=381 (and perks=430, character=383, inventory=395), on the standard
+// 566/408 unchecked/checked plates (disasm-verified GetUITexture literals @0x6454c1..0x645c1e).
 class CButtonsPanel: public CWindow
 {
 	OBJECT_NOCOPY_METHODS(CButtonsPanel)
 private:
-	enum EState
-	{
-		STATE_NORMAL,
-		STATE_CHECKED,
-		STATE_DISABLED
-	};
-
 	ZDATA_(CWindow)
-	CPtr<CButton> pHire;
-	CPtr<CButton> pFire;
-	CPtr<CButton> pPerks;
-	CPtr<CButton> pMedals;
-	CPtr<CButton> pCharacter;
-	CPtr<CButton> pInventory;
-	CPtr<CButton> pBiography;
+	CPtr<CComplexButton> pHire;
+	CPtr<CComplexButton> pFire;
+	CPtr<CComplexButton> pPerks;
+	CPtr<CComplexButton> pMedals;
+	CPtr<CComplexButton> pCharacter;
+	CPtr<CComplexButton> pInventory;
+	CPtr<CComplexButton> pBiography;
 	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CWindow*)this); f.Add(2,&pHire); f.Add(3,&pFire); f.Add(4,&pPerks); f.Add(5,&pMedals); f.Add(6,&pCharacter); f.Add(7,&pInventory); f.Add(8,&pBiography); return 0; }
 
 public:
@@ -626,26 +970,20 @@ CButtonsPanel::CButtonsPanel( const SWindowInfo &sInfo ):
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CButtonsPanel::SetMode( EPanel ePanel )
 {
-	bool bCharacter = false, bInventory = false;
-	switch( ePanel )
-	{
-	case PANEL_CHARACTER:
-		bCharacter = true;
-		break;
-	case PANEL_INVENTORY:
-		bInventory = true;
-		break;
-	}
-
-	pCharacter->SetActiveState( !bCharacter ? STATE_NORMAL : STATE_CHECKED );
-	pInventory->SetActiveState( !bInventory ? STATE_NORMAL : STATE_CHECKED );
+	// retail @0x2441b0: exactly one of the five tab buttons is checked (cmp 2..6).
+	pPerks->SetChecked( ePanel == PANEL_PERKS );
+	pMedals->SetChecked( ePanel == PANEL_MEDALS );
+	pCharacter->SetChecked( ePanel == PANEL_CHARACTER );
+	pInventory->SetChecked( ePanel == PANEL_INVENTORY );
+	pBiography->SetChecked( ePanel == PANEL_BIOGRAPHY );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CButtonsPanel::SetHireMode( bool bHire, bool bEnabled )
 {
+	// retail @0x244220: show Hire (enabled per bEnabled) XOR show Fire. (Jan03's extra
+	// SetActiveState line is absent from the release body.)
 	pHire->SetStyle( STYLE_VISIBLE, bHire );
 	pHire->SetStyle( STYLE_ENABLED, bEnabled );
-	pHire->SetActiveState( bEnabled ? STATE_NORMAL : STATE_DISABLED );
 
 	pFire->SetStyle( STYLE_VISIBLE, !bHire );
 }
@@ -654,34 +992,30 @@ bool CButtonsPanel::ProcessMessage( const SEvent &sEvent )
 {
 	switch( sEvent.nEvent )
 	{
-	case EVENT_TEMPLATELOADCOMPLETE:
+	case EVENT_TEMPLATELOAD:
 		{
-			pHire = GetUIWindow<CButton>( this, "hire" );
-			pHire->AddImageState( STATE_NORMAL, NDb::GetUITexture( 618 ) );
-			pHire->AddImageState( STATE_DISABLED, NDb::GetUITexture( 619 ) );
+			// retail @0x245450: hire/fire NORMAL, the five tabs UNCHECKED; all on the shared
+			// 566 (unchecked plate) / 408 (checked plate) base pair.
+			pHire = new CComplexButton( sEvent.pLoader->GetControl( "hire" ), 0, 0, NDb::GetUITexture( 566 ), NDb::GetUITexture( 408 ) );
+			pHire->Set( NDb::GetUITexture( 618 ), NDb::GetUITexture( 619 ), CComplexButton::NORMAL );
 
-			pFire = GetUIWindow<CButton>( this, "fire" );
-			pFire->AddImageState( STATE_NORMAL, NDb::GetUITexture( 437 ) );
+			pFire = new CComplexButton( sEvent.pLoader->GetControl( "fire" ), 0, 0, NDb::GetUITexture( 566 ), NDb::GetUITexture( 408 ) );
+			pFire->Set( NDb::GetUITexture( 437 ), 0, CComplexButton::NORMAL );
 
-			pPerks = GetUIWindow<CButton>( this, "perks" );
-			pPerks->AddImageState( STATE_NORMAL, NDb::GetUITexture( 430 ) );
-			pPerks->AddImageState( STATE_CHECKED, NDb::GetUITexture( 430 ), NGfx::SPixel8888( 0x7F, 0x7F, 0x7F, 0x7F ) );
+			pPerks = new CComplexButton( sEvent.pLoader->GetControl( "perks" ), 0, 0, NDb::GetUITexture( 566 ), NDb::GetUITexture( 408 ) );
+			pPerks->Set( NDb::GetUITexture( 430 ), 0, CComplexButton::UNCHECKED );
 
-			pMedals = GetUIWindow<CButton>( this, "medals" );
-			pMedals->AddImageState( STATE_NORMAL, NDb::GetUITexture( 418 ) );
-			pMedals->AddImageState( STATE_CHECKED, NDb::GetUITexture( 418 ), NGfx::SPixel8888( 0x7F, 0x7F, 0x7F, 0x7F ) );
+			pMedals = new CComplexButton( sEvent.pLoader->GetControl( "medals" ), 0, 0, NDb::GetUITexture( 566 ), NDb::GetUITexture( 408 ) );
+			pMedals->Set( NDb::GetUITexture( 400 ), 0, CComplexButton::UNCHECKED );
 
-			pCharacter = GetUIWindow<CButton>( this, "character" );
-			pCharacter->AddImageState( STATE_NORMAL, NDb::GetUITexture( 383 ) );
-			pCharacter->AddImageState( STATE_CHECKED, NDb::GetUITexture( 383 ), NGfx::SPixel8888( 0x7F, 0x7F, 0x7F, 0x7F ) );
+			pCharacter = new CComplexButton( sEvent.pLoader->GetControl( "character" ), 0, 0, NDb::GetUITexture( 566 ), NDb::GetUITexture( 408 ) );
+			pCharacter->Set( NDb::GetUITexture( 383 ), 0, CComplexButton::UNCHECKED );
 
-			pInventory = GetUIWindow<CButton>( this, "inventory" );
-			pInventory->AddImageState( STATE_NORMAL, NDb::GetUITexture( 395 ) );
-			pInventory->AddImageState( STATE_CHECKED, NDb::GetUITexture( 395 ), NGfx::SPixel8888( 0x7F, 0x7F, 0x7F, 0x7F ) );
+			pInventory = new CComplexButton( sEvent.pLoader->GetControl( "inventory" ), 0, 0, NDb::GetUITexture( 566 ), NDb::GetUITexture( 408 ) );
+			pInventory->Set( NDb::GetUITexture( 395 ), 0, CComplexButton::UNCHECKED );
 
-			pBiography = GetUIWindow<CButton>( this, "biography" );
-			pBiography->AddImageState( STATE_NORMAL, NDb::GetUITexture( 429 ) );
-			pBiography->AddImageState( STATE_CHECKED, NDb::GetUITexture( 429 ), NGfx::SPixel8888( 0x7F, 0x7F, 0x7F, 0x7F ) );
+			pBiography = new CComplexButton( sEvent.pLoader->GetControl( "biography" ), 0, 0, NDb::GetUITexture( 566 ), NDb::GetUITexture( 408 ) );
+			pBiography->Set( NDb::GetUITexture( 381 ), 0, CComplexButton::UNCHECKED );
 			break;
 		}
 	}
@@ -704,12 +1038,16 @@ private:
 	CObj<CWindow> pPanel;
 	CPtr<CWindow> pPanelBase;
 	////
+	CObj<CKIAPanel> pKIAPanel;			// retail +0x94 (save tag 7) -- the dead-merc name plate
 	CObj<CFlashButton> pCloseButton;
 	CObj<CButtonsPanel> pButtonsPanel;
 	CPtr<CUnitPortraitView> pSelected;
 	vector<CObj<CUnitPortraitView> > unitsViewSet;
 	vector<CObj<CUnitPortraitState> > unitsStateSet;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CWindow*)this); f.Add(2,&pGlobalPlayer); f.Add(3,&ePanel); f.Add(4,&pMerc); f.Add(5,&pPanel); f.Add(6,&pPanelBase); f.Add(7,&pCloseButton); f.Add(8,&pButtonsPanel); f.Add(9,&pSelected); f.Add(10,&unitsViewSet); f.Add(11,&unitsStateSet); return 0; }
+	// retail CTeamMngUI::operator& @0x24c6f0 tag map (disasm): 2 pGlobalPlayer, 3 ePanel, 4 pMerc,
+	// 5 pPanel, 6 pPanelBase, 7 pKIAPanel, 8 pCloseButton, 9 pButtonsPanel, 10 pSelected,
+	// 11 unitsViewSet, 12 unitsStateSet. (Dev had 7..11 without the KIA plate -- off by one vs retail saves.)
+	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CWindow*)this); f.Add(2,&pGlobalPlayer); f.Add(3,&ePanel); f.Add(4,&pMerc); f.Add(5,&pPanel); f.Add(6,&pPanelBase); f.Add(7,&pKIAPanel); f.Add(8,&pCloseButton); f.Add(9,&pButtonsPanel); f.Add(10,&pSelected); f.Add(11,&unitsViewSet); f.Add(12,&unitsStateSet); return 0; }
 
 public:
 	CTeamMngUI() {}
@@ -728,27 +1066,51 @@ CTeamMngUI::CTeamMngUI( const SWindowInfo &sInfo,  NRPG::CGlobalPlayer *_pGlobal
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CTeamMngUI::Set( NRPG::CUnit *_pMerc, EPanel _ePanel )
 {
+	// retail @0x245c80: selecting a DIFFERENT merc plays their on-select greeting ack
+	// (NUI::GetPersAck @0x2452c0 -> CWindow::PlaySound, this->vtbl+0x20). PlaySound null-guards.
 	if ( IsValid( _pMerc ) )
+	{
+		if ( pMerc != _pMerc )
+			PlaySound( GetPersVoiceAck( _pMerc ) );
 		pMerc = _pMerc;
+	}
 	if ( _ePanel != PANEL_DEFAULT )
 		ePanel = _ePanel;
+	if ( ePanel == PANEL_NONE )
+		ePanel = PANEL_BIOGRAPHY;		// retail: the default tab is the biography
 
 	pPanel = 0;
 	switch( ePanel )
 	{
-	case PANEL_NONE:
+	// retail panel switch (container ids are the disasm literals @0x645e35..0x646220):
+	case PANEL_PERKS:
+		{
+			pPanel = new CUnitPerksPanel( SWindowInfo( pPanelBase, SPoint( 0, 0 ), pPanelBase->GetSize(), "perks", STYLE_ENABLED | STYLE_VISIBLE ), pMerc );
+			LoadTemplate( pPanel, NDb::GetUIContainer( 319 ) );	// 0x13f
+			break;
+		}
+	case PANEL_MEDALS:
+		{
+			pPanel = new CUnitMedalsPanel( SWindowInfo( pPanelBase, SPoint( 0, 0 ), pPanelBase->GetSize(), "medals", STYLE_ENABLED | STYLE_VISIBLE ), pMerc );
+			LoadTemplate( pPanel, NDb::GetUIContainer( 319 ) );	// 0x13f (shared list template)
+			break;
+		}
 	case PANEL_CHARACTER:
 		{
-			ePanel = PANEL_CHARACTER;
-			pPanel = new CUnitCharacterPanel( SWindowInfo( pPanelBase, SPoint( 0, 0 ), pPanelBase->GetSize(), "", STYLE_ENABLED | STYLE_VISIBLE ), pMerc );
-			LoadTemplate( pPanel, NDb::GetUIContainer( 318 ) );
+			pPanel = new CUnitCharacterPanel( SWindowInfo( pPanelBase, SPoint( 0, 0 ), pPanelBase->GetSize(), "character", STYLE_ENABLED | STYLE_VISIBLE ), pMerc );
+			LoadTemplate( pPanel, NDb::GetUIContainer( 318 ) );	// 0x13e
 			break;
 		}
 	case PANEL_INVENTORY:
 		{
-			ePanel = PANEL_INVENTORY;
-			pPanel = new CUnitInventoryPanel( SWindowInfo( pPanelBase, SPoint( 0, 0 ), pPanelBase->GetSize(), "", STYLE_ENABLED | STYLE_VISIBLE ), pMerc );
-			LoadTemplate( pPanel, NDb::GetUIContainer( 319 ) );
+			pPanel = new CUnitInventoryPanel( SWindowInfo( pPanelBase, SPoint( 0, 0 ), pPanelBase->GetSize(), "inventory", STYLE_ENABLED | STYLE_VISIBLE ), pMerc );
+			LoadTemplate( pPanel, NDb::GetUIContainer( 393 ) );	// 0x189 (retail; Jan03's 319 became the perks/medals list)
+			break;
+		}
+	case PANEL_BIOGRAPHY:
+		{
+			pPanel = new CUnitBiographyPanel( SWindowInfo( pPanelBase, SPoint( 0, 0 ), pPanelBase->GetSize(), "biography", STYLE_ENABLED | STYLE_VISIBLE ), pMerc );
+			LoadTemplate( pPanel, NDb::GetUIContainer( 382 ) );	// 0x17e
 			break;
 		}
 	}
@@ -765,9 +1127,18 @@ void CTeamMngUI::Set( NRPG::CUnit *_pMerc, EPanel _ePanel )
 
 	pButtonsPanel->SetMode( ePanel );
 
+	// retail: a dead merc raises the KIA name plate and grays (transparents) the buttons row.
+	bool bDead = IsValid( pMerc ) && pMerc->IsDead();
+	if ( IsValid( pMerc ) )
+		pKIAPanel->Set( pMerc );
+	pKIAPanel->SetStyle( STYLE_VISIBLE, bDead );
+	pButtonsPanel->SetStyle( STYLE_TRANSPARENT, bDead );	// retail SetStyle(0x20, bDead)
+	if ( bDead )
+		pKIAPanel->ShowWindow( SWTYPE_SHOW );
+
 	vector<CObj<NRPG::CUnit> >::iterator iTemp = find( pGlobalPlayer->mercs.begin(), pGlobalPlayer->mercs.end(), pMerc );
 	if ( iTemp == pGlobalPlayer->mercs.end() )
-		pButtonsPanel->SetHireMode( true, ( pGlobalPlayer->mercs.size() <= N_MAX_PLAYER_UNITS ) && !pMerc->IsDead() );
+		pButtonsPanel->SetHireMode( true, ( pGlobalPlayer->mercs.size() <= N_MAX_PLAYER_UNITS ) && !bDead );
 	else
 		pButtonsPanel->SetHireMode( false, true );
 }
@@ -817,6 +1188,13 @@ bool CTeamMngUI::ProcessMessage( const SEvent &sEvent )
 		}
 	case EVENT_TEMPLATELOAD:
 		{
+			// retail @0x2498f0: the KIA name plate is built FIRST, from the "kia_panel" control,
+			// and skinned with the SIDE record's pKIAPaper template (side+0x70) when the player
+			// has a valid side. (pKIAPaper comes from the retail game.db chunk stream, tag 18.)
+			pKIAPanel = new CKIAPanel( sEvent.pLoader->GetControl( "kia_panel" ) );
+			if ( IsValid( pGlobalPlayer->pSide ) && IsValid( pGlobalPlayer->pSide->pKIAPaper ) )
+				LoadTemplate( pKIAPanel, pGlobalPlayer->pSide->pKIAPaper );
+
 			pCloseButton = new CFlashButton( sEvent.pLoader->GetControl( "cancel" ) );
 			pButtonsPanel = new CButtonsPanel( sEvent.pLoader->GetControl( "buttons_panel" ) );
 
@@ -835,16 +1213,10 @@ bool CTeamMngUI::ProcessMessage( const SEvent &sEvent )
 		{
 			pPanelBase = GetUIWindow<CWindow>( this, "panel" );
 
-			for ( int nTemp = 0; nTemp < pGlobalPlayer->totalMercs.size(); nTemp++ )
-			{
-				NRPG::CUnit *pMerc = pGlobalPlayer->totalMercs[nTemp];
-
-				if ( pMerc->IsDead() )
-					continue;
-
-				Set( pMerc, PANEL_CHARACTER );
-				break;
-			}
+			// retail @0x2498f0: auto-select the FIRST roster entry (dead or not -- a dead one
+			// shows the KIA plate) on the BIOGRAPHY tab, the release default.
+			if ( !pGlobalPlayer->totalMercs.empty() )
+				Set( pGlobalPlayer->totalMercs[0], PANEL_BIOGRAPHY );
 			break;
 		}
 	}
@@ -884,8 +1256,12 @@ class CTeamMngMenuInterface: public NMainLoop::IInterfaceBase
 {
 	OBJECT_BASIC_METHODS(CTeamMngMenuInterface);
 private:
+	// retail CTeamMngMenuInterface ctor @0x245100 builds SIX binds: cancel, perks, medals,
+	// character, inventory, biography (the tab buttons reach these via CInterface's
+	// EVENT_NOTIFY -> NInput::PostEvent(szID) bridge, so the binds serve both mouse + hotkeys).
 	NInput::CBind bindClose;
-	NInput::CBind bindCharacter, bindInventory;
+	NInput::CBind bindPerks, bindMedals;
+	NInput::CBind bindCharacter, bindInventory, bindBiography;
 
 	ZDATA
 	CPtr<IMission> pMission;
@@ -911,7 +1287,8 @@ public:
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CTeamMngMenuInterface::CTeamMngMenuInterface():
-	bindClose( "cancel" ), bindCharacter( "character" ), bindInventory( "inventory" )
+	bindClose( "cancel" ), bindPerks( "perks" ), bindMedals( "medals" ),
+	bindCharacter( "character" ), bindInventory( "inventory" ), bindBiography( "biography" )
 {
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1004,7 +1381,18 @@ bool CTeamMngMenuInterface::ProcessEvent( const NInput::SEvent &sEvent )
 		return true;
 	}
 
-	if ( bindCharacter.ProcessEvent( sEvent ) )
+	// retail ProcessEvent @0x247510: perks, medals, character, inventory, biography (in order).
+	if ( bindPerks.ProcessEvent( sEvent ) )
+	{
+		pMenuUI->Set( 0, NUI::PANEL_PERKS );
+		return true;
+	}
+	else if ( bindMedals.ProcessEvent( sEvent ) )
+	{
+		pMenuUI->Set( 0, NUI::PANEL_MEDALS );
+		return true;
+	}
+	else if ( bindCharacter.ProcessEvent( sEvent ) )
 	{
 		pMenuUI->Set( 0, NUI::PANEL_CHARACTER );
 		return true;
@@ -1012,6 +1400,11 @@ bool CTeamMngMenuInterface::ProcessEvent( const NInput::SEvent &sEvent )
 	else if ( bindInventory.ProcessEvent( sEvent ) )
 	{
 		pMenuUI->Set( 0, NUI::PANEL_INVENTORY );
+		return true;
+	}
+	else if ( bindBiography.ProcessEvent( sEvent ) )
+	{
+		pMenuUI->Set( 0, NUI::PANEL_BIOGRAPHY );
 		return true;
 	}
 
@@ -1051,3 +1444,10 @@ REGISTER_SAVELOAD_CLASS( 0xB0925144, CUnitPortraitState );
 REGISTER_SAVELOAD_CLASS( 0xB0925145, CUnitInventoryPanel );
 REGISTER_SAVELOAD_CLASS( 0xB0925146, CUnitInventoryPanelItem );
 REGISTER_SAVELOAD_CLASS( 0xB0925147, CButtonsPanel );
+// retail iTeamMngMenu saveload ids (gen/classreg.json):
+REGISTER_SAVELOAD_CLASS( 0xB0925148, CUnitBiographyPanel );
+REGISTER_SAVELOAD_CLASS( 0xB0925149, CUnitPerksPanel );
+REGISTER_SAVELOAD_CLASS( 0xB092514A, CUnitPerksPanelItem );
+REGISTER_SAVELOAD_CLASS( 0xB092514B, CUnitMedalsPanel );
+REGISTER_SAVELOAD_CLASS( 0xB092514C, CUnitMedalsPanelItem );
+REGISTER_SAVELOAD_CLASS( 0xB3516170, CKIAPanel );

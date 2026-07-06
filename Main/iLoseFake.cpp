@@ -214,10 +214,9 @@ bool CLoseMenuInterface::ProcessEvent( const NInput::SEvent &sEvent )
 	}
 	else if ( bindRestartGame.ProcessEvent( sEvent ) )
 	{
-		// retail @0x1f3880: restart = reload the mission-start save (CICSaveRestartMission writes "restart.sav"
-		// at mission start). CICLoad::Exec is try-guarded, so this is a safe no-op until that mission-start
-		// autosave is wired (separate follow-up in CMission::Initialize).
-		NMainLoop::Command( new NMainLoop::CICLoad( string( "restart.sav" ) ) );
+		// retail @0x1f3880: restart = reload the mission-start snapshot written by
+		// CMission::Initialize (CICSaveFile "restart.sav") via the raw-file loader.
+		NMainLoop::Command( new NMainLoop::CICLoadFile( string( "restart.sav" ) ) );
 		return true;
 	}
 	else if ( bindExitGame.ProcessEvent( sEvent ) )

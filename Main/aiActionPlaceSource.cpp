@@ -10,9 +10,12 @@
 #include "rpgUnitMission.h"    // NRPG::IUnitMission::GetActionAP + NRPG::AC_POSE_WALK/CROUCH (pose AP costs)
 #include "aiPath.h"            // NAI::CPath, NWorld::FindPath
 #include "aiMultiMoves.h"      // NAI::CMultiMovesTable + CPathPlaceTable::GetCost (reachable-area sweep)
+#include "aiRouteMisc.h"       // NAI::GetNearestPlaces (special-position neighbourhood search @0x8e980)
 #include "wMainMoves.h"        // NWorld::GetMoveActionType (path-AP calcer)
 #include "wMainPath.h"         // NWorld::FindPath / NWorld::PrepareAllPaths decls
 #include "wUnitAttack.h"       // NWorld::GetMeleeAttackPlaces (the enemy melee ring)
+#include "RPGGame.h"           // NRPG::GetShootDirection (face the candidate place at the enemy) @0x8e5e0
+#include "aiMisc.h"            // NAI::GetAPForMove @0x74520 (price the held-spot move at CROUCH)
 //
 #include "aiActionPlaceSource.h"
 //
@@ -34,40 +37,79 @@ namespace NAI
 // CUnitArea - reachable-set "area" (see aiActionPlaceSource.h). Prepare floods places within nAPRadius AP
 // of the centre (NWorld::PrepareAllPaths, as aiTaskCommander does) and keeps their sorted GetData() keys;
 // IsInArea is a binary search. (Release IsInArea uses a packed hash set; a sorted key set is equivalent
-// for the lookup and avoids a hash functor. wishPose's temporary pose override in the release Prepare is
-// not applied here - the flood uses the unit's current pose.)
+// for the lookup and avoids a hash functor. The release Prepare's wishPose temporary pose override IS
+// applied here -- see Prepare below, which forces the server into wishPose around the flood.)
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CUnitArea::CUnitArea( NWorld::CUnitServer *_pUS, const SPathPlace &_place, int _nAPRadius, int _wishPose ):
+CUnitArea::CUnitArea( NWorld::CUnitServer *_pUS, const SPathPlace &_place, int _nAPRadius, int _wishPose ): // @0x747f0
 	pUS( _pUS ), place( _place ), nAPRadius( _nAPRadius ), wishPose( _wishPose )
 {
-	Prepare();
+	// @0x747f0 -- the release ctor does NOT flood here; the owner Prepares explicitly
+	// (CAIGuardReaction::Update: `new CUnitArea(...); if ( !pNew->Prepare() ) pArea = 0;`). Flooding in the
+	// ctor double-builds the set and (with the wishPose override below) would mutate the server pose during
+	// construction. Leave `keys` empty; the caller calls Prepare().
 }
 int CUnitArea::operator&( CStructureSaver &f )
 {
 	f.Add( 2, &pUS ); f.Add( 3, &place ); f.Add( 4, &nAPRadius ); f.Add( 5, &wishPose );
 	return 0;   // keys are transient: rebuilt by Prepare on use
 }
-bool CUnitArea::Prepare()
+// CUnitArea::GetHash @0x73d60 -- the normalized place key (pose<<24 | layer<<16 | y<<8 | x). It strips the
+// direction / moving / integral / final bits, so the SAME tile reached from any direction maps to ONE key.
+// (NOT a real hash -- the release hash_map hashes it again; for this sorted-key port it is the compare key.)
+// MISSING in the a5dll -- the old port keyed on raw GetData(), which kept those extra bits and fragmented the
+// set so an in-area tile queried with a different direction wrongly missed the gate.
+static inline int AreaHash( const SPathPlace &p )
+{
+	unsigned h = (unsigned)p.GetPose();
+	h = ( h << 8 ) | (unsigned)p.GetLayer();
+	h = ( h << 8 ) | (unsigned)p.GetY();
+	h = ( h << 8 ) | (unsigned)p.GetX();
+	return (int)h;
+}
+bool CUnitArea::Prepare()                                                    // @0x74880
 {
 	keys.clear();
 	if ( !IsValid( pUS ) || !IsValid( pUS->GetWorld() ) )
 		return false;
 	IPathNetwork *pNet = pUS->GetWorld()->GetPathNetwork();
-	if ( pNet == 0 )
+	if ( !IsValid( pNet ) )   // @0x74880 -- release tests the dead-bit (+4 & 0x80000000) too, not just null
 		return false;
+	// @0x74880 -- bail before flooding if the centre place is CM_INACTIVE or is itself unpassable
+	// (release: place pose == 3, or GetPassability(place) in {1,2}).
+	if ( place.GetPose() == CM_INACTIVE )
+		return false;
+	if ( !pNet->IsPassable( place ) )
+		return false;
+	// @0x74880 -- flood with the unit temporarily forced into wishPose; the release writes the server's
+	// path-pose scratch (+0x28) and, for CRAWL, clears the run byte (+0x24). SetWishPose carries both in-tree
+	// (same idiom CAINearEnemyPlaceSource::Prepare uses); restore after the flood.
+	NAI::EPose nOldWish = pUS->GetWishPose();
+	pUS->SetWishPose( (NAI::EPose)wishPose );
 	CMultiMovesTable movesTable;
 	list<SPathPlace>  reach;
 	NWorld::PrepareAllPaths( pNet, &movesTable, &reach, pUS, place, nAPRadius, pUS, true );
+	pUS->SetWishPose( nOldWish );
+	// @0x74880 -- keep every reachable place that is passable and whose pose is neither CM_INACTIVE(3) nor
+	// CM_LAY(0); key on the normalized GetHash so direction/moving bits do not fragment the set.
 	for ( list<SPathPlace>::const_iterator i = reach.begin(); i != reach.end(); ++i )
-		keys.push_back( (*i).GetData() );
+	{
+		if ( !pNet->IsPassable( *i ) )
+			continue;
+		if ( (*i).GetPose() == CM_INACTIVE || (*i).GetPose() == CM_LAY )
+			continue;
+		keys.push_back( AreaHash( *i ) );
+	}
 	sort( keys.begin(), keys.end() );
 	return !keys.empty();
 }
-bool CUnitArea::IsInArea( const SPathPlace &p ) const
+bool CUnitArea::IsInArea( const SPathPlace &p ) const                        // @0x73e30
 {
 	if ( keys.empty() )
-		return true;   // un-prepared / empty -> impose no gate (the unit can still act where it is)
-	return binary_search( keys.begin(), keys.end(), p.GetData() );
+		return true;   // DELIBERATE a5dll deviation: release find() on an empty set returns false; returning
+		               // true keeps an un-prepared / empty area from gating the unit out of every place
+	// @0x73e30 -- key on the normalized GetHash (pose|layer|y|x), NOT raw GetData(): the release hashes the
+	// same normalized key, so a tile queried with a different direction/moving bit still matches its area entry.
+	return binary_search( keys.begin(), keys.end(), AreaHash( p ) );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // Local path-AP accumulator - sums the move AP along a path (GetMoveActionType per step -> GetActionAP).
@@ -175,7 +217,7 @@ void CAIActionPlaceSource::AddPlace( const SPathPlace &p, int nAP )      // @0x0
 // within budget) - the attack source uses the false return to stop walking further down a path.
 // @0x0048e5e0. Ported from the release's structure + the clean dev twin CAIFindGoodPlacesJob::
 // PreparePlaces (aiMoveAction.cpp): cost = nMoveAP + GetActionAP((EPose)GetPose(), AC_POSE_WALK/CROUCH).
-bool CAIActionPlaceSource::AddAllPoses( const SPathPlace &p, int nMoveAP, int nMaxAP, bool /*bArg*/ )
+bool CAIActionPlaceSource::AddAllPoses( const SPathPlace &p, int nMoveAP, int nMaxAP, bool bArg )
 {
 	if ( !IsValid( pUnit ) || !IsValid( pUnit->GetUnitServer() ) )
 		return false;
@@ -184,6 +226,24 @@ bool CAIActionPlaceSource::AddAllPoses( const SPathPlace &p, int nMoveAP, int nM
 	CPtr<NRPG::IUnitMission>  pRPG = pUS->GetUnitRPG();
 	if ( !IsValid( pNet ) || !IsValid( pRPG ) )
 		return false;
+	//
+	// @0x0048e5e0 - bArg (bFaceEnemy, passed true at every call site) orients each added place toward the
+	// current enemy: the release sets the place's direction from NRPG::GetShootDirection before adding it,
+	// so the stored SUnitPosition already aims at the enemy. GetUnitPos copies the place verbatim and
+	// GetShootDirection quantizes only the tile->enemy vector (the from-place's own direction/pose are
+	// irrelevant), so one direction serves both poses. Behaviour-neutral when there is no live enemy
+	// (matches the release `if ( bFaceEnemy && enemy alive )` guard).
+	bool           bFaced   = false;
+	unsigned short nFaceDir = 0;
+	if ( bArg )
+	{
+		IAIUnit *pEnemy = GetEnemy();
+		if ( IsValid( pEnemy ) && IsValid( pEnemy->GetUnitServer() ) )
+		{
+			nFaceDir = ( unsigned short )NRPG::GetShootDirection( pNet, p, pEnemy->GetUnitPosition().GetCP() );
+			bFaced   = true;
+		}
+	}
 	//
 	const int  nCurAP    = pUnit->GetAP();
 	const bool bCanCrouch = !pUnit->HasInactivePose();   // @0x0048e5e0 gates crouch on vtbl 0x20 (inferred)
@@ -195,6 +255,7 @@ bool CAIActionPlaceSource::AddAllPoses( const SPathPlace &p, int nMoveAP, int nM
 	{
 		SPathPlace pp = p;
 		pp.SetPose( NAI::CM_STAND );
+		if ( bFaced ) pp.SetDirection( nFaceDir );   // @0x0048e5e0 face the enemy before storing
 		if ( IsPassable( pNet, pp ) )
 		{
 			places.push_back( SPlaceWithAP( GetUnitPos( pp, pNet ), nCurAP - nWalkCost ) );
@@ -207,6 +268,7 @@ bool CAIActionPlaceSource::AddAllPoses( const SPathPlace &p, int nMoveAP, int nM
 	{
 		SPathPlace pp = p;
 		pp.SetPose( NAI::CM_CROUCH );
+		if ( bFaced ) pp.SetDirection( nFaceDir );   // @0x0048e5e0 face the enemy before storing
 		if ( bAddedWalk || IsPassable( pNet, pp ) )
 			places.push_back( SPlaceWithAP( GetUnitPos( pp, pNet ), nCurAP - nCrouchCost ) );
 	}
@@ -279,8 +341,12 @@ void CAIAttackPlaceSource::Prepare()                                    // @0x00
 				calcer.AddPoint( *i );
 				if ( calcer.GetResult() > nMaxAP )
 					break;
-				if ( ( (*i).GetPose() & 0xc000 ) != 0xc000 &&    // skip inactive-pose tiles (as the release does)
-					( pArea == 0 || pArea->IsInArea( *i ) ) )    // area gate: a guard logic only fires from inside its area
+				// @0x0048f900: skip the unit's own tile (already added by (1)) and special/climbing-pose
+				// tiles (nPose==3). The old `& 0xc000` mask never matched (GetPose() is a 2-bit field).
+				if ( (*i).GetPose() != 3 &&
+					!( (*i).GetX() == curPlace.GetX() && (*i).GetY() == curPlace.GetY() &&
+					   (*i).GetLayer() == curPlace.GetLayer() ) &&
+					( pArea == 0 || pArea->IsInArea( *i ) ) )    // area gate (pArea==0 -> no gate)
 				{
 					if ( !AddAllPoses( *i, calcer.GetResult(), nMaxAP, true ) )
 						break;   // place no longer fully reachable within budget -> stop walking
@@ -289,32 +355,96 @@ void CAIAttackPlaceSource::Prepare()                                    // @0x00
 		}
 	}
 	//
-	// (3) sweep the whole reachable area within nMaxAP for additional firing positions (flanks etc.).
-	// @0x0048f900 uses a CColouredWaysCalcer over pArea; NWorld::PrepareAllPaths gives the same reachable
-	// set + each place's move cost (CPathPlaceTable::GetCost), and we AddAllPoses at each. The release
-	// pre-filters places by GetShootDirection (facing the enemy within the unit's FOV) - omitted here:
-	// the shoot action's GetInfoInner re-checks line-of-sight/to-hit per place, so non-facing places just
-	// score zero rather than being wrongly chosen. pArea is null (GetUnitArea returns 0) -> no area gate. @addr
-	NAI::CMultiMovesTable movesTable;
-	list<SPathPlace>      reach;
-	NWorld::PrepareAllPaths( pNet, &movesTable, &reach, pUS, curPlace, nMaxAP, pUS, true );
-	for ( list<SPathPlace>::const_iterator i = reach.begin(); i != reach.end(); ++i )
+	// (3) @0x0048f900 — the FLANKING wave. The release floods the reachable set within only min(nMaxAP,8)
+	// wave-AP (NOT the full nMaxAP) and keeps a place only when its direction from the unit is within
+	// +-10 degrees of PERPENDICULAR to the unit->enemy axis (|cos| <= sin(10deg) = 0.1737, the load-bearing
+	// constant @0x4b42b0): it offers FLANKING arcs, it does not blanket every reachable tile. Two release
+	// pre-filters remain deferred to the unported weapon layer -- IsPosDangerousForAllies (friendly-fire,
+	// conservative stub) and CanHitFromPlace (weapon range + sight FOV engage probe); omitting them only
+	// WIDENS the set (the shoot action's GetInfoInner re-scores LOS/to-hit per place), so it stays
+	// behaviour-safe, while the wave geometry + 8-AP budget are restored to match the release. pArea==0
+	// (GetUnitArea stub) -> no area gate.
+	if ( IsValid( pEnemy ) && IsValid( pEnemy->GetUnitServer() ) )
 	{
-		if ( ( (*i).GetPose() & 0xc000 ) != 0xc000 &&
-			( pArea == 0 || pArea->IsInArea( *i ) ) )   // area gate (pArea==0 for normal attack -> no gate)
+		const int   nBudget = nMaxAP > 7 ? 8 : nMaxAP;                       // @0x0048f900 wave budget cap (8 AP)
+		const CVec2 unitCP  = pU->GetUnitPosition().GetCPNoHeight();
+		CVec2       dirUE   = pEnemy->GetUnitPosition().GetCPNoHeight() - unitCP;   // unit->enemy axis
+		Normalize( &dirUE );
+		NAI::CMultiMovesTable movesTable;
+		list<SPathPlace>      reach;
+		NWorld::PrepareAllPaths( pNet, &movesTable, &reach, pUS, curPlace, nBudget, pUS, true );
+		for ( list<SPathPlace>::const_iterator i = reach.begin(); i != reach.end(); ++i )
+		{
+			if ( (*i).GetPose() == 3 )                                       // skip special/climbing-pose tiles
+				continue;
+			if ( (*i).GetX() == curPlace.GetX() && (*i).GetY() == curPlace.GetY() &&
+				(*i).GetLayer() == curPlace.GetLayer() )                     // own tile already added by (1)
+				continue;
+			if ( !( pArea == 0 || pArea->IsInArea( *i ) ) )                  // area gate (pArea==0 -> no gate)
+				continue;
+			CVec2 dirUP = GetUnitPos( *i, pNet ).GetCPNoHeight() - unitCP;
+			Normalize( &dirUP );
+			const float fDot    = dirUP * dirUE;                            // cos(angle to the unit->enemy axis)
+			const float fAbsDot = fDot < 0.0f ? -fDot : fDot;
+			if ( fAbsDot > 0.1737f )                                         // keep only ~perpendicular (flanking)
+				continue;
 			AddAllPoses( *i, movesTable.GetCost( *i ), nMaxAP, true );
+		}
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CAICurrentPlaceSource - just the unit's current place (all poses).
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// @0x0048e980 - restored the special-position neighbourhood search (was the simplified single-AddAllPoses
+// form). A unit on a NORMAL pose offers itself (cost 0, no AP cap). A unit on a special/INACTIVE pose
+// (CM_INACTIVE == nPose 3: climbing / ladder / ...) instead floods the 15-AP neighbourhood and offers the
+// CHEAPEST UNLOCKED place (with an inert facing bonus -- see the IsInUnitDir bug). All over the real types:
+// GetNearestPlaces (aiRouteMisc), IPathNetwork::IsLocked, CMultiMovesTable::GetCost, in-file IsInUnitDir.
 void CAICurrentPlaceSource::Prepare()                                   // @0x0048e980
 {
 	ClearPlaces();
-	if ( !IsValid( GetUnit() ) || !IsValid( GetUnit()->GetUnitServer() ) )
+	IAIUnit *pU = GetUnit();
+	if ( !IsValid( pU ) || !IsValid( pU->GetUnitServer() ) || !IsValid( GetAIState() ) )
 		return;
-	SPathPlace cur = GetUnit()->GetPosition().p;
-	AddAllPoses( cur, 0, 0xffff, true );
+	CPtr<NWorld::CUnitServer> pUS = pU->GetUnitServer();
+	SPathPlace cur = pU->GetPosition().p;
+	if ( cur.GetPose() != NAI::CM_INACTIVE )
+	{
+		// normal position: offer itself, both poses, no AP cap.
+		AddAllPoses( cur, 0, 0xffff, true );
+		return;
+	}
+	// special/INACTIVE position (climbing etc.): search the 15-AP neighbourhood for the cheapest unlocked
+	// place. Price the flood at WALK (the unit is in a PK) / RUN -- release IsUnitBusy == IsInPK, EPose 2/3.
+	NAI::EPose nPose = IsValid( pUS->GetWearingDBPK() ) ? NAI::WALK : NAI::RUN;
+	vector<SPathPlace> near_;
+	CMultiMovesTable   table;
+	GetNearestPlaces( pUS, cur, 15, nPose, &near_, &table );
+	CPtr<IPathNetwork> pNet = pUS->GetWorld()->GetPathNetwork();
+	if ( !IsValid( pNet ) )
+		return;
+	// ORIGINAL BUG (confirmed in the retail disasm @0x0048e975 data): `int nBest = 1e10` truncates to
+	// 0x540be400, and the final acceptance compares (double)nBest < 1e10 -- ALWAYS true for any int, so even
+	// a search with NO candidates calls AddAllPoses on the invalid place 0xfdffffff (harmless: IsValidPoint
+	// inside AddAllPoses rejects it). Reproduced verbatim, NOT corrected.
+	int        nBest = 0x540be400;
+	SPathPlace best( (int)0xfdffffff );
+	for ( vector<SPathPlace>::const_iterator i = near_.begin(); i != near_.end(); ++i )
+	{
+		const SPathPlace &p = *i;
+		if ( pNet->IsLocked( p, false ) )
+			continue;
+		int nCost = table.GetCost( p );
+		if ( IsInUnitDir( pUS, p ) )                       // facing bonus (inert -- see IsInUnitDir bug)
+			nCost = (int)( (double)nCost - 100000.0 );
+		if ( nCost < nBest )
+		{
+			nBest = nCost;
+			best  = p;
+		}
+	}
+	if ( (double)nBest < 1.0e10 )                          // ORIGINAL BUG: always true
+		AddAllPoses( best, nBest, 0xffff, true );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CAINearEnemyPlaceSource - places adjacent to the current enemy (for melee/knife/...).
@@ -350,7 +480,12 @@ void CAINearEnemyPlaceSource::Prepare()                                 // @0x00
 	if ( targets.empty() )
 		return;
 	// path to the ring, ignoring the enemy as an obstacle (else it blocks its own ring).
-	CPtr<NAI::CPath> pPath = NWorld::FindPath( pNet, pUS, pU->GetPosition().p, targets, pEnemyUS );
+	// @0x0048ece0 -- pass the tail bools 0,0,0,1,1 (bCanFindNotExactPath + bIgnoreAllUnits), exactly as
+	// the decode and the other two FindPath sites in this module do. The bare 5-arg form defaults
+	// bCanFindNotExactPath/bIgnoreAllUnits to FALSE, so the melee approach only pathed when it could
+	// EXACTLY reach the ring and let other units block it -- diverging from retail.
+	CPtr<NAI::CPath> pPath = NWorld::FindPath( pNet, pUS, pU->GetPosition().p, targets, pEnemyUS,
+		false, NAI::PF_DEFAULT, false, true, true );
 	if ( !IsValid( pPath ) || pPath->points.empty() )
 		return;
 	CPathAPCalcerLocal calcer( pWorld, pRPG, pU->GetUnitPosition(), false );
@@ -381,22 +516,34 @@ void CAIToPlacePlaceSource::Prepare()                                   // @0x00
 		return;
 	//
 	// the unit's current place, then places along the path toward `pos` within nMaxAP (@0x0048f0e0).
-	AddAllPoses( pU->GetPosition().p, 0, nMaxAP, true );
+	const SPathPlace selfPlace = pU->GetPosition().p;
+	AddAllPoses( selfPlace, 0, nMaxAP, true );
 	vector<SPathPlace> dest;
 	dest.push_back( pos );
-	CPtr<NAI::CPath> pPath = NWorld::FindPath( pNet, pUS, pU->GetPosition().p, dest, pUS,
+	// @0x0048f0e0 -- price the pathfind at WALK (in a PK) / RUN by swapping the server wish pose around
+	// FindPath, exactly as CAINearEnemyPlaceSource::Prepare does (IsUnitBusy == IsInPK).
+	// ORIGINAL BUG (confirmed @0x0048f0e0): the wish pose is restored ONLY on the success path -- the
+	// no-path early return below leaves it clobbered. Reproduced verbatim, NOT corrected.
+	NAI::EPose nOldWish = pUS->GetWishPose();
+	pUS->SetWishPose( IsValid( pUS->GetWearingDBPK() ) ? NAI::WALK : NAI::RUN );
+	CPtr<NAI::CPath> pPath = NWorld::FindPath( pNet, pUS, selfPlace, dest, pUS,
 		false, NAI::PF_DEFAULT, false, true, true );   // release uses PF_USE_DIR
 	if ( !IsValid( pPath ) )
-		return;
+		return;   // ORIGINAL BUG (@0x0048f0e0): wish pose intentionally NOT restored on this early return
 	CPathAPCalcerLocal calcer( pWorld, pRPG, pU->GetUnitPosition(), false );
 	for ( vector<SPathPlace>::const_iterator i = pPath->points.begin(); i != pPath->points.end(); ++i )
 	{
 		calcer.AddPoint( *i );
 		if ( calcer.GetResult() > nMaxAP )
 			break;
-		if ( ( (*i).GetPose() & 0xc000 ) != 0xc000 )
+		// @0x0048f0e0 -- skip the unit's OWN tile (already offered above; release masks pose/dir/moving via
+		// IsSamePlace mask 0x1feffff) and CM_INACTIVE tiles (release: nPose != 3). The prior
+		// `GetPose() & 0xc000` was a no-op: GetPose() is the 2-bit nPose, so the skip never fired.
+		if ( ( ( (*i).GetData() ^ selfPlace.GetData() ) & 0x01feffff ) != 0 &&
+			(*i).GetPose() != NAI::CM_INACTIVE )
 			AddAllPoses( *i, calcer.GetResult(), nMaxAP, true );
 	}
+	pUS->SetWishPose( nOldWish );   // restored only here on success (the early returns above leave it clobbered)
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CAIOnePlacePlaceSource - exactly the one held place (defence holds a spot).
@@ -415,10 +562,13 @@ void CAIOnePlacePlaceSource::Prepare()                                  // @0x00
 	// if the held spot would endanger an ally. Skipped while IsPosDangerousForAllies is a conservative
 	// stub (it never blocks) - re-add the guard when that helper is reconstructed. @addr
 	//
-	// build-settle: the release subtracts GetAPForMove(place) (path AP to reach the spot). A defence
-	// one-place source holds the unit's commanded position, so the move cost is ~0 when it is already
-	// there; using 0 here is exact in that case and never over-budgets. @addr
-	const int nMoveAP = 0;
+	// @0x004901f0 -- price the move to the held spot at CROUCH pose via NAI::GetAPForMove (path AP from the
+	// unit's current place to `place`), as the release does, instead of assuming 0. For a defence source
+	// already standing on the spot this is 0 (exact); otherwise it debits the travel. GetAPForMove returns
+	// 0xffff when the spot is unreachable -> the stand branch then offers nothing (faithful: nWalk =
+	// poseAP + 0xffff exceeds the 0xffff cap, so AddAllPoses adds no place) and the crouch branch stores a
+	// negative AP-left (faithful: the choose-place job rejects it on affordability).
+	const int nMoveAP = GetAPForMove( GetUnit(), GetUnit()->GetUnitPosition().pos.p, place, NAI::CROUCH );
 	if ( !bCrouch )
 		AddAllPoses( place, nMoveAP, 0xffff, true );                 // stand: both poses at the spot
 	else
@@ -448,10 +598,11 @@ IAIActionPlaceSource* CreateAttackPlaceSource( IAIUnit *pUnit, CUnitArea *pArea 
 	// (build-settle: reconstruct CUnitArea + GetUnitArea to restore the per-unit area restriction.)
 	if ( !IsValid( pUnit ) )
 		return 0;
-	// release passes the unit's per-turn AP budget as nMaxAP, bCheckDangerousForAllies = true.
-	// (Release read GetUnitMission()->GetMaxAP(); the dev unit-mission has no GetMaxAP, so the turn's
-	// start-AP from the unit server is used - reconciled, build-settle to verify against @0x0048e310.)
-	int nMaxAP = pUnit->GetUnitServer()->GetAP();
+	// @0x0048e310 reads nMaxAP = the unit's MAX AP skill (its full AP bar, release GetUnitMission()->GetMaxAP()),
+	// NOT the current remaining AP -- using GetUnitServer()->GetAP() shrank the attack-place budget as the unit
+	// spent AP during its turn. IAIUnit::GetMaxAP() is the in-tree equivalent of the AP-skill max.
+	// bCheckDangerousForAllies = true.
+	int nMaxAP = pUnit->GetMaxAP();
 	return new CAIAttackPlaceSource( pUnit, nMaxAP, pArea, true );
 }
 IAIActionPlaceSource* CreateCurrentPlaceSource( IAIUnit *pUnit )                    // @0x0048e380

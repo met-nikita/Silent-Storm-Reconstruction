@@ -205,7 +205,7 @@ public:
 			for ( vector<NRPG::CAttackPortion>::const_iterator i = attack.begin(); i != attack.end(); ++i )
 				pUS->GetWorld()->PerformRangedAttack( *i, ray, ignores, 
 					pUS->GetWorld()->GetTime()->GetValue(), pTrailEffect, pWeapon->fTrailSpeed );
-			pUS->CreateFlash();
+			pUS->CreateFlash( false, false );   // @0x3b6d10 accidental shot -> right barrel, single sound
 		}
 	}
 };
@@ -241,6 +241,28 @@ bool IsExecStartCombat( CCommandExecute* pExec )
 		return true;
 	else
 		return false;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail NWorld::IsCancelableExec @0x392fe0 (oracle s2_createactionqueue.h, disasm-verified):
+//   for (;;) {
+//       if ( dynamic_cast<CExecCannon*>(pExec) ) return false;   // a cannon shot is not cancelable
+//       CSimpleExecQueue *q = dynamic_cast<CSimpleExecQueue*>(pExec);
+//       if ( !q ) return true;                                   // any non-queue non-cannon: cancelable
+//       pExec = q->front-or-null;                                // descend into the queue head
+//   }
+// (a null head -- empty queue -- makes the next casts null and falls through to "true").
+bool IsCancelableExec( CCommandExecute* pExec )
+{
+	for (;;)
+	{
+		CDynamicCast<CExecCannon> pCannon( pExec );
+		if ( pCannon )
+			return false;
+		CDynamicCast<CSimpleExecQueue> pQueue( pExec );
+		if ( !pQueue )
+			return true;
+		pExec = pQueue->GetFrontExecutor();
+	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CExecExplode
@@ -771,12 +793,12 @@ void CExecHide::Run()
 	if ( !pUS->GetUnitRPG()->IsHiding() )
 	{
 		pUS->DoAction( NRPG::AC_HIDE );
-		pUS->Hide( true );
+		pUS->Hide( true, false );
 	}
 	else
-		pUS->Hide( false );
+		pUS->Hide( false, false );   // retail CExecHide @0x3b2b5b: the voluntary toggle passes bThrowEvent=false
 
-	Finished(); 
+	Finished();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CExecTakePerk

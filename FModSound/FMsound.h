@@ -78,7 +78,7 @@ public:
 };
 struct SPlayParams
 {
-	CSample3D *pSample; 
+	CSample3D *pSample;
 	CVec3 position;
 	bool bLoop;
 	int  nVolume;
@@ -86,6 +86,10 @@ struct SPlayParams
 	bool bFadeIn;
 	bool bFadeOut;
 	int  nFadeSamples;
+	// start OFFSET into the sample, ms (retail SPlayParams.tStartTime): the mixer hands sounds a
+	// world-time delay so a sound (re)submitted late plays its remaining TAIL -- or nothing at all
+	// when the offset is past the sample end (e.g. an old death grunt on corpse reveal).
+	int  nStartMs;
 
 	SPlayParams()
 	{
@@ -97,6 +101,7 @@ struct SPlayParams
 		bFadeIn = false;
 		bFadeOut = false;
 		nFadeSamples = 0;
+		nStartMs = 0;
 	}
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -113,9 +118,16 @@ CSample3D* LoadSample3D( const void *pData, int nLength, float fMinDistance = 1,
 CSample3D* GetDefault3DSound();
 CSound2D* PlaySound( CSample2D *pSample );
 CSound3D* Play3DSound( const SPlayParams &params );
-CStream* PlayStream( const char *pszName, bool bLoop );
-CStream* SwitchStream( CStream *pOldStream, const char *pszNameNewStream, bool bLoop ); // �� ��������� ������� ������������� �� ����� ����� 
+// retail @0x3db990: PlayStream( name, bUseExisting, nStartMs, bLoop, fFadeInSec ).
+// bUseExisting = adopt an already-open stream of the SAME file instead of reopening -- this is
+// the engine's cross-scene music continuity (menu screens, mission ambient carrying into the
+// base). nStartMs seeks into the clip (save/load resume); fFadeInSec ramps the volume from 0.
+CStream* PlayStream( const char *pszName, bool bUseExisting, int nStartMs, bool bLoop, float fFadeInSec );
+// retail @0x3dbb50: the new stream replaces pOldStream (which is closed); fFadeInSec ramps the
+// NEW stream in over the switch (retail SetSwitchStream @0x3dd190 fade-in priming).
+CStream* SwitchStream( CStream *pOldStream, const char *pszNameNewStream, bool bLoop, float fFadeInSec ); // �� ��������� ������� ������������� �� ����� �����
 bool IsPlaying( CStream *pStream );
+unsigned long GetStreamTime( CStream *pStream );   // current play position ms, 0xFFFFFFFF if not playing (retail NSound::CMusic save capture)
 bool IsPlaying( CSound2D *pSound );
 bool IsPlaying( CSound3D *pSound );
 void FadeOut( CStream *pStream, float fSec );

@@ -32,23 +32,60 @@ CMissionMovieUI::CMissionMovieUI():
 {
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CMissionMovieUI::CMissionMovieUI( const SWindowInfo &sInfo, NGame::IMission *_pMission, CDesktopWindow *_pTransition ):
+CMissionMovieUI::CMissionMovieUI( const SWindowInfo &sInfo, NGame::IMission *_pMission, CDesktopWindow *_pTransition, bool _bSkipFadeOut ):
 	CDesktopWindow( sInfo ), pMission( _pMission ), pTransition( _pTransition ),
-	eStage( START ), sStageTime( 0 ), bindCancel( "cancel" )
+	eStage( START ), sStageTime( 0 ), bindCancel( "cancel" ), bSkipFadeOut( _bSkipFadeOut )
 {
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CMissionMovieUI::ShowDesktop()
+// retail @0x20e330: save the panel state, stash the wait id, and with skip-fade jump straight to the
+// bars-shown stage (BorderShow) before showing/pushing the desktop.
+void CMissionMovieUI::ShowDesktop( int _nNotifyID )
 {
 	eStage = START;
+	nNotifyID = _nNotifyID;
+	nPanelsStateSave = pMission->GetPanelState( NGame::PANEL_ALL );
+
+	if ( bSkipFadeOut )
+		BorderShow();
 
 	ShowWindow( SWTYPE_SHOW );
 	pMission->PushDesktop( this );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CMissionMovieUI::HideDesktop()
+// retail @0x20e390: enter FINISH, stash the wait id, re-show the transition desktop, and with
+// skip-fade tear the letterbox down immediately (BorderHide).
+void CMissionMovieUI::HideDesktop( int _nNotifyID )
 {
 	eStage = FINISH;
+	nNotifyID = _nNotifyID;
+	pTransition->SetStyle( STYLE_VISIBLE, true );
+	if ( bSkipFadeOut )
+		BorderHide();
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail @0x20e210: fade-IN complete -- bars opaque, transition hidden, and the fade-completion
+// NOTIFY: post CCmdInterfaceEvent(nNotifyID) so lua WaitForUI(BeginSequence id) unblocks.
+void CMissionMovieUI::BorderShow()
+{
+	eStage = SHOWSCRIPT;
+	if ( IsValid( pTopBackground ) )
+		pTopBackground->SetColor( NGfx::SPixel8888( 0, 0, 0, 0xFF ) );
+	if ( IsValid( pBottomBackground ) )
+		pBottomBackground->SetColor( NGfx::SPixel8888( 0, 0, 0, 0xFF ) );
+	pTransition->SetStyle( STYLE_VISIBLE, false );
+	pMission->Command( new NWorld::CCmdInterfaceEvent( nNotifyID ) );
+	pMission->SetCheatVisibility( true );	// retail vtbl[0x120](1) -- the cinematic "see all" toggle on
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail @0x20e2b0: fade-OUT complete -- post CCmdInterfaceEvent(nNotifyID) (lua WaitForUI(EndSequence
+// id) unblocks), cinematic toggle off, restore the saved panels, pop this desktop.
+void CMissionMovieUI::BorderHide()
+{
+	pMission->Command( new NWorld::CCmdInterfaceEvent( nNotifyID ) );
+	pMission->SetCheatVisibility( false );	// retail vtbl[0x120](0)
+	pMission->SetPanelState( nPanelsStateSave, true );
+	pMission->PopDesktop( this );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CMissionMovieUI::UpdateDesktop( const STime &sTime )
@@ -59,9 +96,7 @@ void CMissionMovieUI::UpdateDesktop( const STime &sTime )
 		{
 			eStage = FADEIN;
 			sStageTime = sTime;
-			nPanelsStateSave = pMission->GetPanelState( NGame::PANEL_ALL );
 			pMission->SetPanelState( NGame::PANEL_ALL, false );
-			pMission->SetCheatVisibility( true );
 		}
 	case FADEIN:
 		{
@@ -73,18 +108,17 @@ void CMissionMovieUI::UpdateDesktop( const STime &sTime )
 				break;
 			}
 
-			eStage = SHOWSCRIPT;
 			sStageTime = sTime;
-			pTopBackground->SetColor( NGfx::SPixel8888( 0, 0, 0, 0xFF ) );
-			pBottomBackground->SetColor( NGfx::SPixel8888( 0, 0, 0, 0xFF ) );
-			pTransition->SetStyle( STYLE_VISIBLE, false );
+			BorderShow();
 			break;
 		}
+	case SHOWSCRIPT:
+		break;
 	case FINISH:
 		{
+			// (retail re-shows the transition in HideDesktop @0x20e390, done there)
 			eStage = FADEOUT;
 			sStageTime = sTime;
-			pTransition->SetStyle( STYLE_VISIBLE, true );
 		}
 	case FADEOUT:
 		{
@@ -96,9 +130,7 @@ void CMissionMovieUI::UpdateDesktop( const STime &sTime )
 				break;
 			}
 
-			pMission->SetCheatVisibility( false );
-			pMission->SetPanelState( nPanelsStateSave, true );
-			pMission->PopDesktop( this );
+			BorderHide();
 		}
 	}
 }
@@ -115,12 +147,14 @@ NGame::CUICmdExec* CMissionMovieUI::CreateExecutor( NWorld::CUICmd *pCmd )
 	return NGame::CreateExecutor( pCmd, pMission );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail @0x20e1c0: the cancel gesture skips the current movie part ONCE, and only while the letterbox
+// is still up (eStage < FINISH) -- the bSkipPart latch stops a held key from eating the next part too.
 bool CMissionMovieUI::ProcessEvent( const NInput::SEvent &sEvent )
 {
-	if ( bindCancel.ProcessEvent( sEvent ) )
+	if ( bindCancel.ProcessEvent( sEvent ) && !bSkipPart && eStage < FINISH )
 	{
+		bSkipPart = true;
 		pMission->SetWaitForPartFinished( true );
-		return true;
 	}
 
 	return true;

@@ -13,6 +13,7 @@
 #include "aiScaleConverter.h"
 #include "aiControl.h"
 #include "aiTaskCommander.h"
+#include "aiCommander.h"      // CAICommander::GetAITaskCommander (OnSequenceStarted/Finished task cleanup)
 
 #include "RPGGame.h"
 #include "RPGItem.h"
@@ -123,6 +124,8 @@ public:
 	virtual void OnControlFinished();
 	virtual void ActivateCurrentControl();
 	virtual void DeactivateCurrentControl();
+	virtual void OnSequenceStarted();    // retail @0xadec0
+	virtual void OnSequenceFinished();   // retail @0xad3f0
 	virtual bool IsUnderAIControl() { return bUnderAIControl; }
 	virtual int GetAdditionalExpediency() { return nAdditionalExpediency; }
 	virtual void SetAdditionalExpediency( int nExpediency ) { nAdditionalExpediency = nExpediency; }
@@ -151,6 +154,10 @@ public:
 	// tracker subscribes the unit to the global event bus; nothing throws during this tick, so no dispatch reentrancy.
 	virtual void OnAISegment()
 	{
+		// retail CAIUnit::OnAISegment @0xad2c0 opens with `if (IsSequence()) return;` (@0xad230): no
+		// per-segment threat-tracker/state processing while a scripted sequence runs.
+		if ( IsValid( pUnitServer ) && pUnitServer->GetWorld()->IsSequence() )
+			return;
 		if ( !IsValid( pEventTracker ) && IsValid( pUnitServer ) )
 			pEventTracker = new CAIEventTracker( pUnitServer );
 		if ( IsValid( pEventTracker ) )
@@ -224,7 +231,14 @@ void CAIUnit::AssignControl( IAIControl *pAIControl )
 	if ( currentManager > manager && pAIControl->GetType() != AI_CONTROL_UNINTERRUPTABLE )
 		return;
 	//
-	if ( GetUnitServer()->IsCheatEnabled( NRPG::CHEAT_NOAI ) && manager < AIM_SCRIPT )
+	// retail CAIUnit::SetLogic @0xaddc0 opens with `if (IsSequence()) return;` (IsSequence @0xad230 =
+	// world sequence mode): the AI may NEVER install its own (non-script) logic on a unit while a
+	// scripted sequence runs -- only script routes (SetRoute @0xadb90) get through. The dev control-
+	// stack analog: refuse any control below the AIM_SCRIPT manager while the unit is script-locked
+	// (CHEAT_SCRIPTSEQUENCE is set on every unit for exactly the c_BeginSequence..EndSequence span,
+	// the same lifetime as retail's sequence predicate) -- same shape as the existing CHEAT_NOAI gate.
+	if ( ( GetUnitServer()->IsCheatEnabled( NRPG::CHEAT_NOAI ) ||
+		   GetUnitServer()->IsCheatEnabled( NRPG::CHEAT_SCRIPTSEQUENCE ) ) && manager < AIM_SCRIPT )
 		return;
 	//
 	if ( !controls.empty() )
@@ -238,7 +252,7 @@ void CAIUnit::AssignControl( IAIControl *pAIControl )
 		{
 			return;
 		}
-		else 
+		else
 		{
 			if ( pAICurrentControl->IsActive() )
 				pAICurrentControl->DeActivate();
@@ -303,6 +317,77 @@ void CAIUnit::DeactivateCurrentControl()
 		controls.back()->DeActivate();
 		GetUnitServer()->Do( new NWorld::CCmdCancel( GetUnitServer() ) );
 	}
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// helper for OnSequenceStarted/Finished: erase every AIM_SCRIPT control from the stack -- the dev
+// control-stack analog of the retail sequence-route slot (CAIUnit::routes[1], cleared @0xadec0 and
+// deactivated @0xad3f0; a retail sequence route never outlives its sequence). Deactivates live ones and
+// drops each walker task from the task commander so it doesn't leak there as a permanently inactive
+// entry (Tasks are otherwise only removed on unit kill/removal). Returns true when an ACTIVE control
+// was ended (the caller then cancels the in-flight unit command, matching retail's CancelCommand).
+static bool EraseScriptControls( vector< CObj<IAIControl> > *pControls )
+{
+	bool bEndedActive = false;
+	for ( vector< CObj<IAIControl> >::iterator i = pControls->begin(); i != pControls->end(); )
+	{
+		IAIControl *pControl = *i;
+		if ( IsValid( pControl ) && pControl->GetManager() == AIM_SCRIPT )
+		{
+			if ( pControl->IsActive() )
+			{
+				pControl->DeActivate();
+				bEndedActive = true;
+			}
+			CPtr<CTask> pTask = GetTaskFromControl( pControl );
+			CAICommander *pCommander = pControl->GetAICommander();
+			if ( IsValid( pTask ) && IsValid( pCommander ) )
+				pCommander->GetAITaskCommander()->RemoveTask( pTask );
+			i = pControls->erase( i );
+		}
+		else
+			++i;
+	}
+	return bEndedActive;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail CAIUnit::OnSequenceStarted @0xadec0: SetLogic(0) [vtbl+0x58(0)], routes[0]->Deactivate()
+// [vtbl+0x1c], routes[1] = 0. Control-stack analog: stop + drop the combat logic, erase stale
+// AIM_SCRIPT sequence routes, and SUSPEND the unit's current (normal-AI) control for the whole
+// sequence. Script AIM_SCRIPT controls assigned DURING the sequence stack on top and activate
+// normally (AssignControl lets manager >= AIM_SCRIPT through the CHEAT_SCRIPTSEQUENCE gate).
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CAIUnit::OnSequenceStarted()
+{
+	if ( IsValid( pLogic ) )
+		pLogic->StopThinking();   // retail SetRoute-style stop (vtbl+0x14) before the slot clears
+	pLogic = 0;
+	bool bCancel = EraseScriptControls( &controls );
+	if ( !controls.empty() && controls.back()->IsActive() )
+	{
+		controls.back()->DeActivate();
+		bCancel = true;
+	}
+	if ( bCancel && GetUnitServer()->CanFight() )
+		GetUnitServer()->Do( new NWorld::CCmdCancel( GetUnitServer() ) );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail CAIUnit::OnSequenceFinished @0xad3f0: SetLogic(0), routes[1]->Deactivate() [the sequence
+// route ENDS with the sequence], routes[0]->Activate() [vtbl+0x20 -- the normal route RESUMES],
+// state.Modified(). Control-stack analog: stop + drop the combat logic, erase the sequence's
+// AIM_SCRIPT controls, then re-activate the unit's remaining current control. This replaces the
+// round-4 blind ActivateCurrentControl(), which re-woke whatever leftover SCRIPT control happened to
+// sit on top (a stale group route / teleport walker) instead of the unit's own map logic.
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CAIUnit::OnSequenceFinished()
+{
+	if ( IsValid( pLogic ) )
+		pLogic->StopThinking();
+	pLogic = 0;
+	if ( EraseScriptControls( &controls ) && GetUnitServer()->CanFight() )
+		GetUnitServer()->Do( new NWorld::CCmdCancel( GetUnitServer() ) );
+	if ( !controls.empty() && !controls.back()->IsActive() )
+		controls.back()->Activate();
+	state.selfModified.SetModified();   // retail tail: SAIUnitState::Modified()
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 int CAIUnit::GetCoverForFixedUnit( const NAI::SUnitPosition &pos, 

@@ -21,6 +21,15 @@ public:
 
 	void AddExecutor( CCommandExecute *pExec );
 	void AddFrontExecutor( CCommandExecute *pExec );
+	// head executor or 0 -- retail NWorld::IsCancelableExec @0x392fe0 descends into the queue head.
+	// (no ternary here: `cond ? 0 : CObj` builds a destroying temporary -- see CLSPtr-ternary-UAF note)
+	CCommandExecute* GetFrontExecutor()
+	{
+		if ( execList.empty() )
+			return 0;
+		CCommandExecute *pFront = execList.front();
+		return pFront;
+	}
 	int GetStartAP() const;
 	int GetActionAP() const;
 	virtual void Run();
@@ -29,6 +38,7 @@ public:
 	virtual void Cancel();
 	virtual bool IsExecuting();
 	virtual bool IsWaitingForPath( NAI::SUnitPosition *p );
+	virtual void Segment();
 	virtual NAI::CPath* GetCurrentPath() const;
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -46,9 +56,10 @@ public:
 	void CheckOpenCloseOnce();
 	// IExecMove
 	virtual void GetSearchFromPosition( NAI::SPathPlace *pRes );
-	virtual void GetDesiredPlace( NAI::SPathPlace *pRes, NAI::EFindPathParams *pParams );
+	virtual void GetDesiredPlace( NAI::SPathPlace *pRes, NAI::EFindPathParams *pParams, ENeedActiveItem *pActive );
 	virtual void GetPathPoints( list<SPathPoint> *pRes );
 	virtual void FullCancel();
+	virtual CPathConflictsRemover* GetPathConflictsRemover();   // @0x3bd240 -- first execList mover's PCR
 	void SetNewPath( NAI::CPath *pPath, NAI::EFindPathParams _eParams, ENeedActiveItem eActive = ITEM_NO_MATTER );
 	void AddPath( NAI::CPath *pPath, NAI::EFindPathParams _eParams, ENeedActiveItem eActive, IExecMove *pOldFront = 0, 
 		bool bCheckCanRotate = true );

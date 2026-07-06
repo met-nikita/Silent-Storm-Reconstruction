@@ -8,6 +8,7 @@
 #include "iTeamMngMenu.h"
 #include "scFlowChartItems.h"
 #include "..\MiscDll\Commands.h"
+#include "..\MiscDll\LogStream.h"     // csSystem ("[tutorcam]" camera-move evidence trace)
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 namespace NGame
 {
@@ -65,6 +66,12 @@ CUICmdMoveCameraExec::CUICmdMoveCameraExec( NWorld::CUICmd *pCmd,
 	SetTarget( _sTargetPos );
 	pMission->GetCamera()->GetPlacement( &sCameraPos );
 	NormalizePos( &sCameraPos );
+	// retail exec ctor @0x24eee0: UNWRAP the sampled start yaw to within +-pi of the target --
+	// NormalizeAngle is fmod (range (-2pi,2pi)), so DB records with multi-turn yaws (e.g. camera
+	// 3138 "StartCamera" yaw = -4pi) otherwise lerp a near-full-circle swirl on timed moves; the
+	// final pose was never affected (t=0 sets fCoeff=1 immediately).
+	float fYawDiff = sTargetPos.fYaw - sCameraPos.fYaw;
+	sCameraPos.fYaw += floorf( fabsf( fYawDiff ) / ( 2 * PI ) + 0.5f ) * Sign( fYawDiff ) * 2 * PI;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CUICmdMoveCameraExec::NormalizeAngle( float *pfAngle )
@@ -137,16 +144,21 @@ bool CUICmdFollowCameraExec::Update( const STime &sTime )
 	if ( pMission->GetWorld()->GetCurrentPlayer() == pMission->GetActivePlayer()->GetPlayer() )
 		return true;
 
+	// GLUE FIX: the Jan03 body hard-SET the camera onto the unit's LIVE position AND FreezeCamera(true)
+	// EVERY frame while returning false, so the camera stayed glued to (and player control locked on) a
+	// moving unit for the whole action. Retail replaced it with a self-terminating, eased, non-freezing
+	// fly-to (CUICmdUnitCameraExec @0x24eae0). Reproduce that shape: nudge the camera toward the unit
+	// via the DESIRED-placement path (ScrollAnchor smoothed -> CCamera::Update eases the live camera in,
+	// player keeps control) ONCE and finish. No FreezeCamera, no per-frame re-pin.
 	ICamera::SCameraPos sCameraPos;
 	pMission->GetCamera()->GetPlacement( &sCameraPos );
-	pUnit->GetRealPosition( &sCameraPos.ptAnchor );
-	sCameraPos.ptAnchor.z = 0;
-	pMission->GetCamera()->SetPlacement( sCameraPos );
+	CVec3 ptTarget;
+	pUnit->GetRealPosition( &ptTarget );
+	ptTarget.z = 0;
+	pMission->GetCamera()->ScrollAnchor( ptTarget - sCameraPos.ptAnchor, false, false );
 	pMission->SetCutFloor( pUnit->GetPosition().pos.GetFloor() );
 
-	pMission->FreezeCamera( true );
-
-	return false;
+	return true;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CUICmdFollowCameraExec::Cancel()

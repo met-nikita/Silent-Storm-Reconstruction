@@ -651,6 +651,106 @@ void CToolTip::DrawBackground( const STime &sTime, NGScene::I2DGameView *pView )
 	pBackgroundMiddle->Draw( this, sTime, pView );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// CTextFrame -- retail NUI::CTextFrame (@0x3163c0 ctor / @0x313950 UpdateSize / @0x314160
+// UpdatePosition / @0x3143c0 SetText / @0x3143f0 Draw). A self-sizing bordered markup panel.
+////////////////////////////////////////////////////////////////////////////////////////////////////
+const int
+	N_TEXTFRAME_WRAP_WIDTH = 512,   // retail default wrap width (0x200)
+	N_TEXTFRAME_BORDER = 4;         // retail one-border inset (label offset; +8 total on each axis)
+////////////////////////////////////////////////////////////////////////////////////////////////////
+CTextFrame::CTextFrame( const SWindowInfo &sInfo ):
+	CWindow( sInfo )
+{
+	// retail ctor: owned markup label at wrap width 512 (auto-grown by UpdateSize)
+	pText = new CMLText( SWindowInfo( this, SPoint( 0, 0 ), SPoint( N_TEXTFRAME_WRAP_WIDTH, 0 ), "", STYLE_ENABLED | STYLE_VISIBLE | STYLE_TRANSPARENT ) );
+	// the shared 9-image border set (CToolTip textures; retail's CFrame border comes from its container)
+	pBackgroundUp = CreateImage( NDb::GetUITexture( 655 ) );
+	pBackgroundDown = CreateImage( NDb::GetUITexture( 661 ) );
+	pBackgroundLeft = CreateImage( NDb::GetUITexture( 657 ) );
+	pBackgroundRight = CreateImage( NDb::GetUITexture( 659 ) );
+	pBackgroundMiddle = CreateImage( NDb::GetUITexture( 658 ) );
+	pBackgroundUpLeft = CreateImage( NDb::GetUITexture( 654 ) );
+	pBackgroundUpRight = CreateImage( NDb::GetUITexture( 656 ) );
+	pBackgroundDownLeft = CreateImage( NDb::GetUITexture( 660 ) );
+	pBackgroundDownRight = CreateImage( NDb::GetUITexture( 662 ) );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail CTextFrame::UpdateSize @0x313950: fit the frame's own size around the wrapped label.
+void CTextFrame::UpdateSize()
+{
+	pText->SetSize( SPoint( N_TEXTFRAME_WRAP_WIDTH, 0 ) );
+	SPoint sReal;
+	pText->GetRealSize( &sReal );
+	sReal.x += N_TEXTFRAME_BORDER * 2;
+	sReal.y += N_TEXTFRAME_BORDER * 2;
+	pText->SetSize( SPoint( N_TEXTFRAME_WRAP_WIDTH, sReal.y ) );
+	pText->SetPosition( SPoint( N_TEXTFRAME_BORDER, N_TEXTFRAME_BORDER ) );
+	CWindow::SetSize( sReal );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail CTextFrame::UpdatePosition @0x314160: clamp the frame fully inside its parent [0, parent-me].
+void CTextFrame::UpdatePosition()
+{
+	CWindow *pParent = GetParent();
+	if ( !pParent )
+		return;
+	SPoint sMy = GetSize();
+	SPoint sParent = pParent->GetSize();
+	SPoint sCur = GetPosition();
+	SPoint sPos;
+	sPos.x = Min( sCur.x, sParent.x - sMy.x );
+	if ( sPos.x < 0 ) sPos.x = 0;
+	sPos.y = Min( sCur.y, sParent.y - sMy.y );
+	if ( sPos.y < 0 ) sPos.y = 0;
+	CWindow::SetPosition( sPos );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail CTextFrame::SetText @0x3143c0: set the markup, then re-fit + re-clamp.
+void CTextFrame::SetText( const wstring &wsText )
+{
+	pText->SetText( wsText );
+	UpdateSize();
+	UpdatePosition();
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail CTextFrame::Draw @0x3143f0: re-fit + re-clamp each frame, then draw the border + children.
+void CTextFrame::Draw( const STime &sTime, NGScene::I2DGameView *pView )
+{
+	UpdateSize();
+	UpdatePosition();
+	DrawBackground( sTime, pView );
+	CWindow::Draw( sTime, pView );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CTextFrame::DrawBackground( const STime &sTime, NGScene::I2DGameView *pView )
+{
+	SRect sRect( 0, 0, GetSize().x, GetSize().y );
+	sRect.y1 += pBackgroundUp->GetWindow().Height();
+	sRect.y2 -= pBackgroundDown->GetWindow().Height();
+	sRect.x1 += pBackgroundLeft->GetWindow().Width();
+	sRect.x2 -= pBackgroundRight->GetWindow().Width();
+
+	pBackgroundUp->SetWindow( SRect( sRect.x1, 0, sRect.x2, sRect.y1 ) );
+	pBackgroundDown->SetWindow( SRect( sRect.x1, sRect.y2, sRect.x2, GetSize().y ) );
+	pBackgroundLeft->SetWindow( SRect( 0, sRect.y1, sRect.x1, sRect.y2 ) );
+	pBackgroundRight->SetWindow( SRect( sRect.x2, sRect.y1, GetSize().x, sRect.y2 ) );
+	pBackgroundUpLeft->SetWindow( SRect( 0, 0, sRect.x1, sRect.y1 ) );
+	pBackgroundUpRight->SetWindow( SRect( sRect.x2, 0, GetSize().x, sRect.y1 ) );
+	pBackgroundDownLeft->SetWindow( SRect( 0, sRect.y2, sRect.x1, GetSize().y ) );
+	pBackgroundDownRight->SetWindow( SRect( sRect.x2, sRect.y2, GetSize().x, GetSize().y ) );
+	pBackgroundMiddle->SetWindow( sRect );
+
+	pBackgroundUp->Draw( this, sTime, pView );
+	pBackgroundDown->Draw( this, sTime, pView );
+	pBackgroundLeft->Draw( this, sTime, pView );
+	pBackgroundRight->Draw( this, sTime, pView );
+	pBackgroundUpLeft->Draw( this, sTime, pView );
+	pBackgroundUpRight->Draw( this, sTime, pView );
+	pBackgroundDownLeft->Draw( this, sTime, pView );
+	pBackgroundDownRight->Draw( this, sTime, pView );
+	pBackgroundMiddle->Draw( this, sTime, pView );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 // CSlider
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CSlider::CSlider( const SWindowInfo &sInfo ):
@@ -1657,6 +1757,7 @@ using namespace NUI;
 REGISTER_SAVELOAD_CLASS( 0xB0241962, CPushButton );
 REGISTER_SAVELOAD_CLASS( 0xB0241963, CCheckButton );
 REGISTER_SAVELOAD_CLASS( 0xB0241964, CToolTip );
+REGISTER_SAVELOAD_CLASS( 0xB024196E, CTextFrame );   // retail NUI::CTextFrame id (gen/classreg.json)
 REGISTER_SAVELOAD_CLASS( 0xB0241965, CSlider );
 REGISTER_SAVELOAD_CLASS( 0xB0241966, CScroll );
 REGISTER_SAVELOAD_CLASS( 0xB0241967, CListView );

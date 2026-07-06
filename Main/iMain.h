@@ -35,6 +35,12 @@ public:
 	ZDATA_(IInterfaceObject)
 	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(IInterfaceObject*)this); return 0; }
 	virtual void OnGetFocus() = 0;
+	// Called on every interface right after a RAW snapshot reload (CICLoadFile, e.g. restart.sav):
+	// the graph resumes IN PLACE (no Initialize), so runtime-only caches that Initialize normally
+	// derives must be rebuilt here. CMission rebuilds the building shells (SBuildingInfo, which is
+	// deliberately never serialized -- retail @0x26e7f0 omits it too) and the camera terrain
+	// height source (runtime-only per Camera.cpp).
+	virtual void OnSnapshotRestored() {}
 	friend class CInterfaceCommand;
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -99,6 +105,36 @@ private:
 public:
 	CICSave() {}
 	CICSave( const string &_szName, bool _bSilent = false ): szName( _szName ), bSilent( _bSilent ) {}
+
+	virtual void Exec();
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail NMainLoop::CICSaveFile @0x1f6a80 / CICLoadFile @0x1f6830 -- raw fixed-filename FULL-state
+// snapshot in the temp slot: no SSaveFileHeader, no screenshot, no save-slot bookkeeping (unlike
+// CICSave/CICLoad). Carrier of the mission-start "restart.sav" (CICSaveRestartMission @0x20a830,
+// enqueued from CMission::Initialize) and of the pause/lose-menu "Restart mission" button load.
+class CICSaveFile: public CInterfaceCommand
+{
+	OBJECT_BASIC_METHODS(CICSaveFile);
+private:
+	string szName;
+
+public:
+	CICSaveFile() {}
+	CICSaveFile( const string &_szName ): szName( _szName ) {}
+
+	virtual void Exec();
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
+class CICLoadFile: public CInterfaceCommand
+{
+	OBJECT_BASIC_METHODS(CICLoadFile);
+private:
+	string szName;
+
+public:
+	CICLoadFile() {}
+	CICLoadFile( const string &_szName ): szName( _szName ) {}
 
 	virtual void Exec();
 };

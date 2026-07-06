@@ -39,6 +39,15 @@ CTimedObject *CreateDParticles( const CVec3 &_pos, const CQuat &_q, NDb::CEffect
 CTimedObject *Create3DSound( CFuncBase<CVec3> *pPos, NDb::CSound *pSound );
 CTimedObject *Create3DSound( const CVec3 &_pos, NDb::CSound *pSound );
 CTimedObject *CreateDGrassEvent( const CVec3 &_ptPlace );
+CTimedObject *CreateDMesh( CObjectBase *pUnit, const CVec3 &pos, NDb::CModel *pModel, int nFloor );   // @0x3800f0
+// Classify a traced object as a heard-not-seen noise marker (CDMesh) and resolve its heard unit
+// (weak back-ref, may return 0). Mirrors retail NWorld::Trace's AsAISound + sound-owner classify
+// pair (@0x37d760) for the UI pick path; returns 0 for anything that is not a CDMesh.
+CObjectBase* GetDMeshUnit( CObjectBase *p );
+// The marker's world position (where the silhouette stands / the noise happened). Retail anchors
+// both the shoot-the-noise tile command (CStateAttack::GetTargetCmd @0x1d9e20, IAISound::GetPosition)
+// and the ear icon (CSoundIcon::Draw @0x210960) on the SOUND position, never on the live unit.
+bool GetDMeshPos( CObjectBase *p, CVec3 *pPos );
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 }
 #endif

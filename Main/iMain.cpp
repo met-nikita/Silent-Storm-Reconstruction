@@ -292,6 +292,76 @@ void CICSave::Exec()
 #endif
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// CICSaveFile -- retail @0x1f6a80: write the whole interface stack into temp\<name> as a raw
+// headerless compressed stream (dev: uncompressed WRITE; the reader is symmetric).
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CICSaveFile::Exec()
+{
+	// (no S_INVALID_SAVE_CHARS check: that guard is for user-typed SLOT names -- the raw snapshot
+	// name is a code constant like "restart.sav", whose '.' the slot rule would falsely reject)
+	CSaveManager *pSaveManager = GetSaveManager();
+	pSaveManager->PrepareSlot( S_SLOT_ACTIVE );
+	const string szPath = pSaveManager->GetSlotFilePath( S_SLOT_ACTIVE, szName );
+	// retail @0x1f6a80: clear + delete the stale snapshot before writing
+	::SetFileAttributesA( szPath.c_str(), FILE_ATTRIBUTE_NORMAL );
+	::DeleteFileA( szPath.c_str() );
+
+#ifndef _DEBUG
+	try
+#endif
+	{
+		CFileStream sFile;
+		sFile.OpenWrite( szPath.c_str() );
+
+		CStructureSaver sSaver( sFile, CStructureSaver::WRITE );
+		sSaver.Add( 2, &interfaces );
+		SerializeShared( &sSaver );
+	}
+#ifndef _DEBUG
+	catch(...)
+	{
+		csSystem << "WARNING: Can't write snapshot " << szName << endl;
+	}
+#endif
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// CICLoadFile -- retail @0x1f6830: replace the whole interface stack from temp\<name>. No header,
+// no LoadSlot bookkeeping.
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CICLoadFile::Exec()
+{
+	// (no slot-name character check -- see CICSaveFile::Exec)
+	CSaveManager *pSaveManager = GetSaveManager();
+
+#ifndef _DEBUG
+	try
+#endif
+	{
+		CFileStream sFile;
+		sFile.OpenRead( pSaveManager->GetSlotFilePath( S_SLOT_ACTIVE, szName ).c_str() );
+
+		interfaces.clear();
+		CSharedHolder hold;
+		CStructureSaver sSaver( sFile, CStructureSaver::READ );
+		sSaver.Add( 2, &interfaces );
+		SerializeShared( &sSaver );
+		ASSERT( !interfaces.empty() );
+
+		// the snapshot resumes in place (no Initialize): let each interface rebuild its
+		// runtime-only caches (building shells, camera terrain height source, ...)
+		for ( list< CObj<IInterfaceBase> >::iterator i = interfaces.begin(); i != interfaces.end(); ++i )
+			if ( IsValid( *i ) )
+				(*i)->OnSnapshotRestored();
+	}
+#ifndef _DEBUG
+	catch(...)
+	{
+		csSystem << "WARNING: Can't load snapshot " << szName << endl;
+		return;
+	}
+#endif
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 // CICProfile
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CICProfile::Exec()

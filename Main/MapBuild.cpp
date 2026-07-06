@@ -21,7 +21,7 @@
 #include "..\DBFormat\DataAI.h"
 #include "aiGrid.h"
 
-const float WALL_HEIGHT = 2.5f;  // высота этажа
+const float WALL_HEIGHT = 2.5f;  // пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅ
 const int CLUE_SLOT_ID = 188;
 const int EXPLOSION_ID = 189;
 
@@ -104,8 +104,9 @@ class CMapBuilder
 	bool bBuildTerrain;
 	bool bResetPins;
 	bool bShowHoles;
+	int nRelativeLevel;	// retail CMapBuilder+0xa0: map/mission relative level (chest-loot level gate + lock hardness)
 
-	void AddSimpleElements( SMapInfo *pDst, SMapBuilding *pB, NDb::CTemplVariant *pVar, const SMapPosition &parent, 
+	void AddSimpleElements( SMapInfo *pDst, SMapBuilding *pB, NDb::CTemplVariant *pVar, const SMapPosition &parent,
 		bool bTerrAlign, const CVec2 &ptAlignTo, const vector<int> &flags );
 	void AddWaypoints( SMapInfo *pDst, NDb::CTemplVariant *pVar, const SMapPosition &parent,
 		bool bTerrAlign, const CVec2 &ptAlignTo );
@@ -159,9 +160,11 @@ public:
 		bBuildTerrain = true;
 		bResetPins = false;
 		bShowHoles = true;
+		nRelativeLevel = 0;	// retail ctor @0x27c800
 	}
 	void SetParams( const vector<string> &strParams );
 	void SetMaxDepth( int nDepth ) { nMaxDepth = nDepth; }
+	void SetRelativeLevel( int nLevel ) { nRelativeLevel = nLevel; }	// retail free BuildMap @0x2788b0 stores into builder+0xa0
 	void SetPos( const SMapPosition &pos ) { posInitial = pos; }
 	void SetTerrAlignment( bool bTerr ) { bTerrAlignmentInitial = bTerr; }
 	void SetParentBuildingPos( const CVec2 &ptPos ) { ptParentBuildingInitial = ptPos; }
@@ -264,11 +267,11 @@ bool CMapBuilder::CreateBuilding( SMapInfo *pDst, SMapBuilding *pRes, NBuilding:
 		return false;
 	pRes->mpos = pos;
 	pRes->ptAlignTo = ptBuildingCenter;
-	// матрицу трансформации для здания посчитаем позже через mpos
+	// пїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅ mpos
 	pRes->pGrid = new NBuilding::CBuildingGrid;
 	pRes->pSWMap = NBuilding::MakeSWMap( pRes->pVariant->GetRecordID(), pRes->pGrid->GetSeed() );
 	SRand brnd( pRes->pGrid->GetSeed() );
-	// создание объектов, встроенных в здание (окна\двери..)
+	// пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ, пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅ пїЅпїЅпїЅпїЅпїЅпїЅ (пїЅпїЅпїЅпїЅ\пїЅпїЅпїЅпїЅпїЅ..)
 	pInfo->nMinFloor = 100;
 	pInfo->nMaxFloor = -100;
 	AddBuildingObjects( &pInfo->nMinFloor, &pInfo->nMaxFloor, &brnd, pDst, pInfo->solidFragments, pos, ptBuildingCenter, flags, true );
@@ -343,7 +346,31 @@ void CMapBuilder::AddSimpleElements( SMapInfo *pDst, SMapBuilding *pB, NDb::CTem
 						me.szName = pFin->szName;
 						me.nObjectPhase = pFin->nObjectPhase;
 						me.nDC = Float2Int( pFin->fPower );
-						me.pGrenade = pFin->pGrenade;
+						// retail @0x2747c0 (disasm 0x674b2a-0x674c0e): the trap grenade defaults to the
+						// OBJECT's self-detonation grenade; an element-level grenade overrides it and
+						// rescales the disarm DC by the map level.
+						me.pGrenade = pObject->pGrenade;
+						if ( IsValid( pFin->pGrenade ) )
+						{
+							me.pGrenade = pFin->pGrenade;
+							me.nDC = nRelativeLevel * 7 + 16;
+						}
+						me.bIsLocked = pFin->bIsLocked;
+						me.nKeyID = pFin->nKeyID;
+						me.nLockHardness = pFin->nLockHardness;
+						if ( IsValid( pFin->pChest ) )
+						{
+							me.bIsChest = true;
+							me.bIsTransparentIfOpen = true;
+							me.nLockHardness = nRelativeLevel * 7 + 16;
+						}
+						else
+						{
+							me.bIsChest = false;
+							me.bIsTransparentIfOpen = false;
+							if ( me.bIsLocked && pFin->nLockHardness == 0 )
+								me.nLockHardness = ( rand.Get( 20 ) + nRelativeLevel * 2 ) * 3 - 3;
+						}
 						if ( fabs( pFin->vLightCr ) > 0 )
 						{
 							NDb::CContainerModel *p = pObject->pModels[0];
@@ -353,6 +380,7 @@ void CMapBuilder::AddSimpleElements( SMapInfo *pDst, SMapBuilding *pB, NDb::CTem
 							p->fPFlareRadius = pFin->fFlareRadius;
 							p->pPFlareTexture = pFin->pFlareTexture;
 							p->ptPLightFlarePos = pFin->ptFlarePos;
+							p->bPLightShadow = pFin->bLightShadow;	// retail @0x674c91: element LightShadow -> model point-light shadow flag
 							if ( !pFin->szLightParams.empty() )
 							{
 								vector<int> lflags;
@@ -362,6 +390,131 @@ void CMapBuilder::AddSimpleElements( SMapInfo *pDst, SMapBuilding *pB, NDb::CTem
 							}
 						}
 						pDst->items.push_back( me );
+						// ---- chest-loot spill (retail AddSimpleElements @0x2747c0, disasm 0x674cc1-0x6753e9) ----
+						// A placed element with a chest template rolls a CRPGChestReal and spills every
+						// rolled loot item as an SMapRPGElement positioned inside the container's box
+						// (bFromChest=true); CWorld::CreateObjects later places them as world items.
+						if ( IsValid( pFin->pChest ) )
+						{
+							// level gate (computed once at function entry in retail; see disasm 0x6747f9):
+							const int nMinLevel = Max( nRelativeLevel - 4, 0 );
+							const int nMaxLevel = nRelativeLevel == 0 ? 100 : nRelativeLevel;
+							CObj<NDb::CRPGChestReal> pChestReal = pFin->pChest->CreateChest( &rand, flags, nMinLevel, nMaxLevel );
+							if ( IsValid( pChestReal ) )
+							{
+								// the shared template of every spilled item
+								SMapRPGElement mc;
+								CalcPosition( &mc.pos, pFin, parent );
+								mc.pos.ptPos.z += pFin->fDZ + 0.1f;
+								mc.pos.ptScale = CVec3( 1, 1, 1 );
+								mc.nRelFloor = pFin->nFloor;
+								mc.bOpen = false;
+								if ( !bTerrAlign )
+									mc.ptAlignTo = ptAlignTo;
+								else
+									mc.ptAlignTo = CVec2( mc.pos.ptPos.x, mc.pos.ptPos.y );
+								mc.szName = "";
+								mc.nDC = Float2Int( pFin->fPower );
+								mc.bArmed = false;
+								mc.bFromChest = true;
+								if ( IsValid( pObject->pChestLayout ) )
+									mc.bVertical = pObject->pChestLayout->bVertical;
+								else
+									mc.bVertical = false;
+								// chest interior half-extents from the container model's geometry box (default 0.2)
+								float fExtX = 0.2f, fExtY = 0.2f, fExtZ = 0.2f;
+								if ( IsValid( pObject->pModels[0] ) && IsValid( pObject->pModels[0]->pModel )
+									&& IsValid( pObject->pModels[0]->pModel->pGeometry ) )
+								{
+									const CVec3 &boxSize = pObject->pModels[0]->pModel->pGeometry->boundSize;
+									fExtX = boxSize.x * 0.5f;
+									fExtY = boxSize.y * 0.5f;
+									fExtZ = boxSize.z * 0.5f;
+								}
+								CVec3 vOff = VNULL3;
+								if ( IsValid( pObject->pChestLayout ) && pObject->pChestLayout->bSafeLikeLayout )
+								{
+									fExtY *= 0.5f;
+									vOff = CVec3( 0, -fExtY, 0 );
+								}
+								static SRand chestRand;	// retail: function-local static SRand (item-model rolls + grid rolls)
+								char grid[9] = { 0 };	// 3x3 occupancy grid: rolled and marked, but retail never uses the
+														// cell for positioning (only the shelf sequence below does) -- kept
+														// for rand-stream fidelity
+								int nShelfSeq = rand.Get( 9 );
+								for ( vector<NDb::SLootItem>::const_iterator li = pChestReal->items.begin(); li != pChestReal->items.end(); ++li )
+								{
+									if ( !IsValid( li->pItem ) )
+										continue;
+									mc.pItem = li->pItem;
+									// roll the item's model with the static rand -- only its geometry box is used
+									CVec3 itemSize = VNULL3, itemCenter = VNULL3;
+									// ORIGINAL BUG (confirmed @0x67503c-0x67505a): retail calls
+									// pItem->pModel->CreateModel() and derefs its geometry UNCONDITIONALLY --
+									// a loot item without a model would crash. Guarded here; the rand roll is
+									// still consumed only when the model exists, matching retail's stream.
+									if ( IsValid( li->pItem->pModel ) )
+									{
+										CObj<NDb::CModel> pItemModel = li->pItem->pModel->CreateModel( &chestRand );
+										if ( IsValid( pItemModel ) && IsValid( pItemModel->pGeometry ) )
+										{
+											itemSize = pItemModel->pGeometry->boundSize;
+											itemCenter = pItemModel->pGeometry->boundCenter;
+										}
+									}
+									// orient the item inside the chest: swap the axes the way retail does
+									// (disasm 0x67509b-0x6750df) and keep its half-height along the chest z
+									float fHalf;
+									if ( mc.bVertical )
+									{	// stand upright: x' = -z, z' = x
+										fHalf = itemSize.x * 0.5f;
+										itemSize.x = itemSize.z;
+										float fC = itemCenter.x;
+										itemCenter.x = -itemCenter.z;
+										itemCenter.z = fC;
+									}
+									else
+									{	// lie flat: y' = -z, z' = y
+										fHalf = itemSize.y * 0.5f;
+										itemSize.y = itemSize.z;
+										float fC = itemCenter.y;
+										itemCenter.y = -itemCenter.z;
+										itemCenter.z = fC;
+									}
+									// per-axis free range = chest half-extent - item half-size; if ANY component
+									// is negative the whole range collapses to zero (disasm 0x675143-0x675195)
+									CVec3 vRange( fExtX - itemSize.x * 0.5f, fExtY - itemSize.y * 0.5f, fExtZ - fHalf );
+									if ( vRange.x < 0 || vRange.y < 0 || vRange.z < 0 )
+										vRange = VNULL3;
+									// 3x3 grid roll (up to 3 attempts for a free cell; cell is positionally unused)
+									int nGX = 0, nGY = 0;
+									for ( int nTry = 0; nTry < 3; ++nTry )
+									{
+										nGX = chestRand.Get( 3 );
+										nGY = chestRand.Get( 3 );
+										if ( !grid[nGX + nGY * 3] )
+											break;
+									}
+									grid[nGX + nGY * 3] = 1;
+									// shelf fraction: -1/2, -1/6, +1/6 cycling through the shelf sequence
+									const float fFrac = ( nShelfSeq % 3 ) * ( 1.0f / 3.0f ) - 0.5f;
+									nShelfSeq = ( nShelfSeq + 2 ) % 9;
+									// in-chest offset (retail formula verbatim, incl. the doubled z-center
+									// subtraction -- disasm 0x675210-0x675269)
+									CVec3 vLocal;
+									vLocal.x = vRange.x * fFrac - itemCenter.x - vOff.x;
+									vLocal.y = vRange.y * fFrac - itemCenter.y - vOff.y;
+									vLocal.z = ( fHalf - itemCenter.z ) + ( ( 0.0f - itemCenter.z ) - vOff.z );
+									RotatePt( &vLocal, mc.pos.fRotation );
+									SMapRPGElement mi( mc );
+									mi.pos.ptPos += vLocal;
+									if ( IsValid( pObject->pChestLayout ) && !pObject->pChestLayout->shelves.empty() )
+										mi.pos.ptPos.z += pObject->pChestLayout->shelves[rand.Get( (int)pObject->pChestLayout->shelves.size() )];
+									for ( int q = 0; q < li->nQuantity; ++q )
+										pDst->rpgitems.push_back( mi );
+								}
+							}
+						}
 						if ( fabs2( pObject->pModels[0]->ptAmbientColor ) > FP_EPSILON )
 						{
 							SMapBuilding::SAmbientLight l;
@@ -448,6 +601,48 @@ void CMapBuilder::AddSimpleElements( SMapInfo *pDst, SMapBuilding *pB, NDb::CTem
 				mu.nRoamingRadius = pUnit->nRoamingRadius;
 				mu.bFearUseToHit = pUnit->bFearUseToHit;
 				mu.pGuardAnimation = pUnit->pGuardAnimation.GetPtr();
+				// ---- unit loot-chest rolls (retail AddSimpleElements @0x2747c0, disasm 0x6759a2-0x675b97) ----
+				// The persona's backpack chest fills mu.pBackpack; the hand chest rolls the in-hand
+				// item -- its CLIP entries migrate into the backpack, invalid entries are dropped,
+				// and one surviving entry (uniform-random) becomes mu.pInHandItem.
+				if ( IsValid( pUnit->pMonster ) )
+				{
+					const int nMinLevel = Max( nRelativeLevel - 4, 0 );
+					const int nMaxLevel = nRelativeLevel == 0 ? 100 : nRelativeLevel;
+					if ( IsValid( pUnit->pMonster->pBackpackWeapon ) )
+						mu.pBackpack = pUnit->pMonster->pBackpackWeapon->CreateChest( &rand, flags, nMinLevel, nMaxLevel );
+					if ( IsValid( pUnit->pMonster->pHandWeapon ) )
+					{
+						CObj<NDb::CRPGChestReal> pHand = pUnit->pMonster->pHandWeapon->CreateChest( &rand, flags, nMinLevel, nMaxLevel );
+						if ( IsValid( pHand ) && !pHand->items.empty() )
+						{
+							if ( !IsValid( mu.pBackpack ) )
+								mu.pBackpack = new NDb::CRPGChestReal;
+							for ( vector<NDb::SLootItem>::iterator li = pHand->items.begin(); li != pHand->items.end(); )
+							{
+								if ( !IsValid( li->pItem ) || !IsValid( li->pItem->pSuccessor ) )
+								{
+									li = pHand->items.erase( li );
+									continue;
+								}
+								CDynamicCast<NDb::CRPGClip> pClip( li->pItem->pSuccessor );
+								if ( pClip )
+								{
+									mu.pBackpack->items.push_back( *li );
+									li = pHand->items.erase( li );
+								}
+								else
+									++li;
+							}
+							// ORIGINAL BUG (confirmed @0x675b3e-0x675b69): retail indexes the hand list
+							// with rand.Get(size) even when every entry was erased above (size 0 -> an
+							// out-of-bounds read). Guarded here -- only reachable with degenerate chest
+							// data (a hand chest holding nothing but clips/invalid items).
+							if ( !pHand->items.empty() )
+								mu.pInHandItem = pHand->items[rand.Get( (int)pHand->items.size() )].pItem;
+						}
+					}
+				}
 				if ( pUnit->bClueSlot || pUnit->bClueInventorySlot )
 				{
 					SClueSlot cs;
@@ -487,7 +682,7 @@ void CMapBuilder::AddSimpleElements( SMapInfo *pDst, SMapBuilding *pB, NDb::CTem
 void CMapBuilder::WriteLightRooms( SMapInfo *pInfo, NBuilding::CBuildingGrid *pGrid )
 {
 //	for ( list<SMapElement>::iterator i = pInfo->items.begin(); i != pInfo->items.end(); ++i )
-//		if ( i->bTerrAlignment ) // для окон и дверей комнаты не прописываем
+//		if ( i->bTerrAlignment ) // пїЅпїЅпїЅ пїЅпїЅпїЅпїЅ пїЅ пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ
 //			i->nRoomID = GetGlobalRoomID( pGrid, i->nRelFloor, i->nRoomID );		
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -640,7 +835,7 @@ void CMapBuilder::TraverseTemplateTree( NDb::CTemplate* pTemplate, SMapInfo *pFr
 	if ( !IsValid( pVar ) )
 		return;
 
-	// ландшафт
+	// пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ
   const int nRecW = pTemplate->nWidth;
   const int nRecH = pTemplate->nHeight;
 	
@@ -650,7 +845,7 @@ void CMapBuilder::TraverseTemplateTree( NDb::CTemplate* pTemplate, SMapInfo *pFr
 	const float fWHalf = 0.5f * FP_GRID_STEP * nRecW;
 	const float fHHalf = 0.5f * FP_GRID_STEP * nRecH;
 
-	// есть ли необходимость выравнивать по террейну объекты?
+	// пїЅпїЅпїЅпїЅ пїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ?
 	CDGPtr< CPtrFuncBase<NBuilding::CBuildInfo> > pBuildInfo = NGScene::shareBuildings.Get( pVar->GetRecordID() );
 	pBuildInfo.Refresh();
 	NBuilding::CBuildInfo *pBInfo = pBuildInfo->GetValue();
@@ -682,7 +877,7 @@ void CMapBuilder::TraverseTemplateTree( NDb::CTemplate* pTemplate, SMapInfo *pFr
 	NAI::SAlternativeGridInfo nestedAltGrids;
 	for ( int i = 0; i < nmax; ++i )
 	{
-		// преобразование координат при поворотах
+		// пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ
 		NDb::CRectangle *pRec = pVar->rects[i];
 		if ( !IsValid( pRec ) )
 			continue;
@@ -696,12 +891,12 @@ void CMapBuilder::TraverseTemplateTree( NDb::CTemplate* pTemplate, SMapInfo *pFr
 		ConvertFlags( &childFlags, pRec->vszParams );
 		TraverseTemplateTree( pRec->pTemplate, &nested, child, nDepth + 1, &nestedAltGrids, bTerrAlign, ptBuilding, childFlags );
 	}
-	// скрипты
+	// пїЅпїЅпїЅпїЅпїЅпїЅпїЅ
 	if ( IsValid( pVar->pScript ) )
 		nested.scripts.push_back( pVar->pScript.GetPtr() );
-	// здания
+	// пїЅпїЅпїЅпїЅпїЅпїЅ
 	SMapBuilding b;
-  // объекты и юниты
+  // пїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅ пїЅпїЅпїЅпїЅпїЅ
 	SMapPosition posObjects = pos;
   AddSimpleElements( &nested, &b, pVar, posObjects, bTerrAlign, ptBuilding, flags );
 	AddWaypoints( &nested, pVar, posObjects, bTerrAlign, ptBuilding );
@@ -749,7 +944,7 @@ void CMapBuilder::TraverseTemplateTree( NDb::CTemplate* pTemplate, SMapInfo *pFr
 		}
 		for ( int nRelFloor = pBInfo->nMinFloor; nRelFloor <= pBInfo->nMaxFloor; ++nRelFloor )
 		{
-			int nZ = nRelFloor + pos.nFloor; // абсолютный номер этажа
+			int nZ = nRelFloor + pos.nFloor; // пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅ
 			SetOnLayer( &info, &nested, nZ );	
 			//
 			b.stories.push_back( SMapBuilding::SStorey( nRelFloor, nZ ) );
@@ -766,7 +961,7 @@ void CMapBuilder::TraverseTemplateTree( NDb::CTemplate* pTemplate, SMapInfo *pFr
 				if ( lad.nID <= 0 )
 					continue;
 				//const float fLadFloors = lad.nHeight * NAI::F_LADDER_STEP / NBuilding::WALL_HEIGHT;
-				int x = lad.pos.ptMove.x + 1; // CRAP вычитается в aiGrid
+				int x = lad.pos.ptMove.x + 1; // CRAP пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅ aiGrid
 				int y = lad.pos.ptMove.y + 1;
 				if ( nNewGroup >= 0 )
 					pNet->CreateLadder( x, y, lad.nHeight, lad.pos.nRotation, nNewGroup, lad.pos.ptMove.z + pos.nFloor );
@@ -804,6 +999,8 @@ void CMapBuilder::TraverseTemplateTree( NDb::CTemplate* pTemplate, SMapInfo *pFr
 		//SetOnLayer( &info, &nested, 0 );
 		SetOnLayer( &info, &nested, 1000 );
 		ResolveRoutes( &info );
+		// retail @0x276c60 copies the pair from the ROOT variant: bNoAttack right next to bShowTerrain
+		info.bNoAttack = pVar->bNoAttack;
 		info.bShowTerrain = pVar->bShowTerrain;
 	}
 	Transfer( pFree, &nested );
@@ -827,7 +1024,7 @@ void CMapBuilder::TraverseTerrainTree( NDb::CTemplate* pTemplate, float fDZ,	con
 		BlendTerrainInfo( &info.terrain, pVar->GetRecordID(), pos.ptPos, ToRadian( pos.fRotation ), &rand, flags );
 	for ( int i = 0; i < pVar->rects.size(); ++i )
 	{
-		// преобразование координат при поворотах
+		// пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ
 		NDb::CRectangle *pRec = pVar->rects[i];
 		if ( !IsValid( pRec ) )
 			continue;
@@ -839,7 +1036,7 @@ void CMapBuilder::TraverseTerrainTree( NDb::CTemplate* pTemplate, float fDZ,	con
 		child.fRotation = int( pos.fRotation + pRec->fRotation + 360 * 100 ) % 360;
 		vector<int> childFlags( flags );
 		ConvertFlags( &childFlags, pRec->vszParams );
-		// необходимо чтобы сгенеренный террейн соответствовал варианту подтемплейта, который сгенерится в редакторе
+		// пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ, пїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ
 		if ( bResetPins || pRec->nPinID < 0 )
 		{
 			NDb::CTemplVariant *pPin = NDb::GetTemplVariant( pRec->pTemplate, childFlags, -1, &rand );
@@ -1033,7 +1230,7 @@ void CMapBuilder::AddWaypoints( SMapInfo *pDst, NDb::CTemplVariant *pVar, const 
 {
 	if ( !IsValid( pVar ) )
 		return;
-	// добавляем waypoints из текущей расстановки
+	// пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ waypoints пїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ
 	for ( int i = 0; i < pVar->waypoints.size(); ++i )
 	{
 		NDb::CWaypoint *pdbW = pVar->waypoints[i];
@@ -1105,8 +1302,8 @@ void CMapBuilder::ResolveRoute( CPtrFuncBase<NAI::CUnitAIInfo> *pLoader, vector<
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CMapBuilder::ResolveRoutes( SMapInfo *pInfo )
 {
-	// обходим всех добавленных юнитов и проверяем их маршруты, уже установленные флажки пропускаем, 
-	// если на карте появились новые подходящие флажки - вставляем в нужном порядке в маршрут
+	// пїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ пїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ, пїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ, 
+	// пїЅпїЅпїЅпїЅ пїЅпїЅ пїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ - пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅ пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ
 	for ( list<SMapUnit>::iterator i = pInfo->units.begin(); i != pInfo->units.end(); ++i )
 		ResolveRoute( shareUnits.Get( i->nUnitID ), &i->route );
 	for (unordered_map<int, SUnitGroup>::iterator i = pInfo->groups.begin(); i != pInfo->groups.end(); ++i )
@@ -1162,7 +1359,7 @@ bool CMapBuilder::BuildMap( int nPlacementID )
 		b.pGrid->SetPos( b.pos );
 	}
 
-	// Заданные в редакторе разрушения 
+	// пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ 
 	for ( int j = 0; j < explosions.size(); ++j )
 	{
 		const SExplosion &ex = explosions[j];
@@ -1288,14 +1485,15 @@ bool CMapBuilder::BuildTerrain( int nPlacementID )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-bool BuildMap( int nPlacementID, const vector<string> &strParams, 
-	NAI::IPathNetwork *pNet, SMapInfo *pInfo, int nDepth, SRandomSeed sSeed )
+bool BuildMap( int nPlacementID, const vector<string> &strParams,
+	NAI::IPathNetwork *pNet, SMapInfo *pInfo, int nDepth, SRandomSeed sSeed, int nRelativeLevel )
 {
 	if ( nDepth == 0 )
 		return false;
 	CMapBuilder builder( pInfo, pNet, sSeed );
 	builder.SetParams( strParams );
 	builder.SetMaxDepth( nDepth );
+	builder.SetRelativeLevel( nRelativeLevel );	// retail free BuildMap @0x2788b0
 	return builder.BuildMap( nPlacementID );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////

@@ -7,6 +7,7 @@
 #include "wInterface.h"
 #include "wInterfaceVisitors.h"
 #include "RPGAttackMech.h"
+#include "wExplosionPerks.h"   // NWorld::SPerkMineModifiers (placer's explosive-perk damage modifiers)
 namespace NDb
 {
 	class CRPGMine;
@@ -31,10 +32,19 @@ class CMine : public IMine, public IVisObj, public NRPG::IAttackable
 	float fAngle;
 	CPtr<CMineTracker> pMineTracker;
 	int nFloor;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&pWorld); f.Add(3,&vPlace); f.Add(4,&pMine); f.Add(5,&bindGlobal); f.Add(6,&nDC); f.Add(7,&pModel); f.Add(8,&fAngle); f.Add(9,&pMineTracker); f.Add(10,&nFloor); return 0; }
+	// placer's explosive-perk damage modifiers (structure/AE damage + always-human-critical), Filled from the
+	// placing unit at set-mine time (CExecSetMine::TimeLabelReached) and applied when the mine detonates
+	// (GoBoom -> AddGrenadeExplosion). SERIALIZED at tag 11 as a raw 12-byte chunk -- retail CMine::operator&
+	// @0x37f170 stores it there, so a saved+reloaded armed mine RETAINS its perk scaling. Retail SetPerkModifiers
+	// @0x37e130 stores it at CMine+0x44. Retail ALSO serializes the placing unit (pMaster @CMine+0x50) at tag 12
+	// (CMine::operator& @0x37f170) -- a weak CPtr credited for the blast attribution (GoBoom -> AddGrenadeExplosion).
+	SPerkMineModifiers sPerkModifiers;
+	CPtr<CUnitServer> pMaster;   // @+0x50: placing unit (weak ref), credited for the detonation's damage
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&pWorld); f.Add(3,&vPlace); f.Add(4,&pMine); f.Add(5,&bindGlobal); f.Add(6,&nDC); f.Add(7,&pModel); f.Add(8,&fAngle); f.Add(9,&pMineTracker); f.Add(10,&nFloor); f.Add(11,&sPerkModifiers); f.Add(12,&pMaster); return 0; }
 public:
+	void SetPerkModifiers( const SPerkMineModifiers &m ) { sPerkModifiers = m; }
 	CMine() {}
-	CMine( CWorld *_pWorld, const CVec3 &_vPlace, NDb::CRPGMine *pMine, int _nDC, int _nFloor );
+	CMine( CWorld *_pWorld, const CVec3 &_vPlace, NDb::CRPGMine *pMine, int _nDC, int _nFloor, CUnitServer *_pMaster = 0 );
 	~CMine();
 	// implement IVisObj
 	virtual void Visit( IRenderVisitor* );

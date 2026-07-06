@@ -36,10 +36,20 @@ namespace NWorld
 static bool bEverybodyIsAlien = false;
 static bool bIsGoldenShot = false;
 bool bShowBlood = true;
+static bool bFootball = false;   // retail "cheat_football" global: corpse-push always fires, with the 0.33/1.0 coeff split
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void LaunchItem( CWorld *pWorld, const CDumbUnitServer::SResItem &item, const CVec3 &vel )
+// @0x34ef50 -- is the inventory's active item one to SHOW in the unit's hand? True iff there is a live active
+// item whose DB record has bPlaceInHand set. Consumed by CExecMoveInventoryItem::AnimationFinished to decide the
+// ActivateItem bHide arg (an item that is not "placed in hand" activates HIDDEN, using the unarmed animation set).
+bool IsActiveItemToShow( NRPG::IInventoryInfo *pInv )
 {
-	pWorld->AddDebris( item.pModel.GetPtr(), pWorld->GetAIMap(), item.ptCenter, item.q, vel, pWorld->GetTime(), item.pItem );
+	NRPG::IInventoryItem *pItem = pInv->GetActive();
+	return IsValid( pItem ) && pItem->GetDBItem()->bPlaceInHand;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void LaunchItem( CWorld *pWorld, const CDumbUnitServer::SResItem &item, const CVec3 &vel, CObjectBase *pVisibilityParent )
+{
+	pWorld->AddDebris( item.pModel.GetPtr(), pWorld->GetAIMap(), item.ptCenter, item.q, vel, pWorld->GetTime(), item.pItem, pVisibilityParent );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CDumbUnitServer
@@ -124,14 +134,23 @@ int CDumbUnitServer::GetFloor()
 	NAI::SUnitPosition pos;
 	GetUnitPositionForVisit( &pos );
 	int nFloor = pos.pos.GetFloor();
+	// @0x34f610 -- retail only uses the dynamics floor for a plain (non-PK) unit; an
+	// empty PK or a worn PK keeps its static position floor.
 	if ( !CanFight() && !IsValid( animator.GetCorpseCarrier() ) )
-		nFloor = animator.GetDynamicsFloor();
+		if ( !IsEmptyPK() && !IsWearingPK() )
+			nFloor = animator.GetDynamicsFloor();
 	return nFloor;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CDumbUnitServer::IsAddedToVisitor()
 {
+	// @0x34ec20 -- retail also excludes a unit flagged OUT of the visitor set by the
+	// wCheckTooMuchCorpses corpse-density failsafe (MarkNotAddedToVisitors). Converges
+	// the dev no-op noted in wCheckTooMuchCorpses.cpp; behavior-neutral until
+	// CheckTooMuchCorpses() is wired into CWorld::UpdateVisible.
 	if ( bIsPKWhichIsWeared )
+		return false;
+	if ( bNotAddedToVisitors )
 		return false;
 	return true;
 }
@@ -194,6 +213,7 @@ void CDumbUnitServer::Visit( IRenderVisitor *p )
 	if ( bEverybodyIsAlien )
 		p->FinishAlienStyle(); // is hidden PK
 	nPrevFloor = nFloor;
+	bTrackSequence = GetWorld()->IsSequence();   // @0x352380: render-path write-back for Segment's track-seq bug branch
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // release @0x6e96e0: append the effect to the unit's attached-effects list (Visit feeds it each frame). The
@@ -216,11 +236,28 @@ void CDumbUnitServer::Visit( IAIVisitor *p )
 	if ( IsEmptyPK() )
 		pArmor = pRPG->GetRPGPers()->pPanzerklein->pArmor;
 	GetUnitPositionForVisit( &pos );
-	pAIMapHull = p->AddAnimatedHull( 
-		pModel->pGeometry->pAIGeometry, pModel->pSkeleton, animator.GetSkeletonAnimator(), 
-		pArmor, 
-		pWorld->GetPathNetwork()->GetFloor( pos.pos.p.GetLayer() ), 
+	pAIMapHull = p->AddAnimatedHull(
+		pModel->pGeometry->pAIGeometry, pModel->pSkeleton, animator.GetSkeletonAnimator(),
+		pArmor,
+		GetFloor() /* @0x34f710 -- retail feeds the unit's own GetFloor (dynamics floor for corpses), not the raw path-net layer floor; equivalent for live units */,
 		TS_UNITS|TS_FRAGMENTED|TS_PICK|TS_COVER|TS_WEAPON_BLOCKER );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// release @0x34fdd0: feed the unit's looping combat/engine sounds to the sound scene (CRenderSound syncs
+// the union of GetActive()+GetUnits(), so live units are visited). Two CanFight()-guarded emits, each a
+// root-bone-anchored looping 3D sound: (1) the worn PanzerKlein's engine loop, (2) a fixed hand effect.
+void CDumbUnitServer::Visit( ISoundVisitor *p )
+{
+	if ( !CanFight() )
+		return;
+	NDb::CPanzerklein *pPK = GetWearingDBPK();
+	if ( IsValid( pPK ) && IsValid( pPK->pEngineSound ) )
+		p->Add3DSound( 0, pPK->pEngineSound,
+			new NGScene::CExtractTranslation( new NAnimation::CAddBoneFilter( animator.GetSkeletonAnimator(), 0 ) ) );
+	// release: hand-effect record 0x698 emits the fixed loop sound 0x4057 (bone-anchored to the root).
+	if ( IsValid( pHandEffect ) && pHandEffect->GetRecordID() == 0x698 )
+		p->Add3DSound( 0, NDb::GetSound( 0x4057 ),
+			new NGScene::CExtractTranslation( new NAnimation::CAddBoneFilter( animator.GetSkeletonAnimator(), 0 ) ) );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CDumbUnitServer::GetBonePos( CVec3 *pRes, CQuat *pQuat, const char *pszBoneName )
@@ -290,6 +327,14 @@ void CDumbUnitServer::SetPositionCore( const NAI::SUnitPosition &dst )
 {
 	animator.SetPose( dst.GetPose() );
 	position = dst;
+	// retail @0x34f970: if this unit is carrying a corpse, drag the corpse's cached position with it so the
+	// corpse's AI-map hull + last-known position (used by the AI corpse-pickup logic) track the carrier.
+	CDumbUnitServer *pCorpse = GetCorpse();
+	if ( pCorpse )
+	{
+		pCorpse->position = dst;
+		pCorpse->vPrevGetCorpseAIPosition = dst.pos.GetCP();
+	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CDumbUnitServer::LockNextPlace( const NAI::SUnitPosition &dst )
@@ -367,26 +412,56 @@ void CDumbUnitServer::PlaySound( NDb::CTSound *pSound )
 		AttachMiscObject( Create3DSound( position.GetEyePosition(), pS ) );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CDumbUnitServer::DropItems( bool bHands, bool bBackPack )
+void CDumbUnitServer::DropItems( bool bDropHands, bool bDropCap, bool bDropBackPack )
 {
 	SResItem item;
 	CPtr<NRPG::IInventoryInfo> pInventoryInfo = pRPG->GetInventoryInfo();
-	// ����������� ������
-	if ( bHands )
+	// retail DropItems @0x3502c0 split the old Jan03 bHands flag into two independent flags -- bDropCap (the
+	// uniform cap, dropped FIRST) and bDropHands (the in-hand/slot items) -- plus the unchanged bDropBackPack.
+	// drop the uniform cap
+	if ( bDropCap )
 	{
 		NDb::CRPGUniform *pDBUniform = pInventoryInfo->GetUniform();
 		SRand rnd;
-		if ( pDBUniform )
+		if ( pDBUniform && pDBUniform->pCapModel )
 		{
-			if ( pDBUniform->pCapModel )
+			GetBonePos( &item.ptCenter, &item.q, GetBoneName( UIT_CAP, 0, IsWearingPK() ) );
+			item.pModel = pDBUniform->pCapModel->CreateModel(&rnd);
+			// the cap has NO inventory item, so it must be fog-gated explicitly (retail @0x34ade0's
+			// separate CObjectBase* visibility-parent, which DropItems @0x3502c0 passes for every
+			// drop) -- else an unseen unit's death shows a floating helmet. The parent rides on the
+			// flying CDItem (+0x2c) so the gate also survives physics-settle: Segment @0x34b4b0
+			// re-derives it and AddFrozenItem @0x34b100 keeps the frozen cap on the fog-gated list
+			// AND in visibleItems (the LOS/vision candidate list), so gaining LOS reveals it.
+			// INTENTIONALLY BETTER THAN RETAIL: retail publishes the flying cap into
+			// visibleDynamicItems and waits for the NEXT VISION UPDATE to LOS-reveal it (a small but
+			// visible delay); a dev fog-gated CDItem is worse still -- in-flight debris is never a
+			// vision candidate (GetVisibleItems only walks the frozen list), so it stayed hidden
+			// until physics-settle. When the dying unit is already visible to the HUMAN player we
+			// route the cap to the ungated show list so it renders the same frame; unseen units keep
+			// the gated (hidden-until-settle) path so a helmet can't float in the fog of war.
+			// The gate MUST test visibility to the human/scenario-player-0 (the mission's view
+			// player -- same resolution KillEmAll @0x2fd180 uses), NOT GetCurrentPlayer(): the TBS
+			// current player is the ACTING player (the AI during its turn/fast-turn, NULL in plain
+			// real time), and a player's visible list unconditionally contains its OWN units
+			// (CPlayerBaseVision::UpdateVisible), so gating on it counted every AI victim as "seen"
+			// and dropped its cap ungated into the fog of war.
+			bool bSeen = false;
+			CPlayer *pHuman = pWorld->GetPlayerByID( 0 );
+			if ( IsValid( pHuman ) )
 			{
-				// � � ������ ������� �������
-				GetBonePos( &item.ptCenter, &item.q, GetBoneName( UIT_CAP, 0, IsWearingPK() ) );
-				item.pModel = pDBUniform->pCapModel->CreateModel(&rnd);
-				LaunchItem( pWorld, item );
+				list< CPtr<CUnit> > visibleList;
+				pHuman->GetVisible( &visibleList );
+				CPtr<CUnit> pSelf = CDynamicCast<CUnit>( (CObjectBase*)this );
+				if ( IsValid( pSelf ) )
+					bSeen = find( visibleList.begin(), visibleList.end(), pSelf ) != visibleList.end();
 			}
+			LaunchItem( pWorld, item, VNULL3, bSeen ? (CObjectBase*)0 : (CObjectBase*)this );
 		}
-		// item in hand goes away
+	}
+	// drop the in-hand / slotted items
+	if ( bDropHands )
+	{
 		for ( int nSlot = 0; nSlot != NDb::N_SLOTS; ++nSlot )
 			if ( TearOffItem( &item, (NDb::ESlot)nSlot ) )
 			{
@@ -394,8 +469,8 @@ void CDumbUnitServer::DropItems( bool bHands, bool bBackPack )
 				LaunchItem( pWorld, item, vInitial );
 			}
 	}
-	// ���������� ��� �� �������
-	if ( bBackPack )
+	// drop the backpack items
+	if ( bDropBackPack )
 	{
 		const vector<NRPG::SBackPackItem> &sItems = pInventoryInfo->GetItems();
 		for ( int n = 0; n < sItems.size(); ++n )
@@ -416,27 +491,56 @@ void CDumbUnitServer::DropItems( bool bHands, bool bBackPack )
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CDumbUnitServer::Hide( bool bHide )
+void CDumbUnitServer::Hide( bool bHide, bool bThrowEvent )
 {
+	// retail @0x34fb10: you cannot RE-hide until bCanHide is re-armed (OnNewPlayerFastTurn). One unhide disarms it.
+	if ( bHide && !bCanHide )
+		return;
+	bool wasHiding = GetUnitRPG()->IsHiding();   // capture BEFORE SetHiding
 	GetUnitRPG()->SetHiding( bHide );
 	if ( !bHide )
 	{
+		bCanHide = false;      // disarm re-hiding until the next fast-turn re-arms it
 		bJustUnhided = true;
-		NGlobal::ThrowEvent( CEventOnUnitUnhide( this ) );
+		if ( bThrowEvent && wasHiding )   // reveal event only when actually leaving hiding (voluntary/death paths pass false)
+			NGlobal::ThrowEvent( CEventOnUnitUnhide( this ) );
 	}
 	Update();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CDumbUnitServer::FallAsIfDead( const CVec3 &ptDir, bool bDropItemsFromBackPack )
+void CDumbUnitServer::EnableHide()
 {
-	DropItems( !IsWearingPK(), bDropItemsFromBackPack );
+	// retail @0x34ed00: re-arm hiding on the false->true transition (the world UINeedUpdate UI dirty-bit is a
+	// cosmetic no-op absent from this build, so it is elided).
+	if ( !bCanHide )
+		bCanHide = true;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CDumbUnitServer::FallAsIfDead( const CVec3 &ptDir, bool bDropItemsFromBackPack, bool bPlayDeathAnim )
+{
+	DropItems( !IsWearingPK(), true, bDropItemsFromBackPack );   // retail @0x350770 always drops the cap here (bDropCap=true)
 	//
 	if ( GetUnitRPG()->IsHiding() )
-		Hide( false );
+		Hide( false, false );   // retail FallAsIfDead @0x350770: a dying unit unhides WITHOUT throwing the reveal event
+	//
+	// retail @0x350770 (disasm 0x7507c3): a falling corpse-CARRIER lets go of the corpse it hauls --
+	// vtbl+0x30 GetCorpse() -> CUnitAnimator::BeDropped @0x33b1b0 + the corpse's vis-sync Update.
+	// Without this the carried body stays glued to the dead carrier's back forever.
+	CDumbUnitServer *pCarried = GetCorpse();
+	if ( IsValid( pCarried ) )
+	{
+		pCarried->animator.BeDropped();
+		pCarried->Update();
+	}
 	//
 	if ( !IsWearingPK() )
 	{
-		animator.Die( position, ptDir );
+		// retail @0x350770 gates the death animation on the 3rd arg -- a combat (non-script) knock-out
+		// plays NOTHING here; its ragdoll fall arrives from the ProcessAttack corpse-push (@0x350e20).
+		// Retail passes a VNULL3 direction (disasm 0x7507ff..0x750818: the CRay is filled from ::VNULL3);
+		// the push direction only ever enters via the bPlayDeath=false entries.
+		if ( bPlayDeathAnim )
+			animator.Die( position, VNULL3, true );
 		pWorld->GetPathNetwork()->Unlock( this );
 	}
 	else
@@ -460,11 +564,11 @@ void CDumbUnitServer::KillUnit( const CVec3 &ptDir )
 	//
 	if ( !bUnconscious )
 	{
-		FallAsIfDead( ptDir, true );
+		FallAsIfDead( ptDir, true, true );   // retail @0x350cd0: killed -> drop backpack + play death anim
 		PlaySound( pRPG->GetRPGPers()->pSoundDeath );
 	}
 	else
-		DropItems( false, true );
+		DropItems( false, false, true );     // retail @0x350cd0: unconscious->killed drops only the backpack
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CDumbUnitServer::MakeUnconscious( const CVec3 &ptDir, bool bFromScript )
@@ -474,7 +578,7 @@ void CDumbUnitServer::MakeUnconscious( const CVec3 &ptDir, bool bFromScript )
 	//
 	OnUnitMadeUnconscious( bFromScript ); // UnitServer callback
 	//
-	FallAsIfDead( ptDir, false );
+	FallAsIfDead( ptDir, false, bFromScript );   // retail @0x350dc0: play the death anim only for a scripted knock-out
 	if ( !bFromScript )
 		PlaySound( pRPG->GetRPGPers()->pSoundDeath );
 }
@@ -482,7 +586,7 @@ void CDumbUnitServer::MakeUnconscious( const CVec3 &ptDir, bool bFromScript )
 void CDumbUnitServer::BlowUp()
 {
 	SRand rnd;
-	DropItems( true, true );
+	DropItems( true, !IsUnconscious(), true );   // retail @0x350890: an already-unconscious unit blowing up keeps its cap
 	CVec3 vPos = GetUnitPosition().GetCP() + CVec3(0,0,1);
 	pWorld->CreateBloodyMess( vPos, CVec3(0,0,0), this, 30 );
 	pWorld->CreateParticle( vPos, QNULL, NDb::GetTEffect( 822 )->GetEffect( &rnd ) );
@@ -558,18 +662,52 @@ int CDumbUnitServer::ProcessAttack( int nUserID, NRPG::CAttackPortion *pAttack, 
 		KillUnit( pAttack->rTtrajectory.ptDir );
 	}
 
+	bool bDied = false;   // retail @0x350e20: set by BOTH the kill and the knock-out dispatch (beauty-cam gate)
 	if ( pRPG->IsDead() && !IsDead() )
+	{
 		KillUnit( pAttack->rTtrajectory.ptDir );
+		bDied = true;
+	}
 	else if ( pRPG->IsUnconscious() && !IsUnconscious() )
+	{
 		MakeUnconscious( pAttack->rTtrajectory.ptDir );
+		bDied = true;
+	}
 	else
-	{		
+	{
 		animator.Wound();
 
 		NRPG::SUnitInfo sInfo;
 		GetUnitRPG()->GetInfo( NAI::WALK, &sInfo );
 		OnSuffersDamage( float(sInfo.nHP) / sInfo.nMaxHP );
 		GetWorld()->GetAISignalManager()->Add( NAI::CreateAIHitSignal( pAttack->pAttacker, pAttack->pTarget ) );
+	}
+
+	// retail @0x350e20 step 8 (the CORPSE PUSH -- was missing here entirely): push the downed body
+	// with the shot direction via the clipless animator Die (bPlayDeath=false). This is the ONLY
+	// ragdoll fall a combat knock-out ever gets (MakeUnconscious/FallAsIfDead play nothing), and the
+	// push a fresh corpse gets on top of its death clip. Skipping it left KO'd units FROZEN standing
+	// in their last pose -- and a later KillUnit on an unconscious unit takes the DropItems-only
+	// branch, freezing the corpse for good (the reported frozen-corpse-at-old-place bug).
+	// Gates (disasm 0x751313..0x751359): persona !IsAlive; direction (or cheat_football); not a worn
+	// PK shell; persona not a panzerklein; not being carried (animator.bIsCarried @+103).
+	// (retail calls NRPG::CAttackPortion::GetPushCorpseCoeff here for its return value only --
+	//  dev's equivalent is the plain fPushCoeff member read below; no side effects to preserve)
+	{
+		CVec3 vPush = pAttack->rTtrajectory.ptDir;
+		bool bDown = IsDead() || IsUnconscious();
+		if ( bDown && ( bFootball || fabs2( vPush ) > 0 ) && !IsWearingPK() &&
+		     pRPG->GetRPGPers()->pPanzerklein == 0 && !animator.bIsCarried )
+		{
+			Normalize( &vPush );
+			float fCoeff = 1.0f;
+			if ( bFootball )
+				fCoeff = pAttack->fPushCoeff <= 0 ? 0.33f : 1.0f;   // retail GetPushCorpseCoeff(pAttack)
+			vPush *= fCoeff;
+			// retail posts a CUICmdUnitCamera(PR_UNIT_DIED_BEAUTY, t=(coeff<=0.5 ? 1 : 2*coeff+0.5)) when
+			// bDied -- dev has no arbitrated camera-command class (see wUnitMove.cpp GLUE FIX); omitted.
+			animator.Die( position, vPush, false );
+		}
 	}
 
 	if ( IsDead() )
@@ -582,10 +720,17 @@ int CDumbUnitServer::ProcessAttack( int nUserID, NRPG::CAttackPortion *pAttack, 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CDumbUnitServer::Segment()
 {
-	// �������� ���������� ���� ��� �����
+	// ORIGINAL BUG (confirmed retail @0x350960): inside the corpse-like gate, TWO branches re-push the vis-binding
+	// (Update()) on a cached-vs-live mismatch but NEVER write the new value back here -- the write-back lives in the
+	// render path (Visit @0x352380). So a corpse-like unit that is never rendered re-pushes every tick. Faithful --
+	// do NOT add the write-backs here. Branch (A) is the floor change; branch (B) is the track-sequence flag, gated
+	// on CWorld::IsSequence @0x376ff0 (the interrupt/real-time predicate, delegated to CTBSWorld::IsSequence and
+	// exposed as an IWorld default-no-op virtual). bTrackSequence is written back in Visit above.
 	if ( !CanFight() )
 	{
 		if ( GetFloor() != nPrevFloor )
+			Update();
+		if ( bTrackSequence != GetWorld()->IsSequence() )
 			Update();
 	}
 	bJustUnhided = false;
@@ -606,25 +751,45 @@ void CDumbUnitServer::DoGameMove( const NAI::SUnitPosition &dst )
 	AttachMiscObject( CreateDGrassEvent( dst.GetCP() ) );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-bool CDumbUnitServer::CheckPassable( const NAI::SUnitPosition &dst )
+ECanMoveRes CDumbUnitServer::CheckPassable( const NAI::SUnitPosition &dst )
 {
-	pWorld->GetPathNetwork()->Unlock( this );
-	bool bPassable = pWorld->GetPathNetwork()->IsPassable( dst.pos.p );
+	// @0x34efd0 -- query the granular EPassable verdict for dst, optionally re-check the whole lock
+	// footprint (big lockers, or a move INTO the LAY pose: dst nPose==CM_LAY, the 0xC0-masked top pose
+	// bits == 0 -- disasm-confirmed at 0x74f024, and the footprint place is dst, NOT position.pos.p),
+	// then re-lock the unit's own place and map EPassable -> ECanMoveRes:
+	//   AIP_NOT_PASSABLE/AIP_CANNOT_LAY -> CMR_NOT_PASSABLE, AIP_LOCKED -> CMR_LOCKED,
+	//   AIP_DOOR -> CMR_DOOR, AIP_YES -> CMR_YES.
+	NAI::IPathNetwork *pNet = pWorld->GetPathNetwork();
+	pNet->Unlock( this );
+	NAI::EPassable e = pNet->GetPassability( dst.pos.p );
+	if ( e == NAI::AIP_YES &&
+	     ( NAI::IsBigLocker( this ) || dst.pos.p.GetPose() == NAI::CM_LAY ) )
+		e = NAI::BigLockerPassableState( pNet, dst.pos.p );
 	if ( IsLocker() )
 	{
 		if ( bLocksTwoPlaces )
-			pWorld->GetPathNetwork()->LockMovingObject( this, position.pos.p, nextLock );
+			pNet->LockMovingObject( this, position.pos.p, nextLock );
 		else
-			pWorld->GetPathNetwork()->Lock( this, position.pos.p );
+			pNet->Lock( this, position.pos.p );
 	}
-	return bPassable;
+	switch ( e )
+	{
+		case NAI::AIP_NOT_PASSABLE:
+		case NAI::AIP_CANNOT_LAY:  return CMR_NOT_PASSABLE;
+		case NAI::AIP_LOCKED:      return CMR_LOCKED;
+		case NAI::AIP_DOOR:        return CMR_DOOR;
+		default:                   return CMR_YES;   // AIP_YES
+	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-bool CDumbUnitServer::CanDoGameMove( const NAI::SUnitPosition &dst )
+ECanMoveRes CDumbUnitServer::CanDoGameMove( const NAI::SUnitPosition &dst )
 {
-	if ( !CheckPassable( dst ) || !pRPG->CanMove() )
-		return false;
-	return true;
+	// @0x34f100 -- res = CheckPassable(dst); if passable, res = (ECanMoveRes)(CanMove()==0)
+	// i.e. CMR_YES iff both hold, else CMR_CANNOT_MOVE(1); otherwise the CheckPassable verdict.
+	ECanMoveRes res = CheckPassable( dst );
+	if ( res == CMR_YES && !pRPG->CanMove() )
+		res = CMR_CANNOT_MOVE;
+	return res;
 	//CanSpendAP( pWorld->GetMoveActionType( position, dst, animator.IsCarryingCorpse() ) );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -687,7 +852,11 @@ void CDumbUnitServer::PlaceOnPassablePlace()
 	pNet->Lock( this, position.pos.p );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CDumbUnitServer::CreateFlash()
+// @0x351630: retail is CreateFlash(bLeft, bFirstBullet). bLeft picks the L_/R_Weapon barrel bone on a dual-mount
+// (headless) PK; bFirstBullet gates the burst sound so it emits ONCE at the start of a burst (short -> pSoundBurst,
+// long -> pSoundCycleBurst) instead of the Jan03 GetNBullets()==1 gate. (The retail returns the created C3DSound* for
+// the long-burst sound-retention; this dev fork dropped that member, so we keep the void MakeAISound.)
+void CDumbUnitServer::CreateFlash( bool bLeft, bool bFirstBullet )
 {
 	NAnimation::SBonePose barrel;
 	bool bTest = false;
@@ -708,7 +877,7 @@ void CDumbUnitServer::CreateFlash()
 	}
 	NDb::CRPGWeapon *pWeapon = pRPGWeapon->GetDBWeapon();
 	ASSERT( pWeapon );
-	bTest = animator.GetBarrelPos( animator.GetCannon() ? 0 : pWeapon->GetModel()->pGeometry, &barrel );
+	bTest = animator.GetBarrelPos( animator.GetCannon() ? 0 : pWeapon->GetModel()->pGeometry, &barrel, bLeft );
 	ASSERT( bTest );
 	if ( pWeapon->pShotEffect )
 	{
@@ -716,33 +885,31 @@ void CDumbUnitServer::CreateFlash()
 		SRand rnd;
 		AttachMiscObject( CreateDParticles( barrel.pos, barrel.rot * rndX, pWeapon->pShotEffect->GetEffect( &rnd ), GetFloor() ) );
 	}
-	//AttachMiscObject( new CDFlash( barrel.pos, CVec3(0.3f,0.3f,0.3f), 2.5f, 3 ) );
 	NDb::CSound *pSound = 0;
 	NDb::CAISound *pAISound = 0;
-	bool bDoPlay = true;
 	switch ( pRPGWeapon->GetShootMode() )
 	{
 		case NDb::SM_Snap:
 		case NDb::SM_Aimed:
 		case NDb::SM_Careful:
 		case NDb::SM_Snipe:
-			pSound = pWeapon->pSound; // AttachMiscObject // barrel.pos
+			pSound = pWeapon->pSound;
 			pAISound = pRPGWeapon->GetDBWeapon()->pWeaponType->pAISound;
 			break;
 		case NDb::SM_ShortBurst:
+			if ( !bFirstBullet )   // burst sound emits once, at the first bullet
+				return;
+			pSound = pWeapon->pSoundBurst;
+			pAISound = pRPGWeapon->GetDBWeapon()->pWeaponType->pBurstAISound;
+			break;
 		case NDb::SM_LongBurst:
-			if ( pRPG->GetNBullets() == 1 )
-			{
-				pSound = pWeapon->pSoundBurst; // AttachMiscObject( // barrel.pos
-				pAISound = pRPGWeapon->GetDBWeapon()->pWeaponType->pBurstAISound;
-			}
-			else
-				bDoPlay = false;
+			if ( !bFirstBullet )
+				return;
+			pSound = pWeapon->pSoundCycleBurst;   // long burst -> the cycling burst sound
+			pAISound = pRPGWeapon->GetDBWeapon()->pWeaponType->pBurstAISound;
 			break;
 	}
-	//
-	if ( bDoPlay )
-		pWorld->MakeAISound( pAISound, this, 0, pSound );
+	pWorld->MakeAISound( pAISound, this, 0, pSound );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 int CDumbUnitServer::GetActionAP( NRPG::EAction action ) const
@@ -780,6 +947,15 @@ void CDumbUnitServer::DoAction( NRPG::EAction action )
 {
 	SpendAP( GetActionAP( action ) );
 	pRPG->RegisterAction( action );
+	// retail @0x34edb0: only a RUNNING move counts toward nMoveInLastTurn (the shooting move-penalty);
+	// side-step costs 2, diagonal 1. Walk/crouch/crawl moves no longer inflate it.
+	if ( position.GetPose() == NAI::RUN )
+	{
+		if ( action == NRPG::AC_MOVE_SIDE )
+			pRPG->AddMoveInLastTurn( 2 );
+		else if ( action == NRPG::AC_MOVE_DIAGONAL )
+			pRPG->AddMoveInLastTurn( 1 );
+	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 NDb::CRPGArmor* CDumbUnitServer::GetArmor()
@@ -807,7 +983,7 @@ NDb::CAISound *CDumbUnitServer::GetStepAISound()
 		case NAI::WALK:
 			nID = 5; break;
 		case NAI::RUN:
-			nID = 6; break;
+			nID = GetUnitRPG()->HasPerk( 0x29 ) ? 5 : 6; break;   // @0x34ee90: quiet-run perk 0x29 -> walk-step AI sound
 		}
 	}
 	return NDb::GetAISound( nID );
@@ -865,14 +1041,14 @@ void CDumbUnitServer::InitAsCorpse( bool bDead )
 	bindGlobal.Update(); 
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-float CDumbUnitServer::GetMaxFallDist() const
+float CDumbUnitServer::GetMaxFallDist( float extraDrop ) const
 {
 	float fMaxFall = 3.0f;
 	NAI::IAIMap *pMap = GetWorld()->GetAIMap();
 	vector<NAI::SInterval> intersect;
 	CRay ray;
 	ray.ptOrigin = position.GetCP();
-	ray.ptOrigin.z += 0.2f;
+	ray.ptOrigin.z = extraDrop + 0.2f;   // retail @0x34f1c0: z is REPLACED by extraDrop+0.2 (x/y stay from CP)
 	ray.ptDir = CVec3( 0, 0, -1.0f );
 	pMap->Trace( ray, &intersect, NWorld::TS_PASS_BLOCKER	);
 	for ( int k = 0; k < intersect.size(); ++k )
@@ -900,4 +1076,5 @@ START_REGISTER(wDumbUnit)
 	REGISTER_VAR_EX( "i_am_an_alien", NGlobal::VarBoolHandler, &bEverybodyIsAlien, 0, false )
 	REGISTER_VAR_EX( "cheat_golden_shot", NGlobal::VarBoolHandler, &bIsGoldenShot, 0, false )
 	REGISTER_VAR_EX( "cheat_blood", BloodHandler, &bShowBlood, 0, true )
+	REGISTER_VAR_EX( "cheat_football", NGlobal::VarBoolHandler, &bFootball, 0, false )   // retail console var (Game.exe @0x4c8a96)
 FINISH_REGISTER

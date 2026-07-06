@@ -42,8 +42,11 @@ class CAICancelSnipeAction; class CAIDockWithHGAction; class CAIUndockFromHGActi
 class CAITerrorPKAction; class CAIWearPKAction; class CAILeavePKAction;
 class CUnitArea;
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// prepare state of the per-turn decision pipeline (find places -> choose -> decide).
-enum EPrepareState { PS_FINDING_PLACES, PS_CHOOSING_PLACE, PS_DECIDING, PS_FINISHED };
+// prepare state of the per-turn decision pipeline. RETAIL PDB enum (NAI::CAICombatLogic::EPrepareState):
+// prepareState IS the DoJob per-tick stage counter (there is NO separate nJobStage). PS_FINISHED (=4) is the
+// "not thinking" sentinel (IsThinking == prepareState != PS_FINISHED). Converging from the dev 4-value enum is
+// a latent save-compat break on the tag-7 prepareState ordinal -- transient per-turn state, runtime-deferred.
+enum EPrepareState { PS_INIT, PS_PLACESOURCE, PS_ACTION, PS_THINK, PS_FINISHED };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CAICombatLogic - command-driven combat behaviour base (the engine).
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -56,8 +59,12 @@ class CAICombatLogic: public CAILogic, public CAIJob
 	EPrepareState                         prepareState;  // pipeline state
 	int                                   nPSToPrepare = 0; // release tag 8: place-source index pending prepare (save-format)
 	int                                   nUnitLastAP;   // anti-cycling: AP at last decision (release tag 9)
-	// regOnNewTurn: CEventRegister<CAICombatLogic, NWorld::CEventOnPassControl> firing OnNewTurn - modelled
-	// in the .cpp (event-hook member); omitted from the header member list pending the global-event port.
+	// regOnNewTurn: fires CAICombatLogic::OnNewTurn on each new player turn. The a5dll's CEventOnNewPlayerTurn
+	// is the live stand-in for retail's CEventOnPassControl (both fire at StartPlayerTurn; the a5dll never
+	// throws CEventOnPassControl). NOT serialized (a runtime subscription re-established by the ctor -> excluded
+	// from operator&, exactly like CAIAfterCombatLogic's own regOnNewTurn). Fires ALONGSIDE AfterCombat's on the
+	// one event; they touch disjoint state (base: prepareState/nUnitLastAP; derived: bAPUpdated).
+	NGlobal::CEventRegister< CAICombatLogic, NWorld::CEventOnNewPlayerTurn > regOnNewTurn;
 	ZEND
 public:
 	int operator&( CStructureSaver &f );   // public: the concrete logics serialize (CAICombatLogic*)this
@@ -89,9 +96,19 @@ protected:
 	//
 	void DoAction( CAIAction *pAction );        // log move-to-place (pos+AP) then pAction->Do(pLog)
 	CAILog* GetLog() const { return pLog; }
+	// --- Stage-0 parity scaffolding (BUILD-SAFE, currently UNCALLED) -- release helper predicates.
+	// Non-virtual, no new member => vtable/layout/save-format unchanged. Foundation for the world
+	// executor-probe + job-manager driving convergence; do NOT wire into IsNeedToThink/IsEndOfTurn/
+	// IsFinished until the executor object + tactical-commander Add/Remove reconciliation land.
+	bool IsLogicValid();          // @0x00432780  live unit+server+world + server CanFight
+	bool IsExecutingCommand();    // @0x00432ea0  the unit's person component is mid-action
+	bool HasCommandToExecute();   // @0x00432da0  live server cmd | queued logic cmd | non-empty log
+	bool HasSameAP();             // @0x00432730  unit AP == the StopThinking snapshot (nUnitLastAP)
 	//
 public:
-	CAICombatLogic() {}
+	// both ctors MUST init regOnNewTurn (CEventRegister has no default ctor -- it ASSERTs), exactly like
+	// CAIAfterCombatLogic; the default ctor is the save/load registry create path.
+	CAICombatLogic(): regOnNewTurn( this, &CAICombatLogic::OnNewTurn ) {}
 	CAICombatLogic( IAIUnit *pUnit, IAIChoosePlaceJob *pChoosePlace );
 	//
 	IAIActionPlaceSource* AddPlaceSource( IAIActionPlaceSource *pSrc );  // dedup-append
@@ -99,13 +116,16 @@ public:
 	// IAILogic / CAIJob overrides
 	virtual void GenerateCommand();             // drain pLog's world commands into the queue
 	virtual void DoJob();                       // run the find-places -> choose -> MakeDecision pipeline
+	virtual bool IsIdleJob();                   // @0x004331c0 -- overrides CAIJob's return-false idle probe
 	virtual bool IsNeedToThink();
 	virtual void Think();
 	virtual bool IsThinking();
 	virtual void StopThinking();
 	virtual bool IsFinished();
 	virtual bool IsEndOfTurn();
-	virtual void OnNewTurn();
+	// CAICombatLogic does NOT override the no-arg virtual slot-12 OnNewTurn() (retail's slot-12 is empty) -- it
+	// inherits CAILogic::OnNewTurn(){}. The per-turn reset is the EVENT handler below, fired via regOnNewTurn.
+	void OnNewTurn( const NWorld::CEventOnNewPlayerTurn &event );   // @0x00432820 (retail CEventOnPassControl handler)
 	//
 	virtual void MakeDecision() = 0;            // per-logic action/rule set
 	virtual bool CanSkip() const = 0;

@@ -94,7 +94,12 @@ void CAIChoosePlaceJob::Reset()
 		si.nCurrentPlace = 0;
 		si.nBestPlace = -1;
 		si.bPlacesPrepared = false;
-		si.places.clear();
+		// @0x475210 - retail does NOT clear the places vector here. It pings the map KEY
+		// (the action)'s ResetInfoHash (vtbl slot8/+0x20) so the action's cached SActionInfo
+		// is dropped and CanDo/GetInfo recompute on the next scan. bPlacesPrepared=false
+		// re-fetches the candidates (GetPlaces' operator= REPLACES the vector), so the old
+		// filtered places need not be (and are not) cleared.
+		(*i).first->ResetInfoHash();
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -174,9 +179,10 @@ int CAIChoosePlaceForRetreatJob::operator&( CStructureSaver &f ) { f.Add( 2, (CA
 bool CAIChoosePlaceForRetreatJob::IsPlaceBetter( CAIAction *pAction,
 	const SPlaceWithAP *pCandidate, const SPlaceWithAP *pBest )
 {
-	// RECONSTRUCTION PENDING (build-settle): retreat prefers places farther from the enemy / safer;
-	// CreateAIChoosePlaceForRetreatJob @0x00475680, IsPlaceBetter body to decompile.
-	return pAction->ComparePlaces( *pCandidate, *pBest );
+	// @0x476470 - retreat ranking: FEWER AP left wins (more AP spent to reach the place =>
+	// farther from the enemy => safer). Decomp: `return param_2->nUnitAP < param_3->nUnitAP;`.
+	// pAction is unused here (the retail body ignores param_1), matching the decode.
+	return pCandidate->nUnitAP < pBest->nUnitAP;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 IAIChoosePlaceJob* CreateAIChoosePlaceForAttackJob( IAIJob *pParentJob, int nAPToReserve )  // @0x00475610

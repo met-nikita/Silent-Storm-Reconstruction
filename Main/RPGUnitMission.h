@@ -151,11 +151,30 @@ public:
 	// IAIUnit::GetHideProbability pattern) so the dev<->release vtable order is irrelevant and other IUnitMission
 	// implementors keep building; CUnitMission overrides it. Dead until the AI hearing query / assassin reaction.
 	virtual int GetHearingProbability( IUnitMission *pSource, float fDist, const NDb::SAISound &sound, bool *pAudible ) { return 0; }
+	// @0x34edb0 (DoAction) relocates the move-in-last-turn accounting here out of RegisterAction; default no-op
+	// so non-tracking impls (CFakeRPGUnit) need not override.
+	virtual void AddMoveInLastTurn( int n ) {}
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 float GetCubesArea( const CVec3 &ptPos, vector<CVec3> *pCubes );
 int GetHLPenalty( NAI::EHitLocation hl );
 float GetVPPenalty( int nVP, int nHealedVP, int nMaxVP );
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// Weapon-class dispatch of the to-hit/cover pipeline. Was file-local to RPGUnitMission.cpp; the
+// release shares it across the RPGToHit users (RealCalcTileCovers @0x2b4700 picks the melee-swing
+// cover path on TH_MELEE). Values match the retail GetToHitType @0x2b3790 returns.
+enum EToHitType
+{
+	TH_MELEE,
+	TH_THROWING,
+	TH_SHOOT,
+	TH_RLAUNCHER,
+	TH_DEFAULT,
+};
+// NRPG::GetToHitType @0x2b3790: the held-item class of the attacker. NOTE: TH_MELEE means a SWUNG
+// melee weapon only -- a throwable knife reports TH_THROWING (and bare hands fall back to the
+// default melee weapon -> TH_MELEE).
+EToHitType GetToHitType( const NWorld::CUnit *pAttacker );
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // To-hit dispatch (release migration, session 25): free fns that replace the dev virtual
 // IUnitMissionInfo::Get*ToHit interface. Each RTTI-casts the firing unit to its CUnitServer, picks the

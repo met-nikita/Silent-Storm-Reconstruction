@@ -25,6 +25,7 @@ namespace NWorld
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CUnitServer;
 class CUnitStateSniping;
+class CPathConflictsRemover;
 class CCommandExecute: public CObjectBase
 {
 public:
@@ -64,6 +65,13 @@ public:
 	virtual void Cancel() {}
 	virtual bool IsExecuting() { return IsValid( pAction ); }
 	virtual bool IsWaitingForPath( NAI::SUnitPosition *p = 0 ) { return false; }
+	// @0x3cc670 -- per-tick service of the move wait-state (path-conflict recovery). Base no-op;
+	// CPathConflictsRemover/CExecMove tick the wait timer + retry, CSimpleExecQueue fans out to its front.
+	virtual void Segment() {}
+	// @0x3bc3f0/@0x3bd240 -- the CPathConflictsRemover that services this executor's move wait-state
+	// (CExecMove returns itself, CExecQueue its front mover's, others none). Kept on the executor base
+	// rather than IExecMove so CUnitServer/CExecQueue reach it by a plain virtual, no IExecMove cross-cast.
+	virtual CPathConflictsRemover* GetPathConflictsRemover() { return 0; }
 	virtual NAI::CPath* GetCurrentPath() const { return 0; }
 	CUnitServer* GetUnitServer() const { return pUS; }
 };
@@ -98,6 +106,7 @@ class CUnitServer: public CDumbUnitServer, public CUnit, public CTBSUnit<CUnitSe
 	typedef CTBSUnitVision<CUnitServer,CPlayer> TTBSUnitVision;
 	//
 	NGlobal::CEventRegister< CUnitServer, NWorld::CEventOnNewPlayerTurnOrTime > registerOnNewPlayerTurnOrTime;
+	NGlobal::CEventRegister< CUnitServer, NWorld::CEventOnNewPlayerFastTurnOrTime > registerOnNewPlayerFastTurnOrTime;   // @0x3c0300: per-fast-turn hide re-arm
 	//
 	ZDATA
 	ZPARENT( CDumbUnitServer )
@@ -122,7 +131,9 @@ class CUnitServer: public CDumbUnitServer, public CUnit, public CTBSUnit<CUnitSe
 	int nDialog;
 	bool bCanTalk;
 	int nScriptToHit = -1;	// UnitSetToHit override (retail CUnitServer+0x1e8); -1 = use the computed to-hit
-	ZEND int operator&( CStructureSaver &f ) { f.Add(2,(CDumbUnitServer *)this); f.Add(3,(TTBSUnit *)this); f.Add(4,(CUSSoundTracker *)this); f.Add(5,(CASet *)this); f.Add(6,(TTBSUnitVision *)this); f.Add(7,&pExec); f.Add(8,&bCallTimeLabel); f.Add(9,&pCurrentCmd); f.Add(10,&pState); f.Add(11,&criticals); f.Add(12,&bIsRunningForcedAction); f.Add(13,&pAutoRunCmd); f.Add(14,&wasInterruptedList); f.Add(15,&lostUnits); f.Add(16,&fLastHeight); f.Add(17,&plLast); f.Add(18,&pWearingPK); f.Add(19,&bIsPK); f.Add(20,&tPrev); f.Add(21,&nDialog); f.Add(22,&bCanTalk); f.Add(23,&nScriptToHit); return 0; }
+	bool bForceNoChangePose = false;	// retail CUnitServer+0x1f4 (luaUnitLockPose writes it): a script "pose lock".
+										// Consumed by CannotFreelyChangePoses() -> FindPath move-only (keeps the pose).
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,(CDumbUnitServer *)this); f.Add(3,(TTBSUnit *)this); f.Add(4,(CUSSoundTracker *)this); f.Add(5,(CASet *)this); f.Add(6,(TTBSUnitVision *)this); f.Add(7,&pExec); f.Add(8,&bCallTimeLabel); f.Add(9,&pCurrentCmd); f.Add(10,&pState); f.Add(11,&criticals); f.Add(12,&bIsRunningForcedAction); f.Add(13,&pAutoRunCmd); f.Add(14,&wasInterruptedList); f.Add(15,&lostUnits); f.Add(16,&fLastHeight); f.Add(17,&plLast); f.Add(18,&pWearingPK); f.Add(19,&bIsPK); f.Add(20,&tPrev); f.Add(21,&nDialog); f.Add(22,&bCanTalk); f.Add(23,&nScriptToHit); f.Add(24,&bForceNoChangePose); return 0; }
 	void RefreshExecutor();
 	void CheckCmdExecState();
 	void Fall();
@@ -154,6 +165,7 @@ public:
 	CUnitServer( CWorld *pWorld, NRPG::IUnitMission *_pRPG, NDb::CModel *pModel, CPlayer *pPlayer, const NAI::SUnitPosition &pos );
 	// events
 	void OnNewPlayerTurnOrTime( const CEventOnNewPlayerTurnOrTime &event );
+	void OnNewPlayerFastTurnOrTime( const CEventOnNewPlayerFastTurnOrTime &event );   // @0x3c0300: re-arm hiding
 	//
 	// CDumdUnit callbacks
 	virtual void Die( bool bRemove = false );
@@ -174,6 +186,11 @@ public:
 	virtual bool IsStrafing() const { return CDumbUnitServer::IsStrafing(); }
 	virtual bool IsCarryingCorpse() const { return animator.IsCarryingCorpse(); }
 	virtual CUnit* GetCorpseCarrier() const { return animator.GetCorpseCarrier(); }
+	// retail CUnitServer::CannotFreelyChangePoses @0x37d550: the unit may not switch pose freely --
+	// carrying a corpse, wearing a live PK, or a script pose-lock (luaUnitLockPose). FindPath passes
+	// this as bMoveOnly so a locked/loaded unit keeps its current pose along the path.
+	bool CannotFreelyChangePoses() { return IsCarryingCorpse() || IsWearingPK() || bForceNoChangePose; }
+	void SetForceNoChangePose( bool b ) { bForceNoChangePose = b; }   // luaUnitLockPose
 	virtual NDb::CModel* GetModel() const { return GetUnitModel(); }
 	virtual void GetInfo( NRPG::SUnitInfo *pInfo ) const;
 	virtual IPlayer* GetPlayer() const;
@@ -200,6 +217,9 @@ public:
 	void Segment();
 	void UpdateVisible( SInterruptInfo *pRes );
 	bool HasCommand() const { return IsValid( pCurrentCmd ); } //pExec->IsValid(); }// && commandsQueue.empty(); }
+	// The path-conflict remover of this unit's current executor (pExec -> IExecMove), or null.
+	// Used by CPathConflictsRemover::CheckLockerState to walk the who-locks-whom chain.
+	CPathConflictsRemover* GetPathConflictsRemover();
 	bool CanHearSound( const CVec3 &ptFrom, NDb::CAISound *pSound, int nSoundType, CUnitServer *pWho );
 	void CallTimeLabel() { bCallTimeLabel = true; }
 	void RunCriticalExecutor( CCommandExecute *p );
@@ -220,6 +240,10 @@ public:
 	virtual int ProcessAttack( int nUserID, NRPG::CAttackPortion *pAttack, NDb::CRPGArmor *pArmor );
 	virtual int GetCarefulShotExtraAP();
 	virtual CDumbUnitServer *GetCorpse();
+	// retail @0x3c0370: blast-wave ragdoll impulse for an already-downed body (dead or unconscious,
+	// not an empty/worn PK, not being carried) -- normalizes the ray dir and launches the clipless
+	// animator Die (bPlayDeath=false). Called by CVoxelExpl::ApplyWaveDamage on the FIRST wave.
+	void AddImpulse( const CRay &rImpulse );
 	bool HasLostFromSightAliveUnits();
 	bool GetBarrelDir( CRay *pRay );
 	virtual bool IsCheatEnabled( int nCheat );

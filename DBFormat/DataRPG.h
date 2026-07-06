@@ -30,6 +30,7 @@ class CUIContainer;
 class CPlacableObject;
 class CDBDialogPers;
 class CDBPerk;
+class CTRPGChest;
 //
 enum EAmmoColor
 {
@@ -226,7 +227,8 @@ public:
 	CPtr<CDBRecord> pSuccessor;
 	CPtr<CRPGArmor> pRPGArmor;
 	CPtr<CTEffect> pDestructionEffect;
-	// 
+	bool bPlaceInHand;   // retail CRPGItem @+0xc0 (operator& tag 20): whether the item is shown in-hand when active
+	//
 	CTRndModel* GetItemModel( bool bActive, CRPGUniform *pUniform );
 	virtual void Import();
 
@@ -388,6 +390,17 @@ public:
 	int nInnerClipAmmoQuantity;
 	int nPanzerkleinType;
 	int nMinRange, nMaxRange;
+	// v1.1 retail tail (Jan03 lacks these; PDB CRPGWeapon +0x9c..+0xac). nBPM ("BPM" column,
+	// bullets per MINUTE) is the GetNextBulletTime divisor -- NOT nRoF, which is the full-burst
+	// bullet count (nRoF/6 = short burst).
+	int nBPM = 0;            // +0x9c "BPM"
+	int nDamageModMax = 0;   // +0xa0 "DamageModMax"
+	float fSilencer = 0.0f;  // +0xa4 "Silencer"
+	int nAIRating = 0;       // +0xa8 "AIRating"
+	int nShotEffectType = 0; // +0xac "ShotEffectType"
+	// v1.2: NEW int appended to the record (retail +0xb0, "ShotsInOne" column) -- bullets fired
+	// by ONE trigger pull; >1 makes GetNextBulletTime/CheckBurst fire all pellets as one shot.
+	int nShotsInOne = 1;
 	//
 	CModel* GetModel();
 	int operator&( CStructureSaver &f );
@@ -676,7 +689,22 @@ public:
 	bool bIsFemale;
 	int nVoice;
 	bool bCanBeListed;   // release-added: include this persona in the CharGen model-override roll (NUI::GetPers @0x1b5840)
-	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CDBRecord*)this); f.Add(2,&nRPGPersID); f.Add(3,&szUserName); f.Add(4,&pName); f.Add(5,&pSoundHit); f.Add(6,&pSoundDeath); f.Add(7,&pModel); f.Add(8,&pUniform); f.Add(9,&pHead); f.Add(10,&pPanzerklein); f.Add(11,&sFaceGenCamera); f.Add(12,&sPortraitCamera); f.Add(13,&pSide); f.Add(14,&pNationality); f.Add(15,&pDefaultWearsPanzerklein); f.Add(16,&pClass); f.Add(17,&pWeapon); f.Add(18,&items); f.Add(19,&pBaseValue); f.Add(20,&scripts); f.Add(21,&bIsFemale); f.Add(22,&nVoice); f.Add(0x1b,&bCanBeListed); return 0; }	// retail (CRPGPers::operator& @0x41f490) puts pPhoto/pBiography/pCharacteristics/bCanHired at 0x17-0x1a and bCanBeListed at 0x1b; reading it at 23 (0x17) decoded the pPhoto object-ref chunk as a bool
+	// release-added recruit-menu / biography fields (retail CRPGPers +0xb4..0xc0; operator& @0x41f490
+	// tags 0x17-0x1a; Import @0x429540 columns PhotoID/BiographyID/CharacteristicsID/CanHired):
+	CPtr<CUITexture> pPhoto;			// "PhotoID" -- the biography-panel portrait photo (CUnitBiographyPanel "image")
+	CPtr<CString> pBiography;			// "BiographyID" -- biography prose (seeds NRPG::CUnit::pBiography in the CUnit ctor @0x2bc980)
+	CPtr<CString> pCharacteristics;		// "CharacteristicsID" -- the bio panel's "characteristics" text block
+	bool bCanHired = false;				// "CanHired" -- THE recruit-roster filter (NRPG::AddTeamMngPerses @0x29adb0 reads +0xc0)
+	// release-added loot chests (retail CRPGPers::operator& @0x41f490 tags 0x1c/0x1d; Import @0x429540):
+	CPtr<CTRPGChest> pHandWeapon;		// "WeaponInHand" -- chest template rolled for the unit's in-hand item (SMapUnit::pInHandItem)
+	CPtr<CTRPGChest> pBackpackWeapon;	// "WeaponInBackpack" -- chest template rolled into the unit's backpack (SMapUnit::pBackpack)
+	// retail CRPGPers::pAcksHolder (+0xd0; operator& @0x41f490 tag 0x1f; Import @0x429540 "AckUnit"):
+	// the VOICE-HOLDER persona whose Acks rows this persona barks with. In the Steam game.db (chunk-
+	// verified: RPGPers intCols[25]="AckUnit", full 27-value rows) 499 of 728 personas (all generic
+	// enemies/allies/NPCs) have their ack rows keyed ONLY via this link (e.g. every Germ_* soldier
+	// -> pers 911, which owns 20 Acks rows); without it those units have no barks at all.
+	CPtr<CRPGPers> pAcksHolder;			// "AckUnit" -- ack rows donor (NRPG::CUnit::GetAckHolder @0x2ba8f0 non-hero path)
+	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CDBRecord*)this); f.Add(2,&nRPGPersID); f.Add(3,&szUserName); f.Add(4,&pName); f.Add(5,&pSoundHit); f.Add(6,&pSoundDeath); f.Add(7,&pModel); f.Add(8,&pUniform); f.Add(9,&pHead); f.Add(10,&pPanzerklein); f.Add(11,&sFaceGenCamera); f.Add(12,&sPortraitCamera); f.Add(13,&pSide); f.Add(14,&pNationality); f.Add(15,&pDefaultWearsPanzerklein); f.Add(16,&pClass); f.Add(17,&pWeapon); f.Add(18,&items); f.Add(19,&pBaseValue); f.Add(20,&scripts); f.Add(21,&bIsFemale); f.Add(22,&nVoice); f.Add(0x17,&pPhoto); f.Add(0x18,&pBiography); f.Add(0x19,&pCharacteristics); f.Add(0x1a,&bCanHired); f.Add(0x1b,&bCanBeListed); f.Add(0x1c,&pHandWeapon); f.Add(0x1d,&pBackpackWeapon); f.Add(0x1f,&pAcksHolder); return 0; }	// retail (CRPGPers::operator& @0x41f490) tag map: pPhoto=0x17, pBiography=0x18, pCharacteristics=0x19, bCanHired=0x1a, bCanBeListed=0x1b (now all read; previously reading bCanBeListed at 23 decoded the pPhoto object-ref chunk as a bool); 0x1e = pLongName (not ported), 0x1f = pAcksHolder, 0x20 = pLongBurstSnd (not ported)
 	virtual void Import();
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -977,8 +1005,9 @@ public:
 	CPtr<CUITexture> pBaseFlagActive;
 	CPtr<NDb::CDBDialogPers> pDialogHero;
 	CPtr<CUIContainer> pMedalPaperContainer;	// release-new CSide field (retail +0x60, save tag 14): the "medal paper" UI template loaded by NGame::CShowMedalInterface::Initialize (iShowMedal convergence). Additive -- fills the previously-skipped tag 14 slot, existing 2..17 numbering undisturbed.
+	CPtr<CUIContainer> pKIAPaper;	// release-new CSide field (retail +0x70, save tag 18): the per-side "killed in action" name-plate template the recruit menu loads into its CKIAPanel (CTeamMngUI::ProcessMessage @0x2498f0 reads side+0x70). Not imported by retail CSide::Import @0x42a240 -- populated from the game.db chunk stream (tag 18) only. Additive.
 	vector<CPtr<CString> > defaultPersToolTipsSet;	// release-new CSide field (retail +0x78, save tag 0x14=20): the 6 per-preset (nationality x gender) class-description tooltips shown on the HeroMenu portraits. POPULATED FROM THE STEAM game.db BY Import() below (the v1 columnar DB binds by named column, NOT by operator& tags); the f.Add(20,..) tag is parity / savegame round-trip only.
-	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CDBRecord*)this); f.Add(2,&nGlobalMapID); f.Add(3,&nHeroSelectTemplate); f.Add(4,&pName); f.Add(5,&pNationality1); f.Add(6,&pNationality2); f.Add(7,&pNationality3); f.Add(8,&malePersesSet); f.Add(9,&femalePersesSet); f.Add(10,&defaultPersesSet); f.Add(12,&pESCMenuBackground); f.Add(14,&pMedalPaperContainer); f.Add(15,&pBaseFlag); f.Add(16,&pBaseFlagActive); f.Add(17,&pDialogHero); f.Add(20,&defaultPersToolTipsSet); return 0; }	// retail CSide (release @0x41dea0) puts a medals vector at 11 and shifts the UI textures: pESCMenuBackground=12, pBaseFlag=15, pBaseFlagActive=16, pDialogHero=17, and defaultPersToolTipsSet at tag 0x14=20 (last chunk). The dev had them at 11-14, so tag 11 decoded the medals vector as a texture objref and 12-14 were off-by-shift (wrong flag textures / type-confused dialog-hero). Retagged to match; dev-absent retail fields (medals@11, pChapterMapInfoBackground@13, pKIAPaper@18, pCluePaperBackground@19) are simply not read.
+	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CDBRecord*)this); f.Add(2,&nGlobalMapID); f.Add(3,&nHeroSelectTemplate); f.Add(4,&pName); f.Add(5,&pNationality1); f.Add(6,&pNationality2); f.Add(7,&pNationality3); f.Add(8,&malePersesSet); f.Add(9,&femalePersesSet); f.Add(10,&defaultPersesSet); f.Add(12,&pESCMenuBackground); f.Add(14,&pMedalPaperContainer); f.Add(15,&pBaseFlag); f.Add(16,&pBaseFlagActive); f.Add(17,&pDialogHero); f.Add(18,&pKIAPaper); f.Add(20,&defaultPersToolTipsSet); return 0; }	// retail CSide (release @0x41dea0) puts a medals vector at 11 and shifts the UI textures: pESCMenuBackground=12, pBaseFlag=15, pBaseFlagActive=16, pDialogHero=17, pKIAPaper=18 (now read), and defaultPersToolTipsSet at tag 0x14=20 (last chunk). The dev had them at 11-14, so tag 11 decoded the medals vector as a texture objref and 12-14 were off-by-shift (wrong flag textures / type-confused dialog-hero). Retagged to match; dev-absent retail fields (medals@11, pChapterMapInfoBackground@13, pCluePaperBackground@19) are simply not read.
 	//
 	virtual void Import();
 };

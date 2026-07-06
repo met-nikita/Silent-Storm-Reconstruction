@@ -62,6 +62,9 @@ public:
 	float GetFloat( const char *pszField ) { return GetFloat( GetFieldIndex( pszField ) ); }
 	_bstr_t GetString( const char *pszField ) { return GetString( GetFieldIndex( pszField ) ); }
 	const string& GetFieldName( int n ) { return fields[n]; }
+	// v1.2 @0x401900..0x402740: column-presence probe backing ImportField's success flag
+	// (does not touch the GetFieldIndex replay cache; presence is constant per table)
+	bool HasField( const char *pszField ) const { return find( fields.begin(), fields.end(), pszField ) != fields.end(); }
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 static void PrintProviderError(_ConnectionPtr pConnection)
@@ -457,29 +460,46 @@ void NDatabase::Refresh( int nTableID )
 	CloseConnection();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void NDatabase::ImportField( const char *pszFieldName, int *pData )
+// v1.2 @0x7ef6d0-family: the scalar ImportFields now report success -- a missing
+// column returns false and leaves *pData untouched (see ADOImport\BasicDB.cpp).
+bool NDatabase::ImportField( const char *pszFieldName, int *pData )
 {
+	if ( !table.HasField( pszFieldName ) )
+		return false;
 	*pData = table.GetInt( pszFieldName );
+	return true;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void NDatabase::ImportField( const char *pszFieldName, bool *pData )
+bool NDatabase::ImportField( const char *pszFieldName, bool *pData )
 {
+	if ( !table.HasField( pszFieldName ) )
+		return false;
 	*pData = table.GetBool( pszFieldName );
+	return true;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void NDatabase::ImportField( const char *pszFieldName, float *pData )
+bool NDatabase::ImportField( const char *pszFieldName, float *pData )
 {
+	if ( !table.HasField( pszFieldName ) )
+		return false;
 	*pData = table.GetFloat( pszFieldName );
+	return true;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void NDatabase::ImportField( const char *pszFieldName, std::string *pData )
+bool NDatabase::ImportField( const char *pszFieldName, std::string *pData )
 {
+	if ( !table.HasField( pszFieldName ) )
+		return false;
 	*pData = (const char*)table.GetString( pszFieldName );
+	return true;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void NDatabase::ImportField( const char *pszFieldName, std::wstring *pData )
+bool NDatabase::ImportField( const char *pszFieldName, std::wstring *pData )
 {
+	if ( !table.HasField( pszFieldName ) )
+		return false;
 	*pData = (const wchar_t*)table.GetString( pszFieldName );
+	return true;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void NDatabase::ImportRelation( CDBRecord *pSrc, CDBTableBase *pDestTable, std::vector< CPtr<CDBRecord> > *pRefs )
@@ -582,7 +602,7 @@ void CDBTableBase::PreCreate( int nTypeID )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CDBTableBase::Refresh( int nTypeID )
 {
-	Sleep(0); // передаем управление другому потоку (запись в базу обычно происходит не в текущем потоке)
+	Sleep(0); // пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ (пїЅпїЅпїЅпїЅпїЅпїЅ пїЅ пїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅ пїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ)
 	const CRecordHash copy = records;
   records.clear();
 	// iterate through recordset & create records

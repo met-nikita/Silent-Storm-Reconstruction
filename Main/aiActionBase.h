@@ -53,6 +53,7 @@ public:
 	//
 protected:
 	IAIUnit*      GetUnit() const;              // pUnit (null/weak-ref guarded)
+	IAIState*     GetAIState() const;           // @0x13ac0: pUnit's AI state (null/dead-guarded)
 	IAIUnit*      GetEnemy() const;             // current target of pUnit's AI state
 	SPlaceWithAP  GetCurrentPlace() const;      // pUnit's present place + remaining AP
 	//

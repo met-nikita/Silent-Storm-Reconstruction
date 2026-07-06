@@ -12,6 +12,7 @@
 #include "Interface.h"
 #include "iMain.h"
 #include "iMainMenu.h"
+#include "iMission.h"          // NGame::CICBeginMission (the tutorial jumps straight into a mission)
 #include "iRenderWorld.h"
 #include "iSaveLoad.h"
 #include "iCommonUI.h"
@@ -35,7 +36,9 @@ const int
 	N_MAINMENU_CAMERA = 26,
 	N_MAINMENU_TEMPLATE = 2425,
 	N_MAINMENU_SCRIPT = 85,			// game.db "MainMenu" script: PlayMenuMan animates the background "Man"
-	N_LOGO_FLASHTIME = 2000;
+	N_LOGO_FLASHTIME = 2000,
+	N_TUTORIAL_HERO = 730,			// release @0x1f7540: the tutorial global player's single pers id (0x2da)
+	N_TUTORIAL_MISSION = 3589;		// release @0x1f7540: the tutorial mission template (0xe05)
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 namespace NUI
 {
@@ -169,7 +172,7 @@ class CMainMenuInterface: public CRenderBaseInterface
 {
 	OBJECT_BASIC_METHODS(CMainMenuInterface);
 private:
-	NInput::CBind bindCampaign, bindCustomGame, bindLoadGame, bindOptions, bindCredits, bindQuitGame;
+	NInput::CBind bindTutorial, bindCampaign, bindCustomGame, bindLoadGame, bindOptions, bindCredits, bindQuitGame;
 
 	// Menu camera-fly executor state (runtime only). The release menu inherits CMissionBase's per-frame
 	// ExecWorldCommand queue-drain + camera executor; the dev menu (CRenderBaseInterface) has none, so we run a
@@ -200,7 +203,7 @@ private:
 // CMainMenuInterface
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CMainMenuInterface::CMainMenuInterface():
-	bindCampaign( "campaign" ), bindCustomGame( "customgame" ), bindLoadGame( "loadgame" ), bindOptions( "options" ), bindCredits( "credits" ), bindQuitGame( "quit" ),
+	bindTutorial( "tutorial" ), bindCampaign( "campaign" ), bindCustomGame( "customgame" ), bindLoadGame( "loadgame" ), bindOptions( "options" ), bindCredits( "credits" ), bindQuitGame( "quit" ),
 	nActiveWaypoint( 0 ), sWaypointStartTime( 0 )
 {
 }
@@ -242,7 +245,24 @@ bool CMainMenuInterface::ProcessEvent( const NInput::SEvent &sEvent )
 	if ( CRenderBaseInterface::ProcessEvent( sEvent ) )
 		return true;
 
-	if ( bindCampaign.ProcessEvent( sEvent ) )
+	if ( bindTutorial.ProcessEvent( sEvent ) )
+	{
+		// release CMainMenuInterface::ProcessEvent @0x1f7540, tutorial branch (checked FIRST): build a
+		// fresh one-hero global game -- CreateGlobalPlayer({pers 730}) + CreateGlobalGame(-1, <null
+		// difficulty>; dev CreateGlobalGame supplies the default) -- and jump straight into the tutorial
+		// mission template 3589, variant -1, time-of-day "Day" (no side menu, no chapter map).
+		vector<int> personages;
+		personages.push_back( N_TUTORIAL_HERO );
+
+		CPtr<NRPG::CGlobalGame> pGame = NRPG::CreateGlobalGame( -1 );
+		pGame->players.push_back( NRPG::CreateGlobalPlayer( personages ) );	// CObj<> stores an owning AddRef'd reference
+
+		vector<string> templParams;
+		templParams.push_back( "Day" );
+		NMainLoop::Command( new CICBeginMission( N_TUTORIAL_MISSION, -1, templParams, pGame ) );
+		return true;
+	}
+	else if ( bindCampaign.ProcessEvent( sEvent ) )
 	{
 		NMainLoop::Command( new CICSideMenu() );
 		return true;

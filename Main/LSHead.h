@@ -101,6 +101,33 @@ struct SHeadFrame
 	vector<CVec3> normals; // not normalized
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// Ambient facial-idle state of a head animator (release enum NLSHead::EIdleType, PDB values). The
+// refcount-scoped CIdleHead token (LSController.h) flips IDLE_NONE <-> IDLE_NORMAL while some view
+// renders the head; CHeadsController::KillHead forces IDLE_DEATH (the frozen death mask).
+////////////////////////////////////////////////////////////////////////////////////////////////////
+enum EIdleType
+{
+	IDLE_NORMAL = 0,
+	IDLE_NONE   = 1,
+	IDLE_DEATH  = 2,
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// One playing facial sequence of a CHeadAnimator (release NLSHead::SSequence, 16 bytes; operator&
+// @0x2686a0 tags 2..6). bIdle marks the ambient idles Recalc arms/expires itself (blinks); bMask marks
+// the mask leg of the release two-sequence PlaySequence (pruned whenever no real sequence is playing).
+////////////////////////////////////////////////////////////////////////////////////////////////////
+struct SSequence
+{
+	ZDATA
+	CDGPtr< CPtrFuncBase<CHeadSequenceInfo> > pSequence;
+	STime tStart;
+	bool bCycle;
+	bool bIdle;
+	bool bMask;
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&pSequence); f.Add(3,&tStart); f.Add(4,&bCycle); f.Add(5,&bIdle); f.Add(6,&bMask); return 0; }
+	SSequence(): tStart(0), bCycle(false), bIdle(false), bMask(false) {}
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
 class CHeadAnimator: public CFuncBase<SHeadFrame>
 {
 	OBJECT_BASIC_METHODS(CHeadAnimator);
@@ -108,7 +135,9 @@ class CHeadAnimator: public CFuncBase<SHeadFrame>
 	CDBPtr< NDb::CHead > pDbHead;
 	CDGPtr< CFuncBase<STime> > pTime;
 	CDGPtr< CPtrFuncBase<CHeadMeshInfo> > pHead;
-	// current sequence
+	// LEGACY dev-format single "current sequence" (tags 5/6/7): kept as a serialized MIRROR of the
+	// current non-idle entry of `sequences` so older exes still read a new save (and old saves migrate
+	// in operator& below). The runtime plays from `sequences` only.
 	CDGPtr< CPtrFuncBase<CHeadSequenceInfo> > pSequence;
 	STime tStart;
 	bool bCycle;
@@ -116,7 +145,32 @@ class CHeadAnimator: public CFuncBase<SHeadFrame>
 	// Recalc Process()es its pLSAnimators[0] as the single whole-head GDP animator (positions) instead of
 	// the live pHeadTransformInfo or the per-segment idle. Serialized (tag 8) so a saved head round-trips.
 	bool bStatic = false;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&pDbHead); f.Add(3,&pTime); f.Add(4,&pHead); f.Add(5,&pSequence); f.Add(6,&tStart); f.Add(7,&bCycle); f.Add(8,&bStatic); return 0; }
+	// Release multi-sequence state (retail layout +0x28/+0x34/+0x38; retail operator& @0x268530 tags
+	// 4/5/6). SAVE-FORMAT DEVIATION (deliberate): retail serializes pTime/pHead/sequences/eIdleType/
+	// bDeathMask at tags 2/3/4/5/6, which CONFLICT with the established dev tags above (dev tag 2 is a
+	// CDBPtr pDbHead, retail tag 2 a CObj pTime; dev tag 4 pHead, retail tag 4 the vector) -- so the new
+	// members are parked at fresh tags 9/10/11 to keep every existing dev save loading. A later
+	// save-parity pass that renumbers this class to the retail tags must move: pTime->2, pHead->3,
+	// sequences->4, eIdleType->5, bDeathMask->6, and drop dev tags 2 (pDbHead), 5-7 (legacy single
+	// sequence) and 8 (bStatic has no retail tag -- retail keys static heads off CHeadInfo::pMesh).
+	vector<SSequence> sequences;              // release @0x265a30/@0x265890: everything playing now
+	EIdleType eIdleType = IDLE_NONE;          // release +0x34 (GetAnimator creates with IDLE_NONE)
+	bool bDeathMask = false;                  // release +0x38: death idle finished, face frozen on it
+	ZEND int operator&( CStructureSaver &f )
+	{
+		f.Add(2,&pDbHead); f.Add(3,&pTime); f.Add(4,&pHead); f.Add(5,&pSequence); f.Add(6,&tStart); f.Add(7,&bCycle); f.Add(8,&bStatic);
+		f.Add(9,&sequences); f.Add(10,&eIdleType); f.Add(11,&bDeathMask);
+		// old-format save (single current sequence, no vector): lift it into the release-style vector
+		if ( f.IsReading() && sequences.empty() && IsValid( pSequence ) )
+		{
+			SSequence s;
+			s.pSequence = pSequence;
+			s.tStart = tStart;
+			s.bCycle = bCycle;
+			sequences.push_back( s );
+		}
+		return 0;
+	}
 	// Optional live macro-muscle MORPH source (release-new; NOT serialized -- a transient preview ref):
 	// when set, Recalc applies its mmTensions (the advanced FaceGen sliders) to the head animators over
 	// the idle pose, before ComputePhysics. Weak (CPtr) so it does not own the CHeadTransformInfo.
@@ -131,8 +185,16 @@ public:
 	CHeadAnimator( CFuncBase<STime> *_pTime, CPtrFuncBase<CHeadMeshInfo> *_pStaticMesh );
 
 	void SetHeadTransformInfo( CHeadTransformInfo *p );
-	void PlaySequence( NDb::CSequence *pDbSeq, STime tStart, bool bCycle = false );
+	// release @0x265890 two-sequence form: pDbSeq arms as the real (lipsync) entry, pDbExpr as the
+	// MASK entry (bMask=true -- the per-phrase facial expression, GetSequenceByExpression's result).
+	// Recalc's existing bMask machinery renders/prunes it.
+	void PlaySequence( NDb::CSequence *pDbSeq, NDb::CSequence *pDbExpr, STime tStart, bool bCycle = false );
+	void PlaySequence( NDb::CSequence *pDbSeq, STime tStart, bool bCycle = false ) { PlaySequence( pDbSeq, 0, tStart, bCycle ); }
 	void StopSequence();
+	// release @0x265520: change the ambient-idle mode; on a change the armed idle entries are pruned
+	// (a fresh one re-arms on the next Recalc) and the death mask is dropped.
+	void SetIdleType( EIdleType e );
+	EIdleType GetIdleType() const { return eIdleType; }
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CHead : public CPtrFuncBase<NGScene::CObjectInfo>

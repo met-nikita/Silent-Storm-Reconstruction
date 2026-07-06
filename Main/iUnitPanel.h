@@ -6,6 +6,7 @@
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 namespace NUI
 {
+class CAckEvent;
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CUnitsTabBar;
 class CUnitIconsBar;
@@ -39,6 +40,10 @@ public:
 public:
 	CUnitPanel() {}
 	CUnitPanel( const SWindowInfo &sInfo, NGame::IMission *pMission );
+
+	// retail CUnitPanel::PlayAckEvent @0x2563e0 -> the single-unit face's ack animation (the bottom-left
+	// 3D portrait turns to the camera to deliver the bark, temporarily swapping in a non-selected speaker)
+	void PlayAckEvent( const STime &sTime, CAckEvent *pEvent );
 
 	bool ProcessMessage( const SEvent &sEvent );
 	void Draw( const STime &sTime, NGScene::I2DGameView *pView );

@@ -91,7 +91,10 @@ bool CPlayerTracker::IsUnitVisible( NWorld::CUnit *pUnit ) const
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 NDb::EDiplomacyState CPlayerTracker::GetUnitDiplomacy( NWorld::CUnit *pUnit ) const
 {
-	return pMission->GetWorld()->GetDiplomacyState( pUnit, pPlayer );
+	// retail @0x287830: MY player's stance toward the unit's player (world (IPlayer,IPlayer)
+	// overload) -- the old reversed (unit -> my player) query mis-colored asymmetric diplomacy
+	// (neutral civilians whose own row marks the player ENEMY for their fear-AI).
+	return pMission->GetWorld()->GetDiplomacyState( pPlayer, pUnit->GetPlayer() );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CPlayerTracker::GetUnits( vector< CPtr<IUnitTracker> > *pUnits ) const

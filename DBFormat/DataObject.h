@@ -18,6 +18,8 @@ class CDoor;
 class CGun;
 class CRPGItem;
 class CSoundEffect;
+class CRPGChestLayout;
+class CTRPGChest;
 enum ESoundType;
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CPlacableObject: public CDBRecord
@@ -78,6 +80,8 @@ public:
 	CPtr<CTRndObject> pChild;
 	bool bKeepDecals;
 	CPtr<CRPGGrenade> pGrenade;	// DB col "RPGGrenade" -- explodable-object self-detonation grenade; copied to CObject::pGrenade in CreateObject
+	CPtr<CRPGChestLayout> pChestLayout;	// retail tag 25 (col "RPGChestLayout"); copied to CObject::pChestLayout in CreateObject
+	CPtr<CTRPGChest> pDefaultChest;		// retail tag 26 (col "DefaultRPGChest"); copied to CObject::pDefaultChest in CreateObject
 	//
 	virtual void Import();
 	int operator&( CStructureSaver &f );

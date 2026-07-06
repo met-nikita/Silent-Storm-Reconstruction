@@ -34,6 +34,11 @@ struct SGrenadeParams
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool IsWithinHumanReach( const CVec3 &ptFrom, const CVec3 &ptTarget, float fPlaneDist );
+// NWorld::CanMeleeAttack @0x3a1db0: pure reach gate for a melee swing from `from` at ptTarget --
+// F_MELEE_DISTANCE, doubled when the unit carries a reach extender (docked PK cannon). No pose/AP
+// checks here (CExecMelee::CanDoIt @0x3a2180 layers those); the composite tile to-hit (@0x2b54a0)
+// calls this straight and maps a miss to the -1 "no percentage" sentinel.
+bool CanMeleeAttack( CUnitServer *pUS, const NAI::SUnitPosition &from, const CVec3 &ptTarget );
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CExecAttack
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -53,7 +58,9 @@ public:
 
 	virtual EUnitCommandResult CanDoIt( const NAI::SUnitPosition &from, bool bIgnoreTarget = false ) const = 0;
 	virtual void Start() = 0;
-	virtual bool OnLabel() = 0;
+	// retail @0x3a8b40: OnLabel returns VOID and merely ARMS the timed-bullet schedule / ends the shot;
+	// TimeLabelReached (still bool, consumed by CUnitServer::Segment) derives its return from bAttackCanceled.
+	virtual void OnLabel() = 0;
 	virtual void Run();
 	virtual bool TimeLabelReached();
 	virtual void Cancel();
@@ -68,27 +75,43 @@ protected:
 	int nExtraAP;
 	int nToHit;
 	bool bMissed;
-	bool bComplete;
-	CRay ray;
-	float fRayToHit;
+	// --- retail timed-bullet pipeline state (replaces the Jan03 bComplete/vector<CAttackPortion> Attack
+	//     synchronous-burst state). ALL transient (rebuilt per shot by SelectRay / driven by Segment);
+	//     deliberately NOT serialized -> a mid-shot save restores an IDLE executor (no phantom gunshot),
+	//     exactly the intent of the old "tag 9 DROPPED (transient Attack)" reconciliation. ---
+	NRPG::CAttackPortion attack;         // single per-bullet portion (was the vector Attack)
+	CRay ray;                            // firing ray (hit/miss baked in by PeekRay; CExecLaunchRocket also uses it)
 	CVec3 ptAnimTarget;
-	vector<NRPG::CAttackPortion> Attack;
+	STime tNextBulletPrepare = 0;        // retail +0x24 -- 0 == no shot armed
+	STime tNextBulletGo = 0;             // retail +0x11c
+	bool  bShotInitiated = false;        // retail +0x28 -- a bullet is committed in flight
+	int   nBulletPrepared = 0;           // retail +0x2c
+	int   nBulletGone = 0;               // retail +0x118
+	bool  bOnlyPrepareToShoot = false;   // retail +0x115 -- aim-and-hold selector (dormant: not yet threaded from the cmd)
+	bool  bUpdateVision = true;          // retail +0x120 -- ctor default true
 public:
-	// tag 9 (&Attack) DROPPED: Attack is the TRANSIENT per-burst fire queue; the release CExecShoot::operator&
-	// (@0x3b0ef0) does NOT persist it (its tag 9 is ptAnimTarget, already our tag 8). Persisting it means a save
-	// taken mid-burst restores a pending bullet that the first post-load OnLabel->PerformShot fires -> a phantom
-	// gunshot (PerformRangedAttack SFX+projectile). Leaving it out makes Attack default empty on load, so
-	// PerformShot no-ops until the unit is re-commanded. (Empty after a completed burst, so save-format-safe.)
-	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CExecAttack*)this); f.Add(2,&nExtraAP); f.Add(3,&nToHit); f.Add(4,&bMissed); f.Add(5,&bComplete); f.Add(6,&ray); f.Add(7,&fRayToHit); f.Add(8,&ptAnimTarget); return 0; }
+	// save stream: DURABLE members only, kept at the retail tag numbers (CExecShoot::operator& @0x3b0ef0).
+	// The transient timed-bullet/attack/ray state (retail tags 3-8,d,e) is DROPPED -> a stale/mid-shot save
+	// loads as an idle executor (attack empty, tNext*=0 -> Segment early-returns): save-format-safe, and the
+	// deliberate no-phantom-shot design of the old dropped-Attack is preserved. (retail tag 3 longBurstSnd is
+	// elided: C3DSound is a wMisc.cpp-local class with no header surface / no EndSound in-tree.)
+	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CExecAttack*)this); f.Add(2,&nExtraAP); f.Add(9,&ptAnimTarget); f.Add(10,&nToHit); f.Add(11,&bMissed); f.Add(12,&bOnlyPrepareToShoot); f.Add(15,&bUpdateVision); return 0; }
 
 private:
 	void Scream();
 
 protected:
-	int GetExtraAP() const { return nExtraAP; }
+	int  GetExtraAP() const { return nExtraAP; }
 	void CalculateExtraAP();
-	void PerformShot();
 	void SpendAP();
+	int  GetBulletDelay() const;                 // @0x3a1f30 -- per-shot label->launch delay (ms) from the weapon DB
+	NDb::EShootMode GetShootMode() const;        // @0x3a1ee0 -- the equipped weapon's shoot mode (SM_Snap if none)
+	int  GetShortBurstLength() const;            // short-burst bullet count (nRoF/6 + LONGER_SHORT_BURST perk)
+	int  GetBulletsPerShot() const;              // v1.2 @0x7a21c0 (NEW helper) -- weapon DB ShotsInOne clamped to >= 1
+	STime GetNextBulletTime( STime t ) const;    // @0x3a20e0 -- advance a bullet timestamp by one inter-bullet period
+	void OnBulletGo();                           // @0x3a26f0 -- a bullet departs: fire it, then continue/stop the burst
+	void CreateFlash( bool bFirstBullet );       // @0x3a4240 -- muzzle flash (dev CreateFlash is arg-less; bFirstBullet unused)
+	void CheckUnhide();                          // @0x3a40d0 -- reveal-on-shoot (stub: no dev DB field / hidden-predicate)
 
 public:
 	CExecShoot() {}
@@ -98,10 +121,11 @@ public:
 	virtual int GetStartAP() const;
 	virtual int GetActionAP() const;
 	virtual void Start();
-	virtual bool CheckBurst( bool bComplete );
-	virtual void PerformAttack( const vector<NRPG::CAttackPortion> &attack, const CRay &ray, float fHit = 1.0f );
-	virtual bool OnLabel();
-	virtual void PrepareShot() {}
+	virtual void Segment();                      // @0x3a8d20 -- per-tick timed-bullet driver (overrides CCommandExecute::Segment)
+	virtual bool CheckBurst( int nFired, bool bDoAction );   // @0x3a1fa0 -- may the burst keep firing (+ optionally spend burst AP)
+	virtual void PerformAttack();                // @0x3a4480 -- fire ONE ranged attack from `attack`/`ray`
+	virtual void OnLabel();                      // @0x3a8b40 -- arm the timed schedule / end the shot (void)
+	virtual void SelectRay() {}                  // @0x3a4720/@0x3a49b0 -- pick the firing ray+portion (Jan03 PrepareShot renamed; Tile/Unit override)
 	virtual void CheckShotResult() {}
 	virtual bool IsAttackCanceled() { return false; }
 	virtual bool IsAccidental() const { return false; }
@@ -122,7 +146,7 @@ public:
 	CExecShootTile( CUnitServer *_pUS, const CVec3 &_ptTarget );
 
 	virtual EUnitCommandResult CanDoIt( const NAI::SUnitPosition &from, bool bIgnoreTarget = false ) const;
-	virtual void PrepareShot();
+	virtual void SelectRay();
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CExecShootUnit
@@ -141,7 +165,7 @@ public:
 	CExecShootUnit( CUnitServer *_pUS, NWorld::CUnitServer *_pTarget, NAI::EHitLocation _eHL, int _nExtraAttackAP );
 
 	virtual EUnitCommandResult CanDoIt( const NAI::SUnitPosition &from, bool bIgnoreTarget = false ) const;
-	virtual void PrepareShot();
+	virtual void SelectRay();
 	virtual void CheckShotResult();
 	virtual bool IsAttackCanceled();
 };
@@ -179,7 +203,7 @@ public:
 	CExecMeleeTile() {}
 	CExecMeleeTile( CUnitServer *_pUS, const CVec3 &_ptTarget );
 
-	virtual bool OnLabel();
+	virtual void OnLabel();
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CExecMeleeUnit
@@ -199,7 +223,7 @@ public:
 	CExecMeleeUnit( CUnitServer *_pUS, CUnitServer *_pTarget, NAI::EHitLocation _eHL, int _nExtraAttackAP );
 
 	virtual void Start();
-	virtual bool OnLabel();
+	virtual void OnLabel();
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CExecThrowGrenade
@@ -246,19 +270,22 @@ private:
 	ZDATA
 	ZPARENT( CExecShoot );
 	EType type;
+	STime tRocket;   // @+0x128 armed launch time (0 = not armed). TRANSIENT -- deliberately NOT serialized so a
+	                 // mid-flight save cannot restore an armed rocket (phantom launch), matching the dropped Attack.
 	ZEND int operator&( CStructureSaver &f ) { f.Add(2,(CExecShoot *)this); f.Add(3,&type); return 0; }
 
 protected:
 	void LaunchRocket();
 
 public:
-	CExecLaunchRocket() {}
+	CExecLaunchRocket(): tRocket(0) {}
 	CExecLaunchRocket( CUnitServer *_pUS, const CVec3 &_ptTarget );
 	CExecLaunchRocket( CUnitServer *_pUS, EType _type );
 
 	virtual EUnitCommandResult CanDoIt( const NAI::SUnitPosition &from, bool bIgnoreTarget = false ) const;
 	virtual void Start();
-	virtual bool OnLabel();
+	virtual void OnLabel();
+	virtual void Segment();   // @0x3a58a0 -- deferred rocket launch (fires once game time reaches tRocket)
 	virtual bool IsAccidental() const { return type == ACCIDENTAL; }
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -356,13 +383,14 @@ private:
 	ZDATA
 	ZPARENT( CCommandExecute );
 	CPtr<CUnitServer> pDeadUnit;
-	bool bDead;
 	int n;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(2,(CCommandExecute *)this); f.Add(3,&pDeadUnit); f.Add(4,&bDead); f.Add(5,&n); return 0; }
+	// retail CExecTakeCorpseOnDeploy::operator& DROPPED the dead-stored bDead (never read here -- InitAsCorpse was
+	// moved upstream) and renumbered n tag5->tag4. Serialized tags now 2 base / 3 pDeadUnit / 4 n (retail-matching).
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,(CCommandExecute *)this); f.Add(3,&pDeadUnit); f.Add(4,&n); return 0; }
 	//
 public:
 	CExecTakeCorpseOnDeploy() {}
-	CExecTakeCorpseOnDeploy( CUnitServer *_pUS, CUnitServer *_pCorpse, bool _bDead );
+	CExecTakeCorpseOnDeploy( CUnitServer *_pUS, CUnitServer *_pCorpse );
 	//
 	virtual EUnitCommandResult CanDoIt( const NAI::SUnitPosition &from, bool bIgnoreTarget = false ) const;
 	virtual int GetStartAP() const;
@@ -480,10 +508,16 @@ class CExecSnipeAim: public CCommandExecute
 private:
 	ZDATA_( CCommandExecute )
 	CPtr<CUnitServer> pTarget;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(1,( CCommandExecute *)this); f.Add(2,&pTarget); return 0; }
+	// @0x3a7280/@0x3b0260 -- release added a 4-byte hitLocation member at +0x1c (after
+	// pTarget@+0x18) holding the snipe's called-shot hit location; operator& serializes it
+	// as tag 3 (DataChunk, 4 bytes). Mirrors CUnitStateSniping's deferred-called-shot note:
+	// this predecessor snipe has no called-shot machinery, so it stays HL_BODY (un-called) --
+	// SAVE-FORMAT member only; behavior deferred (3-arg ctor / caller threading FLAGGED).
+	NAI::EHitLocation hitLocation;
+	ZEND int operator&( CStructureSaver &f ) { f.Add(1,( CCommandExecute *)this); f.Add(2,&pTarget); f.Add(3,&hitLocation); return 0; }
 
 public:
-	CExecSnipeAim() {}
+	CExecSnipeAim() : hitLocation(NAI::HL_BODY) {}
 	CExecSnipeAim( CUnitServer *_pUnitServer, CUnitServer *_pTarget );
 
 	virtual EUnitCommandResult CanDoIt( const NAI::SUnitPosition &from, bool bIgnoreTarget = false ) const;
@@ -532,10 +566,12 @@ protected:
 public:
 	CExecThrowKnife() {}
 	CExecThrowKnife( CUnitServer *_pUS, const CVec3 &_ptTarget, CUnitServer *_pTarget = 0 );
+	// @0x3a7470 -- targeted-unit ctor: aim point computed from pTarget's hit location (eHL).
+	CExecThrowKnife( CUnitServer *_pUS, NAI::EHitLocation _eHL, CUnitServer *_pTarget );
 
 	virtual EUnitCommandResult CanDoIt( const NAI::SUnitPosition &from, bool bIgnoreTarget = false ) const;
 	virtual void Start();
-	virtual bool OnLabel();
+	virtual void OnLabel();
 	virtual int GetStartAP() const;
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -593,6 +629,10 @@ public:
 	virtual bool TimeLabelReached();
 	virtual void AnimationFinished();
 	virtual void Cancel();
+	virtual int GetStartAP() const;        // @0x3a7b40 retail-only override -> per-action AP cost
+private:
+	// @0x3a7990 retail-only: classify the queued move into its reach-animation action.
+	NRPG::EAction GetActionType() const;
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CExecCreateAndActivateInventoryItem -- create an item from a DB record and slot it into a hand
@@ -635,13 +675,13 @@ class CExecPlayAnimation: public CCommandExecute
 	ZDATA
 	ZPARENT( CCommandExecute );
 	int nDBAnimationID;
-	bool bCircled;
+	// @0x3a7cc0 — Jan03 `bool bCircled` removed: retail has no such member; +0x1c is bFreezeAfterLastFrame.
 	ZEND int operator&( CStructureSaver &f ) { f.Add(2,(CCommandExecute *)this); f.Add(3,&nDBAnimationID); f.Add(5,&bFreezeAfterLastFrame); return 0; }
 	bool bFreezeAfterLastFrame = false;
 	//
 public:
 	CExecPlayAnimation() {}
-	CExecPlayAnimation( CUnitServer *_pUS, int _nDBAnimationID, bool _bCircled );
+	CExecPlayAnimation( CUnitServer *_pUS, int _nDBAnimationID, bool _bFreezeAfterLastFrame );
 	//
 	virtual void Run();
 	virtual void AnimationFinished();

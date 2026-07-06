@@ -241,6 +241,11 @@ CGlobalPlayer* CreateGlobalPlayer( NDb::CSide* pSide )
 		{
 			NDb::CRPGPers *pRPGPers = iTempPers.Get();
 
+			// retail NRPG::AddTeamMngPerses @0x29adb0 (disasm-verified): the recruit roster takes ONLY
+			// personas with CanHired set (byte @+0xc0) AND the matching side -- without the CanHired
+			// gate every civilian/mob persona of the side floods the recruit menu.
+			if ( !pRPGPers->bCanHired )
+				continue;
 			if ( pRPGPers->pSide != pSide )
 				continue;
 

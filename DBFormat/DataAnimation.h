@@ -118,6 +118,21 @@ public:
 		DESTRUCT_2,
 		DESTRUCT_3,
 		DESTRUCT_4,
+		// release EType (gen/include/s2_types.h NDb::CAnimation::EType) also carries DEATH_FRONT..DEATH_LEFT
+		// (33-36), JUMP_BACK_HIGH/LOW (65/66), MINE_TILE/MINE_OBJECT (67/68), END_HEAL (74) and MOVE_ONE_STEP
+		// (75); inserting those would renumber the dev values already serialized in game.db, so only the value
+		// the interface face needs is APPENDED, pinned to its retail number (safe: no existing value shifts).
+		INTERFACE_IDLE = 73,	// release @0x2cbe30 CFakeWorldUnit::CreateAnimation: bPlayIdle ? INTERFACE_IDLE : POSE
+		// retail directional death clips (retail ids 33-36, INSERTED there after DEATH -- see note above;
+		// appended here at fresh ids to keep the dev-serialized values stable). Import strings are retail's
+		// "DeathFront"/"DeathBack"/"DeathRight"/"DeathLeft" (Game.exe @0x4cfb58..7c); the direction is picked
+		// by NWorld::GetDeathType @0x33a660 (CUnitAnimator::Die @0x33bb90), falling back to plain DEATH when
+		// a directional clip is absent. NB: needs a game.db regen (DataImport.exe) to reach the runtime data;
+		// until then the lookups miss and the DEATH fallback preserves the old behavior.
+		DEATH_FRONT = 76,
+		DEATH_BACK  = 77,
+		DEATH_RIGHT = 78,
+		DEATH_LEFT  = 79,
 	};
 	CPtr<CSkeleton> pSkeleton;
 	EType nType;

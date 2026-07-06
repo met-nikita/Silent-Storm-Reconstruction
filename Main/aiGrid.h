@@ -446,7 +446,8 @@ public:
 	virtual void ChangeDynamicLocks( CObjectBase *pUnit, const vector<SPathPlace> &points );
 	virtual bool IsValidDestination( const SPathPlace &p );
 	virtual bool IsPassable( const SPathPlace &p );
-	bool IsBlockedByFlipper( const SPathPlace	&from, const SPathPlace	&to, CPtr<CObjectBase> *ppFlipper, 
+	virtual EPassable GetPassability( const SPathPlace &p );   // @0x42e30 granular sibling; IsPassable == (GetPassability==AIP_YES)
+	bool IsBlockedByFlipper( const SPathPlace	&from, const SPathPlace	&to, CPtr<CObjectBase> *ppFlipper,
 		bool *bIsNowOpen, bool *bBlocksInOpenState, bool *bBlocksInClosedState );
 	virtual bool IsNativePassable( const SPathPlace &p );
 	virtual void GetNearPlaces( const SSphere &s, vector<SPathPlace> *pRes, bool bTakeAll = false );

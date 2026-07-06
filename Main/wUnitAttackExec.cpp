@@ -22,10 +22,12 @@
 #include "..\DBFormat\DataSound.h"
 #include "..\DBFormat\DataRPG.h"
 #include "..\DBFormat\DataAI.h"
+#include "..\DBFormat\DataMap.h"	// NDb::EDiplomacyState / DS_ENEMY (CExecHeal::CanDoIt diplomacy gate)
 #include "RPGCritical.h"
 #include "wUnitAttack.h"
 #include "wUnitAttackExec.h"
 #include "aiNearestPosition.h"
+#include "aiMisc.h"            // NAI::IsAIPlayer (GetActionType AI-silent gate)
 #include "rpgPerkConstants.h"
 #include "wUnitQueue.h"
 #include "wDialog.h"
@@ -43,6 +45,16 @@ bool IsWithinHumanReach( const CVec3 &ptFrom, const CVec3 &ptTarget, float fPlan
 	if ( ptTarget.z < ptFrom.z - 0.5 || ptTarget.z > ptFrom.z + 2 )
 		return false;
 	return true;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail @0x3a1db0: reach gate for a melee swing -- F_MELEE_DISTANCE, doubled when the unit
+// carries a reach extender (docked PK cannon).
+bool CanMeleeAttack( CUnitServer *pUS, const NAI::SUnitPosition &from, const CVec3 &ptTarget )
+{
+	float fReach = F_MELEE_DISTANCE;
+	if ( IsValid( pUS ) && IsValid( pUS->animator.GetCannon() ) )
+		fReach += fReach;
+	return IsWithinHumanReach( from.GetCP(), ptTarget, fReach );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 static EUnitCommandResult HasWorkingWeapon( CUnitServer *pUS )
@@ -152,7 +164,7 @@ EUnitCommandResult CanDoFirstAid( CUnitServer *pUS, const NAI::SUnitPosition &fr
 			return UCR_TARGET_OUT_OF_RANGE;
 
 		if ( !pUS->GetUnitRPG()->GetRPGUnit()->CanHeal( pTarget->GetRPG()->GetRPGUnit() ) )
-			return UCR_GENERAL_FAILURE;
+			return UCR_CANT_HEAL;   // retail CanDoFirstAid @0x3a2d40 returns UCR_CANT_HEAL on the CanHeal-fail path
 	}
 
 	if ( !IsValid( pTarget ) )
@@ -176,7 +188,9 @@ static bool CanDropCorpse( CUnitServer *pUS )
 	vector<CVec3> vels;
 	vector<NAI::SCollisionPoint> ress;
 	float fDir = from.GetDirection();
-	vels.push_back( CVec3( cos(fDir) * FP_GRID_STEP, sin(fDir) * FP_GRID_STEP, 0 ) );
+	// @0x3a31c0 -- retail CanDropCorpse sweeps a 0.9375 (0x3f700000) forward step, NOT FP_GRID_STEP (0.625).
+	// Jan03 used FP_GRID_STEP here; the shipped binary widened the corpse-drop probe -- FOLLOW THE DECOMP.
+	vels.push_back( CVec3( cos(fDir) * 0.9375f, sin(fDir) * 0.9375f, 0 ) );
 	spheres.push_back( SSphere( center, 0.45f ) );
 	NAI::PhysCollideInfo( pUS->GetWorld()->GetAIMap(), spheres, vels, &ress, NWorld::TS_ITEM_BLOCKER );
 	return (ress[0].fDist == NAI::FP_NO_COLLISION);
@@ -326,6 +340,22 @@ EUnitCommandResult CanUnitThrowGrenade( CUnitServer *pUS, const NAI::SUnitPositi
 		return UCR_TARGET_OUT_OF_RANGE;*/
 	if ( !FindGrenadeParams( pUS->GetWorld(), from, ptTarget, pToHitCalcer->GetMaxGrenadeVelocity(), &sParams ) )
 		return UCR_TARGET_OUT_OF_RANGE;
+
+	// Engineer/PK grenades (satchel charges) gate on a required demolition perk + throwing skill (retail
+	// @0x3ac8d0). Ordinary grenades have no eng-grenade DB record -> GetDBEngGrenade() is null -> no gate,
+	// so this fires only for engineer grenades. Fields already serialized on CRPGEngGrenade (tags 5 & 16).
+	CDynamicCast<NRPG::CGrenadeItem> pGrenadeConcrete( pGrenade );
+	if ( IsValid( pGrenadeConcrete ) )
+	{
+		NDb::CRPGEngGrenade *pEngDB = pGrenadeConcrete->GetDBEngGrenade();
+		if ( pEngDB )
+		{
+			if ( pEngDB->nRequiredPerkID > 0 && !pUS->GetUnitRPG()->HasPerk( pEngDB->nRequiredPerkID ) )
+				return UCR_NO_EQUIPMENT;
+			if ( pToHitCalcer->GetSkill() < pEngDB->nSkillReq )
+				return UCR_NEED_HIGHER_SKILL;
+		}
+	}
 
 	return UCR_OK;
 }
@@ -610,6 +640,10 @@ static EUnitCommandResult CanMoveInventoryItem( CUnitServer *pUS, CCmdMoveInvent
 			if( !IsValid( pUSTarget ) || pUSTarget->IsDead() )
 				return UCR_GENERAL_FAILURE;
 
+			// retail @0x3aa1c0: a unit with a disabled hand (C_IDLE_HAND critical) cannot be handed an item.
+			if ( pUSTarget->GetUnitRPG()->HasCritical( NDb::C_IDLE_HAND ) )
+				return UCR_CRITICALS_BAN;
+
 			NRPG::IInventory *pInventory = pUSTarget->GetUnitRPG()->GetInventory();
 			for ( int nTemp = 0; nTemp < NDb::N_SLOTS; nTemp++ )
 			{
@@ -891,13 +925,19 @@ void CExecAttack::Run()
 	StartAction( pUS->GetWorld(), NORMAL );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-bool CExecAttack::TimeLabelReached() // ���� false, �� �����
+bool CExecAttack::TimeLabelReached()
 {
-	pUS->GetUnitRPG()->NextBullet();
-	bool bRes = OnLabel();						// ���� ������� ��������� NextBullet(), �� ���� �� ������� �������� �� �����
-	if ( !bRes && !bAttackCanceled )			// ������ ���������� ���� ���� �� ���� �����! ������ �� � ���!
-		pUS->GetUnitRPG()->StartAttack(); // reset burts state
-	return bRes && !bAttackCanceled;
+	// @0x3a2650 -- retail: OnLabel is now VOID (arms the timed-bullet schedule / ends the shot). Two changes
+	// from Jan03, both disasm-confirmed at 0x7a2650:
+	//   (1) NextBullet() is DROPPED -- retail does NOT advance the RPG bullet cursor per label; the timed
+	//       pipeline tracks bullets via nBulletGone/nBulletPrepared + SelectRay's per-bullet CreateAttack.
+	//       (The one-shot CExecMelee*/CExecThrowKnife OnLabel overrides call NextBullet() themselves.)
+	//   (2) the Jan03 "!bRes -> StartAttack() reset burst state" re-arm is GONE; instead, on cancel we Finish
+	//       the executor here. Return !bAttackCanceled (consumed by CUnitServer::Segment's bCallTimeLabel).
+	OnLabel();
+	if ( bAttackCanceled )
+		Finished();
+	return !bAttackCanceled;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CExecAttack::Cancel()
@@ -942,47 +982,54 @@ EUnitCommandResult CExecShoot::CanDoIt( const NAI::SUnitPosition &from, bool bIg
 	return HasWorkingWeapon( pUS );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CExecShoot::PerformShot()
+// @0x3a8b40 -- retail timed-bullet OnLabel (VOID). Jan03's synchronous "PerformShot drains the Attack
+// vector" is GONE. On the FIRST label it ARMS the schedule (tNextBulletPrepare/Go) and flashes the first
+// bullet (firing it instantly when the weapon has zero bullet-delay); thereafter, once the shot is done
+// (bAttackCanceled -- set by OnBulletGo/Segment when the burst ends) it ENDS the shot (AC_END_SHOOT +
+// CheckShotResult), else it keeps the aim/attack animation running. Per-bullet firing is driven by Segment.
+void CExecShoot::OnLabel()
 {
-	if ( !Attack.empty() )
-	{
-		Attack.front().rTtrajectory = ray;
-		PerformAttack( Attack, ray, fRayToHit );
-		pUS->CreateFlash();
-		Attack.clear();
-	}
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-bool CExecShoot::OnLabel()
-{
-	bool bBurstComplete = bComplete;
 	const NAI::SUnitPosition &position = pUS->GetPosition();
 
-	if ( IsAttackCanceled() )
+	// ---- arm the schedule + flash/launch the first bullet (once; skipped in aim-and-hold mode) ----
+	if ( tNextBulletPrepare == 0 && !bOnlyPrepareToShoot )
 	{
-		bAttackCanceled = true;
-	}
-	else
-	{
-		PerformShot();
-		if ( !bComplete && !bAttackCanceled )
-			PrepareShot();
+		STime delay = GetBulletDelay();
+		bool bFlash = ( nBulletPrepared <= 0 ) || CheckBurst( nBulletPrepared, false );
+		if ( bFlash )
+		{
+			CreateFlash( nBulletPrepared == 0 );
+			++nBulletPrepared;
+		}
+		if ( delay == 0 )
+			OnBulletGo();   // zero-delay weapon: the bullet departs immediately
+		STime t = GetNextBulletTime( pUS->GetWorld()->GetTime()->GetValue() );
+		tNextBulletPrepare = t;
+		tNextBulletGo = t + delay;
 	}
 
-	if ( bBurstComplete || bAttackCanceled )
+	if ( bAttackCanceled )
 	{
+		// ---- END the shot ---- (retail also stops a held long-burst SFX + notifies weapon-empty + refreshes
+		//   vision here; the C3DSound EndSound and the opaque weapon-empty / UpdateVision world sinks are
+		//   elided/deferred -- see the header. DoAction(AC_END_SHOOT) + CheckShotResult are the essentials.)
 		pUS->DoAction( NRPG::AC_END_SHOOT );
 		CheckShotResult();
 	}
 	else
 	{
-		pUS->animator.Attack( position, ray, true );
+		// ---- CONTINUE: keep the aim/attack animation running while bullets are still scheduled ----
+		STime delay = GetBulletDelay();
+		if ( delay == 0 || tNextBulletPrepare > pUS->GetWorld()->GetTime()->GetValue() )
+			pUS->animator.Attack( position, ray, true, false );
 	}
-
-	return !bBurstComplete || bAttackCanceled;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CExecShoot::PerformAttack( const vector<NRPG::CAttackPortion> &attack, const CRay &ray, float fHit )
+// @0x3a4480 -- retail fires ONE ranged attack per call (no args), from this->attack + this->ray (Jan03 looped
+// a vector<CAttackPortion>). Trail model/speed come from the equipped weapon's DB record. (Retail also reports
+// the spawned bullet to IUnitMissionForMedals::AddWaitForBullet -- DEFERRED: the concrete CUnitMission does not
+// derive that interface in-tree, so the cross-cast never resolves; the whole medal-session subsystem is unwired.)
+void CExecShoot::PerformAttack()
 {
 	vector<NRPG::IAttackable*> ignores;
 	CCannon *pCannon = pUS->animator.GetCannon();
@@ -994,6 +1041,9 @@ void CExecShoot::PerformAttack( const vector<NRPG::CAttackPortion> &attack, cons
 	float fTrailSpeed = 0;
 	CPtr<NDb::CModel> pTrailEffect = 0;
 	NRPG::IWeaponItem *pWeapon = pUS->GetUnitRPG()->GetWeaponItem();
+	// ORIGINAL BUG (confirmed disasm @0x7a4480): retail's GetWeaponItem()==null path zeroes the weapon-record
+	// base then falls through into the same GetDBWeapon reads -> deref of a null record. Never reached in
+	// practice (PerformAttack only runs with a weapon equipped); the null-guard keeps the flow observable.
 	if ( pWeapon && pWeapon->GetDBWeapon()->pTrailEffect )
 	{
 		SRand sRand;
@@ -1001,33 +1051,49 @@ void CExecShoot::PerformAttack( const vector<NRPG::CAttackPortion> &attack, cons
 		pTrailEffect = pWeapon->GetDBWeapon()->pTrailEffect->CreateModel( &sRand );
 	}
 
-	CRay rTempRay( ray ); // CRAP
+	CRay rTempRay( ray );
 	rTempRay.ptOrigin += ray.ptDir * pUS->GetMinClearDistance();
-	for ( vector<NRPG::CAttackPortion>::const_iterator i = attack.begin(); i != attack.end(); ++i )
-		pUS->GetWorld()->PerformRangedAttack( *i, rTempRay, ignores, pUS->GetWorld()->GetTime()->GetValue(), pTrailEffect, fTrailSpeed );
+	pUS->GetWorld()->PerformRangedAttack( attack, rTempRay, ignores, pUS->GetWorld()->GetTime()->GetValue(), pTrailEffect, fTrailSpeed );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-bool CExecShoot::CheckBurst( bool bComplete )
+// @0x3a1fa0 -- retail CheckBurst(nFired, bDoAction): may the burst keep firing? (return TRUE == continue) and,
+// when bDoAction, spend the burst AP for this round. NOTE the return polarity is INVERTED vs the Jan03
+// CheckBurst(bool bComplete) form (which returned "should stop"). The first bullet (nFired==0) never spends
+// burst AP here.
+// v1.2 @0x7a2280: the mode dispatch becomes a full switch. NEW: the single-shot modes SM_Snap/SM_Aimed/
+// SM_Careful -- `return false` in v1.1 -- keep firing until the weapon's bullets-per-shot count is exhausted
+// (nFired < GetBulletsPerShot()), so one trigger pull fires all pellets of a ShotsInOne weapon. ShortBurst/
+// LongBurst keep the v1.1 length + burst-state + AC_BURST AP logic verbatim; Snipe still never bursts.
+bool CExecShoot::CheckBurst( int nFired, bool bDoAction )
 {
-	NRPG::IUnitMission *pRPG = pUS->GetUnitRPG();
-	NRPG::CWeaponItem *pWeapon = pRPG->GetRPGUnit()->GetWeaponItem();
-	float fPerkBullets = 0;
-	pRPG->HasPerk( NRPG::N_PERK_LONGER_SHORT_BURST, &fPerkBullets );
-	bool bBurstLastBullet = pRPG->GetNBullets() && 
-		pRPG->GetNBullets() >= ( int ) ( pWeapon->GetDBWeapon()->nRoF / 6.f + fPerkBullets );
-	//
-	if ( !bComplete || bBurstLastBullet )
+	switch ( GetShootMode() )
 	{
-		if ( CanDoIt( pUS->GetPosition() ) != UCR_OK )
-			return true;
-		if ( pUS->GetUnitRPG()->GetNBullets() > 1 )
-		{
-			if ( !pUS->CanSpendAP( pUS->GetActionAP( NRPG::AC_BURST ) ) )
-				return true;
-			pUS->DoAction( NRPG::AC_BURST );
-		}
+	case NDb::SM_Snap:
+	case NDb::SM_Aimed:
+	case NDb::SM_Careful:
+		return nFired < GetBulletsPerShot();   // v1.2: multi-bullet single shot
+	case NDb::SM_ShortBurst:
+		if ( GetShortBurstLength() <= nFired )
+			return false;   // short burst has fired its full length
+		break;
+	case NDb::SM_LongBurst:
+		break;
+	default:
+		return false;       // SM_Snipe: never a burst
 	}
-	return bComplete;
+
+	if ( CanDoIt( pUS->GetPosition() ) != UCR_OK )
+		return false;       // can no longer shoot from here
+
+	if ( nFired >= 1 )
+	{
+		int nAP = pUS->GetActionAP( NRPG::AC_BURST );
+		if ( !pUS->CanSpendAP( nAP ) )
+			return false;   // not enough AP for the next burst round
+		if ( bDoAction )
+			pUS->DoAction( NRPG::AC_BURST );
+	}
+	return true;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 int CExecShoot::GetActionAP() const 
@@ -1066,20 +1132,36 @@ void CExecShoot::Scream()
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// @0x3a8290 -- retail Start: reset the timed-bullet bookkeeping, then either aim-and-hold (bOnlyPrepareToShoot)
+// or run a full shot (unhide, careful-AP, select the ray, spend AP, play the fire anim / free-shot OnLabel).
 void CExecShoot::Start()
 {
-	bComplete = true;
+	nBulletGone = 0;
+	nBulletPrepared = 0;
 	bMissed = true;
 	nToHit = 0;
-	//
+
+	if ( bOnlyPrepareToShoot )
+	{
+		// aim-and-hold: raise/aim only (no AP, no scream). Latch bAttackCanceled so the first OnLabel ENDs
+		// immediately without arming a bullet. animator.Attack(.., bInstant=false, bNoShoot=true).
+		SelectRay();
+		bShotInitiated = true;
+		pUS->animator.Attack( pUS->GetPosition(), ray, false, true );
+		bAttackCanceled = true;
+		return;
+	}
+
 	csRPG << CC_WHITE << "Shoot begin :\n";
+	CheckUnhide();
 	CalculateExtraAP();
-	PrepareShot();
+	SelectRay();
+	bShotInitiated = true;
 	SpendAP();
 	if ( !IsAccidental() )
 	{
 		Scream();
-		pUS->animator.Attack( pUS->GetPosition(), ray );
+		pUS->animator.Attack( pUS->GetPosition(), ray, false, false );
 	}
 	else
 		OnLabel();
@@ -1114,6 +1196,145 @@ void CExecShoot::SpendAP()
 	pUS->SpendAP( nExtraAP );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// @0x3a1ee0 -- the equipped weapon's shoot mode (SM_Snap when there is no valid weapon).
+NDb::EShootMode CExecShoot::GetShootMode() const
+{
+	NRPG::CWeaponItem *pWeapon = pUS->GetUnitRPG()->GetRPGUnit()->GetWeaponItem();
+	if ( IsValid( pWeapon ) )
+		return pWeapon->GetShootMode();
+	return NDb::SM_Snap;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// Short-burst bullet count = nRoF/6 (floored) + the LONGER_SHORT_BURST perk bonus -- the exact Jan03 CheckBurst
+// inline formula. 0 when there is no valid weapon.
+int CExecShoot::GetShortBurstLength() const
+{
+	NRPG::IUnitMission *pRPG = pUS->GetUnitRPG();
+	NRPG::CWeaponItem *pWeapon = pRPG->GetRPGUnit()->GetWeaponItem();
+	float fPerkBullets = 0;
+	pRPG->HasPerk( NRPG::N_PERK_LONGER_SHORT_BURST, &fPerkBullets );
+	if ( IsValid( pWeapon ) )
+		return ( int )( pWeapon->GetDBWeapon()->nRoF / 6.f + fPerkBullets );
+	return 0;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// @0x3a20e0 -- advance a bullet timestamp by one inter-bullet period = round(60000/BPM) ms (the disasm computes
+// t -= round(-60000.0f/rec[+0x9c]), and +0x9c is nBPM -- bullets per MINUTE. NOT nRoF, which is the full-burst
+// bullet COUNT: dividing by nRoF (~12-30) gave multi-second gaps between burst bullets). Unchanged t on a
+// missing weapon/record.
+// v1.2 @0x7a23f0: a multi-bullet shot (ShotsInOne > 1) has NO inter-bullet interval -- the timestamp is
+// returned unchanged, so all pellets share one time (Segment's catch-up loop fires them in a single tick).
+STime CExecShoot::GetNextBulletTime( STime t ) const
+{
+	NRPG::IWeaponItem *pWeapon = pUS->GetUnitRPG()->GetWeaponItem();
+	if ( IsValid( pWeapon ) )
+	{
+		NDb::CRPGWeapon *pDB = pWeapon->GetDBWeapon();
+		if ( pDB && pDB->nShotsInOne > 1 )
+			return t;   // v1.2: all bullets of the shot go at once
+		if ( pDB && pDB->nBPM != 0 )
+			t += ( STime )( int )( 60000.0f / ( float )pDB->nBPM + 0.5f );
+	}
+	return t;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// v1.2 @0x7a21c0 (NEW helper) -- bullets fired by ONE trigger pull: the weapon DB's ShotsInOne field
+// clamped to >= 1 (1 when there is no valid weapon/record, matching the retail rec[+0xb0]>1 ? rec[+0xb0] : 1).
+int CExecShoot::GetBulletsPerShot() const
+{
+	NRPG::IWeaponItem *pWeapon = pUS->GetUnitRPG()->GetWeaponItem();
+	if ( IsValid( pWeapon ) )
+	{
+		NDb::CRPGWeapon *pDB = pWeapon->GetDBWeapon();
+		if ( pDB && pDB->nShotsInOne > 1 )
+			return pDB->nShotsInOne;
+	}
+	return 1;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// @0x3a4240 -- muzzle flash for one shot. bLeft alternates the barrel bone on a dual-mount (headless) PK
+// (retail gates it on GetWearingDBPK()->bHasNoHead and the prepared-bullet parity); bFirstBullet gates the
+// once-per-burst sound. (Retail also stashed the returned C3DSound* in longBurstSnd for the long-burst cycle
+// EndSound lifecycle -- this dev fork dropped that member, so the return is unused here.)
+void CExecShoot::CreateFlash( bool bFirstBullet )
+{
+	bool bLeft = false;
+	NDb::CPanzerklein *pPK = pUS->GetWearingDBPK();
+	if ( IsValid( pPK ) && pPK->bHasNoHead )
+		bLeft = ( nBulletPrepared & 1 ) != 0;
+	pUS->CreateFlash( bLeft, bFirstBullet );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// @0x3a40d0 -- retail reveals a concealed shooter before firing (weapon reveal-coeff >= 1.0 gated by a
+// hidden-state predicate). STUBBED: the reveal-coefficient field (CRPGWeapon+0xa4) and the posProvider
+// hidden-predicate (vtbl[0xc]) have no counterpart in the dev DB schema / interface, and the dev has no
+// conceal-on-shoot flow -> safe no-op until that subsystem lands.
+void CExecShoot::CheckUnhide()
+{
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// @0x3a26f0 -- one bullet departs the barrel: fire it (PerformAttack), then decide whether to chamber the next
+// burst round (SelectRay) or latch the cancel and stop. A short burst clears a pending mid-burst cancel (it
+// always finishes its full length); any other mode stops on a pending cancel.
+void CExecShoot::OnBulletGo()
+{
+	if ( bShotInitiated )
+	{
+		++nBulletGone;
+		PerformAttack();
+		bShotInitiated = false;
+	}
+
+	NDb::EShootMode mode = GetShootMode();
+	if ( mode == NDb::SM_ShortBurst )
+	{
+		if ( bAttackCanceled )
+			bAttackCanceled = false;
+	}
+	else if ( bAttackCanceled )
+		return;
+
+	if ( !IsAttackCanceled() && CheckBurst( nBulletGone, true ) )
+	{
+		SelectRay();
+		bShotInitiated = true;
+		return;
+	}
+
+	bAttackCanceled = true;   // nothing more to fire -> OnLabel ENDs the shot next tick
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// @0x3a8d20 -- per-tick timed-bullet driver. Samples world-time ONCE; as it crosses tNextBulletPrepare it
+// chambers/flashes the next bullet, and as it crosses tNextBulletGo it fires (OnBulletGo). Overrides the
+// CCommandExecute::Segment no-op; CUnitServer::Segment invokes it every tick.
+// v1.2 @0x7a9160: the go branch is a catch-up LOOP with a NEW abort guard on bAttackCanceled -- v1.1 fired at
+// most ONE bullet per tick; v1.2 fires EVERY bullet whose time has come (and, with the v1.2 GetNextBulletTime
+// no-advance for ShotsInOne > 1 weapons, all pellets of a multi-bullet shot depart in this same tick --
+// bAttackCanceled, latched by OnBulletGo when the shot ends, is the loop's only brake). Prepare unchanged.
+void CExecShoot::Segment()
+{
+	if ( tNextBulletPrepare == 0 )
+		return;   // no shot armed
+
+	STime now = pUS->GetWorld()->GetTime()->GetValue();
+
+	if ( tNextBulletPrepare <= now )
+	{
+		if ( nBulletPrepared < 1 || CheckBurst( nBulletPrepared, false ) )
+		{
+			CreateFlash( nBulletPrepared == 0 );
+			++nBulletPrepared;
+		}
+		tNextBulletPrepare = GetNextBulletTime( tNextBulletPrepare );
+	}
+
+	while ( tNextBulletGo <= now && !bAttackCanceled )   // reuses the same sampled `now`; v1.2 catch-up loop
+	{
+		OnBulletGo();
+		tNextBulletGo = GetNextBulletTime( tNextBulletGo );
+	}
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 // CExecShootTile
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CExecShootTile::CExecShootTile( CUnitServer *_pUS, const CVec3 &_ptTarget ): 
@@ -1139,21 +1360,24 @@ EUnitCommandResult CExecShootTile::CanDoIt( const NAI::SUnitPosition &from, bool
 	return UCR_OK;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CExecShootTile::PrepareShot() // false, ����� ��������� �������
+void CExecShootTile::SelectRay() // false, ����� ��������� �������
 {
-	bComplete = CreateAttack( &Attack, 0, true );
-	bComplete = CheckBurst( bComplete );
-	//
-	if ( !Attack.empty() )
+	// retail SelectRay builds a SINGLE `attack` portion into the member (was the vector Attack); NO CheckBurst
+	// here (that moved to the OnBulletGo/Segment pipeline). cover+to-hit+peek inlined from the retail solver
+	// NRPG::AttackPointRanged (absent in-tree) using the dev helpers it wraps.
+	vector<NRPG::CAttackPortion> tmp;
+	CreateAttack( &tmp, 0, true );
+	if ( !tmp.empty() )
 	{
+		attack = tmp[0];
 		int nTmpToHit;
 		bool bTmpMissed;
 		CPtr<CWorld> pWorld = pUS->GetWorld();
-		CObj<NRPG::CCoverInfo> pCover = pWorld->GetGame()->CalcCoversForTile( pUS->GetAttackOrigin( pUS->GetPosition() ), 
-			Attack[0], pUS, ptAnimTarget, pUS->GetMinClearDistance() );
-		fRayToHit = NRPG::CheckTileToHit( pUS, ptAnimTarget, 
+		CObj<NRPG::CCoverInfo> pCover = pWorld->GetGame()->CalcCoversForTile( pUS->GetAttackOrigin( pUS->GetPosition() ),
+			attack, pUS, ptAnimTarget, pUS->GetMinClearDistance() );
+		float fHit = NRPG::CheckTileToHit( pUS, ptAnimTarget,
 			GetExtraAP(), eHL, pCover, pWorld->IsFirstTurn(), &nTmpToHit );
-		NRPG::PeekRay( pCover, &ray, fRayToHit, &bTmpMissed );
+		NRPG::PeekRay( pCover, &ray, fHit, &bTmpMissed );
 		bMissed &= bTmpMissed;
 		nToHit = max( nToHit, nTmpToHit );
 	}
@@ -1196,20 +1420,22 @@ EUnitCommandResult CExecShootUnit::CanDoIt( const NAI::SUnitPosition &from, bool
 	return UCR_OK;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CExecShootUnit::PrepareShot() // false, ����� ��������� �������
+void CExecShootUnit::SelectRay() // false, ����� ��������� �������
 {
-	bComplete = CreateAttack( &Attack, pTarget );
-	bComplete = CheckBurst( bComplete );
-	//
-	if ( !Attack.empty() )
+	// retail SelectRay builds a SINGLE `attack` portion into the member (was the vector Attack); NO CheckBurst
+	// here (moved to the OnBulletGo/Segment pipeline). cover+to-hit+peek inlined from NRPG::AttackObjectRanged.
+	vector<NRPG::CAttackPortion> tmp;
+	CreateAttack( &tmp, pTarget );
+	if ( !tmp.empty() )
 	{
+		attack = tmp[0];
 		int nTmpToHit;
 		bool bTmpMissed;
 		CPtr<CWorld> pWorld = pUS->GetWorld();
-		vector<int> accessibleHLs; // ���������� ������ ��� ���������� Melee ToHit
-		CObj<NRPG::CCoverInfo> pCover = pWorld->GetGame()->CalcCovers( pUS->GetAttackOrigin(), Attack[0], pUS, pTarget, eHL, pUS->GetMinClearDistance() );
-		fRayToHit = NRPG::CheckToHit( pUS, pTarget, GetExtraAP(), eHL, accessibleHLs, pCover, pWorld->IsFirstTurn(), &nTmpToHit );
-		NRPG::PeekRay( pCover, &ray, fRayToHit, &bTmpMissed );
+		vector<int> accessibleHLs;
+		CObj<NRPG::CCoverInfo> pCover = pWorld->GetGame()->CalcCovers( pUS->GetAttackOrigin(), attack, pUS, pTarget, eHL, pUS->GetMinClearDistance() );
+		float fHit = NRPG::CheckToHit( pUS, pTarget, GetExtraAP(), eHL, accessibleHLs, pCover, pWorld->IsFirstTurn(), &nTmpToHit );
+		NRPG::PeekRay( pCover, &ray, fHit, &bTmpMissed );
 		bMissed &= bTmpMissed;
 		nToHit = max( nToHit, nTmpToHit );
 	}
@@ -1243,12 +1469,19 @@ void CExecShootUnit::CheckShotResult()
 	// retail CExecShootUnit::CheckShotResult (wUnitAttackExec.c:8205): fire the lua hook for the unit that was
 	// shot at (target may be null/invalid -> nil), regardless of hit/miss, before clearing the snipe state.
 	NScript::luaCallFunction( "OnShotAtUnit", "p", IsValid( pTarget ) ? pTarget.GetBarePtr() : 0 );
+	// @0x3a8da0 -- retail fires CEventOnAttackAtUnit (consumed by CAIEventTrackerImpl::OnAttack /
+	// aiThreatTracker) after the lua hook and before CancelSnipe. Was missing in a5dll (dead listener).
+	NGlobal::ThrowEvent( CEventOnAttackAtUnit( pUS, pTarget ) );
 	//
 	pUS->CancelSnipe();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CExecShootUnit::IsAttackCanceled()
 {
+	// @0x3a4ae0 -- already-canceled short-circuit: the binary returns early on bAttackCanceled
+	// BEFORE consuming the burst auto-stop RNG roll. (a5dll previously fell through to the roll.)
+	if ( bAttackCanceled )
+		return true;
 	CPtr<NRPG::IUnitMission> pRPG = pUS->GetUnitRPG();
 	CPtr<NRPG::IWeaponItem> pWeapon = pRPG->GetWeaponItem();
 	bool bCanStopBurst = pRPG->HasPerk( NRPG::N_PERK_LONG_BURST_AUTO_STOP ) ||
@@ -1271,10 +1504,18 @@ CExecMelee::CExecMelee( CUnitServer *_pUS, int _nExtraAP ):
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 EUnitCommandResult CExecMelee::CanDoIt( const NAI::SUnitPosition &from, bool bIgnoreTarget ) const
 {
+	// @0x3a2180 -- retail composes this with NWorld::CanMeleeAttack @0x3a1db0; two
+	// behaviours were missing vs the Jan03 copy:
+	//   * a prone (CRAWL) attacker cannot melee -> UCR_UNAVAILABLE;
+	//   * the melee reach DOUBLES when the unit carries a reach extender (a docked
+	//     Panzerklein cannon); otherwise it stays F_MELEE_DISTANCE.
 	if ( bIgnoreTarget )
 		return UCR_NO_TARGET;
 
-	if ( !IsWithinHumanReach( from.GetCP(), ptTarget, F_MELEE_DISTANCE ) )
+	if ( from.GetPose() == NAI::CRAWL )
+		return UCR_UNAVAILABLE;
+
+	if ( !CanMeleeAttack( pUS, from, ptTarget ) )	// reach (+PK-cannon extender), @0x3a1db0
 		return UCR_TARGET_OUT_OF_RANGE;
 
 	return UCR_OK;
@@ -1319,12 +1560,15 @@ CExecMeleeTile::CExecMeleeTile( CUnitServer *_pUS, const CVec3 &_ptTarget ):
 	ptTarget = _ptTarget;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-bool CExecMeleeTile::OnLabel()
+void CExecMeleeTile::OnLabel()
 {
 	NRPG::IUnitMission *pRPG = pUS->GetUnitRPG();
 	CWorld *pWorld = pUS->GetWorld();
 	const NAI::SUnitPosition &position = pUS->GetPosition();
 	bool bComplete = true;
+	// OnLabel is now VOID; NextBullet() (dropped from CExecAttack::TimeLabelReached in the retail timed-shot
+	// rework) is restored here so this one-shot melee still advances the RPG bullet cursor exactly once.
+	pRPG->NextBullet();
 
 	CRay ray;
 	ray.ptOrigin = position.GetEyePosition();
@@ -1334,7 +1578,11 @@ bool CExecMeleeTile::OnLabel()
 	bComplete = CreateAttack( &attack, 0 );
 	ASSERT( bComplete );
 	PerformAttack( attack, ray );
-	return !bComplete;
+	// @0x3a50a0 -- decode sets bAttackCanceled (+0x18) unconditionally before return.
+	// It suppresses CExecAttack::TimeLabelReached's burst-reset branch
+	// (`if(!bRes && !bAttackCanceled) StartAttack()`): without it a completed
+	// melee-tile swing re-triggers StartAttack(), a behavioral divergence.
+	bAttackCanceled = true;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CExecMeleeUnit
@@ -1370,14 +1618,16 @@ void CExecMeleeUnit::Start()
 	CExecMelee::Start();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-bool CExecMeleeUnit::OnLabel()
+void CExecMeleeUnit::OnLabel()
 {
 	NRPG::IUnitMission *pRPG = pUS->GetUnitRPG();
 	CWorld *pWorld = pUS->GetWorld();
 	const NAI::SUnitPosition &position = pUS->GetPosition();
 	bool bComplete = true;
-	
-	pUS->GetUnitRPG()->NextBullet();
+
+	// OnLabel is now VOID; NextBullet() is restored here -- it was moved OUT of CExecAttack::TimeLabelReached in
+	// the retail timed-shot rework, so this one-shot melee advances the RPG bullet cursor exactly once again.
+	pRPG->NextBullet();
 	csRPG << CC_WHITE << "Melee " << pRPG->GetName() << "\n{\n";
 	vector<NRPG::CAttackPortion> attack;
 	bComplete = CreateAttack( &attack, pTarget );
@@ -1400,11 +1650,20 @@ bool CExecMeleeUnit::OnLabel()
 		CRay ray;
 		bool bIsMiss;
 		if ( NRPG::PeekRay( pCover, &ray, fHit, &bIsMiss ) )
+		{
 			PerformAttack( attack, ray, fHit );
 			//PerformAttack( attack, ray, bIsMiss, fHit );
+			// @0x3a94c0 -- retail throws CEventOnAttackAtUnit( attacker, target ) after a landed
+			// melee blow (subscribed by CAIEventTrackerImpl::OnAttack, aiThreatTracker.cpp:175).
+			// Jan03 OnLabel never fired it -> the AI threat tracker missed melee strikes.
+			NGlobal::ThrowEvent( CEventOnAttackAtUnit( pUS, pTarget ) );
+		}
 	}
 	csRPG << "}\n";
-	return !bComplete;
+	// @0x3a94c0 -- retail OnLabel unconditionally sets bAttackCanceled = true here (its primary
+	// observable side effect): marks the attack consumed so the base CExecAttack::TimeLabelReached()
+	// does NOT re-issue StartAttack()/reset burst state (lines 898-900). Jan03 OnLabel omitted it.
+	bAttackCanceled = true;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CExecThrowGrenade
@@ -1521,8 +1780,10 @@ void CExecThrowGrenade::Run()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CExecThrowGrenade::TimeLabelReached()
 {
-	NRPG::IUnitMission *pRPG = pUS->GetUnitRPG();
-	pRPG->NextBullet();
+	// @0x3acf60 -- retail decode is exactly { ThrowGrenade(); return false; }.
+	// The pRPG->NextBullet() advance was burst-gun cruft (cf. CExecShoot label path
+	// @wUnitAttackExec.cpp:896) and is absent from the grenade executor's decode --
+	// a grenade is a single throw, not a burst, so nBullet must not be advanced here.
 	ThrowGrenade();
 	return false;
 }
@@ -1530,15 +1791,15 @@ bool CExecThrowGrenade::TimeLabelReached()
 // CExecLaunchRocket
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CExecLaunchRocket::CExecLaunchRocket( CUnitServer *_pUS, const CVec3 &_ptTarget ):
-	CExecShoot(_pUS, 0), type(NORMAL)
+	CExecShoot(_pUS, 0), type(NORMAL), tRocket(0)
 {
 	ptAnimTarget = _ptTarget;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CExecLaunchRocket::CExecLaunchRocket( CUnitServer *_pUS, EType _type )
-	: CExecShoot(_pUS, 0), type(_type)
+	: CExecShoot(_pUS, 0), type(_type), tRocket(0)
 {
-	ptAnimTarget = CVec3(0,0,0); 
+	ptAnimTarget = CVec3(0,0,0);
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 EUnitCommandResult CExecLaunchRocket::CanDoIt( const NAI::SUnitPosition &from, bool bIgnoreTarget ) const
@@ -1616,15 +1877,52 @@ void CExecLaunchRocket::LaunchRocket( )
 	pUS->Update();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-bool CExecLaunchRocket::OnLabel()
+// @0x3a1f30 CExecShoot::GetBulletDelay -- the per-shot label->launch delay (ms), read from the weapon's DB
+// anim-weapon record (0 when any link in the weapon/record chain is missing/destroyed).
+int CExecShoot::GetBulletDelay() const
 {
-	NRPG::IUnitMission *pRPG = pUS->GetUnitRPG();
-	pRPG->NextBullet();
-	LaunchRocket();
-	if ( !IsAccidental() )
-		pUS->DoAction( NRPG::AC_END_SHOOT );
-	pUS->CreateFlash();
-	return false;
+	NRPG::IWeaponItem *pWeapon = pUS->GetUnitRPG()->GetWeaponItem();
+	if ( IsValid( pWeapon ) )
+	{
+		NDb::CRPGWeapon *pDB = pWeapon->GetDBWeapon();
+		if ( pDB && IsValid( pDB->pAnimWeaponType ) )
+			return pDB->pAnimWeaponType->nBulletDelay;
+	}
+	return 0;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// @0x3a21d0 -- retail ARMS the launch here (schedules tRocket) instead of firing immediately; the actual
+// LaunchRocket + END_SHOOT happen in Segment once game time reaches tRocket. (Jan03 did it all inline here:
+// NextBullet/LaunchRocket/DoAction/CreateFlash -- retail keeps only CreateFlash + the arm.)
+void CExecLaunchRocket::OnLabel()
+{
+	if ( tRocket == 0 )
+	{
+		pUS->CreateFlash( false, false );   // @0x3a21d0 launch rocket -> right barrel, single sound
+		tRocket = pUS->GetWorld()->GetTime()->GetValue() + GetBulletDelay();
+	}
+	// OnLabel is now VOID (was `return false`). It does NOT set bAttackCanceled, so the label re-fires each tick
+	// -- benign: this body no-ops once tRocket is armed, and CExecLaunchRocket::Segment fires the rocket + latches
+	// bAttackCanceled + Finished(). No NextBullet() (rocket ammo is spent in LaunchRocket->CreateAttack(true)).
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// @0x3a58a0 -- per-tick: once game time reaches the armed launch time, fire exactly once (LaunchRocket +
+// END_SHOOT), latch via bAttackCanceled (the "already launched" flag), and finish. Driven each tick by
+// CUnitServer::Segment's pExec->Segment().
+void CExecLaunchRocket::Segment()
+{
+	STime tNow = pUS->GetWorld()->GetTime()->GetValue();
+	if ( tRocket != 0 && tNow >= tRocket )
+	{
+		if ( !bAttackCanceled )
+		{
+			LaunchRocket();
+			if ( !IsAccidental() )
+				pUS->DoAction( NRPG::AC_END_SHOOT );
+		}
+		bAttackCanceled = true;
+		Finished();
+	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CExecPanzerklein
@@ -1688,7 +1986,10 @@ bool CExecPanzerklein::TimeLabelReached()
 		pUS->GetWorld()->GetPathNetwork()->Unlock( pUS );
 		pUS->FlipPanzerklein( 0 );
 
-		CVec3 ptPKPos( ptPos.x - 1.45f * cos(fAngle), ptPos.y - 1.45f * sin(fAngle), ptPos.z );
+		// @0x3a59d0 -- retail ADDS the 1.45f back-off offset (fadd @0x7a5a89/0x7a5a97; 0x3fb9999a==1.45f);
+	// Jan03 SUBTRACTED. The decomp is authoritative -> drop the PK 1.45m FORWARD along the facing
+	// direction, not behind. (cp + 1.45*(cos a, sin a, 0).)
+	CVec3 ptPKPos( ptPos.x + 1.45f * cos(fAngle), ptPos.y + 1.45f * sin(fAngle), ptPos.z );
 		NAI::SPosition pos = NAI::GetNearestPosition( ptPKPos, pPK->GetWorld()->GetPathNetwork(), true, ptPos + CVec3( 0, 0, 1.0f ) );
 		NAI::SUnitPosition posPK;
 		posPK.pos = pos;
@@ -1721,7 +2022,19 @@ CExecUsePassage::CExecUsePassage( CUnitServer *_pUS, CCmdUsePassage *_pCmd ):
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 EUnitCommandResult CExecUsePassage::CanDoIt( const NAI::SUnitPosition &from, bool bIgnoreTarget ) const
 {
-	return UCR_OK;
+	// @0x3a22b0 -- retail grew real validity gates + a reach test; the Jan03/dev version was a bare
+	// `return UCR_OK`. `from` and `bIgnoreTarget` are accepted but UNUSED (faithful: the disasm reads
+	// neither).
+	if ( !IsValid( pUS ) )
+		return UCR_GENERAL_FAILURE;
+	if ( !IsValid( pCmd->pPassageObject ) )
+		return UCR_GENERAL_FAILURE;
+	// Reach test: retail reads the passage zone id (IPassageObject vtbl+0x14 == GetPassageZoneID) and
+	// asks a unit-side component (pUS+0x2c vtbl+0x1e8) "is the unit in that passage zone", returning
+	// UCR_OK when near else UCR_NOT_ALL_UNITS_NEAR_PASSAGE. That component virtual is opaque/unnameable
+	// in this tree; CanPass is the in-tree equivalent reach predicate -- the same gate
+	// CWorld::UsePassageObject applies before actually using the passage (wMain.cpp:2325).
+	return pCmd->pPassageObject->CanPass( pUS ) ? UCR_OK : UCR_NOT_ALL_UNITS_NEAR_PASSAGE;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 int CExecUsePassage::GetStartAP() const
@@ -1827,25 +2140,30 @@ int CExecCorpse::GetStartAP() const
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CExecCorpse::Run()
 {
-	ASSERT( CanDoIt( pUS->GetPosition() ) == UCR_OK );
-	ASSERT( pUS->CanSpendAP( GetStartAP() ) );
-	if ( GetState() == FINISHED ) 
+	// @0x3a62e0 -- ASSERTs replaced by retail carry-state guard; bCorpseInPK cached;
+	// PK branch now FALLS THROUGH to StartAction (Jan03 early-return dropped).
+	if ( GetState() == FINISHED )
 		return;
-	if ( pDeadUnit->IsWearingPK() ) 
+	if ( bTake && pUS->IsCarryingCorpse() )		// can't take while already carrying
+		return;
+	if ( !bTake && !pUS->IsCarryingCorpse() )	// nothing to drop
+		return;
+	bCorpseInPK = pDeadUnit->IsWearingPK();		// cache [+0x24] -- read by TimeLabelReached/Cancel
+	if ( bCorpseInPK )
 	{
+		// SpillPK: eject the corpse from its shell, lay it dead, re-seat the empty PK.
 		CUnitServer *pPK = pDeadUnit->GetWearingPK();
 		pPK->SetPosition( pDeadUnit->GetPosition() );
 		pPK->WearAsPK( false );
 		pDeadUnit->FlipPanzerklein( 0 );
-		CVec2 ptDir( 1, 0 );
-		pDeadUnit->animator.Die( pDeadUnit->GetPosition(), CVec3( ptDir.x, ptDir.y, 0 ) );
+		// retail @0x3a62e0 (SpillPK): Die(pos, VNULL3, bPlayDeath=FALSE) -- the spilled pilot corpse
+		// drops as a pure ragdoll, no death clip and no synthetic (1,0) push direction.
+		pDeadUnit->animator.Die( pDeadUnit->GetPosition(), VNULL3, false );
 		pUS->GetWorld()->GetPathNetwork()->Unlock( pDeadUnit );
-		return;
 	}
-	if ( bTake )
+	else if ( bTake )
 	{
 		pUS->DoAction( NRPG::AC_TAKE_CORPSE );
-		OutputDebugString("Taking corpse in Run()\n");
 		pUS->animator.TakeCorpse( pUS->GetPosition() );
 	}
 	else
@@ -1854,16 +2172,24 @@ void CExecCorpse::Run()
 		NDb::CAISound *pAISound = NDb::GetAISound( 27 );
 		pUS->GetWorld()->MakeAISound( pAISound, pUS, 0, 0 );
 	}
-	StartAction( pUS->GetWorld(), SKIPPABLE );
+	StartAction( pUS->GetWorld(), SKIPPABLE );		// ALL branches reach this
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CExecCorpse::TimeLabelReached()
 {
-	ASSERT( pDeadUnit );
-	if ( pDeadUnit->IsWearingPK() ) 
+	// @0x3a64d0 -- leading StopAction(); branch on cached bCorpseInPK; take-branch
+	// validity/carrier re-check that abandons the carry pose (DropCorpse) when the
+	// corpse became invalid or got taken by someone else during the animation.
+	StopAction();
+	if ( bCorpseInPK )
 		return false;
 	if ( bTake )
 	{
+		if ( !IsValid( pDeadUnit ) || pDeadUnit->GetCorpseCarrier() )
+		{
+			pUS->animator.DropCorpse( pUS->GetPosition() );
+			return false;
+		}
 		pDeadUnit->animator.BeTaken( pUS, &pUS->animator );
 		pUS->SetState( new CUnitStateCorpseCarrier( pUS, pDeadUnit ) );
 	}
@@ -1874,32 +2200,36 @@ bool CExecCorpse::TimeLabelReached()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CExecCorpse::Cancel()
 {
-	if ( bTake )
+	// @0x3a6610 -- reversal now gated on !bCorpseInPK; CalmCorpse dropped (retail
+	// dropped it); StopAction() reordered ahead of AlignTime/PlaceUnit.
+	// NOTE: retail gates each SetState on GetStateType()==8 (corpse-carrier state-
+	// machine id); a5dll has no GetStateType -> kept unconditional SetState (FLAGGED).
+	if ( !bCorpseInPK )
 	{
-		pUS->animator.DropCorpse( pUS->GetPosition() );
-		pDeadUnit->animator.BeDropped();
-		pDeadUnit->animator.CalmCorpse();
-		pUS->SetState( new CUnitStateNormal( pUS ) );
+		if ( bTake )
+		{
+			pUS->animator.DropCorpse( pUS->GetPosition() );
+			pDeadUnit->animator.BeDropped();
+			pUS->SetState( new CUnitStateNormal( pUS ) );
+		}
+		else
+		{
+			pUS->animator.TakeCorpse( pUS->GetPosition() );
+			pDeadUnit->animator.BeTaken( pUS, &pUS->animator );
+			pUS->SetState( new CUnitStateCorpseCarrier( pUS, pDeadUnit ) );
+		}
 	}
-	else
-	{
-		OutputDebugString("Taking corpse in Cancel()\n");
-		pUS->animator.TakeCorpse( pUS->GetPosition() );
-		pDeadUnit->animator.BeTaken( pUS, &pUS->animator );
-		pUS->SetState( new CUnitStateCorpseCarrier( pUS, pDeadUnit ) );
-	}
-
-	pUS->animator.AlignTime( 50 );
-	pUS->animator.PlaceUnit( pUS->GetPosition() );
 
 	StopAction();
+	pUS->animator.AlignTime( 50 );
+	pUS->animator.PlaceUnit( pUS->GetPosition() );
 	Finished();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CExecTakeCorpseOnDeploy
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CExecTakeCorpseOnDeploy::CExecTakeCorpseOnDeploy( CUnitServer *_pUS, CUnitServer *_pCorpse, bool _bDead ):
-	CCommandExecute(_pUS), pDeadUnit(_pCorpse), bDead( _bDead ), n( 0 )
+CExecTakeCorpseOnDeploy::CExecTakeCorpseOnDeploy( CUnitServer *_pUS, CUnitServer *_pCorpse ):
+	CCommandExecute(_pUS), pDeadUnit(_pCorpse), n( 0 )
 {
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1916,31 +2246,45 @@ int CExecTakeCorpseOnDeploy::GetStartAP() const
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CExecTakeCorpseOnDeploy::Run()
 {
+	// @0x3a2760 -- retail: the Jan03 pre-corpse bookkeeping (SetState Unconscious/Death +
+	// pDeadUnit->InitAsCorpse(bDead)) is NOT done here; it was moved upstream (unit is already
+	// a corpse by deploy time). Retail also forces the carrier to WALK pose before laying the
+	// corpse. See src/s2_cexectakecorpseondeploy.h header note (disasm-verified).
 	ASSERT( IsValid( pDeadUnit ) );
 	ASSERT( IsValid( pUS ) );
 	if ( !IsValid( pDeadUnit ) || !IsValid( pUS ) )
 		return;
+	// retail loads both units into REGISTERS at entry and never re-reads the members
+	// (disasm @0x3a2760). The calls below (SetPosition / animator Init*) can reach
+	// CUnitServer::CancelAction / CheckCmdExecState, which null CUnitServer::pExec and so
+	// DELETE this executor mid-Run -- re-reading this->pUS afterwards is a use-after-free
+	// (AV in the CUnitStateCorpseCarrier ctor on base-zone deploy). Strong locals reproduce
+	// the retail register caching and pin both units.
+	CPtr<CUnitServer> pCarrier = pUS;
+	CPtr<CUnitServer> pCorpse = pDeadUnit;
 	//
-	if ( !bDead )
-		pDeadUnit->SetState( new CUnitStateUnconscious( pDeadUnit ) );
-	else
-		pDeadUnit->SetState( new CUnitStateDeath( pDeadUnit ) );
-	pDeadUnit->GetWorld()->GetPathNetwork()->Unlock( pDeadUnit );
-	pDeadUnit->InitAsCorpse( bDead );
-	pDeadUnit->animator.InitAsCorpse( pDeadUnit->GetPosition() );
-	int nCorpseDir = (int)( pUS->GetPosition().GetDir() ) - 4;
+	pCorpse->GetWorld()->GetPathNetwork()->Unlock( pCorpse );
+	pCorpse->animator.InitAsCorpse( pCorpse->GetPosition() );
+	int nCorpseDir = (int)( pCarrier->GetPosition().GetDir() ) - 4;
 	if ( nCorpseDir < 0 )
 		nCorpseDir += 8;
 	else if ( nCorpseDir > 7 )
 		nCorpseDir -= 8;
-	NAI::SUnitPosition pos = pUS->GetPosition();
+	NAI::SUnitPosition pos = pCarrier->GetPosition();
 	pos.pos.p.SetDirection( nCorpseDir );
-	pDeadUnit->SetPosition( pos );
-	pDeadUnit->GetWorld()->GetPathNetwork()->Unlock( pDeadUnit );
+	// carrier WALK-pose gate (@0x3a2760: GetPose @0x4911a0 cmp eax,2; SetPose @0x491120)
+	if ( pos.GetPose() != NAI::WALK )
+	{
+		pos.SetPose( NAI::WALK );
+		pCarrier->SetPosition( pos );
+		pCarrier->animator.PlaceUnit( pCarrier->GetPosition() );
+	}
+	pCorpse->SetPosition( pos );
+	pCorpse->GetWorld()->GetPathNetwork()->Unlock( pCorpse );
 	//
-	pUS->animator.InitAsCorpseCarrier( pUS->GetPosition() );
-	pUS->SetState( new CUnitStateCorpseCarrier( pUS, pDeadUnit ) );
-	pDeadUnit->animator.BeTaken( pUS, &pUS->animator );
+	pCarrier->animator.InitAsCorpseCarrier( pCarrier->GetPosition() );
+	pCarrier->SetState( new CUnitStateCorpseCarrier( pCarrier, pCorpse ) );
+	pCorpse->animator.BeTaken( pCarrier, &pCarrier->animator );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CExecTakeCorpseOnDeploy::TimeLabelReached()
@@ -1957,6 +2301,13 @@ CExecHeal::CExecHeal( CUnitServer *_pUS, CUnitServer *_pTarget ):
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 EUnitCommandResult CExecHeal::CanDoIt( const NAI::SUnitPosition &from, bool bIgnoreTarget ) const
 {
+	// @0x3a6840 -- retail adds a diplomacy gate absent in Jan03: a medic must not "heal" an
+	// enemy. Taken only when a real target is considered (bIgnoreTarget==false) and BOTH the
+	// medic and the patient are live objects; pTarget->GetDiplomacyState(pUS)==DS_ENEMY (==0).
+	if ( !bIgnoreTarget && IsValid( pUS ) && IsValid( pTarget ) &&
+	     pTarget->GetDiplomacyState( pUS ) == NDb::DS_ENEMY )
+		return UCR_GENERAL_FAILURE;
+
 	return CanDoFirstAid( pUS, from, pTarget );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1969,11 +2320,30 @@ void CExecHeal::Run()
 {
 	ASSERT( CanDoIt( pUS->GetPosition() ) == UCR_OK );
 
+	// @0x3a68b0 -- retail distinguishes plain first-aid from power-armour REPAIR. The gate is on the
+	// TARGET being a Panzerklein (worn PK, or an empty PK suit); only then is the medic's ACTIVE
+	// inventory item probed, driving the finer "dedicated repair kit" flag (a CFirstAidItem whose
+	// first-aid DB record id == 0x1a). DoAction picks AC_REPAIR_PK vs AC_FIRSTAID by the PK gate;
+	// StartHealing takes (bPanzerklein=gate, bRepairKit). (disasm-verified arg wiring.)
+	bool bTargetIsPK = pTarget->IsWearingPK() || pTarget->IsEmptyPK();
+	bool bRepairKit  = false;
+	if ( bTargetIsPK )
+	{
+		CDynamicCast<NRPG::CFirstAidItem> pKit( pUS->GetUnitRPG()->GetInventory()->GetActive() );
+		if ( IsValid( pKit ) )
+		{
+			// @0x3a68b0 -- retail null-guards GetDBFirstAid()'s RETURN (test eax; je) before reading the id.
+			NDb::CRPGFirstAid *pRec = pKit->GetDBFirstAid();
+			if ( pRec && pRec->GetRecordID() == 0x1a )   // 0x1a == PK repair-kit record
+				bRepairKit = true;
+		}
+	}
+
 	CVec3 ptTarget;
 	pUS->GetWorld()->GetAIMap()->GetUnitHLPos( &ptTarget, pUS->GetWorld()->GetAIMap()->GetHull(pTarget), -1 );
-	pUS->animator.StartHealing( pUS->GetPosition(), NAI::GetBlowHeight( pUS->GetPosition(), ptTarget ) );
+	pUS->animator.StartHealing( pUS->GetPosition(), NAI::GetBlowHeight( pUS->GetPosition(), ptTarget ), bTargetIsPK, bRepairKit );
 	StartAction( pUS->GetWorld(), SKIPPABLE );
-	pUS->DoAction( NRPG::AC_FIRSTAID );
+	pUS->DoAction( bTargetIsPK ? NRPG::AC_REPAIR_PK : NRPG::AC_FIRSTAID );
 
 	NDb::CAISound *pAISound = NDb::GetAISound( 20 );
 	pUS->GetWorld()->MakeAISound( pAISound, pUS, 0, 0 );
@@ -1983,6 +2353,26 @@ void CExecHeal::AnimationFinished()
 {
 	StopAction();
 	Finished();
+
+	// @0x3a6ac0 -- inside the same target-is-Panzerklein gate as Run: for a dedicated repair kit
+	// install the welder hand effect (NDb::GetEffect(0x698), stamped with the current world time),
+	// and always (in gate) set the custom idle animation (0x1183 repair / 0x1181 plain PK heal).
+	if ( pTarget->IsWearingPK() || pTarget->IsEmptyPK() )
+	{
+		bool bRepairKit = false;
+		CDynamicCast<NRPG::CFirstAidItem> pKit( pUS->GetUnitRPG()->GetInventory()->GetActive() );
+		if ( IsValid( pKit ) )
+		{
+			// @0x3a6ac0 -- null-guard the DB record before reading its id (matches the disasm test eax; je).
+			NDb::CRPGFirstAid *pRec = pKit->GetDBFirstAid();
+			if ( pRec && pRec->GetRecordID() == 0x1a )
+				bRepairKit = true;
+		}
+
+		if ( bRepairKit )
+			pUS->SetHandEffect( NDb::GetEffect( 0x698 ), pUS->GetWorld()->GetTime()->GetValue() );
+		pUS->animator.SetCustomIdleAnimation( NDb::GetAnimation( bRepairKit ? 0x1183 : 0x1181 ) );
+	}
 	//
 	pUS->SetState( new CUnitStateHealer( pUS, pTarget ) );
 }
@@ -1996,6 +2386,14 @@ CExecSetTrap::CExecSetTrap( CUnitServer *_pUS, CWindowDoor *_pTarget ):
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 EUnitCommandResult CExecSetTrap::CanDoIt( const NAI::SUnitPosition &from, bool bIgnoreTarget ) const
 {
+	// @0x3a2450 -- retail gates FIRST on the active item being an undestroyed grenade in SETTRAP
+	// mode (IGrenadeItemInfo vtbl[0] = GetMode() == GM_SETTRAP == 1, the oracle's
+	// kSetTrapRequiredGrenadeType); a missing / throw-mode grenade -> UCR_UNAVAILABLE, evaluated
+	// BEFORE the target check. Mirrors the in-tree gate at wUnitAttack.cpp:516.
+	CDynamicCast<NRPG::IGrenadeItem> pGrenade( pUS->GetUnitRPG()->GetInventory()->GetActive() );
+	if ( !IsValid( pGrenade ) || pGrenade->GetMode() != NRPG::GM_SETTRAP )
+		return UCR_UNAVAILABLE;
+
 	if ( !IsValid( pTarget ) )
 		return UCR_NO_TARGET;
 	if ( pUS->GetTBSPlayer()->CanSeeTrap( pTarget ) && pTarget->IsMineSet() )
@@ -2031,7 +2429,12 @@ bool CExecSetTrap::TimeLabelReached()
 		if (pGrenade)
 		{
 			NDb::CRPGGrenade *pRPGGrenade = pGrenade->GetDBGrenade();
-			if ( pTarget->SetTrap( pRPGGrenade, pRPG->GetGrenadeTrapDC( pRPGGrenade ) ) )
+			// retail CExecSetTrap::TimeLabelReached @0x3a99e0: seed the placer's explosive-perk mods {1,1,0}+Fill
+			// and hand them to the trapped door. (The eng-grenade branch -- GetDBEngGrenade + 4-arg SetTrap with the
+			// panzerklein capacity -- is deferred, blocked on the absent SPanzerkleinCapacity + AddEngGrenadeExplosion.)
+			SPerkMineModifiers mods;
+			mods.Fill( pRPG->GetRPGUnit() );
+			if ( pTarget->SetTrap( pRPGGrenade, pRPG->GetGrenadeTrapDC( pRPGGrenade ), &mods ) )
 			{
 				CUnitServer::SResItem item;
 				pUS->TearOffItem( &item, (NDb::ESlot)pInventory->GetActiveSlot(), true );
@@ -2070,14 +2473,22 @@ CExecDisarmTrap::CExecDisarmTrap( CUnitServer *_pUS, CWindowDoor *_pTarget ) :
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 EUnitCommandResult CExecDisarmTrap::CanDoIt( const NAI::SUnitPosition &from, bool bIgnoreTarget ) const
 {
-	if ( !IsValid( pTarget ) || bIgnoreTarget )
-		return UCR_NO_TARGET;
-	if ( !pUS->GetTBSPlayer()->CanSeeTrap( pTarget ) || !pTarget->IsMineSet() )
-		return UCR_GENERAL_FAILURE;
-	if ( !IsValid( GetMineClearingTool( pUS ) ) )
-		return UCR_GENERAL_FAILURE;
+	// @0x3a6e50 -- retail tests the TOOL first (UCR_UNAVAILABLE when none equipped,
+	// UCR_NEED_HIGHER_SKILL when the unit can't use it) BEFORE the target tests, unlike
+	// the Jan03 target-first form this used to carry. FOLLOW THE DECOMP.
+	NRPG::IToolItem *pTool = GetMineClearingTool( pUS );
+	if ( !IsValid( pTool ) )
+		return UCR_UNAVAILABLE;
+	if ( !pTool->CanBeUsed( pUS->GetUnitRPG()->GetRPGUnit() ) )
+		return UCR_NEED_HIGHER_SKILL;
 
-	return UCR_OK;
+	if ( IsValid( pTarget ) && !bIgnoreTarget )
+	{
+		if ( pUS->GetTBSPlayer()->CanSeeTrap( pTarget ) && pTarget->IsMineSet() )
+			return UCR_OK;
+		return UCR_GENERAL_FAILURE;
+	}
+	return UCR_NO_TARGET;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 int CExecDisarmTrap::GetStartAP() const
@@ -2184,7 +2595,12 @@ bool CExecSetMine::TimeLabelReached()
 		{
 			NRPG::IUnitMission *pRPG = pUS->GetUnitRPG();
 			NDb::CRPGMine *pRPGMine = pMine->GetDBItemInfo();
-			CMine *pRes = new CMine( pUS->GetWorld(), pCmd->ptDst.GetCP(), pRPGMine, pRPG->GetMineDC( pRPGMine ), pCmd->ptDst.GetFloor() );
+			CMine *pRes = new CMine( pUS->GetWorld(), pCmd->ptDst.GetCP(), pRPGMine, pRPG->GetMineDC( pRPGMine ), pCmd->ptDst.GetFloor(), pUS );   // thread the placer for save (tag 12) + blast attribution
+			// retail @0x3a9c00: scale the placed mine's explosion damage by the placer's explosive perks
+			// (structure/AE damage + always-human-critical). Stored on the mine; applied at detonation (GoBoom).
+			SPerkMineModifiers mods;
+			mods.Fill( pRPG->GetRPGUnit() );
+			pRes->SetPerkModifiers( mods );
 			pUS->AddToVisibleTraps( pRes );
 			NRPG::IInventory *pInventory = pRPG->GetInventory();
 			CUnitServer::SResItem item;
@@ -2206,8 +2622,14 @@ EUnitCommandResult CExecDisarmMine::CanDoIt( const NAI::SUnitPosition &from, boo
 		if ( !pUS->GetTBSPlayer()->CanSeeObject( pTarget ) || !pUS->GetTBSPlayer()->CanSeeTrap( pTarget ) )
 			return UCR_GENERAL_FAILURE;
 		// ��������� ����-�� � ��� ����������� tool
-		if ( !IsValid( GetMineClearingTool( pUS ) ) )
+		NRPG::IToolItem *pTool = GetMineClearingTool( pUS );
+		if ( !IsValid( pTool ) )
 			return UCR_GENERAL_FAILURE;
+		// @0x3a70e0 -- RETAIL skill gate (absent from Jan03, which fell straight to UCR_OK):
+		// the clearing tool must be usable by this unit's RPG unit (skill high enough).
+		// Decomp: tool->CanBeUsed( pUS->GetUnitRPG()->GetRPGUnit() ); false -> NEED_HIGHER_SKILL.
+		if ( !pTool->CanBeUsed( pUS->GetUnitRPG()->GetRPGUnit() ) )
+			return UCR_NEED_HIGHER_SKILL;
 	}
 	else
 		return UCR_GENERAL_FAILURE;
@@ -2255,8 +2677,10 @@ bool CExecDisarmMine::TimeLabelReached()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CExecSnipeAim
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CExecSnipeAim::CExecSnipeAim( CUnitServer *_pUnitServer, CUnitServer *_pTarget ): 
-	CCommandExecute(_pUnitServer), pTarget(_pTarget)
+// @0x3a7280 -- release ctor also records hitLocation (3rd param). The called-shot 3rd arg is
+// deferred (see header note / FLAGGED); default to HL_BODY so the tag-3 save round-trips cleanly.
+CExecSnipeAim::CExecSnipeAim( CUnitServer *_pUnitServer, CUnitServer *_pTarget ):
+	CCommandExecute(_pUnitServer), pTarget(_pTarget), hitLocation(NAI::HL_BODY)
 {
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -2265,17 +2689,25 @@ EUnitCommandResult CExecSnipeAim::CanDoIt( const NAI::SUnitPosition &from, bool 
 	if ( !pUS->CanSnipe() )
 		return UCR_GENERAL_FAILURE;
 
-	if ( GetActionType( pUS ) == AT_CANNON ) 
+	// @0x3a72e0 -- release wraps the cannon / working-weapon dispatch in a live-target guard:
+	// a null or zombie (nObjData & 0x80000000) target short-circuits to UCR_NO_TARGET before the
+	// dispatch. IsValid(pTarget) == pTarget!=0 && !pTarget->IsRefInvalid() -- the exact decode.
+	if ( IsValid( pTarget ) )
 	{
-		if ( bIgnoreTarget )
-			return UCR_NO_TARGET;
+		if ( GetActionType( pUS ) == AT_CANNON )
+		{
+			if ( bIgnoreTarget )
+				return UCR_NO_TARGET;
 
-		CVec3 ptTarget;
-		pUS->GetWorld()->GetAIMap()->GetUnitHLPos( &ptTarget, pUS->GetWorld()->GetAIMap()->GetHull(pTarget), NAI::HL_BODY );
-		return CanAttackWithCannon( pUS->animator.GetCannon(), ptTarget );
+			CVec3 ptTarget;
+			pUS->GetWorld()->GetAIMap()->GetUnitHLPos( &ptTarget, pUS->GetWorld()->GetAIMap()->GetHull(pTarget), NAI::HL_BODY );
+			return CanAttackWithCannon( pUS->animator.GetCannon(), ptTarget );
+		}
+
+		return HasWorkingWeapon( pUS );
 	}
 
-	return HasWorkingWeapon( pUS );
+	return UCR_NO_TARGET;
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 int CExecSnipeAim::GetStartAP() const 
@@ -2290,18 +2722,31 @@ void CExecSnipeAim::Run()
 {
 	ASSERT( CanDoIt( pUS->GetPosition() ) == UCR_OK );
 
+	// @0x3a19a0 -- release derives the snipe-ray END POINT from the target's AIMap hit-location
+	// world pos (GetUnitHLPos at hitLocation, HL_ANY clamped to HL_BODY) MINUS the attack origin,
+	// not Jan03's pTarget->GetCP() - pUS->GetCP(). hitLocation stays HL_BODY here (called-shot
+	// deferred), so this reduces to the body-centre ray for the un-called case.
 	CRay ray;
-	ray.ptOrigin = 	pUS->GetAttackOrigin( pUS->GetPosition() );
-	ray.ptDir = pTarget->GetPosition().GetCP() - pUS->GetPosition().GetCP();
+	ray.ptOrigin = pUS->GetAttackOrigin( pUS->GetPosition() );
+	pUS->GetWorld()->GetAIMap()->GetUnitHLPos( &ray.ptDir, pUS->GetWorld()->GetAIMap()->GetHull(pTarget),
+		hitLocation == NAI::HL_ANY ? NAI::HL_BODY : hitLocation );
+	ray.ptDir = ray.ptDir - ray.ptOrigin;
 
 	StartAction( pUS->GetWorld(), SKIPPABLE );
-	pUS->animator.Snipe( pUS->GetPosition(), ray );
 
-	if ( !pUS->IsSniping()  )
+	// @0x3a19a0 -- release order: when not already sniping, PREPARE (if not aimed) THEN Snipe THEN
+	// enter the sniping state; the already-sniping path just (re)aims. Jan03 Snipe'd once before the
+	// IsSniping test. animator.IsAiming() == (bAimed||bAimedStrafe) is the decode's not-aimed guard.
+	if ( !pUS->IsSniping() )
 	{
 		if ( !pUS->animator.IsAiming() )
 			pUS->DoAction( NRPG::AC_PREPARE );
-		pUS->SetState( new CUnitStateSniping( pUS, pTarget, 0 ) );	
+		pUS->animator.Snipe( pUS->GetPosition(), ray );
+		pUS->SetState( new CUnitStateSniping( pUS, pTarget, 0 ) );	// 4th hitLocation arg deferred (FLAGGED)
+	}
+	else
+	{
+		pUS->animator.Snipe( pUS->GetPosition(), ray );
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -2327,13 +2772,16 @@ int CExecCollectSnipeAP::GetResiduaryAP() const
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 EUnitCommandResult CExecCollectSnipeAP::CanDoIt( const NAI::SUnitPosition &from, bool bIgnoreTarget ) const
 {
+	// @0x3a8a50 -- retail caches GetResiduaryAP() and ADDS the (res < start) clamp Jan03 lacked
 	if ( !pUS->IsSniping() )
 		return UCR_INVALID_COMMAND;
 	//
-	if ( GetResiduaryAP() <= 0 )
+	const int nRes = GetResiduaryAP();
+	if ( nRes < 1 )
 		return UCR_GENERAL_FAILURE;
 	//
-	if ( GetStartAP() <= 0 )
+	const int nStart = GetStartAP();
+	if ( nStart < 1 || nRes < nStart )
 		return UCR_NOT_ENOUGH_AP;
 	//
 	return UCR_OK;
@@ -2341,37 +2789,57 @@ EUnitCommandResult CExecCollectSnipeAP::CanDoIt( const NAI::SUnitPosition &from,
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 int CExecCollectSnipeAP::GetStartAP() const
 {
-	int nRes = 0;
+	// @0x3a8aa0 -- retail returns the fixed 1AP/10AP amounts UNCLAMPED; the residuary cap (Min)
+	// applies ONLY to the CSAP_MAX / CSAP_ALL paths. (CSAP_PRECISE -> this->nAP is a release-only
+	// mode deliberately omitted from this build; see AILog.cpp -- so it falls through to 0.)
 	switch( eAP )
 	{
 		case CSAP_1AP:
-			nRes = 1; break;
+			return 1;
 		case CSAP_10AP:
-			nRes = 10; break;
+			return 10;
 		case CSAP_MAX:
 		{
-			nRes = pUS->GetUnitRPG()->GetSkillValue( NDb::ST_AP ) -	
-				pUS->GetUnitRPG()->GetActionAP( NAI::WALK, NRPG::AC_SHOOT ); 
-			break;
+			int nCap = pUS->GetUnitRPG()->GetSkillValue( NDb::ST_AP ) -
+				pUS->GetUnitRPG()->GetActionAP( NAI::WALK, NRPG::AC_SHOOT );
+			return Min( GetResiduaryAP(), nCap );
 		}
 		case CSAP_ALL:
-			nRes = pUS->GetUnitRPG()->GetSkillValue( NDb::ST_AP ); break;
+		{
+			int nCap = pUS->GetUnitRPG()->GetSkillValue( NDb::ST_AP );
+			return Min( GetResiduaryAP(), nCap );
+		}
 	}
 	//
-	return Min( nRes, GetResiduaryAP() );
+	return 0;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CExecCollectSnipeAP::Run()
 {
 	ASSERT( CanDoIt( pUS->GetPosition() ) == UCR_OK );
 	pUS->CollectSnipeAP( GetStartAP() );
+	Finished();		// @0x3a1b40 -- retail sets state=FINISHED inline; one-shot must reap itself
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CExecThrowKnife
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CExecThrowKnife::CExecThrowKnife( CUnitServer *_pUS, const CVec3 &_ptTarget, CUnitServer *_pTarget ): 
+CExecThrowKnife::CExecThrowKnife( CUnitServer *_pUS, const CVec3 &_ptTarget, CUnitServer *_pTarget ):
 	CExecAttack(_pUS), ptTarget(_ptTarget), pTarget(_pTarget)
 {
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// @0x3a7470 -- targeted-unit ctor (RETAIL ADDITION; Jan03 had only the point ctor). Records eHL and
+// derives the aim point from the target unit's hit location instead of taking an explicit ptTarget.
+// The exact retail aim helper (pUS->GetWorld()->...->vtbl[0x28](&ptTarget, pTarget->ObjBase, eHL)) is
+// not mapped in-tree; reproduced with the proven AIMap hit-location idiom (cf. CExecShootUnit ctor).
+CExecThrowKnife::CExecThrowKnife( CUnitServer *_pUS, NAI::EHitLocation _eHL, CUnitServer *_pTarget ):
+	CExecAttack(_pUS), pTarget(_pTarget), eHL(_eHL)
+{
+	if ( IsValid( pTarget ) )
+	{
+		NAI::EHitLocation eHitLoc = ( eHL == NAI::HL_ANY ) ? NAI::HL_BODY : eHL;
+		pUS->GetWorld()->GetAIMap()->GetUnitHLPos( &ptTarget, pUS->GetWorld()->GetAIMap()->GetHull( pTarget ), eHitLoc );
+	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 EUnitCommandResult CExecThrowKnife::CanDoIt( const NAI::SUnitPosition &from, bool bIgnoreTarget ) const
@@ -2381,6 +2849,22 @@ EUnitCommandResult CExecThrowKnife::CanDoIt( const NAI::SUnitPosition &from, boo
 
 	if ( bIgnoreTarget )
 		return UCR_NO_TARGET;
+
+	// @0x3a7540 -- RETAIL cover/LOS gate (absent in Jan03): build the attack portion and reject the
+	// throw when cover/line-of-sight blocks it, matching the other ranged CExec*::CanDoIt (CExecShootUnit/
+	// CExecShootTile). Decomp: CExecAttack::CreateAttack(this,&portion,pTarget,false,true) then NRPG::CanShoot
+	// over the portion (free-point on ptTarget when pTarget==0, else object pTarget+eHL).
+	CWorld *pWorld = pUS->GetWorld();
+	vector<NRPG::CAttackPortion> attack;
+	if ( !CreateAttack( &attack, pTarget, false ) || attack.empty() )
+		return UCR_GENERAL_FAILURE;
+	CObj<NRPG::CCoverInfo> pCover;
+	if ( pTarget )
+		pCover = pWorld->GetGame()->CalcCovers( pUS->GetAttackOrigin( from ), attack[0], pUS, pTarget, eHL, pUS->GetMinClearDistance() );
+	else
+		pCover = pWorld->GetGame()->CalcCoversForTile( pUS->GetAttackOrigin( from ), attack[0], pUS, ptTarget, pUS->GetMinClearDistance() );
+	if ( !NRPG::CanShoot( pCover ) )
+		return UCR_GENERAL_FAILURE;
 
 	CDynamicCast<NRPG::IMeleeWeaponItem> pMelee( pUS->GetUnitRPG()->GetInventory()->GetActive() );
 	return CanUnitThrowKnife( pUS, from, ptTarget, pMelee );
@@ -2399,10 +2883,16 @@ void CExecThrowKnife::Start()
 	pUS->animator.ThrowKnife( position, ptTarget );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-bool CExecThrowKnife::OnLabel()
+void CExecThrowKnife::OnLabel()
 {
+	// OnLabel is now VOID; NextBullet() is restored here (moved out of CExecAttack::TimeLabelReached in the
+	// retail timed-shot rework) so this one-shot knife throw advances the RPG bullet cursor exactly once.
+	pUS->GetUnitRPG()->NextBullet();
 	ThrowKnife();
-	return false;
+	// @0x3ab700 -- retail marks the attack canceled after the throw label fires so CExecAttack::TimeLabelReached
+	// finishes the executor for this one-shot throw (the decomp writes [esi+0x18]=1). Jan03 omitted this.
+	// NOTE: the retail "knife gone / torn-off" feedback sound is deferred.
+	bAttackCanceled = true;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CExecThrowKnife::ThrowKnife()
@@ -2482,6 +2972,7 @@ void CExecCreateInventoryItem::Run()
 		pFake = new CCmdMoveInventoryItem( SItem( 0, SItem::GROUND, pItem ), SItem( pUS, SItem::GROUND ) );
 
 	MoveInventoryItem( pUS, pFake );
+	Finished();		// @0x3ab770 -- retail Run latches state=FINISHED (mov [esi+0x10],1) right after the create+move; without it CSimpleExecQueue::Run sees RUNNING (wUnitQueue.cpp L57) and never pops this executor -> the unit's command queue hangs
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CExecCreateAndActivateInventoryItem
@@ -2499,33 +2990,26 @@ EUnitCommandResult CExecCreateAndActivateInventoryItem::CanDoIt( const NAI::SUni
 	return UCR_OK;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// Mirrors CExecCreateInventoryItem::Run but slots the new item into a hand (nSlot) and activates it,
-// vacating the slot to the backpack first if it is occupied. The per-step draw/stow ANIMATION that
-// CExecMoveInventoryItem/CExecSetActiveItem play is elided (build-validation scope): the inventory
-// STATE is faithful (the proven MoveInventoryItem / Activate primitives), the animation is not replayed.
+// @0x3ab790 -- match the retail decode (re-read get_decomp.py 0x3ab790). The binary does NOT vacate
+// the slot first and does NOT call Inventory::Activate: "activate" is achieved purely by moving the
+// freshly created item from the GROUND into the hand SLOT (nSlot) -- the SLOT-destination move equips
+// it. On UCR_INVENTORY_NO_PLACE the item is dropped on the GROUND (disasm fallback builds GROUND<->pItem,
+// mirroring CExecCreateInventoryItem::Run, SLOT instead of BACKPACK). The prior vacate pre-step, the
+// BACKPACK fallback and the explicit Activate were predecessor guesswork that diverged from the binary.
 void CExecCreateAndActivateInventoryItem::Run()
 {
-	NRPG::IInventory *pInventory = pUS->GetUnitRPG()->GetInventory();
 	int nSlot = pCmd->GetSlot();
-
-	// vacate the target hand slot (move the current item to the backpack) so the new item can be slotted
-	if ( IsValid( pInventory->Get( (NDb::ESlot)nSlot ) ) )
-	{
-		CObj<CCmdMoveInventoryItem> pVacate = new CCmdMoveInventoryItem(
-			SItem( pUS, SItem::SLOT, nSlot ), SItem( pUS, SItem::BACKPACK, CTPoint<int>( -1, -1 ) ) );
-		if ( CanMoveInventoryItem( pUS, pVacate ) == UCR_OK )
-			MoveInventoryItem( pUS, pVacate );
-	}
-
-	// create the item from the DB record and slot it into the (now-free) hand
+	// create the item from the DB record and slot it directly into the hand (nSlot)
 	CObj<NRPG::IInventoryItem> pItem = NRPG::CreateItem( pCmd->GetItem()->pSuccessor );
 	CObj<CCmdMoveInventoryItem> pFake = new CCmdMoveInventoryItem(
 		SItem( 0, SItem::GROUND, pItem ), SItem( pUS, SItem::SLOT, nSlot, pItem ) );
+	// slot full -> drop the new item on the ground instead (matches the @0x3ab790 NO_PLACE branch)
 	if ( CanMoveInventoryItem( pUS, pFake ) == UCR_INVENTORY_NO_PLACE )
-		pFake = new CCmdMoveInventoryItem( SItem( 0, SItem::GROUND, pItem ), SItem( pUS, SItem::BACKPACK, CTPoint<int>( -1, -1 ) ) );
+		pFake = new CCmdMoveInventoryItem( SItem( 0, SItem::GROUND, pItem ), SItem( pUS, SItem::GROUND ) );
 	MoveInventoryItem( pUS, pFake );
-
-	pInventory->Activate( (NDb::ESlot)nSlot );
+	Finished();		// @0x3ab790 -- latch state=FINISHED (mov [edi+0x10],1) after the create+move, exactly like
+					// the sibling CExecCreateInventoryItem::Run; without it CSimpleExecQueue::Run sees RUNNING
+					// and never pops the executor -> the unit command queue hangs. (adversarial-verify catch)
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CExecExchangeInventoryItems
@@ -2590,6 +3074,10 @@ void CExecMoveInventoryItem::Run()
 {
 	ASSERT( CanDoIt( pUS->GetPosition() ) == UCR_OK );
 
+	// @0x3abc90 -- retail opens Run by registering the classified reach action (and
+	// spending its AP) BEFORE touching the inventory (disasm: DoAction(GetActionType())).
+	pUS->DoAction( GetActionType() );
+
 	NRPG::IInventory *pInventory = pUS->GetUnitRPG()->GetInventory();
 	////
 	NDb::ESlot slot = (NDb::ESlot)pInventory->GetActiveSlot();
@@ -2653,7 +3141,9 @@ void CExecMoveInventoryItem::Run()
 		return;
 	}
 
-	StartAction( pUS->GetWorld(), NOBLOCK );
+	// @0x3abc90 -- retail starts this move/deactivate action as SKIPPABLE, not NOBLOCK
+	// (disasm: CCommandExecute::StartAction(this, pUS->GetWorld(), SKIPPABLE)).
+	StartAction( pUS->GetWorld(), SKIPPABLE );
 	bTwoHeavy = IsTwoHeavy( subType, subTypeNext );
 	nStage = 1;
 	if ( !BeginDeactivatingItem( pUS, subType ) )
@@ -2686,13 +3176,18 @@ void CExecMoveInventoryItem::AnimationFinished()
 	}
 	nStage = 2;
 	NDb::EItemSubType subType = pInventory->Get(slot)->GetDBItem()->subType;
+	// retail @0x3a1b70: activate the newly-active item HIDDEN unless its DB record marks it bPlaceInHand
+	// (IsActiveItemToShow). Clear the undraw flag first so a shown item actually renders (retail zeroes the
+	// target unit's bUndrawWeapon immediately before ActivateItem).
+	bool bHide = !NWorld::IsActiveItemToShow( pInventory );
+	pUSTarget->SetUndrawItem( false );
 	if ( subType == NDb::SUBTYPE_HEAVY || subType == NDb::SUBTYPE_MINE_DETECTOR )
-		pUSTarget->animator.ActivateItem( pUSTarget->GetPosition(), true, true, NDb::BELT_M1, pRPG->GetWeaponType() );
+		pUSTarget->animator.ActivateItem( pUSTarget->GetPosition(), true, true, NDb::BELT_M1, pRPG->GetWeaponType(), bHide );
 	else
 	{
 		int nPlace = pInventory->GetPlaceBySubType( subType );
-		pUSTarget->animator.ActivateItem( pUSTarget->GetPosition(), false, 
-			nPlace == -1, (NDb::EItemPlace)nPlace, pRPG->GetWeaponType() );
+		pUSTarget->animator.ActivateItem( pUSTarget->GetPosition(), false,
+			nPlace == -1, (NDb::EItemPlace)nPlace, pRPG->GetWeaponType(), bHide );
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -2710,10 +3205,67 @@ void CExecMoveInventoryItem::Cancel()
 	Finished();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// @0x3a7990 -- classify the queued inventory move into the NRPG::EAction whose reach
+// animation should play (AC_NONE when no body animation / AP is needed). Retail-only:
+// Jan03 has no CExecMoveInventoryItem::GetActionType, so the disasm @0x7a7990 is the sole
+// authority. Reads the REAL CCmdMoveInventoryItem source/target SItem members.
+NRPG::EAction CExecMoveInventoryItem::GetActionType() const
+{
+	// AI-driven inventory moves are instantaneous (no reach animation).
+	if ( NAI::IsAIPlayer( pUS->GetPlayer() ) )
+		return NRPG::AC_NONE;
+
+	const SItem &src = pCmd->GetSource();
+	const SItem &dst = pCmd->GetTarget();
+
+	// Pull off the ground into a hand / generic unit place -> a "take" pickup.
+	if ( src.eType == SItem::GROUND &&
+		( dst.eType == SItem::UNIT_ANYPLACE || dst.eType == SItem::HAND ) )
+		return NRPG::AC_ITEM_TAKE;
+
+	// Dropping an item onto the ground needs no reach animation.
+	if ( dst.eType == SItem::GROUND )
+		return NRPG::AC_NONE;
+
+	if ( src.eType == SItem::HAND )
+	{
+		// Retail re-fetches the in-hand item (SItem-returning GetInHandItem) and compares
+		// its ORIGINAL drag placement (sHandItem.eType) against the destination. The a5dll's
+		// in-hand model (IPlayer::SItemInfo -> pUnit/pItem) does NOT retain that drag-origin
+		// placement, so the same-holder case is classified by the DESTINATION placement --
+		// identical to retail whenever the in-hand item did not originate from a slot and is
+		// not already at the destination. See the patch RISK note (in-hand-item model).
+		IPlayer::SItemInfo sInfo;
+		pUS->GetTBSPlayer()->GetInHandItem( &sInfo );
+		CUnit *pInfoUnit = sInfo.pUnit.GetPtr();
+		CUnit *pDstUnit  = dst.pUnit.GetPtr();
+		if ( pInfoUnit == pDstUnit || pInfoUnit == 0 || pDstUnit == 0 )
+		{
+			if ( dst.eType == SItem::SLOT )
+				return NRPG::AC_ITEM_SLOT;
+			return NRPG::AC_ITEM_TAKE;
+		}
+		// in-hand item held by a different unit -> a cross-unit transfer
+	}
+	else if ( src.pUnit.GetPtr() == dst.pUnit.GetPtr() ||
+		src.pUnit.GetPtr() == 0 || dst.pUnit.GetPtr() == 0 )
+		return NRPG::AC_NONE;
+
+	return NRPG::AC_ITEM_TRANSFER;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// @0x3a7b40 -- start-AP for the move == the unit's AP cost of the classified action
+// (disasm: return CDumbUnitServer::GetActionAP(pUS, GetActionType())).
+int CExecMoveInventoryItem::GetStartAP() const
+{
+	return pUS->GetActionAP( GetActionType() );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 // CExecPlayAnimation
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CExecPlayAnimation::CExecPlayAnimation( CUnitServer *_pUS, int _nDBAnimationID, bool _bCircled ):
-	CCommandExecute( _pUS ), nDBAnimationID( _nDBAnimationID ), bCircled( _bCircled )
+// @0x3a7cc0 — retail stores arg3 into bFreezeAfterLastFrame (+0x1c), NOT the Jan03 bCircled.
+CExecPlayAnimation::CExecPlayAnimation( CUnitServer *_pUS, int _nDBAnimationID, bool _bFreezeAfterLastFrame ):
+	CCommandExecute( _pUS ), nDBAnimationID( _nDBAnimationID ), bFreezeAfterLastFrame( _bFreezeAfterLastFrame )
 {
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -2728,15 +3280,14 @@ void CExecPlayAnimation::Run()
 	pUS->animator.PlayCustomAnimation( pUS->GetPosition(), nDBAnimationID );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// @0x3a7d10 — retail AnimationFinished is BYTE-FOR-BYTE identical to Cancel @0x3a7d40:
+// it StopAction()+Finished() unconditionally and NEVER replays the clip.
+//   ORIGINAL BUG (confirmed @0x3a7d10 disasm): a "circled" play-animation command does NOT loop;
+//   the Jan03 replay branch was dropped in the retail build.
 void CExecPlayAnimation::AnimationFinished()
 {
-	if ( bCircled )
-		pUS->animator.PlayCustomAnimation( pUS->GetPosition(), nDBAnimationID );
-	else
-	{
-		StopAction();
-		Finished();
-	}
+	StopAction();
+	Finished();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CExecPlayAnimation::Cancel()
@@ -2754,18 +3305,28 @@ CExecTalk::CExecTalk( CUnitServer *_pUS, CUnitServer *_pTarget ):
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CExecTalk::Run()
 {
+	// @0x3a2580 -- one-shot command: retail sets state=FINISHED at the end (decomp +0x10=1).
+	// Without Finished() the unit command Segment loop keeps state==RUNNING and re-invokes
+	// Run() every tick, replaying the OnTalk lua callback + the dialog. Jan03's Run() omitted
+	// it; the decomp wins. Finished() only flips state (no executor free) -> re-entrancy-safe.
 	NScript::luaCallFunction( "OnTalk", "pp", pUS.GetBarePtr(), pTarget.GetBarePtr() );
 	int nDialogID = pTarget->GetDialog();
 	if ( nDialogID > 0 )
 		PlayDialog( pUS->GetWorld(), nDialogID );
+	Finished();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 EUnitCommandResult CExecTalk::CanDoIt( const NAI::SUnitPosition &from, bool bIgnoreTarget )
 {
-	if ( pTarget->CanTalk() && pUS->GetUnitRPG()->GetRPGUnit()->IsHero() )
-		return UCR_OK;
-	else
+	// @0x3a1cf0 -- retail splits the two failure paths (Jan03 collapsed both to
+	// UCR_GENERAL_FAILURE). CanTalk()==false -> UCR_GENERAL_FAILURE; CanTalk() but
+	// !IsHero() -> UCR_NOT_HERO, which the result classifier treats as a SILENT no-op
+	// (no error log/sound), unlike the generic UCR_GENERAL_FAILURE feedback.
+	// ORIGINAL BUG (confirmed @0x3a1cf0 disasm): non-hero talk yields the distinct
+	// UCR_NOT_HERO, not UCR_GENERAL_FAILURE.
+	if ( !pTarget->CanTalk() )
 		return UCR_GENERAL_FAILURE;
+	return pUS->GetUnitRPG()->GetRPGUnit()->IsHero() ? UCR_OK : UCR_NOT_HERO;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 }

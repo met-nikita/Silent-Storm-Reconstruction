@@ -421,7 +421,7 @@ public:
 	CUnitHead( const SWindowInfo &sInfo, NRender::IRenderGame *pRender, float fScale = 1.0f );
 
 	void SetUnit( NWorld::CUnit *pUnit );
-	void SetSequence( NDb::CSequence *pSequence );
+	void SetSequence( NDb::CSequence *pSequence, NDb::CSequence *pExpression = 0 );
 
 	void Draw( const STime &sTime, NGScene::I2DGameView *pView );
 };
@@ -459,10 +459,15 @@ public:
 
 	void SetUnit( NRPG::CUnit *pUnit, ECameraType eType = CAMERA_PORTRAIT );
 	void SetUnit( NWorld::CUnit *pUnit, ECameraType eType = CAMERA_PORTRAIT );
-	void SetUnit( NWorld::CUnit *pUnit, NDb::CDBCamera *pCamera );
+	// release @0x1c03d0: SetUnit(unit, camera, b1, b2, b3) with b1=bItems, b2=bShowCap, b3=bPlayIdle -- the
+	// @0x1c043c..3e push order feeds CreateShowUnit's three bools as (b1, b3, b2) = (bItems, bPlayIdle, bShowCap).
+	// Decoded retail call sites: HUD unit face @0x254cc0 (false, true, true); inventory doll (true, true, false);
+	// mission-dialog body view (false, true, false). Defaults reproduce the old dev callers' behavior.
+	void SetUnit( NWorld::CUnit *pUnit, NDb::CDBCamera *pCamera, bool bItems = true, bool bShowCap = true, bool bPlayIdle = false );
 	void SetUnit( NRPG::CUnit *pUnit, NDb::CDBCamera *pCamera );    // release @0x1c0310: global-camera variant FaceGen calls (NRPG::CUnit*)
 	void SetLight( NDb::CTAmbientLight *pLight );
-	void SetSequence( NDb::CSequence *pSequence );
+	// release @0x1bf030: (lipsync seq, expression seq) -- both forwarded to the shown unit's head
+	void SetSequence( NDb::CSequence *pSequence, NDb::CSequence *pExpression = 0 );
 	void PlayAnimation( NDb::CAnimation *pAnim, bool bLoop );
 
 	void Draw( const STime &sTime, NGScene::I2DGameView *pView );

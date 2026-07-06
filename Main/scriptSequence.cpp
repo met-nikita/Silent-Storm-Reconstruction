@@ -19,6 +19,7 @@
 #include "..\MiscDll\LogStream.h"
 #include "aiCommander.h"
 #include "aiTacticalCommander.h"
+#include "aiUnit.h"				// IAIUnit::De/ActivateCurrentControl (sequence route suspend/resume)
 #include "aiMap.h"						// NAI::IAIMap::Sync (SlowSyncAIMap)
 //
 #include "scriptSequence.h"
@@ -26,8 +27,40 @@
 namespace NScript
 {
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// NESTED-SEQUENCE DEPTH GUARD: retail nests sequences through the ownerless-interrupt STACK
+// (StartSequence @0x375dd0 pushes one interrupt per c_BeginSequence, EndSequence pops one;
+// CWorld::IsSequence @0x376ff0 is "stack non-empty"). The dev bForcedRealTime flag analog must behave
+// the same: only the OUTERMOST BeginSequence applies the per-unit suspension + forced real time, and
+// only the LAST EndSequence releases them. Without the guard a nested Begin/End pair (Common.l
+// DialogPlayWithSequence, EBase's pkrepair OnOpenObject handler) CCmdCancel'ed the outer cutscene's
+// live script routes on its Begin and dropped CHEAT_SCRIPTSEQUENCE + bForcedRealTime mid-cutscene on
+// its End. The depth is per-world (the weak CPtr detects a destroyed/replaced world and resets).
+static CPtr<NWorld::CWorld> s_pSequenceWorld;
+static int s_nSequenceDepth = 0;
+////////////////////////////////////////////////////////////////////////////////////////////////////
 static void SetSequenceCheat( NWorld::CWorld *pWorld, bool bOn )
 {
+	if ( !IsValid( s_pSequenceWorld ) || s_pSequenceWorld.GetPtr() != pWorld )
+	{
+		s_pSequenceWorld = pWorld;
+		s_nSequenceDepth = 0;
+	}
+	if ( bOn )
+	{
+		if ( s_nSequenceDepth++ > 0 )
+			return;                    // nested Begin: the outer sequence already holds the world
+	}
+	else
+	{
+		if ( s_nSequenceDepth > 0 )
+			--s_nSequenceDepth;
+		if ( s_nSequenceDepth > 0 )
+			return;                    // nested End: the outer sequence is still running
+	}
+	// the Begin/EndSequence world edge: ForceRealTime rides the same depth edge (in retail the
+	// pushed/popped ownerless interrupt IS both the sequence predicate and the forced-real-time state).
+	pWorld->ForceRealTime( bOn );
+	//
 	vector< CPtr<NWorld::CUnit> > units;
 	pWorld->GetAllUnits( &units );
 	for ( vector< CPtr<NWorld::CUnit> >::iterator i = units.begin(); i != units.end(); ++i )
@@ -39,6 +72,25 @@ static void SetSequenceCheat( NWorld::CWorld *pWorld, bool bOn )
 			pUS->animator.SetBreathOnlyIdle( bOn );
 			if ( bOn )
 				pUS->OnTBSEvent( NWorld::TBS_CANCEL_ACTION );
+			// retail luac_BeginSequence @0x2f1890 / EndSequence @0x2f1a60 run a per-unit AI notify
+			// (GetAIUnits + CallAIFunc): CAIUnit::OnSequenceStarted @0xadec0 drops the combat logic,
+			// SUSPENDS the unit's normal AI route (map guard/patrol/roaming logic -- without this the
+			// bank robbers left the bank on their own before the camera got there) and clears any stale
+			// sequence route; OnSequenceFinished @0xad3f0 drops the logic, ENDS the sequence's script
+			// routes (a retail sequence route never outlives its sequence: routes[1] is deactivated,
+			// never resumed) and RESUMES the unit's normal route (routes[0]->Activate). Script
+			// AIM_SCRIPT controls assigned DURING the sequence stack on top and activate normally, so
+			// scripted walks are unaffected. (The earlier De/ActivateCurrentControl pair mishandled the
+			// End side: it re-woke whatever leftover SCRIPT control sat on top instead of the map logic.)
+			CDynamicCast<NAI::CAICommander> pUnitCommander( pUS->GetPlayer()->GetCommander() );
+			NAI::IAIUnit *pAIUnit = pUnitCommander ? pUnitCommander->GetAIUnit( pUS ) : 0;
+			if ( IsValid( pAIUnit ) )
+			{
+				if ( bOn )
+					pAIUnit->OnSequenceStarted();
+				else
+					pAIUnit->OnSequenceFinished();
+			}
 		}
 	}
 	if ( bOn )
@@ -55,11 +107,13 @@ static void SetSequenceCheat( NWorld::CWorld *pWorld, bool bOn )
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-BEGIN_SCRIPT_COMMAND( c_BeginSequence, "b[true]" );
-	pScript->AddUICommand( new NWorld::CUICmdBeginSequence() );
-	SetSequenceCheat( pScript->pWorld, true );
-	pScript->pWorld->ForceRealTime( true );
-	return 0;
+// retail @0x2f1890 ("b[false]" -- NOT b[true]; the arg is the letterbox's skip-fade flag, Common.l
+// DelayGameStart passes BeginSequence(true)): sequence-cheat all units, force real time, then queue the
+// command WITH an id and return it -- lua BeginSequence() = WaitForUI(c_BeginSequence(b)) blocks until
+// the letterbox fade-in completes (movieUI BorderShow @0x20e210 posts CCmdInterfaceEvent(id)).
+BEGIN_SCRIPT_COMMAND( c_BeginSequence, "b[false]" );
+	SetSequenceCheat( pScript->pWorld, true );   // ForceRealTime(true) rides the depth edge inside
+	return pScript->AddUICommandWithID( new NWorld::CUICmdBeginSequence( luaParams[ 0 ].b ) );
 END_SCRIPT_COMMAND
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 BEGIN_SCRIPT_COMMAND( EndSequencePart, "" );
@@ -67,13 +121,19 @@ BEGIN_SCRIPT_COMMAND( EndSequencePart, "" );
 	return 0;
 END_SCRIPT_COMMAND
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-BEGIN_SCRIPT_COMMAND( EndSequence, "" );
+// retail @0x2f1a60 ("b[false]b[false]"): arg0 = bRestoreCamera (pop the BeginSequence pose back;
+// false = the cutscene-end pose BECOMES the gameplay camera), arg1 = bSkipFade (immediate letterbox
+// teardown). Queues PartFinished (plain) + the EndSequence command WITH an id and returns it -- lua
+// StartGame() = WaitForUI(EndSequence()) blocks until the letterbox fade-out completes (BorderHide).
+BEGIN_SCRIPT_COMMAND( EndSequence, "b[false]b[false]" );
 	pScript->AddUICommand( new NWorld::CUICmdPartFinished() );
-	pScript->AddUICommand( new NWorld::CUICmdEndSequence() );
-	SetSequenceCheat( pScript->pWorld, false );
-	pScript->pWorld->ForceRealTime( false );
+	SetSequenceCheat( pScript->pWorld, false );   // ForceRealTime(false) rides the depth edge inside
+	// retail pop analog (luaEndSequence @0x2f1a60 pops the ownerless top via CTBSWorld::EndOfTurn
+	// @0x3776f0, whose !IsRealTime() branch re-fires OnPassControl to the RESUMED owned turn)
+	pScript->pWorld->OnSequenceEndPassControl();
+	int nRet = pScript->AddUICommandWithID( new NWorld::CUICmdEndSequence( luaParams[ 0 ].b, luaParams[ 1 ].b ) );
 	pScript->pWorld->UpdateVisible();
-	return 0;
+	return nRet;
 END_SCRIPT_COMMAND
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // IsUIActionIDPresent( id ): replaces the dev's type-based IsInterfaceAction. lua WaitForUI(id) (Common.l)
@@ -103,7 +163,8 @@ BEGIN_SCRIPT_COMMAND( CameraMove, "un" );
 	STime transitionTime = ( STime )luaParams[ 1 ].n;
 	ICamera::SCameraPos pos( pDBCamera->vAnchor,
 		pDBCamera->fDistance, pDBCamera->fPitch, pDBCamera->fYaw, pDBCamera->fRoll, pDBCamera->fFOV );
-	return pScript->AddUICommandWithID( new NWorld::CUICmdMoveCamera( pos, transitionTime ) );
+	int nMoveID = pScript->AddUICommandWithID( new NWorld::CUICmdMoveCamera( pos, transitionTime ) );
+	return nMoveID;
 END_SCRIPT_COMMAND
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CameraSetClipping( near, far ): set the camera near/far clip planes (CUICmdSetCameraClipDistance). No id

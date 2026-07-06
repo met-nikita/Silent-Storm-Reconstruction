@@ -10,6 +10,7 @@
 #include "DataPerk.h"
 #include "DataInterface.h"
 #include "DataAck.h"
+#include "DataChest.h"
 
 namespace NDb
 {
@@ -156,6 +157,7 @@ int CRPGItem::operator&( CStructureSaver &f )
 	f.Add( 15, &pSuccessor );
 	f.Add( 16, &pRPGArmor );
 	f.Add( 17, &pDestructionEffect );
+	f.Add( 20, &bPlaceInHand );   // retail tag 20 (bPlaceInHand @+0xc0); tag-tolerant append reads it from the retail game.db
 
 	for ( int i = 0; i < CAMERA_MAX_VALUE; ++i )
 		f.Add( 24, &sCameras[i], i + 1 );
@@ -387,6 +389,14 @@ int CRPGWeapon::operator&( CStructureSaver &f )
 	f.Add(33,&nMaxRange);
 	for ( int i = 0; i < SM_MAXVALUE; ++i )
 		f.Add( 34 + i, &shootModes[i] );
+	// retail v1.1 tail tags 50..54 (disasm @0x429bd0), v1.2 appends ShotsInOne as tag 55
+	// (disasm-confirmed in the Steam v1.2 exe: push 0x37 with lea [rec+0xB0])
+	f.Add( 50, &nBPM );
+	f.Add( 51, &nDamageModMax );
+	f.Add( 52, &fSilencer );
+	f.Add( 53, &nAIRating );
+	f.Add( 54, &nShotEffectType );
+	f.Add( 55, &nShotsInOne );
 	return 0;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -444,6 +454,20 @@ void CRPGWeapon::Import()
 	string szAWT;
 	NDatabase::ImportField( "WeaponRPGLogics", &szAWT );
 	eWeaponType = GetAnimationType( szAWT );
+
+	// v1.1 retail tail (retail Import @0x4289b0 reads these right after WeaponRPGLogics);
+	// nBPM is the inter-bullet timing divisor -- missing column keeps the 0 default
+	// (GetNextBulletTime then leaves the timestamp unchanged, like retail's invalid-record path)
+	NDatabase::ImportField( "BPM", &nBPM );
+	NDatabase::ImportField( "DamageModMax", &nDamageModMax );
+	NDatabase::ImportField( "Silencer", &fSilencer );
+	NDatabase::ImportField( "AIRating", &nAIRating );
+	NDatabase::ImportField( "ShotEffectType", &nShotEffectType );
+
+	// v1.2: NEW ShotsInOne column (bullets per trigger pull, retail rec+0xb0); guarded so a
+	// mod db missing the column keeps single-bullet behaviour
+	if ( !NDatabase::ImportField( "ShotsInOne", &nShotsInOne ) )
+		nShotsInOne = 1;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CModel* CRPGWeapon::GetModel()
@@ -767,7 +791,15 @@ void CRPGPers::Import()
 	////
 	NDatabase::ImportField( "IsFemale", &bIsFemale );
 	NDatabase::ImportField( "Voice", &nVoice );
+	// retail CRPGPers::Import @0x429540 -- recruit-menu / biography columns (between Voice and CanBeListed):
+	NDatabase::ImportField( "PhotoID", &pPhoto );					// biography-panel portrait photo
+	NDatabase::ImportField( "BiographyID", &pBiography );			// biography prose CString
+	NDatabase::ImportField( "CharacteristicsID", &pCharacteristics );	// bio "characteristics" CString
+	NDatabase::ImportField( "CanHired", &bCanHired );				// THE recruit-roster filter (AddTeamMngPerses @0x29adb0)
 	NDatabase::ImportField( "CanBeListed", &bCanBeListed );   // release CharGen model-override roll filter
+	NDatabase::ImportField( "WeaponInHand", &pHandWeapon );			// retail CRPGPers::Import @0x429540 -- in-hand loot chest
+	NDatabase::ImportField( "WeaponInBackpack", &pBackpackWeapon );	// retail CRPGPers::Import @0x429540 -- backpack loot chest
+	NDatabase::ImportField( "AckUnit", &pAcksHolder );				// retail CRPGPers::Import @0x429540 -- voice-holder pers whose Acks rows this persona barks with
 	////
 	NDatabase::ImportRelation( this, &scripts );
 }

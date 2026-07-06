@@ -42,13 +42,13 @@ private:
 
 public:
 	CInGameMenuUI() {}
-	CInGameMenuUI( const SWindowInfo &sInfo, NRPG::CGlobalPlayer *pPlayer );
+	CInGameMenuUI( const SWindowInfo &sInfo, NRPG::CGlobalPlayer *pPlayer, bool bAllowRestart );
 
 	bool ProcessMessage( const SEvent &sEvent );
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CInGameMenuUI::CInGameMenuUI( const SWindowInfo &sInfo, NRPG::CGlobalPlayer *_pPlayer ):
-	CWindow( sInfo ), pPlayer( _pPlayer )
+CInGameMenuUI::CInGameMenuUI( const SWindowInfo &sInfo, NRPG::CGlobalPlayer *_pPlayer, bool _bAllowRestart ):
+	CWindow( sInfo ), pPlayer( _pPlayer ), bAllowRestart( _bAllowRestart )
 {
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -87,6 +87,15 @@ bool CInGameMenuUI::ProcessMessage( const SEvent &sEvent )
 			pExitToMainMenu->AddTextState( CHoverButton::STATE_HOVER, GetDBString( 11144 ) + GetDBString( 11149 ) );
 			pExitToMainMenu->AddTextState( CHoverButton::STATE_NORMAL, GetDBString( 11143 ) + GetDBString( 11149 ) );
 			pExitToMainMenu->AddTextState( CHoverButton::STATE_DISABLED, GetDBString( 11145 ) + GetDBString( 11149 ) );
+
+			// retail CInGameMenuUI @0x1e9df0 (disasm 0x5ead68: label id 0x4f19 = 20249 'Restart
+			// mission' -- NOT the lose dialog's 18970 'Заново'); enabled only when the menu was
+			// opened from a mission (bAllowRestart).
+			pRestartMission = new CHoverButton( sEvent.pLoader->GetControl( "restart" ) );
+			pRestartMission->AddTextState( CHoverButton::STATE_HOVER, GetDBString( 11144 ) + GetDBString( 20249 ) );
+			pRestartMission->AddTextState( CHoverButton::STATE_NORMAL, GetDBString( 11143 ) + GetDBString( 20249 ) );
+			pRestartMission->AddTextState( CHoverButton::STATE_DISABLED, GetDBString( 11145 ) + GetDBString( 20249 ) );
+			pRestartMission->SetStyle( STYLE_ENABLED, bAllowRestart );
 			break;
 		}
 	case EVENT_TEMPLATELOADCOMPLETE:
@@ -115,6 +124,7 @@ class CInGameMenuInterface: public NMainLoop::IInterfaceBase
 private:
 	NInput::CBind bindClose;
 	NInput::CBind bindOptions, bindLoadGame, bindSaveGame, bindExitToMainMenu;
+	NInput::CBind bindRestartMission;	// retail ctor @0x1e97c0: bindRestartMission("restart")
 
 	ZDATA
 	CPtr<NRPG::CGlobalPlayer> pPlayer;
@@ -132,7 +142,7 @@ private:
 public:
 	CInGameMenuInterface();
 
-	void Initialize( NRPG::CGlobalPlayer *pPlayer );
+	void Initialize( NRPG::CGlobalPlayer *pPlayer, bool bAllowRestart );
 
 	void Step();
 	void OnGetFocus();
@@ -141,13 +151,15 @@ public:
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CInGameMenuInterface::CInGameMenuInterface():
-	bindClose( "cancel" ), bindOptions( "options" ), bindLoadGame( "loadgame" ), bindSaveGame( "savegame" ), bindExitToMainMenu( "exittomainmenu" )
+	bindClose( "cancel" ), bindOptions( "options" ), bindLoadGame( "loadgame" ), bindSaveGame( "savegame" ), bindExitToMainMenu( "exittomainmenu" ),
+	bindRestartMission( "restart" )
 {
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CInGameMenuInterface::Initialize( NRPG::CGlobalPlayer *_pPlayer )
+void CInGameMenuInterface::Initialize( NRPG::CGlobalPlayer *_pPlayer, bool _bAllowRestart )
 {
 	pPlayer = _pPlayer;
+	bAllowRestart = _bAllowRestart;
 
 	pCursor = NUI::ICursor::Create();
 	pInterface = new NUI::CInterface( pCursor );
@@ -156,7 +168,7 @@ void CInGameMenuInterface::Initialize( NRPG::CGlobalPlayer *_pPlayer )
 	pScreenShot->SetMode( NUI::CScreenShot::BLACKANDWHITE, CVec4( 0.5f, 0.5f, 0.5f, 1 ) );
 	pScreenShot->Generate();
 
-	pMenuUI = new NUI::CInGameMenuUI( NUI::SWindowInfo( pInterface, NUI::SPoint( 0, 0 ), NUI::SPoint( 1024, 768 ), "ingamemenu", NUI::STYLE_ENABLED ), pPlayer );
+	pMenuUI = new NUI::CInGameMenuUI( NUI::SWindowInfo( pInterface, NUI::SPoint( 0, 0 ), NUI::SPoint( 1024, 768 ), "ingamemenu", NUI::STYLE_ENABLED ), pPlayer, bAllowRestart );
 	NUI::LoadTemplate( pMenuUI, NDb::GetUIContainer( 158 ) );
 	pMenuUI->ShowWindow( NUI::SWTYPE_SHOW );
 }
@@ -210,6 +222,12 @@ bool CInGameMenuInterface::ProcessEvent( const NInput::SEvent &sEvent )
 		NMainLoop::Command( new CICMainMenu() );
 		return true;
 	}
+	else if ( bAllowRestart && bindRestartMission.ProcessEvent( sEvent ) )
+	{
+		// retail @0x1e9440: restart = load the mission-start snapshot straight away (no confirm)
+		NMainLoop::Command( new NMainLoop::CICLoadFile( string( "restart.sav" ) ) );
+		return true;
+	}
 
 	return false;
 }
@@ -223,15 +241,15 @@ void CInGameMenuInterface::RenderFrame()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CICMission
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CICInGameMenu::CICInGameMenu( NRPG::CGlobalPlayer *_pGlobalPlayer ):
-	pGlobalPlayer( _pGlobalPlayer )
+CICInGameMenu::CICInGameMenu( NRPG::CGlobalPlayer *_pGlobalPlayer, bool _bAllowRestart ):
+	pGlobalPlayer( _pGlobalPlayer ), bAllowRestart( _bAllowRestart )
 {
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CICInGameMenu::Exec()
 {
 	CInGameMenuInterface *pRes = new CInGameMenuInterface();
-	pRes->Initialize( pGlobalPlayer );
+	pRes->Initialize( pGlobalPlayer, bAllowRestart );
 	PushInterface( pRes );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////

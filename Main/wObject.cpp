@@ -279,14 +279,14 @@ void CWindowDoor::GoBoom( CUnitServer *pWho )
 	// whoops, stuff is pucked up
 	if ( IsValid(trap.pGrenade) )
 	{
-		pWorld->AddGrenadeExplosion( GetMinePos(), trap.pGrenade, 0, CastToObjectBase( this ) );   // door is its own igniter -> 10x self-damage
+		pWorld->AddGrenadeExplosion( GetMinePos(), trap.pGrenade, 0, CastToObjectBase( this ), &trap.sMineModifiers );   // door is its own igniter -> 10x self-damage; carry the placer's perk mods (retail @0x381d60)
 		trap.pGrenade = 0;
 		pWorld->RemoveMine( this );
 		NScript::luaCallFunction( "OnMineTriggered", "p", IsValid( pWho ) ? CastToObjectBase( pWho ) : 0 );
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-bool CWindowDoor::SetTrap( NDb::CRPGGrenade *pGrenade, int nDC )
+bool CWindowDoor::SetTrap( NDb::CRPGGrenade *pGrenade, int nDC, const SPerkMineModifiers *pMods )
 {
 	if ( trap.pGrenade )
 	{
@@ -295,6 +295,8 @@ bool CWindowDoor::SetTrap( NDb::CRPGGrenade *pGrenade, int nDC )
 	}
 	trap.pGrenade = pGrenade;
 	trap.nDC = nDC;
+	if ( pMods )
+		trap.sMineModifiers = *pMods;   // retail @0x381ee0: the trapped door carries the placer's explosive-perk mods (map traps have none -> keep the {1,1,false} default)
 	pWorld->GetAIMap()->GetUnitHLPos( &trap.vPos, pAIHull, -1 );
 	pWorld->AddMine( this );
 	return true;

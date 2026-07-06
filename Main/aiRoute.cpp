@@ -30,12 +30,22 @@ CAIRouteWaypoint::CAIRouteWaypoint( IPathNetwork *pPathNetwork, CMapWaypoint *pM
 		return;
 	//
 	szName = pMapWaypoint->pName->szName;
-	pos = GetNearestPosition( pMapWaypoint->pos.ptPos, pPathNetwork );
+	// RETAIL PARITY (marker-2 root): this 2-arg ctor is what fills the SCRIPT-facing registry
+	// (CWorld::AddWaypoint -> CWorld::GetWaypoint -> GetWaypointPos / PlaceTemplate /
+	// UnitSetToWaypoint / WaitForUnitWaypoint). Retail has ONE registry (CWaypointsHolder,
+	// AddWaypoint @0x77de70) and its only waypoint ctor (@0x496000) snaps onto the nearest
+	// NATIVE cell -- RealGetNearestPosition @0x7e830 bNative arm, accepting every
+	// GetPassability != AIP_NOT_PASSABLE place (AIP_DOOR/AIP_LOCKED included), nearest by
+	// plain 3D distance (no extra floor tiebreak in retail). The dev-legacy NON-native snap
+	// here (IsPassable == AIP_YES only) rejected dynamically-blocked cells, so a waypoint on
+	// a closed-door threshold (tutorial "DoorsTraining", floor 1 -> its cell is AIP_DOOR)
+	// snapped to some far/other-layer AIP_YES cell and the lua proximity trigger
+	// GetDistance( GetPos(hero), GetWaypointPos(wp) ) <= 2 could never fire. The earlier
+	// native-arm filter fix (aiNearestPosition.cpp) never applied to script waypoints
+	// because this ctor did not take the native arm.
+	pos = GetNearestNativePosition( pMapWaypoint->pos.ptPos, pPathNetwork );
 	commands = pMapWaypoint->commands;
 	ptPos = pMapWaypoint->pos.ptPos;
-
-	CVec3 cp = pos.GetCP();
-	DebugTrace( "%f %f %f\n", cp.x, cp.y, cp.z );
 }
 //////////////////////////////////////////////////////////////////////////////////////
 // retail @0x496000 -- the offset-map / 3D-aware waypoint ctor used by NWorld::CWaypointsHolder

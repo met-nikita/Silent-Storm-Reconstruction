@@ -88,8 +88,12 @@ class CDItem: public IVisObj
 	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&model); f.Add(3,&pAnimation); f.Add(4,&nFloor); f.Add(5,&pInvItem); f.Add(6,&bindGlobal); f.Add(7,&pVisibilityParent); return 0; }
 public:
 	CDItem() {}
+	// retail ctor @0x34acc0 takes a trailing CObjectBase* pVisibilityParent (stored @+0x2c, save tag 7):
+	// the unit the item flew off of. Non-null == "this flying item is fog-gated"; Segment reads it back
+	// at physics-settle so the frozen form inherits the gate (see AddFrozenItem @0x34b100).
 	CDItem( CSyncSrc<IVisObj> *pShow, const SItemRenderInfo &_model, CFuncBase<NAnimation::SSkeletonPose> *_pAnim,
-		int _nFloor, NRPG::IInventoryItem *_pItem );
+		int _nFloor, NRPG::IInventoryItem *_pItem, CObjectBase *_pVisibilityParent = 0 );
+	CObjectBase* GetVisibilityParent() const { return pVisibilityParent; }
 	CFuncBase<NAnimation::SSkeletonPose>* GetAnimation() const { return pAnimation; }
 	const SItemRenderInfo& GetModel() const { return model; }
 	NRPG::IInventoryItem* GetInvItem() const { return pInvItem; }
@@ -125,7 +129,11 @@ private:
 	void InnerSegment( list<STrackItem> *pRes );
 	void GetInSphere( const SSphere &sphere, list<CObj<CDFrozenItem> > *pRes );
 	void InitAction() { if ( !IsValid( pDebrisAction ) ) pDebrisAction = CreateActionCounter(); }
-	CDFrozenItem* AddFrozenItem( const SHMatrix &m, NRPG::IInventoryItem *pInvItem, const SItemRenderInfo &_model, int nFloor );
+	// retail @0x34b100 takes a trailing bVisibleGated bool: show-list select is
+	// (pInvItem==0 && !bVisibleGated) ? GetShowList : GetVisibleShowList, and the item is published
+	// into visibleItems (the LOS/vision candidate list) when (pInvItem!=0 || bVisibleGated) -- so a
+	// fog-gated capless item stays hidden until a unit gains LOS on it.
+	CDFrozenItem* AddFrozenItem( const SHMatrix &m, NRPG::IInventoryItem *pInvItem, const SItemRenderInfo &_model, int nFloor, bool bVisibleGated = false );
 protected:
 	bool Segment( SSphere *pInvalidate );
 	bool HasDynamicItems() { return !items.empty(); }
@@ -137,9 +145,14 @@ protected:
 	virtual STime GetWorldTime() = 0;
 public:
 	CDebrisController() { pTrash = new CDebrisControllerTrash(); }
-	//! add new piece of debris
-	void AddDebris( const SItemRenderInfo &_model, NAI::IAIMap *pMap, const CVec3 &ptCenter, const CQuat &q, const CVec3 &velocity, 
-		CFuncBase<STime> *pTime, NRPG::IInventoryItem *pItem = 0 );
+	//! add new piece of debris. pVisibilityParent: retail AddDebris @0x34ade0 carries a CObjectBase*
+	//! visibility-parent (the dying unit, DropItems @0x3502c0 passes its this-adjusted CObjectBase for
+	//! every drop) SEPARATE from the inventory item -- the uniform CAP has no IInventoryItem but must
+	//! still bind to the fog-gated list on an unseen death (the `pItem != 0` test alone let it leak).
+	//! The parent is STORED on the CDItem (+0x2c, save tag 7) so Segment can re-derive the gate at
+	//! physics-settle and route the frozen form to the fog-gated list + vision-candidate visibleItems.
+	void AddDebris( const SItemRenderInfo &_model, NAI::IAIMap *pMap, const CVec3 &ptCenter, const CQuat &q, const CVec3 &velocity,
+		CFuncBase<STime> *pTime, NRPG::IInventoryItem *pItem = 0, CObjectBase *pVisibilityParent = 0 );
 	//! turn in radius frozen items into alive ones
 	void ActivateDebris( const SSphere &b, NAI::IAIMap *pAIMap, CFuncBase<STime> *pTime );
 	//! put RPG item into fixed position

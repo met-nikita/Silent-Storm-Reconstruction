@@ -15,8 +15,13 @@ bool NotSmooth( const vector<SPathPlace> &pts, int i )
 	int nDXB = (int)pts[i - 1].nX - (int)pts[i].nX;
 	int nDYF = (int)pts[i].nY - (int)pts[i + 1].nY;
 	int nDYB = (int)pts[i - 1].nY - (int)pts[i].nY;
-	if ( ( nDXF != nDXB || pts[i].nX == pts[i + 1].nX ) &&
-	     ( nDYF != nDYB || pts[i].nY == pts[i + 1].nY ) )
+	// @0xa3ab0: an axis is a "corner axis" when its backward delta CHANGES, OR the point actually MOVES along
+	// that axis (`!=`). FIX (2026-07-01): the original reconstruction used `==` here, which inverted the
+	// movement test -> NotSmooth only fired on full 90-degree L-corners (both axes reverse) and MISSED the
+	// horizontal->diagonal junction (one axis keeps moving), so SmoothenPath left the dog-leg uncut. The retail
+	// disasm is `!=` on both axes.
+	if ( ( nDXF != nDXB || pts[i].nX != pts[i + 1].nX ) &&
+	     ( nDYF != nDYB || pts[i].nY != pts[i + 1].nY ) )
 	{
 		if ( nDXF == nDXB && nDYF == nDYB )
 			return false;
@@ -99,7 +104,8 @@ bool SmoothenPrePost( vector<SPathPlace> &pts, IPathNetwork *pNet, int nPre, int
 		buf[0] = pts[nStart + 1];
 		int nX = pts[nStart + 1].nX;
 		int nY = pts[nStart + 1].nY;
-		int nOrig = nStart + 2;   // original element whose flags feed buf[k]
+		int nOrig = nStart + 1;   // original element whose pose/moving flags feed buf[k] (retail @0xa3deb: buf[1]
+		                          // inherits from pts[nStart+1], not +2 -- flag-source off-by-one, geometry-neutral)
 		int k = 0;
 		while ( nA > 0 || nB > 0 )
 		{
@@ -132,6 +138,7 @@ bool SmoothenPrePost( vector<SPathPlace> &pts, IPathNetwork *pNet, int nPre, int
 			p.nY = (unsigned short)( nY & 0xff );
 			p.nLayer = (unsigned short)nLayer;
 			p.nIntegral = 1;
+				p.nFinal = 0;   // retail masks off the nFinal/n3D bit (word & 0xfc01 @0xa3ed0) on interleaved points
 			++nOrig;
 			buf[++k] = p;
 		}

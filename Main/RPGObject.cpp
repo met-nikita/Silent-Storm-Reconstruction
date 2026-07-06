@@ -31,9 +31,18 @@ public:
 	virtual int GetHP() { return nVP; }   // luaObjectGetHP: current vitality points
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CObject::CObject( int nStages, NDb::CModel *pModel, int nStartStage ): nDestroyStages(nStages), nStage(0) 
+CObject::CObject( int nStages, NDb::CModel *pModel, int nStartStage ): nDestroyStages(nStages), nStage(0)
 {
 	nMaxVP = IsValid( pModel ) ? pModel->GetMaxVP() : 1;
+	// retail CObject ctor @0x2ad680 (disasm: cmp eax,1; jg skip; mov eax,1): clamp nMaxVP >= 1.
+	// GetMaxVP = volume/0.7 * solidPart * material->nVP rounds/truncates to 0 for small hulls
+	// (the shed gas tank), and ProcessAttack's `nMaxVP <= 0 -> return 0` early-out then made the
+	// object INVULNERABLE to structural damage: its own 10x ignition blast hit it for 300..650
+	// and returned 0, so it never advanced a destroy
+	// stage, never played the destroy sound, never chained. Retail instead gives such props
+	// 1 VP -- any hit >= 1 dmg jumps the stage recompute to the FINAL stage in one blow.
+	if ( nMaxVP <= 1 )
+		nMaxVP = 1;
 	SetDestroyStage( nStartStage );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////

@@ -116,6 +116,14 @@ class CGameView: public IGameView
 	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&pScene); f.Add(3,&nodes); f.Add(5,&grassTrackers); f.Add(6,&pAmbientDirectional); f.Add(7,&pMaterials); f.Add(8,&colorMaterials); f.Add(9,&transparentMaterials); f.Add(10,&nCutFloor); f.Add(11,&fog); f.Add(14,&vCurrentFogColor); f.Add(15,&vDefaultClearColor); f.Add(16,&mPrevView); f.Add(17,&nSameViewCount); f.Add(18,&bHasTerrain); f.Add(19,&trMode); f.Add(20,&pIdentityTransform); f.Add(21,&pPrevLight); f.Add(22,&pAlienMaterial); f.Add(23,&bAlienStyle); f.Add(24,&fFogBaseHeight); f.Add(25,&renderMode); f.Add(26,&bForceFastest); f.Add(27,&prevLightMode); f.Add(28,&precacheObjects); f.Add(29,&bFastMode); return 0; }
 	bool bWaitLoading;
 	ELightMode prevLightMode;
+	// runtime-only, NOT serialized (retail keeps the cut-floor range on CBaseCamera and the
+	// mission reinstalls it from the template variant at Initialize @0x200690): the inclusive
+	// clamp range for nCutFloor; retail CBaseCamera ctor default is [-3,4] (clamp @0xd0050).
+	int nMinCutFloor;
+	int nMaxCutFloor;
+	// mirror of the camera FreezeCamera refcount (retail keeps floors ON the camera and its
+	// SetCutFloor @0xd0050 no-ops while [this+0xd4] > 0); runtime-only like the range above.
+	int nCutFloorLock;
 
 	void AddModelPart( CRenderNode *pRes, int nPart, NDb::CGeometry *pGeometry, 
 		NDb::CMaterial *pMaterial, CFuncBase<SFBTransform> *pPlacement, const SFullRoomInfo &_r );
@@ -163,6 +171,9 @@ public:
 	virtual CVec2 GetScreenRect();
 	virtual int  GetCutFloor();
 	virtual void SetCutFloor( int nFloor );
+	virtual void SetCutFloorRange( int nMinFloor, int nMaxFloor );
+	virtual void GetCutFloorRange( int *pMinFloor, int *pMaxFloor );
+	virtual void SetCutFloorLock( bool bLock );
 	virtual bool GetParticleShow() { return bShowParticles; }
 	virtual void SetParticleShow( bool bNewState ) { bShowParticles = bNewState; }
 	virtual void SetAmbient( const CVec3 &vBottomAmbientColor, const CVec3 &vTopAmbientColor );
@@ -333,6 +344,9 @@ CGameView::CGameView()
 {
 	pScene = CreateScene();
 	nCutFloor = N_MAX_FLOOR;
+	nMinCutFloor = N_MIN_FLOOR;	// retail CBaseCamera ctor default cut-floor range [-3,4]
+	nMaxCutFloor = N_MAX_FLOOR;
+	nCutFloorLock = 0;
 	pMaterials = new CMaterialShare;
 	SetHSRMode( defaultHSRMode );
 	renderMode = defaultRenderMode;
@@ -1223,7 +1237,42 @@ int CGameView::GetCutFloor()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CGameView::SetCutFloor( int _nFloor )
 {
-	nCutFloor = Clamp( _nFloor, N_MIN_FLOOR, N_MAX_FLOOR );
+	// retail CBaseCamera::SetCutFloor @0xd0050 FIRST gate: `cmp [this+0xd4],0; jg ret` -- while the
+	// camera is frozen (script CameraLock) every floor change is a hard NO-OP (the base's one-floor
+	// lock; the freeze count is mirrored here by the CUICmdLockCamera dispatch).
+	if ( nCutFloorLock > 0 )
+		return;
+	// then: EVERY floor set (keys, level-switch bar, UICmdSetFloor, unit focus) clamps into the
+	// INCLUSIVE [nMinCutFloor, nMaxCutFloor] range from the template variant (default [-3,4]).
+	nCutFloor = Clamp( _nFloor, nMinCutFloor, nMaxCutFloor );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CGameView::SetCutFloorRange( int nMinFloor, int nMaxFloor )
+{
+	// retail CBaseCamera::SetCutFloorRange @0xcba10: store the inclusive range, then re-clamp
+	// the current floor into it (the GetCutFloor/SetCutFloor round-trip in the binary).
+	// Dev keeps floors on the scene (no CBaseCamera range), so the range lives here; the old
+	// static [-3,4] stays as the outer bound so the render floor-mask shifts keep their invariant.
+	nMinCutFloor = Max( nMinFloor, N_MIN_FLOOR );
+	nMaxCutFloor = Min( nMaxFloor, N_MAX_FLOOR );
+	SetCutFloor( GetCutFloor() );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CGameView::GetCutFloorRange( int *pMinFloor, int *pMaxFloor )
+{
+	if ( pMinFloor )
+		*pMinFloor = nMinCutFloor;
+	if ( pMaxFloor )
+		*pMaxFloor = nMaxCutFloor;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CGameView::SetCutFloorLock( bool bLock )
+{
+	// unclamped like the camera FreezeCamera refcount it mirrors (@0xcffc0)
+	if ( bLock )
+		++nCutFloorLock;
+	else
+		--nCutFloorLock;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////

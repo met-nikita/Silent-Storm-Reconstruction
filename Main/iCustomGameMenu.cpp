@@ -23,7 +23,9 @@
 //   CICCustomGameMenu      ~ CICSaveLoadMenu       (the queued command that opens it)
 // SModInfo + CModManager (the mod enumerator/activator) already live in ModManager.{h,cpp}.
 //
-// Nothing in the dev tree issues CICCustomGameMenu yet -> the entire module is behaviour-neutral.
+// The main menu's "custom game" binding issues CICCustomGameMenu (iMainMenu.cpp ProcessEvent,
+// retail @0x1f7540), and Apply below runs the real CModManager::Activate @0x285e60 -- the mods
+// screen is live end-to-end.
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 namespace NUI
 {
@@ -482,7 +484,7 @@ bool CCustomGameMenuInterface::ProcessEvent( const NInput::SEvent &sEvent )
 		vector<SModInfo> mods;
 		if ( IsValid( pMenuUI ) )
 			pMenuUI->GetModsList( &mods );
-		CModManager::Activate( mods );				// stub today (sibling deferred); behaviour-neutral
+		CModManager::Activate( mods );				// release CModManager::Activate @0x285e60: reload base game.db + layer the chosen mods
 		NMainLoop::Command( new CICMainMenu() );
 		return true;
 	}

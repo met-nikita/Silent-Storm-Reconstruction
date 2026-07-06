@@ -346,7 +346,9 @@ public:
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CContainerModel;
-class CObject: public CObjectBase 
+class CRPGChestLayout;
+class CTRPGChest;
+class CObject: public CObjectBase
 {
 	OBJECT_BASIC_METHODS( CObject );
 public:
@@ -370,6 +372,8 @@ public:
 	CDBPtr<CRPGGrenade> pGrenade;	// @0x40 (DB col "RPGGrenade") -- explodable-object self-detonation grenade
 									// (gas tanks / fuel barrels). Armed onto the runtime CObjectServerBase::pAttachedGrenade
 									// at creation (CWorld::AddObject); fired by ProcessAttack path A on any damaging hit.
+	CDBPtr<CRPGChestLayout> pChestLayout;	// retail @0x44 (tag 22) -- shelf layout of a lootable container (chest-loot spill orientation)
+	CDBPtr<CTRPGChest> pDefaultChest;		// retail @0x48 (tag 23) -- default loot-chest template of the object type
 
 	int operator&( CStructureSaver &f );
 	//
@@ -398,10 +402,23 @@ public:
 	int operator&( CStructureSaver &f );
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// Which ambient-idle table an idle-flagged facial sequence joins (release enum NDb::ESequenceIdleType;
+// NLSHead::InitializeIdleAnimations @0x2602f0 buckets HeadSeqs records by it).
+enum ESequenceIdleType
+{
+	SIT_NORMAL = 0,
+	SIT_DEATH  = 1,
+};
 class CSequence: public CDBRecord
 {
 	OBJECT_BASIC_METHODS(CSequence);
 public:
+	// release @0x400d60 (tags 2/3) / Import @0x42dbc0: the HeadSeqs facial-idle columns. Idle-flagged
+	// records ("Blink"/"Blink01" normal, "Death" death in retail data) feed the ambient facial-idle
+	// tables the head animator arms between spoken sequences (CHeadAnimator::Recalc @0x265a30).
+	bool bIdleAnimation;              // IsIdleAnimation
+	ESequenceIdleType eIdleType;      // IdleType ("Death" -> SIT_DEATH, anything else -> SIT_NORMAL)
+	CSequence(): bIdleAnimation( false ), eIdleType( SIT_NORMAL ) {}
 	virtual void Import();
 	int operator&( CStructureSaver &f );
 };

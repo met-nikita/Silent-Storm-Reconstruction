@@ -12,6 +12,7 @@ namespace NDb
 	class CSound;
 	class CMusic;
 	class CSoundEffect;
+	enum EMusicType : int;	// defined in DBFormat\DataSound.h (fixed underlying type for this opaque declaration)
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CTransformStack;
@@ -33,13 +34,23 @@ public:
 	virtual ISound2D* Add2DSound( NDb::CSound *pSample ) = 0;
 	virtual CSoundEffect* AddEffect( NDb::CSoundEffect *pEff, STime stBeginTime, CFuncBase<STime> *pTime, CFuncBase<CVec3> *pPos, const vector<int> &flags ) = 0;
 
+	// retail ISoundScene::SetMusic(EMusicType) @0x304db0 (vtbl+0x1c): the edge-triggered music-type
+	// switch CMission::UpdateSound drives every frame (retail @0x1feb50 passes MT_AMBIENT/MT_COMBAT).
+	virtual void SetMusic( NDb::EMusicType eType ) = 0;
+	// dev-facing adapter: adopts the record into the scene's ambient/combat slot (by its eType)
+	// and drives the type machine above.
 	virtual void SetMusic( NDb::CMusic *pMusic ) = 0;
+	// maps onto the retail SetMusic(MT_AMBIENT) edge (retail FadeOutMusic @0x304c20 itself is the
+	// internal data-driven fade the machine calls through vtbl+0x20).
 	virtual void FadeOutMusic() = 0;
 
 	virtual void Draw( CTransformStack *pTS ) = 0;
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-ISoundScene* CreateSoundScene( NDb::CMusic *pAmbient );
+// retail NSound::CreateSoundScene @0x305ad0 takes BOTH slots (ambient, combat) -- the ctor
+// (@0x3058c0) stores them and the type machine launches from them; without the combat slot a
+// fresh scene could never start combat music (retail passes GetTMusic(3)-derived combat here).
+ISoundScene* CreateSoundScene( NDb::CMusic *pAmbient, NDb::CMusic *pCombat = 0 );
 bool InitSound( HWND hWnd );
 bool SetModeFromConfig();
 void DoneSound();

@@ -37,6 +37,13 @@ public:
 	int nSightDistance;
 	bool bWearingPK;          // unit is piloting a Panzerklein -> show the PK-armor bar
 	int nPKLife, nMaxPKLife;  // worn Panzerklein's current / max armor (VP)
+	// retail CUnitServer::GetInfo @0x3bfd50 PK-HP HUD layering. SUnitInfo is a TRANSIENT interface
+	// record (no operator&/ZDATA -- NOT serialized), so these are a plain, additive struct extension.
+	// bUnitInfo => this record describes a normal (non-empty-PK) unit; bPKInfo => the nPKHP/nMaxPKHP
+	// pair below is valid this frame (an empty-PK shell's own HP, or a worn PK unit's HP).
+	bool bPKInfo;             // nPKHP/nMaxPKHP are valid this frame
+	bool bUnitInfo;           // the record describes a normal (non-empty-PK) unit
+	int nPKHP, nMaxPKHP;      // Panzerklein current / max HP for the PK-HP bar
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ RPG unit
@@ -79,14 +86,29 @@ enum EAction // ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ enum ï¿½ ï¿½ï¿½ï¿½ï
 	AC_TRAP_OBJECT,
 	AC_DISARM_TRAP,
 	AC_SET_MINE,
-	AC_DISARM_MINE
+	AC_DISARM_MINE,               // = 37 (0x25) last Jan03/dev code
+	// Retail (Game.exe) appends the inventory-move reach actions at 42..44. Codes 38..41 are a
+	// retail-only gap (AC_SWAP + unnamed, see NRPG::CUnitMission::GetActionAP @0x2c0bd0) so the AC_ITEM_*
+	// codes land on their exact decoded ordinals: GetActionType @0x3a7990 returns these;
+	// CExecMoveInventoryItem::GetStartAP feeds them to GetActionAP. Append-only with an EXPLICIT 42 =>
+	// existing serialized action ordinals are unchanged (save-format safe).
+	AC_REPAIR_PK = 0x28,          // 0x28 (40) CExecHeal power-armour REPAIR branch
+	AC_ITEM_TAKE = 42,            // 0x2a  ground/other -> hand pickup
+	AC_ITEM_SLOT,                 // 0x2b  slot (re)placement
+	AC_ITEM_TRANSFER              // 0x2c  cross-unit hand transfer
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // Critical info
 class ICriticalInfo: public CObjectBase
 {
 public:
+	// release vtable order (CCritical impls @0x695f90..0x695fd0): IsTemporarily, GetRemainingTime,
+	// GetDifficultyClass, GetValue, GetCriticalType, GetCriticalLocation. The UI (iCriticalIcons)
+	// pumps IsTemporarily (icon variant), GetRemainingTime ("critdur"), GetValue ("bleedspeed").
+	virtual bool IsTemporarily() const = 0;
+	virtual int GetRemainingTime() const = 0;
 	virtual int GetDifficultyClass() const = 0;
+	virtual float GetValue() const = 0;
 	virtual NDb::ECritical GetCriticalType() const = 0;
 	virtual NDb::ECriticalLocation GetCriticalLocation() const = 0;
 };

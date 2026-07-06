@@ -54,14 +54,22 @@ void CAIShootAction::GetInfoInner( const SPlaceWithAP &place, SInfo *pInfo ) con
 	int nCover = 0, nQuality = 0;
 	pInfo->pWeapon =
 		GetUnit()->GetAIInventory()->GetBestFireArms( place.place, GetEnemy(), place.nUnitAP, &nCover, &nQuality, &pInfo->shootMode, &pInfo->nToHit );
-	if ( IsValid( pInfo->pWeapon ) )
+	// @0x41bf30 -- retail gates bCanDo on IsNeedReload(weapon)==false AND nToHit>0. IsNeedReload @0x4b5bd0
+	// == (current clip present && not destroyed && ammo>0); an empty clip is NOT shootable here even with a
+	// spare in inventory -- CAIReloadAction reloads first -- so the dev "empty-but-has-next-clip still bCanDo"
+	// escape is DROPPED, and the previously-ungated nToHit<=0 now fails too. IsValid(pInfo->pWeapon) already
+	// excludes a null/destroyed weapon (== retail weapon+7 bit 0x80). The clip fetch is null-guarded.
+	CAIFireArmsWeaponClip *pClip = IsValid( pInfo->pWeapon ) ? pInfo->pWeapon->GetCurrentClip() : 0;
+	bool bNeedReload = !IsValid( pClip ) || pClip->GetAmmoCount() <= 0;
+	if ( IsValid( pInfo->pWeapon ) && !bNeedReload && pInfo->nToHit > 0 )
 	{
 		pInfo->bCanDo = true;
-		bool bNeedReload = pInfo->pWeapon->GetCurrentClip()->GetAmmoCount() <= 0;
-		if ( bNeedReload && !IsValid( pInfo->pWeapon->GetNextClip() ) )
-			pInfo->bCanDo = false;
 		pInfo->fCover = (float)nCover;
-		pInfo->hitLocation = HL_ANY;            // release computes an aimed body part; the dev path fires center-mass
+		// ORACLE @0x41bf30: release aims the head when nToHit>50 && a unit aim-metric>5.0f -- the metric is
+		// enemy->vtbl[0]( weapon item +0xc, 1 ) fed to unit->vtbl[0x30]( &place, enemyVal ). Those two IAIUnit
+		// vtable slots are not named in-tree (and the a5dll vtable is reordered), so the aimed-head path stays
+		// DEFERRED and the unit fires center-mass. See FLAGGED-NEXT.
+		pInfo->hitLocation = HL_ANY;
 		pInfo->nAPToSpend = place.nUnitAP;        // the shot budget Do() spends down (release reads this field)
 		pInfo->bKillTargetCertainly = GetEnemy()->GetHP() * 2.5f < nQuality;
 	}
@@ -95,7 +103,9 @@ void CAIShootAction::Do( CAILog *pLog ) const
 		bool bNeedReload;
 		int nAmmo, nShotHP, nShotAP;
 		info.pWeapon->GetShotParameters( pUnit->GetUnitPosition(), pEnemy, (int)info.fCover, nAP, &nShotAP, &nAmmo, &nShotHP, &bNeedReload );
-		while ( nAmmo > 0 && nShotAP <= nAP )
+		// @0x41cb10 -- retail guards the burst on !bNeedReload too: stop the moment GetShotParameters reports the
+		// clip ran dry mid-burst (a reload is owed); the ungated loop could log a shot the engine would not.
+		while ( !bNeedReload && nAmmo > 0 && nShotAP <= nAP )
 		{
 			*pLog << new CAILogShot( pUnit, pEnemy, info.hitLocation );
 			*pLog << new CAILogSpendAP( pUnit, nShotAP );
@@ -106,36 +116,31 @@ void CAIShootAction::Do( CAILog *pLog ) const
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// RETAIL @0x0041cdd0 (oracle: decomp/src/s2_aiattackaction.h, disasm-verified). The release REWROTE
+// this from the Jan03 bCanDo/distance ladder: rank the two firing places by their to-hit, but once BOTH
+// clear the accuracy bar prefer the one that leaves MORE AP -- i.e. the place needing the LEAST movement,
+// so the unit HOLDS POSITION and keeps its aim instead of stepping a tile closer before every shot. The
+// bar is 20, relaxed to 5 only when the unit is "busy" in a panzerklein (release IAIUnit::vtbl+0x20 ==
+// IsUnitBusy == IsInPK; a PK accepts low-percentage shots -- the same slot the place source reads as
+// no-CROUCH / WALK-not-RUN), expressed in-tree by the established IsValid(GetWearingDBPK()) idiom. A
+// non-shootable place has nToHit==0 (SInfo ctor) so it loses to any place clearing the bar -- the release
+// relies on that rather than a bCanDo short-circuit, and does NOT re-test the pose here (the choose-place
+// job already rejects inactive/lay candidates). The previous "tie -> prefer the place CLOSER to the enemy"
+// tie-break was a Jan03-ladder artifact and is what made AI units creep forward / walk up before shooting.
 bool CAIShootAction::ComparePlaces( const SPlaceWithAP &p1, const SPlaceWithAP &p2 ) const
 {
-	const int N_GOOD_TOHIT = 20;
+	int nThreshold = 20;
+	CPtr<IAIUnit> pUnit = GetUnit();
+	if ( IsValid( pUnit ) && IsValid( pUnit->GetUnitServer() ) &&
+		IsValid( pUnit->GetUnitServer()->GetWearingDBPK() ) )
+		nThreshold = 5;   // in a panzerklein -> relax the accuracy bar (release vtbl+0x20)
 	//
 	SInfo info1, info2;
 	GetInfoInner( p1, &info1 );
 	GetInfoInner( p2, &info2 );
-	//
-	if ( !info1.bCanDo )
-		return false;
-	if ( !info2.bCanDo )
-		return true;
-	if ( info2.nToHit >= N_GOOD_TOHIT )
-		return false;
-	ECheckMove pose = ( ECheckMove )( p1.place.pos.p.GetPose() );
-	if ( pose == CM_INACTIVE || pose == CM_LAY )
-		return false;
-	if ( info1.nToHit < info2.nToHit )
-		return false;
-	if ( info1.nToHit > 0 && info1.nToHit > info2.nToHit )
-		return true;
-	else
-	{
-		// tie on to-hit: prefer the place closer to the enemy. fDistance is no longer cached in SInfo
-		// (release layout), so compute it from the place here.
-		if ( !IsValid( GetEnemy() ) )
-			return false;
-		CVec3 ptEnemy = GetEnemy()->GetPosition().GetCP();
-		return fabs( ptEnemy - p1.place.GetCP() ) < fabs( ptEnemy - p2.place.GetCP() );
-	}
+	if ( info1.nToHit < nThreshold || info2.nToHit < nThreshold )
+		return info1.nToHit > info2.nToHit;   // not both good -> rank by accuracy
+	return p1.nUnitAP > p2.nUnitAP;            // both good -> prefer the place needing the least movement
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CAIThrowGrenadeAction - enemy-group helpers (carried over verbatim from dev aiAttackAction.cpp)
@@ -278,12 +283,18 @@ void CAIThrowGrenadeAction::Do( CAILog *pLog ) const
 		CPtr<CAIGrenadeWeapon> pGrenade = info.pGrenade;
 		NAI::EPose pose = pUnit->GetUnitPosition().GetPose();
 		int nGrenadeThrowAP = pUnit->GetUnitMission()->GetActionAP( pose, NRPG::AC_THROW_GRENADE );
-		while ( IsValid( pGrenade ) && pUnit->GetAP() >= nGrenadeThrowAP )
+		// @0x0041ceb0 -- the throw budget is the cached info.nAPToSpend (the AP at the chosen place), a LOCAL
+		// counter decremented per throw. Logged records do NOT mutate the live unit (they apply only when the
+		// commander later executes them), so re-reading pUnit->GetAP() inside the loop would never decrease and
+		// GetBestGrenade would keep returning the same grenade -> infinite loop (the "AI freezes on attack, turn
+		// never ends" bug, same fix as CAIShootAction::Do above).
+		while ( IsValid( pGrenade ) && info.nAPToSpend >= nGrenadeThrowAP )
 		{
 			if ( !pUnit->GetAIInventory()->IsCurrentItem( pGrenade ) )
 				*pLog << new CAILogChangeWeapon( pUnit, pGrenade );
 			*pLog << new CAILogThrowGrenade( pUnit, info.ptTarget, pGrenade );   // cached throw point (release SInfo field)
 			*pLog << new CAILogSpendAP( pUnit, nGrenadeThrowAP );
+			info.nAPToSpend -= nGrenadeThrowAP;
 			pGrenade = pUnit->GetAIInventory()->GetBestGrenade( VNULL3 );
 		}
 	}
@@ -291,15 +302,11 @@ void CAIThrowGrenadeAction::Do( CAILog *pLog ) const
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CAIThrowGrenadeAction::ComparePlaces( const SPlaceWithAP &p1, const SPlaceWithAP &p2 ) const
 {
-	SInfo info1, info2;
-	GetInfoInner( p1, &info1 );
-	GetInfoInner( p2, &info2 );
-	//
-	if ( !info1.bCanDo )
-		return false;                  // can't throw from p1 -> p1 not preferred (both-false -> equivalent)
-	if ( !info2.bCanDo )
-		return true;
-	return p1.nUnitAP > p2.nUnitAP;    // both viable: prefer the place with more AP left
+	// @0x0041b980 -- the RETAIL rewrite DROPS the Jan03 bCanDo/fDistance ladder (and the two heavy
+	// GetInfoInner doability scans the comparator used to run): it is a pure "more AP left wins"
+	// leaf comparator. Doability is filtered separately by CanDo; ComparePlaces only ranks by AP.
+	// Decomp: return p2.nUnitAP < p1.nUnitAP.
+	return p2.nUnitAP < p1.nUnitAP;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CAILaunchRocketAction
@@ -321,6 +328,12 @@ void CAILaunchRocketAction::GetInfoInner( const SPlaceWithAP &place, SInfo *pInf
 		return;
 	if ( pInfo->pWeapon->GetCurrentClip()->GetAmmoCount() <= 0 )
 		return;   // empty launcher: not do-able (release SInfo has no bNeedReload; reloading is the reload action's job)
+	// @0x1c940 - affordability gate (release-NEW vs dev): the launch-rocket AP cost must fit place.nUnitAP BEFORE
+	// the (heavier) nearest-group search, so an unaffordable rocket never wins the decision (mirrors the grenade
+	// twin's pre-search GetActionAP gate above). In-tree the launch cost is the weapon's GetShotAP() - the same AP
+	// Do() spends - because there is no AC_LAUNCH_ROCKET action code in RPGUnitInfo.h for GetActionAP(pose,6,weapon).
+	if ( pInfo->pWeapon->GetShotAP() > place.nUnitAP )
+		return;
 	//
 	const vector<SAIUnitGroup> &groups = pState->GetEnemyGroups();
 	int nGroup = GetNearestGroup( pUnit->GetUnitServer(), place.place, pInfo->pWeapon.GetPtr(), groups, &pInfo->ptTarget );
@@ -351,15 +364,10 @@ void CAILaunchRocketAction::Do( CAILog *pLog ) const
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CAILaunchRocketAction::ComparePlaces( const SPlaceWithAP &p1, const SPlaceWithAP &p2 ) const
 {
-	SInfo info1, info2;
-	GetInfoInner( p1, &info1 );
-	GetInfoInner( p2, &info2 );
-	//
-	if ( !info1.bCanDo )
-		return false;
-	if ( !info2.bCanDo )
-		return true;
-	return p1.nUnitAP > p2.nUnitAP;
+	// @0x1b9a0 (image 0x0041b9a0) - RETAIL REWRITE: the release dropped the dev bCanDo/distance ladder and
+	// ranks the two places PURELY by remaining AP (no GetInfoInner calls). p1 strictly outranks p2 iff it leaves
+	// more AP; ties (==) yield false (strict weak order). Follow the decomp, not the Jan03 ladder.
+	return p2.nUnitAP < p1.nUnitAP;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // Support actions (reconstruction/exports/actions_support.c). NOTE on dependencies still to port:
@@ -502,9 +510,11 @@ void CAIMeleeAction::Do( CAILog *pLog ) const   // @0x0041d5b0
 	if ( !pUnit->GetAIInventory()->IsCurrentItem( info.pWeapon ) )
 		*pLog << new CAILogChangeWeapon( pUnit, info.pWeapon );
 	*pLog << new CAILogSpendAP( pUnit, pUnit->GetUnitMission()->GetActionAP( pUnit->GetUnitPosition().GetPose(), NRPG::AC_MELEE ) );
-	// the strike: a weapon-agnostic CCmdShootObject against the enemy with the now-current melee weapon.
-	// (release logs a dedicated CAILogMelee record; CAILogShot emits the same attack-object command.)
-	*pLog << new CAILogShot( pUnit, pEnemy, HL_ANY );
+	// the strike: retail logs a dedicated CAILogMelee record carrying the melee weapon; its GetCommands
+	// @0x460d20 emits CCmdShootObject( pEnemy->GetUnitServer(), 0, HL_HEAD ) -- the same attack-object command
+	// CAILogShot would, but the weapon is preserved for save-format fidelity. @0x41d5b0 CreateAILogMelee passes
+	// hitLoc=1 (HL_HEAD), NOT pinned to HL_ANY like the throw-knife sibling.
+	*pLog << new CAILogMelee( pUnit, pEnemy, info.pWeapon, HL_HEAD );
 }
 bool CAIMeleeAction::ComparePlaces( const SPlaceWithAP &p1, const SPlaceWithAP &p2 ) const
 {
@@ -553,8 +563,12 @@ void CAIThrowKnifeAction::Do( CAILog *pLog ) const   // @0x0041d420
 	if ( !pUnit->GetAIInventory()->IsCurrentItem( info.pWeapon ) )
 		*pLog << new CAILogChangeWeapon( pUnit, info.pWeapon );
 	*pLog << new CAILogSpendAP( pUnit, pUnit->GetUnitMission()->GetActionAP( pUnit->GetUnitPosition().GetPose(), NRPG::AC_THROW_KNIFE ) );
-	// throw at the enemy: same weapon-agnostic CCmdShootObject after the knife is the current weapon.
-	*pLog << new CAILogShot( pUnit, pEnemy, HL_ANY );
+	// @0x0041d420 -- retail emits CAILogThrowKnife (NOT CAILogShot). The WORLD COMMAND is identical
+	// (CAILogThrowKnife::GetCommands @0x460c30 pins eHL = -1/HL_ANY, exactly like CAILogShot(pEnemy,HL_ANY)),
+	// but CAILogThrowKnife ALSO carries the thrown knife so its Commit (retail ModifyState @0x45c7f0) removes
+	// the knife from the AI inventory and empties the hand -- the simulated-state effect CAILogShot (base
+	// no-op Commit) silently dropped.
+	*pLog << new CAILogThrowKnife( pUnit, pEnemy, info.pWeapon, HL_ANY );
 }
 bool CAIThrowKnifeAction::ComparePlaces( const SPlaceWithAP &p1, const SPlaceWithAP &p2 ) const
 {
@@ -566,9 +580,19 @@ bool CAIThrowKnifeAction::ComparePlaces( const SPlaceWithAP &p1, const SPlaceWit
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CAIMoveToEnemyAction::GetInfoInner( const SPlaceWithAP &place, SInfo *pInfo ) const
 {
-	// bCanDo iff the unit has any weapon and an enemy exists (advance to engage). @0x00475110
+	// @0x00475110 - can advance iff the unit is alive AND the candidate place is a DIFFERENT tile than
+	// where the unit already stands. Masked tile compare (mask 0x1feffff, == NAI::IsSamePlace @0x00473da0:
+	// (a&mask)==(b&mask)) ignores the pose/direction/moving bits. The move itself is emitted by
+	// CAICombatLogic::DoAction; GetInfoInner only gates it. Retail checks NEITHER an enemy nor a weapon --
+	// the old GetEnemy()/HasAnyWeapon() gate was a dev interpretation that never matched the decode.
+	pInfo->bCanDo = false;
 	CPtr<IAIUnit> pUnit = GetUnit();
-	pInfo->bCanDo = IsValid( pUnit ) && IsValid( GetEnemy() ) && pUnit->GetAIInventory()->HasAnyWeapon();
+	if ( !IsValid( pUnit ) )
+		return;
+	const int nCur  = pUnit->GetUnitPosition().pos.p.GetData();   // unit's current tile (vtbl +0xc GetUnitPosition)
+	const int nDest = place.place.pos.p.GetData();                // the candidate place's tile
+	if ( ( ( nCur ^ nDest ) & 0x1feffff ) != 0 )                 // tiles differ -> the move is do-able
+		pInfo->bCanDo = true;
 }
 void CAIMoveToEnemyAction::Do( CAILog *pLog ) const
 {

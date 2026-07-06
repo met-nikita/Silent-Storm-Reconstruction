@@ -151,7 +151,7 @@ public:
 	STime GetTimeEnd() const { return tEnd; }
 	STime GetTimeLabel1() const { return tLabel1; }
 	bool GetHipPos( CVec3 *pRes );
-	bool GetBarrelPos( NDb::CGeometry *pWeaponGeometry, NAnimation::SBonePose *pRes );
+	bool GetBarrelPos( NDb::CGeometry *pWeaponGeometry, NAnimation::SBonePose *pRes, bool bLeft );   // @0x33b720: bLeft picks L_Weapon vs R_Weapon on a PK skeleton
 	bool IsAiming() const { return bAimed || bAimedStrafe; }
 	bool IsStrafing() const { return bStrafing; }
 	bool IsActiveItem() const { return bActiveItem; }
@@ -177,10 +177,13 @@ public:
 	void Jump( const NAI::SUnitPosition &prevPos, const NAI::SUnitPosition &cmdPos, bool bRealJump );
 	void Fall( const NAI::SUnitPosition &cmdPos, float fPrevHeight );
 	void ForcedMove( const NAI::SUnitPosition &cmdPos );
-	void Die( const NAI::SUnitPosition &cmdPos, const CVec3 &ptDir );
-	void ActivateItem( const NAI::SUnitPosition &cmdPos, 
-		bool bHeavy, bool bBackpack, NDb::EItemPlace place, 
-		NDb::EWeaponType eAWT, bool bInstantly = false );
+	// retail @0x33bb90: bPlayDeath gates ONLY the death CLIP -- the ragdoll handoff (AddDynamics)
+	// ALWAYS runs. bPlayDeath=false is the pure ragdoll-push entry (corpse push @0x350e20 /
+	// blast impulse @0x3c0370 / SpillPK @0x3a62e0); true plays a directional death anim when idle.
+	void Die( const NAI::SUnitPosition &cmdPos, const CVec3 &ptDir, bool bPlayDeath = true );
+	void ActivateItem( const NAI::SUnitPosition &cmdPos,
+		bool bHeavy, bool bBackpack, NDb::EItemPlace place,
+		NDb::EWeaponType eAWT, bool bHide = false, bool bInstantly = false );   // retail @0x33e800 inserted bHide at slot 6
 	void DeactivateItem( const NAI::SUnitPosition &cmdPos, bool bHeavy, 
 		bool bBackpack, NDb::EItemPlace place, bool bInstantly = false );
 	void ThrowGrenade( const NAI::SUnitPosition &cmdPos, const CVec3 &target, int nSide, int nGrenadeSize = 1 );
@@ -188,6 +191,9 @@ public:
 	void OpenWindowDoor( const NAI::SUnitPosition &cmdPos );
 	void Reload( const NAI::SUnitPosition &cmdPos );
 	void StartHealing( const NAI::SUnitPosition &cmdPos, NAI::EBlowHeight eHeight );
+	// @0x3401b0 -- power-armour REPAIR overload: bPanzerklein => fixed PK-heal clip params
+	// ("PKHealGer" if a dedicated repair kit is active, else "PKHealEng"); else == the 2-arg form.
+	void StartHealing( const NAI::SUnitPosition &cmdPos, NAI::EBlowHeight eHeight, bool bPanzerklein, bool bRepairKit );
 	void FinishHealing( const NAI::SUnitPosition &cmdPos );
 	// corpses
 	void TakeCorpse( const NAI::SUnitPosition &cmdPos );

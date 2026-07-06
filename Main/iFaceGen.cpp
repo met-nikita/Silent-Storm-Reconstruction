@@ -162,10 +162,18 @@ bool CFaceGenUI::ProcessMessage( const SEvent &sEvent )
 		{
 			if ( sEvent.szID == "face" )
 			{
+				// retail CFaceGenUI::ProcessMessage @0x1d27e0 (oracle s2_cfacegenui.h:294): the pick is
+				// written straight onto the REAL merc (CUnit::SetHead @0x2bb970) and the preview rebinds to
+				// that same merc -- so the head the player sees IS the head the mission gets. The old dev
+				// path stashed the pick on a throwaway CreateMerc preview and pushed the untouched pMerc on
+				// play, so gameplay always got the persona default head.
 				int nValue = pFaceScroll->GetValue();
 				ASSERT( nValue < customHeads.size() );
 				if ( nValue < customHeads.size() )
+				{
 					pHead = customHeads[nValue];
+					pMerc->SetHead( customHeads[nValue] );
+				}
 
 				UpdateUnit();
 				return true;
@@ -264,11 +272,11 @@ void CFaceGenUI::UpdateVoiceChecks()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CFaceGenUI::UpdateUnit()
 {
-	pTempMerc = NRPG::CreateMerc( pMerc->GetPers(), pHead );
-	// release CFaceGenUI::ProcessMessage @0x1d27e0: the FaceGen unit view uses the GLOBAL DataCamera 5024
-	// ("PersCustomHead", GetDBCamera 0x13a0) via the CDBCamera* SetUnit overload -- NOT the per-character pers
-	// camera. CAMERA_FACEGEN read pUnit->GetPers()->sFaceGenCamera -> the wrong (per-pers) angle.
-	pUnitView->SetUnit( pTempMerc, NDb::GetDBCamera( 5024 ) );
+	// retail: the preview shows the REAL edited merc (SetHead already applied at notify time) -- no
+	// throwaway CreateMerc (pTempMerc stays only as a dormant save-format member).
+	// The FaceGen unit view uses the GLOBAL DataCamera 5024 ("PersCustomHead", GetDBCamera 0x13a0) via
+	// the CDBCamera* SetUnit overload -- NOT the per-character pers camera.
+	pUnitView->SetUnit( pMerc.GetPtr(), NDb::GetDBCamera( 5024 ) );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 } // NAMESPACE

@@ -311,6 +311,9 @@ void CMainIconBarSet::Update()
 			CreateButton( 385, 425, CComplexButton::NORMAL, 4278, SLOT_R1C1, 0, NGame::UA_ATTACK, NWorld::CUnit::ST_NORMAL_KNIFE, "attack" );
 			CreateButton( 384, 424, CComplexButton::NORMAL, 4279, SLOT_R1C1, 0, NGame::UA_ATTACK, NWorld::CUnit::ST_NORMAL_GRENADE,	"attack" );
 			CreateButton( 648, 649, CComplexButton::NORMAL, 4279, SLOT_R1C1, 0, NGame::UA_MINE, NWorld::CUnit::ST_NORMAL_MINE,	"setmine" );
+			// retail R1 set (oracle s2_cmainiconbarset.h:141): the USE-TOOL button for a unit holding
+			// a tool -- icons 849/850 'Command Tool' (the dev showed the mine icon here instead)
+			CreateButton( 849, 850, CComplexButton::NORMAL, 4405, SLOT_R1C1, 1, NGame::UA_USETOOL, NWorld::CUnit::ST_NORMAL_TOOL, "usetool" );
 			CreateButton( 387, 419, CComplexButton::NORMAL, 4280, SLOT_R1C1, 1, NGame::UA_ATTACK, N_ANY_VALUE, "attack" );
 			CreateButton( 388, 426, CComplexButton::NORMAL, 4291, SLOT_R1C1, 1, NGame::UA_HEAL, NWorld::CUnit::ST_NORMAL_MEDKIT, "firstaid" );
 			CreateButton( 443, 475, CComplexButton::NORMAL, 4290, SLOT_R1C1, 1, NGame::UA_DROPCORPSE, NWorld::CUnit::ST_CARRY_CORPSE, "dropcorpse" );

@@ -215,7 +215,9 @@ ETransitionType GetTransitionType( const IPathNetwork *_pNet, const SPathPlace &
 		if ( fHDiff > 0 )
 			return GetClimbTransTypeByHeight( fHDiff );
 		else
-			return TT_JUMP;
+			// @0x77df0 -- a downward high-clearance step is a JUMP; if the unit FACES away from the move
+			// direction (i = GetDir), it is a JUMP_BACK (dropping down backwards). TT_JUMP_BACK == TT_JUMP+1.
+			return (ETransitionType)( TT_JUMP + ( src.GetDirection() != i ) );
 	}
 	if ( (t.nMoveStand | t.nMoveCrouch | t.nMoveLay) & (1<<i) )
 	{
@@ -457,58 +459,30 @@ void GetNonStandartMoves(
 		case CM_STAND:
 			if ( !bMoveOnly )
 			{
-				// climbing
+				// climbing -- retail @0x78300 SIMPLIFIED the Jan03 nested variant: the climb onto a
+				// special point is emitted whenever the point is higher by (0, F_MAX_CLIMB_HEIGHT]
+				// and CP_INACTIVE. Jan03 additionally demanded a usable continuation BEYOND the edge
+				// (t1.nMoveCrouch/t1.nMoveHC toward t2 + t2 pose bits), which rejected legitimate
+				// climb spots (edges whose far tile doesn't cooperate) and with it the whole
+				// climb-over / climb-down chain through them. Retail decomp is authoritative.
 				for ( int i = 0; i < 8; ++i )
 				{
-					if ( t.nMoveHC & (1<<i) )
+					if ( ( t.nMoveHC & (1<<i) ) == 0 )
+						continue;
+					int nX1 = nX + nMoveShift[i][0];
+					int nY1 = nY + nMoveShift[i][1];
+					CNodesLayer::STile &t1 = pLayer->tiles[nY1][nX1];
+					float fHDiff = GetFHeight(t1.nHeight) - GetFHeight(t.nHeight);
+					if ( fHDiff > 0 && fHDiff <= F_MAX_CLIMB_HEIGHT && (t1.nPassable & CP_INACTIVE) )
 					{
-						int nX1 = nX + nMoveShift[i][0];
-						int nY1 = nY + nMoveShift[i][1];
-						CNodesLayer::STile &t1 = pLayer->tiles[nY1][nX1];
-						float fHDiff = GetFHeight(t1.nHeight) - GetFHeight(t.nHeight);
-						if ( fHDiff > 0 && fHDiff <= F_MAX_CLIMB_HEIGHT && (t1.nPassable & CP_INACTIVE) )
+						m.dest = SPathPlace( nX1, nY1, src.GetLayer(), i, CM_INACTIVE, 0 );
+						m.type = GetClimbMoveTypeByHeight( fHDiff );
+						if ( IsGoodPt( m.dest, pNet ) )
 						{
-							if ( t1.nMoveCrouch & (1<<i) )
-							{
-								int nX2 = nX1 + nMoveShift[i][0];
-								int nY2 = nY1 + nMoveShift[i][1];
-								CNodesLayer::STile &t2 = pLayer->tiles[nY2][nX2];
-								//float fHDiff = GetFHeight(t2.nHeight) - GetFHeight(t1.nHeight);
-								if ( t2.nPassable & CP_CROUCH )
-								{
-									m.dest = SPathPlace( nX1, nY1, src.GetLayer(), i, CM_INACTIVE, 0 );
-									m.type = GetClimbMoveTypeByHeight( fHDiff );
-									if ( IsGoodPt( m.dest, pNet ) )
-									{
-										res[ pResPos ] = m;
-										dynLocks[ pResPos ] = t.nDynLocks;
-										//DebugForEach( src, m, pNet );
-										++pResPos;
-									}
-								}
-							}
-							if ( t1.nMoveHC & (1<<i) )
-							{
-								int nX2 = nX1 + nMoveShift[i][0];
-								int nY2 = nY1 + nMoveShift[i][1];
-								CNodesLayer::STile &t2 = pLayer->tiles[nY2][nX2];
-								float fHDiff2 = GetFHeight(t2.nHeight) - GetFHeight(t1.nHeight);
-								if ( fHDiff2 < 0 && (t2.nPassable & CP_CROUCH) )
-								{
-									if ( bCheckSuicide || fHDiff2 > -F_MAX_CLIMB_HEIGHT )
-									{
-										m.dest = SPathPlace( nX1, nY1, src.GetLayer(), i, CM_INACTIVE, 0 );
-										m.type = GetClimbMoveTypeByHeight( fHDiff );
-										if ( IsGoodPt( m.dest, pNet ) )
-										{
-											res[ pResPos ] = m;
-											dynLocks[ pResPos ] = t.nDynLocks;
-											//DebugForEach( src, m, pNet );
-											++pResPos;
-										}
-									}
-								}
-							}
+							res[ pResPos ] = m;
+							dynLocks[ pResPos ] = t.nDynLocks;
+							//DebugForEach( src, m, pNet );
+							++pResPos;
 						}
 					}
 				}
@@ -571,6 +545,35 @@ void GetNonStandartMoves(
 								res[ pResPos ] = m;
 								dynLocks[ pResPos ] = t.nDynLocks;
 								++pResPos;
+							}
+						}
+					}
+				}
+				// retail @0x78300 ADDITION (NAI::TryToJump @0x77d00 via the back direction): from a
+				// special climb point also try the jump-down BEHIND the facing -- a unit that climbed
+				// onto an edge (CM_INACTIVE faces the climb direction) descends the far side by
+				// jumping back. Jan03 only ever jumped forward, so the wave could mount an edge from
+				// the high side yet never come down the low side (climb-down over a ledge).
+				{
+					int nBack = ( i + 4 ) & 7;
+					if ( t.nMoveHC & (1<<nBack) )
+					{
+						int nX1 = nX + nMoveShift[nBack][0];
+						int nY1 = nY + nMoveShift[nBack][1];
+						CNodesLayer::STile &t1 = pLayer->tiles[nY1][nX1];
+						float fHDiff = GetFHeight(t1.nHeight) - GetFHeight(t.nHeight);
+						if ( fHDiff < 0 && (t1.nPassable & CP_CROUCH) )
+						{
+							if ( bCheckSuicide || fHDiff > -F_MAX_CLIMB_HEIGHT )
+							{
+								m.dest = SPathPlace( nX1, nY1, src.GetLayer(), 0, CM_CROUCH, 0 );
+								m.type = MT_JUMP;
+								if ( IsGoodPt( m.dest, pNet ) )
+								{
+									res[ pResPos ] = m;
+									dynLocks[ pResPos ] = t.nDynLocks;
+									++pResPos;
+								}
 							}
 						}
 					}

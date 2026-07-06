@@ -29,13 +29,21 @@ BEGIN_SCRIPT_COMMAND( GetItem, "s" )
 	return 1;
 END_SCRIPT_COMMAND
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// release luaFindItem @0x2e7170 (sig "n"): find the on-ground world item by its RPG db id and return it
-// as the same CDFrozenItem CPtr handle GetItem/ItemGetName/ItemRemove use (luaPushCPtr is nil-safe, so a
-// missing item pushes nil -- matching retail, which lua_pushnil's when no item matches).
+// release luaFindItem @0x2e7170 (sig "n"): find the on-ground world item by its RPG db id. NOTE: retail
+// pushes the INVENTORY item (frozen->GetInvItem(), oracle s2_nscript_scriptobject.h:832), NOT the
+// CDFrozenItem world holder -- the consumers (ItemUnload -> CWeaponItem dyncast, UnitTakeItem) expect the
+// NRPG item. Pushing the holder made every such call a silent dyncast miss. Warn on a failed lookup so a
+// never-spawned map item is visible in the console.
 BEGIN_SCRIPT_COMMAND( FindItem, "n" )
 	int nID = luaParams[ 0 ].n;
 	CPtr<NWorld::CDFrozenItem> pItem = pScript->pWorld->FindFrozenItem( nID );
-	luaPushCPtr( pState, pItem );
+	if ( IsValid( pItem ) && pItem->GetInvItem() != 0 )
+		luaPushCPtr( pState, pItem->GetInvItem() );
+	else
+	{
+		csSystem << CC_RED << "Script warning: " << CC_GREY << " FindItem(" << nID << ") -- no on-ground item with this RPG item id" << endl;
+		pScript->PushNil();
+	}
 	return 1;
 END_SCRIPT_COMMAND
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -122,6 +130,24 @@ BEGIN_SCRIPT_COMMAND( ObjectRemove, "u" )
 	return 0;
 END_SCRIPT_COMMAND
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail luaObjectPlaceInPocket @0x2e9000 ("u"): stash a world object in the strategic pocket -- held
+// alive but removed from the world (used by the training script 87 to hide the shooting-range targets).
+// Retail gates on the RTTI cast alone (no liveness check); the in-pocket dedup lives in the world method.
+BEGIN_SCRIPT_COMMAND( ObjectPlaceInPocket, "u" )
+	CDynamicCast<NWorld::CObjectServerBase> pObject( luaParams[ 0 ].p );
+	if ( pObject )
+		pScript->pWorld->PlaceObjectInPocket( pObject );
+	return 0;
+END_SCRIPT_COMMAND
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail luaObjectRestoreFromPocket @0x2e9130 ("u"): bring a pocketed object back into the world.
+BEGIN_SCRIPT_COMMAND( ObjectRestoreFromPocket, "u" )
+	CDynamicCast<NWorld::CObjectServerBase> pObject( luaParams[ 0 ].p );
+	if ( pObject )
+		pScript->pWorld->RestoreObjectFromPocket( pObject );
+	return 0;
+END_SCRIPT_COMMAND
+////////////////////////////////////////////////////////////////////////////////////////////////////
 BEGIN_SCRIPT_COMMAND( CreateObject, "nsns" )
 	// DBID, WAYPOINT, ANGLE, NAME
 	int nID = luaParams[ 0 ].n;
@@ -170,6 +196,24 @@ BEGIN_SCRIPT_COMMAND( ObjectSetToWaypoint, "usn" )
 	//
 	NWorld::SObjectPlace pos = pWaypoint->GetObjectPlace( nAngle );
 	pObject->SetPosition( pos );
+	return 0;
+END_SCRIPT_COMMAND
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail luaItemSetToWaypoint @0x2e86c0 ("us"): move an ON-GROUND inventory item to a waypoint. Retail
+// reads the waypoint's place (waypoint+0x2c) then moves the item via the debris placer (pWorld vtbl+0xe4
+// -> vtbl+0x20/commit). Dev's CDebrisController re-places by remove+re-add; a CPtr keeps the item alive
+// across the remove. (Distinct from ObjectSetToWaypoint, which repositions a world OBJECT via SetPosition.)
+BEGIN_SCRIPT_COMMAND( ItemSetToWaypoint, "us" )
+	CDynamicCast<NRPG::IInventoryItem> pItem( luaParams[ 0 ].p );
+	if ( !IsValid( pItem ) )
+		return 0;
+	CPtr<NAI::CAIRouteWaypoint> pWaypoint = pScript->pWorld->GetWaypoint( luaParams[ 1 ].s );
+	if ( !IsValid( pWaypoint ) )
+		return 0;
+	CPtr<NRPG::IInventoryItem> pHold = pItem;   // survive the remove below
+	NWorld::SObjectPlace place = pWaypoint->GetObjectPlace( 0 );
+	pScript->pWorld->RemoveFrozenItem( pItem );
+	pScript->pWorld->AddFrozenItem( place.ptPos, CQuat( place.fAngle, CVec3( 0, 0, 1 ) ), pItem, place.nFloor );
 	return 0;
 END_SCRIPT_COMMAND
 ////////////////////////////////////////////////////////////////////////////////////////////////////

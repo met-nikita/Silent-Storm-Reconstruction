@@ -92,6 +92,10 @@ enum EUnitAction
 	UA_HEAL,
 	UA_MINE,
 	UA_ATTACK,
+	// retail action 9 (oracle s2_cmainiconbarset.h:141 "usetool" button; dropcorpse=10,
+	// weaponreload=0xb align after it): the use-tool action for a unit holding a TOOL
+	// (disassemble/mount turrets, disarm) -- dev's enum skipped it, shifting everything after.
+	UA_USETOOL,
 	UA_DROPCORPSE,
 	UA_WEAPONRELOAD,
 	UA_EXITPK,
@@ -138,6 +142,10 @@ enum EPanel
 	PANEL_STORE				= 0x00000002,
 	PANEL_INVENTORY		= 0x00000004,
 	PANEL_CHARACTER		= 0x00000008,
+	// retail hosts FOUR character sub-panels (skills/perks/medals/biography) switched exclusively
+	// (ActivateCharacterSubPanel @0x20f140); medals + biography were missing from the dev enum.
+	PANEL_MEDALS			= 0x00000010,
+	PANEL_BIOGRAPHY		= 0x00000020,
 	////
 	PANEL_ALL					= 0xFFFFFFFF
 };
@@ -308,6 +316,7 @@ public:
 	virtual NUI::ICursor* GetCursor() const = 0;
 	virtual NUI::CInterface* GetInterface() const = 0;
 	virtual bool IsInterfaceHidden() const = 0;
+	virtual bool IsSequence() const { return false; }   // retail mission vtbl+0x44: true while a scripted sequence runs (CMission override = nSequenceDepth>0)
 	////
 	virtual void SetWaitForPartFinished( bool bState ) = 0;
 	virtual bool IsWaitForPartFinished() const = 0;
@@ -347,13 +356,19 @@ protected:
 	vector<string> params;
 	CPtr<NRPG::CGlobalGame> pGlobalGame;
 	CPtr<NScenario::CScenarioZone> pZone;
+	// retail CICBeginMission +0x14 (zone ctor @0x20b7a0 param 7): a DIRECT mission->zone transition
+	// (script BeginZone) must "emulate the chapter map" leave-zone bookkeeping in Exec @0x20ba00 --
+	// notably UpdateScenarioOnLeaveZone, which clears deployData.pCorpse so a CARRIED BODY stays
+	// behind. Chapter/global-map entries leave it false (CICContinueChapter already ran it), and
+	// within-zone template walks leave it false (the carried body must cross sub-maps).
+	bool bEmulateChapter = false;
 
 public:
 	CICBeginMission() {}
 	CICBeginMission( int nTemplateID, int nVariantID, const vector<string> &params, NRPG::CGlobalGame *_pGlobalGame );
 	// ���� ��������� ���� ����� �������� �� ���������� template-��
-	CICBeginMission( NScenario::CScenarioZone *pZone, 
-		int _nTemplateID, const vector<string> &params, NRPG::CGlobalGame *_pGlobalGame );
+	CICBeginMission( NScenario::CScenarioZone *pZone,
+		int _nTemplateID, const vector<string> &params, NRPG::CGlobalGame *_pGlobalGame, bool bEmulateChapter = false );
 	virtual void Exec();
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
