@@ -10,6 +10,22 @@ https://github.com/nival/Silent-Storm
 Текущий статус: игра собирается и запускается на файлах Steam версии,
 но склонна к зависаниям, вылетам и в целом далека от релизной.
 
+<div align="center">
+  <table>
+    <tr>
+      <td colspan="3" align="center">
+        <img width="200" alt="image" src="https://github.com/user-attachments/assets/fff39b1f-1c8c-42d4-9b68-ca73cb45d51f" />
+      </td>
+    </tr>
+    <tr>
+      <td colspan="3" align="center">
+        <img width="200" alt="image" src="https://github.com/user-attachments/assets/483a8f95-eada-4e40-8d54-f18576291676" />
+        <img width="200" alt="image" src="https://github.com/user-attachments/assets/ad808b8d-4add-4a7c-98b1-4c776db496d3" />
+      </td>
+    </tr>
+  </table>
+</div>
+
 ---
 
 ## Сборка
