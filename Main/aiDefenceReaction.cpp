@@ -8,12 +8,15 @@
 #include "aiRouteMisc.h"       // NAI::GetNearestPlaces
 #include "aiRouteLogic.h"      // NAI::CreateAIStrafeToPositionLogic
 #include "aiCombatLogic.h"     // NAI::CreateAIDefenceLogic
-#include "aiInventory.h"       // NAI::CAIInventory::HasAnyWeapon
+#include "..\DBFormat\DataRPG.h"  // NDb::WT_PISTOL / WT_SUB_MACHINE_GUN -- BEFORE aiInventory.h (its NDB:: fwd-decl typo)
+#include "aiInventory.h"       // NAI::CAIInventory::GetFirstFireArms
+#include "aiWeapon.h"          // NAI::CAIFireArmsWeapon::GetAnimType (release hold-type gate)
 #include "wUnitServer.h"       // NWorld::CUnitServer (GetWorld/GetWearingDBPK/CanFight/wish-pose)
 #include "wMain.h"             // NWorld::CWorld::GetPathNetwork / GetGame
 #include "wMainPath.h"         // NWorld::FindPath
 #include "aiPath.h"            // NAI::CPath, NAI::PF_DEFAULT
-#include "RPGGame.h"           // NRPG::IGame::CheckPositionVisibility
+#include "RPGGame.h"           // NRPG::IGame::CheckPositionVisibility (the retail 4-arg overload)
+#include "RPGUnit.h"           // NRPG::CUnit::GetSightFOV (@0x2ba6c0) for the retail sight cone
 //
 #include "aiDefenceReaction.h"
 //
@@ -40,9 +43,15 @@ inline bool IsValidPlace( const SPathPlace &p )
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // NAI::IsUnitSeePosFromPos @0x3a270 -- can `pUnit` (placed at `from`, turned toward `target`) see `target`?
-// The release builds the sight cone explicitly (the unit's RPG sight range + GetSightFOV, vision CanSee);
-// the dev-native equivalent is NRPG::IGame::CheckPositionVisibility(observerPos, targetPos), which applies
-// sight range / FOV internally -- so the explicit range/FOV are elided (the same simplification snipe uses).
+// CONVERGED 1:1 to the retail chain (was the 2-arg CheckPositionVisibility approximation, whose leaf
+// IsCubeVisible demanded a 4-of-9 jittered-ray majority under a hardcoded N_SIGHTDISTANCE -- strictly
+// HARSHER than retail, so it reported "hidden" where retail sees; GetCoveredPosition then found spurious
+// FULL COVER on open ground and CanUseDefenceReaction sent pistol bandits into Defence where retail
+// rushes -- the GFirst car-guy):
+//   range = game->GetUnitSightDistance( unit RPG )      (@0x2984d0: flat 20, perks 0x53/0x51+night)
+//   fov   = rpg->GetSightFOV()                          (@0x2ba6c0: PI, perk 0x52)
+//   seer  = `from` turned toward the target             (GetClosestDir, 3 direction bits)
+//   return game->CheckPositionVisibility( seer, target.pos, range, fov )   (the 4-arg @0x298fa0)
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool IsUnitSeePosFromPos( IAIUnit *pUnit, const SUnitPosition &target, const SUnitPosition &from )
 {
@@ -55,9 +64,14 @@ bool IsUnitSeePosFromPos( IAIUnit *pUnit, const SUnitPosition &target, const SUn
 	NRPG::IGame *pGame = pUS->GetWorld()->GetGame();
 	if ( pNet == 0 || pGame == 0 )
 		return false;
+	NRPG::CUnit *pRPG = pUnit->GetRPGUnit();
+	if ( !IsValid( pRPG ) )
+		return false;
+	float fRange = pGame->GetUnitSightDistance( pRPG );
+	float fFOV = pRPG->GetSightFOV();
 	SUnitPosition seer = from;
 	seer.pos.p.SetDirection( (unsigned short)( (int)pNet->GetClosestDir( seer.pos.p, target.pos.p ) & 7 ) );
-	return pGame->CheckPositionVisibility( seer, target.pos );
+	return pGame->CheckPositionVisibility( seer, target.pos, fRange, fFOV );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // NAI::IsLocked @0x3a480 -- a dead server counts as locked; else locked iff some OTHER live object holds the
@@ -85,16 +99,34 @@ bool CanUseDefenceReactionInner( IAIUnit *pUnit, const SUnitPosition &cover, con
 		return false;
 	if ( !pUS->CanFight() )
 		return false;
-	// [pfnPosCompBusy elided: a unit-component vtbl-0xc predicate (the decode labelled it "busy"; the same
-	//  slot reads as the hidden flag elsewhere) -- semantic uncertain, omitted as a permissive plausibility gate]
+	// retail gate @0x43a55b-56e (vftable-dump-proven, was the elided "pfnPosCompBusy"): the CUnit-base
+	// vtbl+0xc == CUnitServer::IsHiding @0x3bf350 -> NRPG::CUnitMission::IsHiding @0x2c5b30 (+0x190
+	// bHiding). A unit already sneaking/hidden may NOT enter Defence (it must not abandon concealment
+	// for a crouch-dash to cover). Probe TRUE -> the whole predicate returns false.
+	if ( pUS->IsHiding() )
+		return false;
 	IPathNetwork *pNet = pUS->GetWorld()->GetPathNetwork();
 	if ( pNet == 0 )
 		return false;
+	// retail @0x3a4f0 probes the path net's REAL point validity on both places (net vtbl+0xb0 ==
+	// IsValidDestination, two calls in the decomp) -- not just the 0xc0000000 sentinel-bit test. The
+	// sentinel check stays as the cheap pre-filter (IsValidDestination on a sentinel is UB-ish).
 	if ( !IsValidPlace( cover.pos.p ) || !IsValidPlace( attack.pos.p ) )
 		return false;
-	// the unit must carry a firearm. The release wants a HOLSTERED LONG ARM (model hold type 1 or 3); the
-	// GetFirstFireArms + hold-type accessor is absent in the dev tree, so approximated by "has any weapon".
-	if ( !IsValid( pUnit->GetAIInventory() ) || !pUnit->GetAIInventory()->HasAnyWeapon() )
+	if ( !pNet->IsValidDestination( cover.pos.p ) || !pNet->IsValidDestination( attack.pos.p ) )
+		return false;
+	// the unit must carry a SHORT arm -- pistol or SMG. Release CanUseDefenceReactionInner @0x3a4f0 gate
+	// @0x43a677: weapon->GetModel()->pAnimWeaponType[+0x6c]->type[+0x38] in {WT_PISTOL=1, WT_SUB_MACHINE_GUN=3}
+	// (the answer-key "HOLSTERED LONG ARM, hold type 1 or 3" comment was WRONG -- 1/3 is pistol/SMG). The old
+	// HasAnyWeapon() approximation wrongly let rifle/MG/heavy-weapon units take cover. Same accessor chain the
+	// assassin gate reads (aiAssassinReaction.cpp:224-229). NOTE: a pistol passes this in BOTH retail and the
+	// a5dll, so this does not by itself stop a pistol unit from entering Defence -- it only excludes long arms.
+	CAIInventory *pInv = pUnit->GetAIInventory();
+	CAIFireArmsWeapon *pWeapon = IsValid( pInv ) ? pInv->GetFirstFireArms() : 0;
+	if ( !IsValid( pWeapon ) )
+		return false;
+	int nType = pWeapon->GetAnimType();
+	if ( nType != NDb::WT_PISTOL && nType != NDb::WT_SUB_MACHINE_GUN )
 		return false;
 	// the pop-out move must cost something (the cover/attack pair must differ)
 	if ( GetAPForMove( pUnit, cover.pos.p, attack.pos.p, CROUCH ) <= 0 )
@@ -235,9 +267,10 @@ void CAIDefenceReaction::StrafeToCover( IAIUnit *pU, int nAP )
 //   en route rich -> strafe to the attack spot (> 2x the price);
 //   en route poor -> strafe to cover, clamping the pool to what remains.
 //
-// ELIDED: the release brackets the dance with DisableShootMode/EnableShootMode (kinds 2,4) -- those IAIUnit
-// vtbl 0x7c/0x80 methods are absent from the dev tree, so the shoot-mode toggling is omitted (the unit may
-// auto-fire during the cover approach -- a behaviour refinement, not part of the core decision).
+// The release brackets the dance with DisableShootMode/EnableShootMode on SM_Careful/SM_LongBurst
+// (IAIUnit vtbl 0x7c/0x80, now ported on CAIUnit): disabled while the dance runs, re-enabled on the
+// revert-to-prev path (disasm 0x43b205-0x43b260; the old oracle "Subscribe kinds 2,4" label was wrong --
+// the constants are the NDb::EShootMode values). GetBestFireArms' @0x560e0 per-mode gate consumes them.
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CAIDefenceReaction::Update()
 {
@@ -248,9 +281,16 @@ void CAIDefenceReaction::Update()
 	CAIReaction *pPrev = pPrevReaction.GetPtr();
 	if ( !bOK && IsValid( pPrev ) )
 	{
+		// @0x3b160 revert bracket: re-enable the modes the dance disabled, THEN hand back
+		pU->EnableShootMode( NDb::SM_Careful );
+		pU->EnableShootMode( NDb::SM_LongBurst );
 		pU->SetReaction( pPrev );   // hand the unit back to the fall-back reaction
 		return;
 	}
+	// @0x3b160 active bracket (first thing after the revert branch, before the AP read):
+	// suppress the slow/expensive modes while the cover dance runs
+	pU->DisableShootMode( NDb::SM_Careful );
+	pU->DisableShootMode( NDb::SM_LongBurst );
 	int nAP = pU->GetAP();
 	SUnitPosition own = pU->GetUnitPosition();
 	bool bAtCover = GetAPForMove( pU, own.pos.p, coveredPos.pos.p, own.GetPose() ) == 0;
@@ -260,7 +300,8 @@ void CAIDefenceReaction::Update()
 	{
 		if ( nAP < 2 * nAPForTakeCover )
 			pU->SetAP( nAP, pU->GetMaxAP() );
-		SetLogic( CreateAIStrafeToPositionLogic( pU, attackPos.pos, CROUCH, CROUCH ) );
+		IAILogic *pStrafe = CreateAIStrafeToPositionLogic( pU, attackPos.pos, CROUCH, CROUCH );
+		SetLogic( pStrafe );
 	}
 	else if ( bAtAttack )
 	{
@@ -273,7 +314,10 @@ void CAIDefenceReaction::Update()
 			StrafeToCover( pU, nAP );
 	}
 	else if ( nAP > 2 * nAPForTakeCover )
-		SetLogic( CreateAIStrafeToPositionLogic( pU, attackPos.pos, CROUCH, CROUCH ) );
+	{
+		IAILogic *pStrafe = CreateAIStrafeToPositionLogic( pU, attackPos.pos, CROUCH, CROUCH );
+		SetLogic( pStrafe );
+	}
 	else
 		StrafeToCover( pU, nAP );
 	bJustStarted = false;

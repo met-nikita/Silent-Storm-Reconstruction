@@ -19,9 +19,11 @@ namespace NWorld
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CDFrozenItem
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail ctor @0x34aaf0 (ret 0x20 = 7 semantic args + the vbase flag): the trailing bool is stored to
+// +0x88 (bIsTemporaryVisible) at @0x74ac69 `mov [ebx+0x88], dl` -- dl = arg 7.
 CDFrozenItem::CDFrozenItem( CSyncSrc<IVisObj> *pShow, const SItemRenderInfo &_model, const SHMatrix &_m,
-	int _nFloor, NRPG::IInventoryItem *_pItem, CDebrisControllerTrash *_pTrash )
-	: model(_model), m(_m), nFloor(_nFloor), pInvItem(_pItem), pTrash( _pTrash )
+	int _nFloor, NRPG::IInventoryItem *_pItem, CDebrisControllerTrash *_pTrash, bool _bIsTemporaryVisible )
+	: model(_model), m(_m), nFloor(_nFloor), pInvItem(_pItem), pTrash( _pTrash ), bIsTemporaryVisible( _bIsTemporaryVisible )
 {
 	bindGlobal.Link( pShow, this );
 	//
@@ -31,6 +33,28 @@ CDFrozenItem::CDFrozenItem( CSyncSrc<IVisObj> *pShow, const SItemRenderInfo &_mo
 		nMaxVP = 1;
 	//
 	nVP = nMaxVP;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail CDFrozenItem::GetVisiblePos @0x349e50 -- the LOS probe points of an on-ground item:
+//   pRes->resize(1); (*pRes)[0] = m.GetTranslation();          // fallback: the matrix translation
+//   NAI::GetSpheres( model.pModel, &spheres );                 // the model's mass spheres (model space)
+//   if ( !spheres.empty() ) { pRes->resize( spheres.size() );
+//       for (i) (*pRes)[i] = m * spheres[i].ptCenter; }        // centres pushed through the world matrix
+// so a rifle lying flat probes one point per collision sphere along its length, not just the origin.
+// (Oracle: s2_scratch/src/s2_cdfrozenitem.h `CDFrozenItem_GetVisiblePos`.)
+void CDFrozenItem::GetVisiblePos( vector<CVec3> *pRes ) const
+{
+	pRes->resize( 1 );
+	(*pRes)[0] = m.GetTranslation();
+	vector<SMassSphere> spheres;
+	CVec3 massCenter;
+	NAI::GetSpheres( model.pModel, &spheres, &massCenter );
+	if ( !spheres.empty() )
+	{
+		pRes->resize( spheres.size() );
+		for ( int i = 0; i < (int)spheres.size(); ++i )
+			m.RotateHVector( &(*pRes)[i], spheres[i].ptCenter );
+	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 int CDFrozenItem::ProcessAttack( int nUserID, NRPG::CAttackPortion *pAttack, NDb::CRPGArmor *pArmor )
@@ -86,6 +110,16 @@ CDItem::CDItem( CSyncSrc<IVisObj> *pShow, const SItemRenderInfo &_model, CFuncBa
 	: model(_model), pAnimation(_pAnim), nFloor(_nFloor), pInvItem(_pItem), pVisibilityParent(_pVisibilityParent)
 {
 	bindGlobal.Link( pShow, this );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail CDItem::GetPos @0x34a030: DGPtr-style refresh of the skeleton animation (frame-stamp check +
+// Process), then the root bone's position -- the item's CURRENT physics position. Used by
+// FilterVisibleItems<CDItem> @0x34bd40 as the gather-range test point.
+CVec3 CDItem::GetPos() const
+{
+	CDGPtr< CFuncBase<NAnimation::SSkeletonPose> > pPos = GetAnimation();
+	pPos.Refresh();
+	return pPos->GetValue()[0].pos;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CDItem::Visit( IRenderVisitor *p )
@@ -222,6 +256,14 @@ void CDebrisController::AddDebris( const SItemRenderInfo &_model, NAI::IAIMap *p
 	// Segment @0x34b4b0 reads it back (IVisible vtbl+8) and forwards `parent != 0` to AddFrozenItem
 	// @0x34b100 -- without it a fog-gated cap became unconditionally visible the moment it settled.
 	CDItem *pI = new CDItem( ( _pItem || pVisibilityParent ) ? GetVisibleShowList() : GetShowList(), _model, pAnimator, N_VISIBLE_FLOOR, _pItem, pVisibilityParent ); // CRAP nFloor
+	// retail AddDebris @0x74b04a: the fog-gated flying item is ALSO published into
+	// visibleDynamicItems so CUnitServer::UpdateVisible's dynamic-items loop (@0x7c5341, via
+	// GetVisibleDynamicItems) can LOS-reveal it in flight. Retail's publish gate is
+	// `pVisibilityParent != 0` alone (@0x74b04a `test ebp,ebp`) because retail DropItems @0x3502c0
+	// threads the parent for EVERY drop; dev callers still launch parent-less item drops, so the
+	// compound (pItem || parent) gate reproduces the same routing until every caller threads it.
+	if ( _pItem || pVisibilityParent )
+		visibleDynamicItems.push_back( pI );
 	Add( pI, pSphere );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -239,28 +281,34 @@ void CDebrisController::ActivateDebris( const SSphere &sphere, NAI::IAIMap *pAIM
 		float fDist = fabs( vel );
 		Normalize( &vel ); vel += CVec3(0,0,1);
 		vel *= Max( 0.0f, 1 - sqr( fDist / sphere.fRadius ) );
-		AddDebris( p->GetModel(), pAIMap, pos, QNULL, vel, pTime, p->GetInvItem() );
+		// retail ActivateDebris @0x34a640 passes the frozen item's own CObjectBase as the
+		// visibility parent (disasm: the vbase-adjusted item pointer rides in the AddDebris call),
+		// so a blast-tossed item stays fog-gated + published as a dynamic vision candidate.
+		AddDebris( p->GetModel(), pAIMap, pos, QNULL, vel, pTime, p->GetInvItem(), p );
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CDFrozenItem* CDebrisController::AddFrozenItem( const SHMatrix &m, NRPG::IInventoryItem *pInvItem, const SItemRenderInfo &_model, int nFloor, bool bVisibleGated )
+CDFrozenItem* CDebrisController::AddFrozenItem( const SHMatrix &m, NRPG::IInventoryItem *pInvItem, const SItemRenderInfo &_model, int nFloor, bool bTemporaryVisible, bool bVisibleGated )
 {
 	// retail @0x34b100: `(pInvItem == 0 && !bVisibleGated) ? GetShowList() : GetVisibleShowList()`,
 	// and the visibleItems (vision-candidate) publish runs when `pInvItem != 0 || bVisibleGated`.
 	// bVisibleGated covers the item-less uniform cap of an UNSEEN unit: its frozen form must sit on
 	// the fog-gated list AND be discoverable by CUnitServer::UpdateVisible's GetVisibleItems query,
 	// so gaining LOS reveals it -- the bare `pInvItem != 0` test parked it on the always-on list.
+	// bTemporaryVisible threads straight into the CDFrozenItem ctor (@0x74b15b, ctor arg 7).
 	bool bIsVisibleItem = pInvItem != 0 || bVisibleGated;
 	CDFrozenItem *pWorldItem = new CDFrozenItem(
 		bIsVisibleItem ? GetVisibleShowList() : GetShowList(),
-		_model, m, nFloor, pInvItem, pTrash );
+		_model, m, nFloor, pInvItem, pTrash, bTemporaryVisible );
 	if ( bIsVisibleItem )
 		visibleItems.push_back( pWorldItem );
 	showFrozenItems.push_back( pWorldItem );
 	return pWorldItem;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CDFrozenItem* CDebrisController::AddFrozenItem( const CVec3 &pos, const CQuat &rot, NRPG::IInventoryItem *pInvItem, int nFloor )
+// retail public overload @0x34b340: (pMap, pos, rot, pInvItem, bool bTemporaryVisible, int nFloor);
+// @0x74b45d forwards bTemporaryVisible as the inner overload's arg 6 and hardwires bVisibleGated 0.
+CDFrozenItem* CDebrisController::AddFrozenItem( const CVec3 &pos, const CQuat &rot, NRPG::IInventoryItem *pInvItem, bool bTemporaryVisible, int nFloor )
 {
 	CPtr<NRPG::IInventoryItem> pHold( pInvItem );
 	if ( !IsValid( pInvItem->GetDBItem()->pModel ) )
@@ -271,7 +319,7 @@ CDFrozenItem* CDebrisController::AddFrozenItem( const CVec3 &pos, const CQuat &r
 	SRand rnd;
 	SHMatrix m;
 	MakeMatrix( &m, pos, rot );
-	CDFrozenItem *pWorldItem = AddFrozenItem( m, pInvItem, pInvItem->GetDBItem()->pModel->CreateModel( &rnd ), nFloor );
+	CDFrozenItem *pWorldItem = AddFrozenItem( m, pInvItem, pInvItem->GetDBItem()->pModel->CreateModel( &rnd ), nFloor, bTemporaryVisible );
 	return pWorldItem;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -290,17 +338,39 @@ void CDebrisController::RemoveFrozenItem( NRPG::IInventoryItem *pInvItem )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CDebrisController::GetVisibleItems( const SSphere &sphere, list<IVisible*> *pRes )
 {
+	// retail FilterVisibleItems<CDFrozenItem> @0x34bc40: dead entries erased; the range test point is
+	// the item's GetPos() (the IItem-base vtbl+4 @0x34c290, m.GetTranslation()) -- the multi-point
+	// GetVisiblePos is only for the LOS rays, not the gather.
 	for ( list<CPtr<CDFrozenItem> >::iterator i = visibleItems.begin(); i != visibleItems.end(); )
 	{
 		CDFrozenItem *p = *i;
 		if ( IsValid(p) )
 		{
-			if ( fabs2( p->GetVisiblePos() - sphere.ptCenter ) <= sqr( sphere.fRadius ) )
+			if ( fabs2( p->GetPos() - sphere.ptCenter ) <= sqr( sphere.fRadius ) )
 				pRes->push_back( p );
 			++i;
 		}
 		else
 			i = visibleItems.erase( i );
+	}
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail GetVisibleDynamicItems @0x34a420 -> FilterVisibleItems<CDItem> @0x34bd40: the same
+// erase-dead + range filter over the in-flight vision candidates; the test point is the item's
+// CURRENT physics position (CDItem::GetPos @0x34a030, the refreshed root-bone pos).
+void CDebrisController::GetVisibleDynamicItems( const SSphere &sphere, list<IVisible*> *pRes )
+{
+	for ( list<CPtr<CDItem> >::iterator i = visibleDynamicItems.begin(); i != visibleDynamicItems.end(); )
+	{
+		CDItem *p = *i;
+		if ( IsValid(p) )
+		{
+			if ( fabs2( p->GetPos() - sphere.ptCenter ) <= sqr( sphere.fRadius ) )
+				pRes->push_back( p );
+			++i;
+		}
+		else
+			i = visibleDynamicItems.erase( i );
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -319,9 +389,10 @@ bool CDebrisController::Segment( SSphere *pInvalidate )
 			SHMatrix pos;
 			const NAnimation::SBonePose &bone = pPos->GetValue()[0];
 			MakeMatrix( &pos, bone.pos, bone.rot );
-			// retail @0x34b4b0 settle: bVisibleGated = (pI->GetVisibilityParent() != 0) -- the launch-time
-			// fog gate carried on the flying CDItem decides the frozen item's show list + vision candidacy.
-			AddFrozenItem( pos, pI->GetInvItem(), pI->GetModel(), pI->GetFloor(), pI->GetVisibilityParent() != 0 );
+			// retail @0x34b4b0 settle (disasm @0x74b5eb): bVisibleGated = (pI->GetVisibilityParent() != 0,
+			// read via IVisible vtbl+8) -- the launch-time fog gate carried on the flying CDItem decides
+			// the frozen item's show list + vision candidacy; bTemporaryVisible = 0 (push 0 @0x74b5f0).
+			AddFrozenItem( pos, pI->GetInvItem(), pI->GetModel(), pI->GetFloor(), false, pI->GetVisibilityParent() != 0 );
 			showItems.remove( pI );
 			bc.Add( bone.pos, 1 );
 		}

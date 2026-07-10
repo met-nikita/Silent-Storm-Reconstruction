@@ -51,7 +51,7 @@ void CSimpleExecQueue::Run()
 {
 	while ( !execList.empty() )
 	{
-		CObj<CSimpleExecQueue> pHold( this ); // �� ��� ������, ���� ���� ���� � ������ ���������� ��������
+		CObj<CSimpleExecQueue> pHold( this ); // in case the unit dies while the action is being executed
 		execList.front()->Run();
 		EFinishType f = execList.front()->GetState();
 		if ( f == RUNNING )
@@ -297,7 +297,7 @@ static bool CanSimplyOpen( NAI::IPathNetwork *pNet, NAI::SPathPlace &from, IWind
 void CExecQueue::AddPath( NAI::CPath *pPath, NAI::EFindPathParams _eParams, ENeedActiveItem eActive, IExecMove *pOldFront,
 	bool bCheckCanRotate )
 {
-	// ��������� ����
+	// break the path apart into segments
 	CPtr<NAI::CPath> pSimplePath = new NAI::CPath;
 	pSimplePath->pNet = pPath->pNet;
 	pSimplePath->bStrafePath = pPath->bStrafePath;
@@ -328,7 +328,7 @@ void CExecQueue::AddPath( NAI::CPath *pPath, NAI::EFindPathParams _eParams, ENee
 				continue;
 			}
 
-			//  ��������� �������������� ����� ��������, ����� �������� �������� ����� � ���������� �������
+			// add an extra turn point so the character opens the door from the correct side
 			if ( nBestDir != p.GetDirection() )
 			{
 				NAI::SPathPlace newPoint( p );

@@ -42,9 +42,9 @@ class IAIInventoryItem;
 class IAILogRecord: public CObjectBase
 {
 public:
-	virtual void RollBack() = 0; // �������� 
+	virtual void RollBack() = 0; // roll back
 	virtual void Commit() = 0;
-	virtual void GetCommands( list< CPtr<NWorld::CCommand> > *Commands ) = 0; // ������ �������� �� ����������
+	virtual void GetCommands( list< CPtr<NWorld::CCommand> > *Commands ) = 0; // issue commands for execution
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 //	IAILogContainer
@@ -52,9 +52,9 @@ public:
 class IAILogContainer: public IAILogRecord
 {
 public:
-	virtual void Add( IAILogRecord *pAILogRecord, bool bCommit = false ) = 0; // �������� ������ 
-	virtual void Add( IAILogContainer *pAILogContainer ) = 0; // �������� ��� ������ ����������
-	virtual void Clear() = 0; // ������� ��� ������ ��� ������
+	virtual void Add( IAILogRecord *pAILogRecord, bool bCommit = false ) = 0; // add a record
+	virtual void Add( IAILogContainer *pAILogContainer ) = 0; // add all records of the container
+	virtual void Clear() = 0; // delete all records without rolling back
 	virtual list< CObj<IAILogRecord> > *GetLogRecords() = 0;
 	virtual bool IsEmpty() = 0;
 };
@@ -66,7 +66,7 @@ class CAILogRecord: public IAILogRecord
 	OBJECT_BASIC_METHODS(CAILogRecord);
 	ZDATA
 public:
-	CPtr<IAIUnit> pAIUnit; // ��� ��� ������������ �������� 
+	CPtr<IAIUnit> pAIUnit; // whom the action is performed on
 	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&pAIUnit); return 0; }
 	CAILogRecord() {}
 	CAILogRecord( IAIUnit *_pAIUnit ) : pAIUnit(_pAIUnit) {}
@@ -96,7 +96,7 @@ public:
 	virtual void GetCommands( list< CPtr<NWorld::CCommand> > *Commands );
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// CAILogShot - �������
+// CAILogShot - a shot
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CAILogShot: public CAILogRecord
 {

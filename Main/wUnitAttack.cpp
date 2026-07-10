@@ -523,14 +523,14 @@ CCommandExecute* CreateActionExecutor( CUnitServer *pUS, CCmd *pCmd, EUnitComman
 				EActionType eType = GetActionType(pUS);
 
 				CDynamicCast<NWorld::CWindowDoor> pWDTarget(pAttackObject->pTarget);
-				if ((eType == AT_GRENADE) && (IsValid(pWDTarget) || !IsValid(pAttackObject->pTarget))) //// CRAP!: ��� CanDo
+				if ((eType == AT_GRENADE) && (IsValid(pWDTarget) || !IsValid(pAttackObject->pTarget))) //// CRAP!: for CanDo
 				{
 					CDynamicCast<NRPG::IGrenadeItemInfo> pGrenade(pUS->GetRPG()->GetInventoryInfo()->GetActive());
 					if (IsValid(pGrenade) && (pGrenade->GetMode() == NRPG::GM_SETTRAP))
 						return CreateActionQueue(pUS, new CCmdSetGrenadeOnObject(pAttackObject->pTarget), new CExecSetTrap(pUS, pWDTarget), ITEM_ACTIVE, pError);
 				}
 
-				if (IsValid(pUnitTarget) || !IsValid(pAttackObject->pTarget)) //// CRAP!: ��� CanDo
+				if (IsValid(pUnitTarget) || !IsValid(pAttackObject->pTarget)) //// CRAP!: for CanDo
 				{
 					switch (eType)
 					{
@@ -552,8 +552,8 @@ CCommandExecute* CreateActionExecutor( CUnitServer *pUS, CCmd *pCmd, EUnitComman
 					}
 				}
 
-				/// CRAP #1: ��������� ���� ������ ������� ����
-				/// CRAP #2: ����� ������� = ����� ����� ��� ��������
+				/// CRAP #1: some weapon types attack a tile
+				/// CRAP #2: attacking an object = attacking the tile under the object
 				if (!IsValid(pAttackObject->pTarget))
 				{
 					EActionType eType = GetActionType(pUS);
@@ -593,7 +593,7 @@ CCommandExecute* CreateActionExecutor( CUnitServer *pUS, CCmd *pCmd, EUnitComman
 						return CreateActionQueue(pUS, pSetTrap.GetPtr(), new CExecSetTrap(pUS, pTarget), ITEM_ACTIVE, pError);
 					else
 					{
-						*pError = UCR_INVALID_COMMAND; // ������� ��������� �� �� �����
+						*pError = UCR_INVALID_COMMAND; // asked to set the trap on something that isn't a door
 						return 0;
 					}
 				}
@@ -615,7 +615,7 @@ CCommandExecute* CreateActionExecutor( CUnitServer *pUS, CCmd *pCmd, EUnitComman
 									return CreateActionQueue(pUS, pDisarm.GetPtr(), new CExecDisarmMine(pUS, pMine), ITEM_ACTIVE, pError);
 								else
 								{
-									*pError = UCR_INVALID_COMMAND; // ����������� ����� ������ ���� � �������
+									*pError = UCR_INVALID_COMMAND; // only mines and traps can be disarmed
 									return 0;
 								}
 							}

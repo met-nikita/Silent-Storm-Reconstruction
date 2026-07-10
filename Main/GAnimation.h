@@ -18,6 +18,7 @@ namespace NGScene
 {
 	class CCInt;
 }
+namespace NWorld { class CUnitServer; }   // fwd for AddDynamics' pServer (-> CParticleSkeleton::pUnit)
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 namespace NAnimation
 {
@@ -395,8 +396,13 @@ public:
 	
 	void AddBoneFilter( STime tFrom, CFuncBase<SSkeletonPose> *pSource, int nAddBone );
 
-	void AddDynamics( STime tFrom, STime tMaxAnim, const CVec3 &impact, 
-		NAI::IAIMap *pMap, NGScene::CCInt *pFloor, CAnimator *pEffector = 0 );
+	// retail @0xdd4e0 9-arg form: + ptWhereImpact (the impulse falloff origin -- Die passes the raw-cast
+	// SUnitPosition bytes, an ORIGINAL BUG), + pServer (-> CParticleSkeleton::pUnit), + bFall
+	// (fDeathFall > 0: hands collide immediately). ptWhereImpact/bFall are stored only on the
+	// non-effector (real ragdoll) branch, like retail.
+	void AddDynamics( STime tFrom, STime tMaxAnim, const CVec3 &impact, const CVec3 &ptWhereImpact,
+		NAI::IAIMap *pMap, NGScene::CCInt *pFloor, NWorld::CUnitServer *pServer,
+		CAnimator *pEffector = 0, bool bFall = false );
 	bool IsInstableCorpse();
 	bool CalmCorpse();
 	// later

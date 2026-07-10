@@ -221,7 +221,7 @@ void CWeaponItem::CreateNewAttackPortion( vector<CAttackPortion> *pRes, bool bSp
 	float fUW = pInnerClip->GetDBAmmo()->fUnitWeight;
 	int nK = (int)( fUW * pDBWeapon->nInitialVelocity );
 	pRes->push_back( CAttackPortion( nK, pInnerClip->GetDBAmmo()->nBulletType, info.nDmgMin, info.nDmgMax,
-	info.nArmorPiercingAbility, 0 ) ); // вероятность и сложность critical вычисляется в RPGUnitMission
+	info.nArmorPiercingAbility, 0 ) ); // пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ critical пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅ RPGUnitMission
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 int CWeaponItem::GetClipType() const
@@ -265,10 +265,10 @@ bool CWeaponItem::FindProperClip( IInventoryInfo *pInventory,
 	SFindClipResult *pResult, bool bCheckSameColor ) const
 {
 	ASSERT( pResult );
-	// если патроны в рожке не закончились, то туда можно сыпать только тот же тип патронов
+	// пїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅ пїЅпїЅпїЅпїЅпїЅ пїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ, пїЅпїЅ пїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅ пїЅпїЅ пїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ
 	bool bSameColor = bCheckSameColor || pInnerClip->GetIncQuantity() > 0;
-	// Ищем обойму такого же типа как сейчас в оружии
-	// ищем в slot-ах
+	// пїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅ пїЅпїЅпїЅпїЅ пїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ пїЅ пїЅпїЅпїЅпїЅпїЅпїЅ
+	// пїЅпїЅпїЅпїЅ пїЅ slot-пїЅпїЅ
 	for ( int i = 0; i < NDb::N_SLOTS; ++i )
 	{
 		CDynamicCast<CClipItem> pClip(pInventory->Get(NDb::ESlot(i)));
@@ -283,7 +283,7 @@ bool CWeaponItem::FindProperClip( IInventoryInfo *pInventory,
 			}
 		}
 	}
-	// ищем в рюкзаке
+	// пїЅпїЅпїЅпїЅ пїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ
 	const vector<SBackPackItem> &items = pInventory->GetItems();
 	for ( int i = 0; i < items.size(); ++i )
 	{
@@ -402,7 +402,7 @@ void CMeleeWeaponItem::CreateNewAttackPortion( vector<CAttackPortion> *pRes )
 	pRes->push_back( CAttackPortion( 
 		110, 2, 
 		pDBMelee->nDmgMin, pDBMelee->nDmgMax, 
-		0, 0 ) ); // piercing ability(+str*10), вероятность и сложность critical вычисляется в RPGUnitMission
+		0, 0 ) ); // piercing ability(+str*10), пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ critical пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅ RPGUnitMission
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 NDb::EWeaponType CMeleeWeaponItem::GetWeaponType() const
@@ -457,7 +457,7 @@ IInventoryItem *CreateClipItem( NDb::CRPGClip *pDBClip, NDb::CRPGAmmo *pDBAmmo, 
 	CDBPtr<NDb::CRPGAmmo> pTmpDBAmmo = pDBAmmo;
 	if ( !IsValid( pTmpDBAmmo ) )
 	{
-		// ищем подходящие патроны
+		// пїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ
 		CDBTable<NDb::CRPGAmmo> *pAmmoTable = NDatabase::GetTable<NDb::CRPGAmmo>();
 		CDBIterator<NDb::CRPGAmmo> i(*pAmmoTable);
 		while ( pAmmoTable && i.MoveNext() )
@@ -483,15 +483,20 @@ IInventoryItem *CreateClipItem( NDb::CRPGClip *pDBClip, NDb::CRPGAmmo *pDBAmmo, 
 	}
 	else
 	{
-		// В базе данных нет подходящего clip-а
-		// Ошибка дизайнеров
+		// пїЅ пїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ clip-пїЅ
+		// пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ
 		ASSERT( 0 );
 	}
 	//
 	return 0;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-class CClueItem: public CInventoryItem
+// retail NRPG::CSimpleItem<NRPG::IClueItem> (ctors @0x2a58e0/@0x2a4b90/@0x2a8800): the IClueItem
+// marker base is what CMissionUI::UpdateVisibleItems @0x2130c0 RTDynamicCast-detects to raise the
+// in-world CClueIcon marker over a discovered clue pickup. No data of its own beyond CInventoryItem.
+// (Save id 0x51012110 is this fork's established one -- retail registers the class as 0xB3212130,
+// register thunk @0x8a3a40 -- kept for save compatibility with existing dev saves.)
+class CClueItem: public CInventoryItem, public IClueItem
 {
 	OBJECT_BASIC_METHODS( CClueItem );
 	ZDATA
@@ -501,6 +506,21 @@ class CClueItem: public CInventoryItem
 public:
 	CClueItem() {}
 	CClueItem( NDb::CRPGItem *_pItem ): CInventoryItem( _pItem ) {}
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail NRPG::CSimpleItem<NRPG::IHintItem> (ctors @0x2a5a20/@0x2a4d40/@0x2a8e20): the in-world
+// "hint" pickup item. Identical shape to the clue item; the IHintItem marker base is what
+// UpdateVisibleItems @0x2130c0 detects to raise a CHintIcon (gated by "ui_showhints").
+class CHintItem: public CInventoryItem, public IHintItem
+{
+	OBJECT_BASIC_METHODS( CHintItem );
+	ZDATA
+	ZPARENT( CInventoryItem );
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,(CInventoryItem *)this); return 0; }
+	//
+public:
+	CHintItem() {}
+	CHintItem( NDb::CRPGItem *_pItem ): CInventoryItem( _pItem ) {}
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CToolItem
@@ -549,6 +569,20 @@ IInventoryItem *CreateClueItem( NDb::CRPGItem *pDBItem )
 		return 0;
 	//
 	return new CClueItem( pDBItem );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail NRPG::CreateHintItem @0x2a21a0 (disasm 0x6a21d3: mov ecx,0x1b6; push 1 -> GetRPGItem(0x1b6,1)):
+// every in-world hint pickup wraps the FIXED db RPG item 0x1b6 in a CSimpleItem<IHintItem>.
+// (The null guard mirrors the dev CreateClueItem shape; retail's GetRPGItem second arg 1 is its
+// assert-on-missing flag.)
+IInventoryItem *CreateHintItem()
+{
+	NDb::CRPGItem *pDBItem = NDb::GetRPGItem( 0x1b6 );
+	ASSERT( IsValid( pDBItem ) );
+	if ( !IsValid( pDBItem ) )
+		return 0;
+	//
+	return new CHintItem( pDBItem );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 IWeaponItem *CreateWeaponItem( NDb::CRPGWeapon *pDBWeapon )
@@ -650,6 +684,7 @@ REGISTER_SAVELOAD_CLASS( 0xA2312140, CPotionItem )
 REGISTER_SAVELOAD_CLASS( 0xA2312141, CPotionContainer )
 REGISTER_SAVELOAD_TEMPL_CLASS( 0x11462170, CMineDetectorItem, CSomeItem )
 REGISTER_SAVELOAD_CLASS( 0x51012110, CClueItem )
+REGISTER_SAVELOAD_CLASS( 0xB3212131, CHintItem )	// retail CSimpleItem<IHintItem> id (register thunk @0x8a3a70)
 REGISTER_SAVELOAD_TEMPL_CLASS( 0x018c2110, CMineItem, CSomeItem )
 REGISTER_SAVELOAD_TEMPL_CLASS( 0x024c2141, CKeyItem, CSomeItem )
 REGISTER_SAVELOAD_CLASS( 0x024c2140, CToolItem )

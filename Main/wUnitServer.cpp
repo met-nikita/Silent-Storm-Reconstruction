@@ -18,6 +18,7 @@
 #include "..\Misc\RandomGen.h"
 #include "RPGUnit.h"
 #include "aiPath.h"
+#include "aiMap.h"                // NAI::IAIMap::GetObjectBound (mine-LOS probe pull-back)
 #include "aiSignal.h"
 #include "scScenarioTracker.h"
 #include "scriptCallLUA.h"		// NScript::luaCallFunction (OnClickUsable)
@@ -35,6 +36,7 @@
 #include "..\DBFormat\DataAck.h"
 #include "RPGVision.h"
 #include "aiCommander.h"
+#include "aiMisc.h"               // NAI::IsAIPlayer (retail IsAIUnit @0x3c0340 probe)
 //
 namespace NWorld
 {
@@ -176,7 +178,9 @@ void CUnitServer::OnUnitMadeUnconscious( bool bFromScript )
 	SetState( new CUnitStateUnconscious( this ) );
 	if ( !bFromScript )
 	{
-		GetWorld()->AddUICommand( new CUICmdUnit( this ) );
+		// BUG 5 (auto-focus): retail OnUnitMadeUnconscious @0x3c2010 posts CUICmdUnitCamera(self,
+		// PR_UNIT_IS_DEAD, false, 1.0, null) -- the arbitrated auto-focus, not the old one-unit CUICmdUnit.
+		GetWorld()->AddUICommand( new NWorld::CUICmdUnitCamera( this, NWorld::PR_UNIT_IS_DEAD, false, 1.0f, 0 ) );
 		GetWorld()->GetAISignalManager()->Add( NAI::CreateAICorpseSignal( this ) );
 	}
 }
@@ -196,16 +200,23 @@ void CUnitServer::Die( bool bRemove )
 	GetWorld()->OnUnitDied( this );
 	if ( !bRemove )
 		GetWorld()->GetGlobalAck()->OnUnitDied( this );
-	// ������� ack-� ����� unit-�
+	// remove this unit's acks
 	GetWorld()->GetGlobalAck()->RemoveUnitAcks( this );
 	//
 	if ( !bRemove )
 	{
-		// ����� ���������
+		// new state
 		pState->OnDeath();
 		pExec = 0;
 		pCurrentCmd = 0;
 		SetState( new CUnitStateDeath( this ) );
+		// BUG 5 (auto-focus): retail CUnitServer::Die @0x3c2190 posts CUICmdUnitCamera(self,
+		// beauty?PR_UNIT_DIED_BEAUTY:PR_UNIT_IS_DEAD, useSloMo=beauty, 3.0, null) -- a HERO death gets the
+		// slow-mo "beauty shot" (beauty = GetRPG()->IsHero(), the retail cVar6 test; retail also ORs a 2nd
+		// Die bool the a5dll's single-arg Die lacks -- heroes qualify regardless).
+		bool bBeauty = IsValid( GetRPG() ) && GetRPG()->IsHero();
+		GetWorld()->AddUICommand( new NWorld::CUICmdUnitCamera( this,
+			bBeauty ? NWorld::PR_UNIT_DIED_BEAUTY : NWorld::PR_UNIT_IS_DEAD, bBeauty, 3.0f, 0 ) );
 		//
 		GetWorld()->GetAISignalManager()->Add( NAI::CreateAICorpseSignal( this ) );
 	}
@@ -228,7 +239,7 @@ void CUnitServer::AddImpulse( const CRay &rImpulse )
 		return;
 	CVec3 vDir = rImpulse.ptDir;
 	Normalize( &vDir );
-	animator.Die( GetPosition(), vDir, false );   // clipless ragdoll launch (bPlayDeath=false)
+	animator.Die( GetPosition(), vDir, false, this );   // clipless ragdoll launch (bPlayDeath=false); retail @0x7c03fa passes the server
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CUnitServer::ProcessCritical( NDb::ECritical eCA )
@@ -350,7 +361,7 @@ void CUnitServer::Do( CCommand *_pCmd )
 		//OutputDebugString(" CCmdCancel \n");
 		CancelAction();
 		//
-		CancelSnipe(); // ������ �������� � CancelAction()
+		CancelSnipe(); // cannot be called from within CancelAction()
 		CancelHeal();
 		//
 		pCurrentCmd = 0;
@@ -537,8 +548,8 @@ EUnitCommandResult CUnitServer::CanDo( CCmd *p, int *pnStartAP, int *pnFullAP )
 	CDynamicCast<CCmdPath> pMove(p);
 	if ( pMove && ( !pnStartAP ) )
 	{
-		// ������ ���� � ������, ����� ���� �����, � �� �����, ������� �������. ������� �������� ����, ���������� �� ����,
-		// ������������ � WishPose = STAND.
+		// Finding a path is much faster when the unit is standing rather than lying down, so the check for whether a path exists is
+		// done with WishPose = STAND.
 		vector<NAI::SPathPlace> dst;
 		dst.push_back( pMove->ptDst.p );
 		NAI::EPose curPose = GetWishPose();
@@ -736,6 +747,11 @@ void CUnitServer::ForcedMove()
 		}
 		return;
 	}
+	// retail @0x3c0b80: nowhere to land at all -> the unit dies FALLING. Stash the pre-fall height
+	// into animator.fDeathFall BEFORE the kill dispatch (disasm: the +0x114 float store precedes the
+	// pUnit vtbl+0x94 Kill call); CUnitAnimator::Die @0x33bb90 reads it and takes the SetMove
+	// falling-death branch instead of SetStand+PutOnTerrain.
+	animator.fDeathFall = fLastHeight;
 	GetUnitRPG()->Kill();
 	KillUnit( CVec3(0,0,1) );
 }
@@ -770,7 +786,16 @@ void CUnitServer::OnTBSEvent( ETBSEvent event )
 		case TBS_ACTION_FINISH:
 			ASSERT( !IsPerformingAction() );
 			//if ( pExec->IsValid() ) return;
-			if ( IsLocker() )
+			// HOLD-AIM FIX (Issue 2): retail CUnitServer::OnTBSEvent @0x3c2a90 TBS_ACTION_FINISH does NOT reseat --
+			// it only stores height/place + OnActionFinish; the locker Unlock/ForcedMove/Fall/Lock block below is
+			// a5dll grid logic RELOCATED here from the (undelivered) TBS_GRID_INFO_UPDATED event, and it fires for
+			// EVERY player's units on EVERY world action-finish edge. When the unit's tile went non-passable
+			// (-> ForcedMove -> Stand) or drifted >1cm (-> Fall -> IdleOn), it CLEARS bAimed, spuriously dropping a
+			// unit's held aim after firing -- a reset retail never does (retail holds the raised weapon until the
+			// unit next moves/is re-ordered). Skip the reseat for a unit holding its aim: it is stationary, needs no
+			// reseat, and keeps its existing lock untouched (closer to retail's no-Unlock/Lock ACTION_FINISH than
+			// the non-aiming path). Non-aiming units keep the a5dll grid-consistency handling unchanged.
+			if ( IsLocker() && !animator.IsAiming() )
 			{
 				NAI::IPathNetwork *pNet = GetWorld()->GetPathNetwork();
 				pNet->Unlock( this );
@@ -1013,6 +1038,33 @@ void CUnitServer::HearUnit( CUnitServer *pSource )
 	SetAudible( pSource, true );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail NWorld::AddMedalPointsForNoticedMines @0x3c3190 (free fn, wUnitServer.obj): for every mine
+// in the unit's freshly rebuilt trappedObjects that the PLAYER did not already know (player
+// GetTrappedObjectsList, vtbl+0x40), credit MPC_NOTICE_TRAP scaled by the mine's DC into the RPG
+// unit's medals gainer (retail CMedalsGainer::AddMedalPoints @0x2ac660; dev's is the documented
+// behaviour-neutral stub until NDb::CSide::medals lands -- the notice detection + event stay live).
+// Returns whether anything NEW was noticed; the caller throws CEventOnSpotMineOrTrap on true.
+static bool AddMedalPointsForNoticedMines( NRPG::CGlobalGame *pGame, NRPG::CUnit *pRPGUnit,
+	IPlayer *pPlayer, const list<CPtr<CObjectBase> > &trappedObjects )
+{
+	bool bRes = false;
+	list<CPtr<CObjectBase> > known;
+	pPlayer->GetTrappedObjectsList( &known );
+	for ( list<CPtr<CObjectBase> >::const_iterator i = trappedObjects.begin(); i != trappedObjects.end(); ++i )
+	{
+		CObjectBase *p = i->GetPtr();
+		if ( IsInSet( known, p ) )
+			continue;                                     // the player already knows this one
+		CDynamicCast<IMine> pMine( p );
+		if ( IsValid( pMine ) && pMine->IsMineSet() )
+		{
+			pRPGUnit->AddMedalPoints( pGame, NRPG::MPC_NOTICE_TRAP, (float)pMine->GetMineDC() );
+			bRes = true;
+		}
+	}
+	return bRes;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 void CUnitServer::UpdateVisible( SInterruptInfo *pRes )
 {
 	bool bCanSee = !GetUnitRPG()->HasCritical( NDb::C_BLIND ) && CanFight();
@@ -1022,7 +1074,13 @@ void CUnitServer::UpdateVisible( SInterruptInfo *pRes )
 		GetPlayer()->GetVisible( &playerVisible );
 		list<CPtr<CUnitServer> > origVis = visible;
 		list<CPtr<CUnitServer> > res, oldVisible = visible;
-		GetWorld()->GetUnitsNear( GetPosition().GetEyePosition(), &res, GetRPG()->GetSightDistance( GetPose() ) );
+		// retail UpdateVisible @0x3c4450 (disasm): the candidate-gather radius is
+		// CGame::GetMaxUnitSightDistance @0x298520 = 2x GetUnitSightDistance (vtbl+0x38) -- matching
+		// MakeVisionQuery's 2x cap on the height-stretched effective range. The old per-pose
+		// GetSightDistance(GetPose()) getter is a Jan03-ism (retail's sight getters take no pose) and
+		// under-gathered: a unit above/below can be visible out to 2x the flat range.
+		GetWorld()->GetUnitsNear( GetPosition().GetEyePosition(), &res,
+			GetWorld()->GetGame()->GetMaxUnitSightDistance( GetUnitRPG()->GetRPGUnit() ) );
 		
 		visible.clear();
 		for ( list<CPtr<CUnitServer> >::iterator i = res.begin(); i != res.end(); ++i )
@@ -1038,20 +1096,27 @@ void CUnitServer::UpdateVisible( SInterruptInfo *pRes )
 			}
 /*			if ( !pEnemy->CanFight() && find( oldVisible.begin(), oldVisible.end(), pEnemy ) != oldVisible.end() )
 			{
-				// ���������� ������ ��� �����
+				// keep seeing all corpses
 				visible.push_back( pEnemy );
 				continue;
 			}*/
 			//
-			if ( !GetWorld()->GetGame()->CheckVisibility( this, pEnemy ) )
+			// retail perception probe: CheckVisibility(observer, candidate, bUseFOV=TRUE) -- disasm-proven
+			// push 1 @0x7c46fe (the observer's real FOV cone applies; facing matters).
+			if ( !GetWorld()->GetGame()->CheckVisibility( this, pEnemy, true ) )
 			{
 				if ( find( oldVisible.begin(), oldVisible.end(), pEnemy ) != oldVisible.end() )
 				{
-					// ���� ������� �� ����
+					// enemy lost from sight
 					if ( pEnemy->CanFight() )
 						HearUnit( pEnemy );
 					if ( find( lostUnits.begin(), lostUnits.end(), pEnemy ) == lostUnits.end() )
 						lostUnits.push_back( pEnemy );
+					// item 7 parity: retail CUnitServer::UpdateVisible @0x3c4450 raises the lost-from-sight event
+					// (symmetric with the CEventOnSeeNewEnemy throw below); CAIEventTrackerImpl::OnLostEnemy
+					// downgrades enemy -> possible-enemy. Gate on DS_ENEMY so a lost neutral isn't marked a suspect.
+					if ( GetDiplomacyState( pEnemy ) == NDb::DS_ENEMY )
+						NGlobal::ThrowEvent( NWorld::CEventOnLostEnemyFromSight( this, pEnemy ) );
 				}
 				continue;
 			} 
@@ -1071,7 +1136,7 @@ void CUnitServer::UpdateVisible( SInterruptInfo *pRes )
 				else
 					pEnemy->Hide( false );
 			}
-			// ������� commander-�, ��� ������� Unit
+			// tell the commander we saw the Unit
 			if ( pEnemy->CanFight() )
 				GetPlayer()->GetCommander()->OnSeeUnit( this, pEnemy );
 			//
@@ -1094,17 +1159,47 @@ void CUnitServer::UpdateVisible( SInterruptInfo *pRes )
 				NGlobal::ThrowEvent( NWorld::CEventOnSeeNewEnemy( this, pEnemy, GetWorld()->IsRealTime() ) );
 			visible.push_back( pEnemy );
 		}
-		// look at mines
+		// look at mines -- retail @0x7c4b74..0x7c4f2b:
 		list<CPtr<IMine> > traps;
 		trappedObjects.clear();
-		GetWorld()->GetMinesNear( GetPosition().GetEyePosition(), &traps, NRPG::N_SIGHTDISTANCE );
+		// gather radius = the unit's OWN max mine-spot range, GetMineSpotRange(0) (rpg vtbl+0x168,
+		// @0x7c4bca pushes literal 0), NOT a hardcoded constant -- per-unit, skill/perk-driven.
+		GetWorld()->GetMinesNear( GetPosition().GetEyePosition(), &traps, GetUnitRPG()->GetMineSpotRange( 0 ) );
 		for ( list<CPtr<IMine> >::const_iterator i = traps.begin(); i != traps.end(); ++i )
 		{
 			IMine *pMine = *i;
+			CObjectBase *pObj = i->GetPtr();
+			// @0x7c4c11: mines already queued in addToVisibleTraps skip the see-check entirely
+			// (the addToVisibleTraps adoption loop below picks them up regardless).
+			if ( IsInSet( addToVisibleTraps, pObj ) )
+				continue;
 			float fDist = fabs( pMine->GetMinePos() - GetPosition().GetEyePosition() );
-			if ( GetUnitRPG()->CanSeeMine( fDist, pMine->GetMineDC() ) )
-				trappedObjects.push_back( i->GetPtr() );
+			// per-DC skill check (CanSeeMine @0x2bec30 == fDist <= GetMineSpotRange(GetMineDC()))
+			if ( !GetUnitRPG()->CanSeeMine( fDist, pMine->GetMineDC() ) )
+				continue;
+			// @0x7c4cc1: the LOS gate -- a CanSeeCenter ray to the mine point LIFTED by 0.1625
+			// (imm @0x8cd1a0), pulled back toward the eye by HALF the object's AI-hull
+			// bounding-sphere radius (GetObjectBound @0x465800; @0x7c4d83 fRadius*0.5 (imm
+			// @0x8b19ec), Max(0, d - 0.5r)/d along the eye ray, Max<float> @0x42ab90) so the ray
+			// doesn't end inside a trapped door/chest's own hull. No pull-back when the object has
+			// no hulls or d == 0. Without this gate mines were spotted THROUGH WALLS.
+			CVec3 pt = pMine->GetMinePos() + CVec3( 0, 0, 0.1625f );
+			CVec3 ptEye = GetPosition().GetEyePosition();
+			CVec3 delta = pt - ptEye;
+			float fD = fabs( delta );
+			SBound bound;
+			if ( GetWorld()->GetAIMap()->GetObjectBound( &bound, pObj ) && fD > 0 )
+				pt = ptEye + delta * ( Max( 0.0f, fD - 0.5f * bound.s.fRadius ) / fD );
+			if ( !GetWorld()->GetGame()->CanSee( this, pt ) )
+				continue;
+			trappedObjects.push_back( pObj );
 		}
+		// @0x7c4eac: medal credit for NEWLY noticed set mines + the squad "spotted a trap" event
+		// (@0x7c4f04 throws CEventOnSpotMineOrTrap(this); retail consumer CAckDiscoveringMineNearby).
+		if ( AddMedalPointsForNoticedMines( GetWorld()->GetGlobalGame(), GetUnitRPG()->GetRPGUnit(),
+				GetPlayer(), trappedObjects ) )
+			NGlobal::ThrowEvent( NWorld::CEventOnSpotMineOrTrap( this ) );
+		// @0x7c4f30: adopt/prune the script-forced visible traps.
 		for ( list<CPtr<CObjectBase> >::iterator i = addToVisibleTraps.begin(); i != addToVisibleTraps.end(); )
 		{
 			CObjectBase *p = *i;
@@ -1118,16 +1213,75 @@ void CUnitServer::UpdateVisible( SInterruptInfo *pRes )
 			else
 				i = addToVisibleTraps.erase( i );
 		}
-		// look at items
-		visibleObjects.clear();
+		// look at items -- retail @0x7c5027..0x7c54f7. KEY semantics (all disasm-verified):
+		//  * visibleObjects is NOT cleared: EraseInvalidRefs (@0x7c502d, call 0x564c60) drops dead
+		//    entries and everything else PERSISTS -- a discovered item stays discovered; only
+		//    tempVisibleObjects (+0x174) restarts empty (@0x7c5032).
+		//  * gather radius = GetMaxUnitSightDistance (2x per-unit, game vtbl+0x38), centre = eye.
+		//  * per item: skip if already in visibleObjects (@0x7c513b); else ray EVERY point of the
+		//    item's GetVisiblePos vector (mass-sphere centres), each LIFTED by 0.1625 (imm @0x8cd1a0)
+		//    -- a point ON the floor grazes the ground voxel and always fails -- via CanSeeCenter
+		//    against the viewer info computed once per update (dev CGame::CanSee == CalcViewerInfo
+		//    @0x298570 + CanSeeCenter @0x298750 fused); first visible point wins (@0x7c521d
+		//    `or bl,al`). CHEAT_SEEALL (IsCheatEnabled(2) @0x7c5185) bypasses the rays entirely.
+		//  * IsTemporaryVisible routes to tempVisibleObjects (@0x7c5259) else visibleObjects (@0x7c528e).
+		EraseInvalidRefs( &visibleObjects );
+		tempVisibleObjects.clear();
+		SSphere area( GetPosition().GetEyePosition(),
+			GetWorld()->GetGame()->GetMaxUnitSightDistance( GetUnitRPG()->GetRPGUnit() ) );
 		list<IVisible*> items;
-		SSphere area( GetPosition().GetEyePosition(), GetRPG()->GetSightDistance( GetPose() ) );
 		GetWorld()->GetVisibleItems( area, &items );
 		for ( list<IVisible*>::iterator i = items.begin(); i != items.end(); ++i )
 		{
 			IVisible *p = *i;
-			if ( GetWorld()->GetGame()->CanSee( this, p->GetVisiblePos() ) )
-				visibleObjects.push_back( p );
+			CObjectBase *pObj = p;                        // the vbase upcast retail does inline
+			if ( IsInSet( visibleObjects, pObj ) )
+				continue;
+			bool bSee = IsCheatEnabled( NRPG::CHEAT_SEEALL );
+			vector<CVec3> pts;
+			p->GetVisiblePos( &pts );
+			for ( int k = 0; !bSee && k < (int)pts.size(); ++k )
+				bSee = GetWorld()->GetGame()->CanSee( this, pts[k] + CVec3( 0, 0, 0.1625f ) );
+			if ( !bSee )
+				continue;
+			if ( p->IsTemporaryVisible() )
+				tempVisibleObjects.push_back( pObj );
+			else
+				visibleObjects.push_back( pObj );
+		}
+		// dynamic (in-flight) items -- retail @0x7c5341..0x7c54f7 (GetVisibleDynamicItems, ctrl
+		// vtbl+0x20 @0x34a420, SAME sphere): never rayed (CDItem::GetVisiblePos adds no points);
+		// instead an in-flight item is visible iff CHEAT_SEEALL (@0x7c53a9), OR its visibility
+		// parent dyncasts to a CUnitServer of MY player (@0x7c53cb RTDynamicCast -> CUnitServer,
+		// @0x7c53e1 GetPlayer compare), OR the parent is among the units I currently SEE
+		// (@0x7c5404 scans this->visible). Success feeds the PERSISTENT visibleObjects (@0x7c5456).
+		list<IVisible*> dynItems;
+		GetWorld()->GetVisibleDynamicItems( area, &dynItems );
+		for ( list<IVisible*>::iterator i = dynItems.begin(); i != dynItems.end(); ++i )
+		{
+			IVisible *p = *i;
+			CObjectBase *pObj = p;
+			if ( IsInSet( visibleObjects, pObj ) )
+				continue;
+			bool bSee = IsCheatEnabled( NRPG::CHEAT_SEEALL );
+			CObjectBase *pParent = p->GetVisibilityParent();
+			if ( !bSee )
+			{
+				CDynamicCast<CUnitServer> pParentUS( pParent );
+				if ( IsValid( pParentUS ) && pParentUS->GetPlayer() == GetPlayer() )
+					bSee = true;
+			}
+			if ( !bSee && pParent )
+			{
+				for ( list<CPtr<CUnitServer> >::const_iterator v = visible.begin(); v != visible.end(); ++v )
+					if ( static_cast<CObjectBase*>( v->GetPtr() ) == pParent )
+					{
+						bSee = true;
+						break;
+					}
+			}
+			if ( bSee )
+				visibleObjects.push_back( pObj );
 		}
 	}
 	else
@@ -1239,7 +1393,7 @@ void CUnitServer::UpdateCriticalsState()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CUnitServer::CanSnipe() const
 {
-	// ���� ����������� ������
+	// has a scoped (sniper) weapon
 	if ( !IsValid( GetUnitRPG()->GetWeaponItem() ) || !GetUnitRPG()->GetWeaponItem()->GetDBWeapon()->bScope )
 		return false;
 	//
@@ -1368,7 +1522,7 @@ int CUnitServer::ProcessAttack( int nUserID, NRPG::CAttackPortion *pAttack, NDb:
 				FlipPanzerklein( 0 );
 				if ( GetUnitRPG()->IsDead() )
 				{
-					animator.Die( GetPosition(), VNULL3, true );   // retail @0x3c33a0: PK self-explosion DOES play the pilot death clip (bPlayDeath=true)
+					animator.Die( GetPosition(), VNULL3, true, this );   // retail @0x3c33a0: PK self-explosion DOES play the pilot death clip (bPlayDeath=true)
 					GetWorld()->GetPathNetwork()->Unlock( this );
 				}
 			}
@@ -1474,7 +1628,7 @@ bool CUnitServer::GetBarrelDir( CRay *pRay )
 	barrel.rot.GetXAxis( &pRay->ptDir );
 	Normalize( &pRay->ptDir );
 //	if ( GetUnitRPG()->GetWeaponType() == NDb::WT_RLAUNCHER )
-//		pRay->ptDir = -pRay->ptDir; // ��� �� ���, ��� ������� ����������� // ��� ��� ���� ��� ��� :)
+//		pRay->ptDir = -pRay->ptDir; // this is not a bug, the artists did it this way // it actually was a bug after all :)
 	return true;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1583,7 +1737,7 @@ bool CUnitServer::IsUnitAudible( const CUnit *pUnit ) const
 void CUnitServer::CheckStability()
 {
 	if ( CanFight() )
-		return; // ������� � forced move ���������� �� �����, � � ����� WORLD'����� action'a
+		return; // falling and forced move don't happen here, but at the end of the WORLD action
 	if ( IsEmptyPK() )
 		return;
 	if ( IsWearingPK() )
@@ -1593,7 +1747,7 @@ void CUnitServer::CheckStability()
 	OutputDebugString("checking stability for dead unit\n");
 
 	if ( animator.IsInstableCorpse() )
-		animator.BeDropped();
+		animator.BeDropped( this );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CUnitServer::IsDead() const 
@@ -1651,7 +1805,11 @@ void CUnitServer::SetDialog( const string &szDialogCode )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CUnitServer::IsAIUnit() const
 {
-	return CDynamicCast<NAI::CAICommander>( GetPlayer()->GetCommander() );
+	// retail @0x3c0340: IsAIUnit == NAI::IsAIPlayer( unit's player ) -- "the commander is NOT a
+	// CSequenceCommander". The old raw CDynamicCast<CAICommander> probe becomes WRONG once the human
+	// player carries its retail CSequenceCommander (a CAICommander subclass): it would classify the
+	// human's units as AI units.
+	return NAI::IsAIPlayer( GetPlayer() );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////

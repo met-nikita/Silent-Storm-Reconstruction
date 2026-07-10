@@ -10,6 +10,7 @@
 #include "wMain.h"             // NWorld::CWorld::GetPathNetwork
 #include "wMainPath.h"         // NWorld::FindPath
 #include "aiPath.h"            // NAI::CPath, NAI::PF_DEFAULT
+#include "aiEvent.h"           // NAI::CreateAILostAllyEvent (consume the ally help call)
 //
 #include "aiGuardReaction.h"
 //
@@ -81,7 +82,10 @@ void CAIGuardReaction::Update()
 	}
 	if ( !IsValid( pArea ) )
 		return;
-	// (b) [SetRoute(NULL) elided -- see banner]  the per-unit threat state (populated by the commander each think).
+	// (b) retail SetRoute(NULL) RESTORED (release IAIUnit vtbl+0x5c @0xadb90 -- possible now that the route
+	// slot exists): the guarding unit abandons its patrol route for good and lives in the guard dance.
+	pU->SetRouteLogic( 0 );
+	// the per-unit threat state (populated by the commander each think).
 	SAIUnitState *pState = GetAIUnitState();
 	if ( pState == 0 )
 		return;
@@ -137,7 +141,12 @@ void CAIGuardReaction::Update()
 			SPosition pos = pAlly->GetPosition();
 			if ( SetLogic( CreateAICheckPositionLogic( pU, pArea, pos, CROUCH ) ) )
 			{
-				// [ELIDED: pU->AddEvent(CreateAILostAllyEvent(pAlly)) -- see banner]
+				// Consume the help call (retail AddEvent(CreateAILostAllyEvent) -- oracle
+				// s2_aiguardreaction.h:182): Modify == RemoveAlly + clear pAlly, so each call
+				// triggers ONE glance instead of being stared at forever.
+				CObj<IAIEvent> e = CreateAILostAllyEvent( pAlly );
+				if ( IsValid( e ) )
+					e->Modify( pState );
 			}
 		}
 		else if ( bWasCombat )

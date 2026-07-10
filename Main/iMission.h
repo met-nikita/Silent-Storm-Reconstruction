@@ -52,6 +52,7 @@ namespace NUI
 namespace NWorld
 {
 	class CUnit;
+	class IItem;
 	class IPlayer;
 	class IWorld;
 	class CCommander;
@@ -257,7 +258,7 @@ public:
 class IMission: public NMainLoop::IInterfaceBase
 {
 public:
-	virtual bool Initialize( int nTemplateID, int nVariantID, NScenario::CScenarioZone *pZone, const vector<string> &params, NRPG::CGlobalGame *pGlobalGame ) = 0;
+	virtual bool Initialize( int nTemplateID, int nVariantID, NScenario::CScenarioZone *pZone, const vector<string> &params, NRPG::CGlobalGame *pGlobalGame, NDb::CUITexture *pPWLImage = 0 ) = 0;
 	virtual void Terminate() = 0;
 
 	virtual void Command( NWorld::CCommand *pCmd ) = 0;
@@ -302,6 +303,9 @@ public:
 	virtual void SetCameraParams( ECameraType eType, float fFOV, const ICamera::SCameraLimits &limits ) = 0;
 	virtual void FreezeCamera( bool bState ) = 0;
 	virtual void FocusCameraOnUnit( NWorld::CUnit *pUnit ) = 0;
+	// retail mission vtbl+0xc4 (CMissionBase::FocusCameraOnItem @0x1a1740, right after FocusCameraOnUnit
+	// @vtbl+0xc0): anchor the camera on a world item -- the hint/clue in-world icons' RBUTTONUP action.
+	virtual void FocusCameraOnItem( NWorld::IItem *pItem ) = 0;
 	virtual int GetCutFloor() = 0;
 	virtual void SetCutFloor( int nFloor ) = 0;
 	virtual const CVec3& GetCameraCP() const = 0;
@@ -362,13 +366,17 @@ protected:
 	// behind. Chapter/global-map entries leave it false (CICContinueChapter already ran it), and
 	// within-zone template walks leave it false (the carried body must cross sub-maps).
 	bool bEmulateChapter = false;
+	// retail CICBeginMission +0x30 (CDBPtr<NDb::CUITexture>): the chapter/caller-supplied PreWorldLoad
+	// splash. Exec @0x20ba00 does a 3-way pick zone-image -> this->pPWLImage -> default 0x373, so a
+	// chapter whose zone carries no PWL image still shows the chapter's own loading background.
+	CDBPtr<NDb::CUITexture> pPWLImage;
 
 public:
 	CICBeginMission() {}
-	CICBeginMission( int nTemplateID, int nVariantID, const vector<string> &params, NRPG::CGlobalGame *_pGlobalGame );
-	// ���� ��������� ���� ����� �������� �� ���������� template-��
+	CICBeginMission( int nTemplateID, int nVariantID, const vector<string> &params, NRPG::CGlobalGame *_pGlobalGame, NDb::CUITexture *_pPWLImage = 0 );
+	// one scenario zone can consist of several templates
 	CICBeginMission( NScenario::CScenarioZone *pZone,
-		int _nTemplateID, const vector<string> &params, NRPG::CGlobalGame *_pGlobalGame, bool bEmulateChapter = false );
+		int _nTemplateID, const vector<string> &params, NRPG::CGlobalGame *_pGlobalGame, bool bEmulateChapter = false, NDb::CUITexture *_pPWLImage = 0 );
 	virtual void Exec();
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////

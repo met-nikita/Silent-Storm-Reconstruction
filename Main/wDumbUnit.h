@@ -107,6 +107,10 @@ private:
 public:
 	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&pRPG); f.Add(3,&nextLock); f.Add(4,&bLocksTwoPlaces); f.Add(5,&position); f.Add(6,&bStrafe); f.Add(7,&wishPose); f.Add(8,&pWorld); f.Add(9,&bindGlobal); f.Add(10,&bUndrawWeapon); f.Add(11,&bNoHeavyWeapon); f.Add(12,&miscObjects); f.Add(13,&pModel); f.Add(14,&bIsPKWhichIsWeared); f.Add(15,&pHandModel); f.Add(16,&pHandEffect); f.Add(17,&tBeginHandEffect); f.Add(18,&bBloodyDeath); f.Add(19,&animator); f.Add(20,&nPrevFloor); f.Add(21,&bHeadless); f.Add(22,&bCanHide); f.Add(23,&bTemporaryAimed); f.Add(24,&vPrevGetCorpseAIPosition); f.Add(25,&bNotAddedToVisitors); f.Add(26,&attachedEffects); f.Add(27,&bTrackSequence); f.Add(28,&corpseHLpos); return 0; }
 
+public:
+	// retail CUnit vtbl+0x94 thunk @0x3c68e0 (lea eax,[corpseHLpos]): CUnitServer forwards its CUnit
+	// override here (CUnit is a SIBLING base, so this plain accessor is not itself the virtual).
+	const vector<CVec3>* GetCorpseHLs() const { return &corpseHLpos; }
 private:
 	void ProcessSteps( const STime tCurrent );
 	void PlaySound( NDb::CTSound *pSound );
@@ -128,7 +132,7 @@ protected:
 	friend bool NAI::IsLockerUnit( CObjectBase *pUnit ); // aiPositionDebug locker-validity probe (retail @0x917d0)
 	virtual void Die( bool bRemove = false ) {}
 	virtual void OnUnitMadeUnconscious( bool bFromScript = false ) {}
-	virtual void OnSuffersDamage( float fAP )	{} // ������� �������� � ���������
+	virtual void OnSuffersDamage( float fAP )	{} // how much is left, in percent
 	virtual void ProcessCritical( NDb::ECritical eCA ) {}
 	virtual void TouchedMines( const vector<CPtr<CMine> > &mines ) {}
 	virtual void RemoveFromWorld() {}

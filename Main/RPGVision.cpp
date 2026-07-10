@@ -18,7 +18,7 @@ const int N_VISION_CUBE_RES_POW2 = 5;
 const int N_VISION_CUBE_RESOLUTION = 1 << N_VISION_CUBE_RES_POW2;
 const float F_STEP = FP_GRID_STEP / 4;
 const float F_VISION_CUBE_SIZE = F_STEP * N_VISION_CUBE_RESOLUTION;
-// ���������� ������ ������� ������������� �� �������������
+// number of tiles that are semi-transparent at infinity
 const int N_TILES_HALF_TRANSP = 1;
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CVisionTracker;
@@ -50,15 +50,24 @@ public:
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CVisionTracker
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail SVisionQuery (0x20 bytes, MakeVisionQuery @0x2c8040 fills it as the cache key):
+// {vFrom, vWhat, fRange = the EFFECTIVE sight distance, fCosFOV = cos(FOV/2)}. The legacy 3-arg
+// IsCubeVisible salts the two floats with its fixed constants so its key-space stays disjoint and
+// deterministic. (Save note: visionCache/pointVisionCache are serialized raw-keyed caches -- the key
+// grew 8 bytes, so entries from older dev saves load garbled; harmless, they are caches.)
 struct SVisionQuery
 {
 	CVec3 vFrom, vWhat;
-	bool operator ==( const SVisionQuery &a ) const { return vFrom == a.vFrom && vWhat == a.vWhat; }
+	float fRange, fCosFOV;
+	SVisionQuery(): fRange( 0 ), fCosFOV( 0 ) {}
+	bool operator ==( const SVisionQuery &a ) const
+	{ return vFrom == a.vFrom && vWhat == a.vWhat && fRange == a.fRange && fCosFOV == a.fCosFOV; }
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 struct SVisionQueryHash
 {
-	int operator()( const SVisionQuery &a ) const { SVec3Hash h; return h( a.vFrom ) + h( a.vWhat ); }
+	int operator()( const SVisionQuery &a ) const
+	{ SVec3Hash h; return h( a.vFrom ) + h( a.vWhat ) + (int)( a.fRange * 16 ) + (int)( a.fCosFOV * 1024 ); }
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CVisionTracker : public IVisionTracker
@@ -82,8 +91,8 @@ private:
 
 	bool TraverseLine( const CTPoint3<int> &_p1, const CTPoint3<int> &_p2, const CTPoint3<int> &_s, const CTPoint3<int> &_a,  
 		int nXIdx, int nYIdx, int nZIdx, int nTranspLimit );
-	bool IsVisible( const CTPoint3<int> p1, const CTPoint3<int> &p2, int nLimit );
-	bool IsVisible( const CVec3 &vFrom, const CVec3 &vWhat, float fLimit );
+	bool IsVisible( const CTPoint3<int> p1, const CTPoint3<int> &p2, int nDistance, float fRange );
+	bool IsVisible( const CVec3 &vFrom, const CVec3 &vWhat, float fDistance, float fRange );
 	void FlushCubeCache() { nGCx = 0x7fffffff; nGCy = 0; nGCz = 0; pCachedCube = 0; }
 	CVisionCube* FetchCube( int x, int y, int z );
 	EVoxelVisionState GetVisionCached( int x, int y, int z );
@@ -91,6 +100,11 @@ public:
 	CVisionTracker() { FlushCubeCache(); }
 	CVisionTracker( NAI::IAIMap *_pAIMap );
 	virtual bool IsCubeVisible( const CVec3 &ptFrom, const CVec3 &ptTarget, const CVec3 &ptForward );
+	virtual bool IsCubeVisible( const CVec3 &ptFrom, const CVec3 &ptTarget, const CVec3 &ptForward,
+		float fRange, float fCosHalfFOV );   // retail @0x2c9160 (vision vtbl+0x10)
+	virtual bool IsPointVisible( const CVec3 &ptFrom, const CVec3 &ptTarget, const CVec3 &ptForward,
+		float fRange, float fCosHalfFOV );   // retail @0x2c9440
+	virtual bool IsWithinSightRange( const CVec3 &ptFrom, const CVec3 &ptTarget, float fRange );   // retail @0x2c7fa0
 	virtual EVoxelVisionState GetVision( int x, int y, int z )
 	{
 		FlushCubeCache();
@@ -286,7 +300,7 @@ bool CVisionTracker::TraverseLine( const CTPoint3<int> &_p1, const CTPoint3<int>
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-bool CVisionTracker::IsVisible( const CTPoint3<int> p1, const CTPoint3<int> &p2, int nDistance )
+bool CVisionTracker::IsVisible( const CTPoint3<int> p1, const CTPoint3<int> &p2, int nDistance, float fRange )
 {
 	if ( nDistance == 0 )
 		return true;
@@ -295,7 +309,15 @@ bool CVisionTracker::IsVisible( const CTPoint3<int> p1, const CTPoint3<int> &p2,
 	dy = p2.y - p1.y;
 	dz = p2.z - p1.z;
 
-	int nTranspLimit = -Float2Int( (128 * N_TILES_HALF_TRANSP * 1.45f) * log( nDistance  / ( N_SIGHTDISTANCE / F_STEP ) ) );
+	// retail @0x2c8f40 (raw-disasm-proven: fild nDist; fld fRange; fdiv F_STEP; fdivp; fldln2; fyl2x
+	// [= NATURAL log, NOT the linear product Ghidra printed]; fmul 185.6; fistp; neg):
+	//   limit = -Round( 185.6 * ln( nDistance / ( fRange / F_STEP ) ) )
+	// The curve was already logarithmic here -- the DIVERGENCE was the ratio's inputs: retail feeds the
+	// ACTUAL ray distance over the PER-QUERY sight range; the old dev form fed the effective range over
+	// a hardcoded N_SIGHTDISTANCE, so a stretched/equal effective range made the ratio >= 1 -> budget
+	// <= 0 -> ONE half-transparent voxel (car window/fence/bush) blocked the ray -- spurious "enemy
+	// can't see this spot" full cover, the GFirst car-guy's wrong Defence entry.
+	int nTranspLimit = -Float2Int( (128 * N_TILES_HALF_TRANSP * 1.45f) * log( nDistance / ( fRange / F_STEP ) ) );
 	CTPoint3<int> a( abs(dx) << 1, abs(dy) << 1, abs(dz) << 1 );
 	CTPoint3<int> s( Sign(dx), Sign(dy), Sign(dz) );
 
@@ -318,12 +340,14 @@ bool CVisionTracker::IsVisible( const CTPoint3<int> p1, const CTPoint3<int> &p2,
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-bool CVisionTracker::IsVisible( const CVec3 &_vFrom, const CVec3 &_vWhat, float fDistance )
+// retail @0x2c90e0: nDistance = Round( fDistance / F_STEP ) (the ACTUAL ray length in voxel steps);
+// fRange rides through to the budget denominator.
+bool CVisionTracker::IsVisible( const CVec3 &_vFrom, const CVec3 &_vWhat, float fDistance, float fRange )
 {
 	CTPoint3<int> vFrom, vWhat;
 	GetCoord( _vFrom, &vFrom );
 	GetCoord( _vWhat, &vWhat );
-	return IsVisible( vFrom, vWhat, Float2Int( fDistance * ( 1 / F_STEP ) ) );
+	return IsVisible( vFrom, vWhat, Float2Int( fDistance * ( 1 / F_STEP ) ), fRange );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CVisionTracker::IsCubeVisible( const CVec3 &vFrom, const CVec3 &ptTarget, const CVec3 &ptForward )
@@ -331,6 +355,8 @@ bool CVisionTracker::IsCubeVisible( const CVec3 &vFrom, const CVec3 &ptTarget, c
 	SVisionQuery q;
 	q.vFrom = vFrom;
 	q.vWhat = ptTarget;
+	q.fRange = (float)N_SIGHTDISTANCE;   // legacy-path key salt (fixed constants -> disjoint key-space)
+	q.fCosFOV = -2.0f;
 	CVec3 ptDif = ptTarget - vFrom;
 	if ( ptDif * ptForward < -1e-5f )
 		return false;
@@ -341,16 +367,20 @@ bool CVisionTracker::IsCubeVisible( const CVec3 &vFrom, const CVec3 &ptTarget, c
 	if ( i != visionCache.end() )
 		return i->second;
 	//CObj<CVisionCube> pCube = GetCube( ptFrom );
+	// legacy 9-ray perception path: fRange = N_SIGHTDISTANCE keeps the pre-existing budget ratio
+	// (actualDist / N_SIGHTDISTANCE) byte-identical -- this leaf's hardcoded range is its own
+	// documented divergence from retail IsCubeVisible @0x2c9160 (which rides MakeVisionQuery's
+	// per-query range/FOV), out of scope here.
 	int nCount = 0;
-	nCount += IsVisible( vFrom, ptTarget, fDistance );
-	nCount += IsVisible( vFrom, ptTarget + CVec3(-0.2f, -0.2f, -0.2f), fDistance );
-	nCount += IsVisible( vFrom, ptTarget + CVec3(0.2f, -0.2f, -0.2f), fDistance );
-	nCount += IsVisible( vFrom, ptTarget + CVec3(-0.2f, 0.2f, -0.2f), fDistance );
-	nCount += IsVisible( vFrom, ptTarget + CVec3(0.2f, 0.2f, -0.2f), fDistance );
-	nCount += IsVisible( vFrom, ptTarget + CVec3(-0.2f, -0.2f, 0.2f), fDistance );
-	nCount += IsVisible( vFrom, ptTarget + CVec3(0.2f, -0.2f, 0.2f), fDistance );
-	nCount += IsVisible( vFrom, ptTarget + CVec3(-0.2f, 0.2f, 0.2f), fDistance );
-	nCount += IsVisible( vFrom, ptTarget + CVec3(0.2f, 0.2f, 0.2f), fDistance );
+	nCount += IsVisible( vFrom, ptTarget, fDistance, N_SIGHTDISTANCE );
+	nCount += IsVisible( vFrom, ptTarget + CVec3(-0.2f, -0.2f, -0.2f), fDistance, N_SIGHTDISTANCE );
+	nCount += IsVisible( vFrom, ptTarget + CVec3(0.2f, -0.2f, -0.2f), fDistance, N_SIGHTDISTANCE );
+	nCount += IsVisible( vFrom, ptTarget + CVec3(-0.2f, 0.2f, -0.2f), fDistance, N_SIGHTDISTANCE );
+	nCount += IsVisible( vFrom, ptTarget + CVec3(0.2f, 0.2f, -0.2f), fDistance, N_SIGHTDISTANCE );
+	nCount += IsVisible( vFrom, ptTarget + CVec3(-0.2f, -0.2f, 0.2f), fDistance, N_SIGHTDISTANCE );
+	nCount += IsVisible( vFrom, ptTarget + CVec3(0.2f, -0.2f, 0.2f), fDistance, N_SIGHTDISTANCE );
+	nCount += IsVisible( vFrom, ptTarget + CVec3(-0.2f, 0.2f, 0.2f), fDistance, N_SIGHTDISTANCE );
+	nCount += IsVisible( vFrom, ptTarget + CVec3(0.2f, 0.2f, 0.2f), fDistance, N_SIGHTDISTANCE );
 	bool bRes = nCount >= 4;
 	// if cache has grown too large truncate it
 	if ( visionCache.size() > 30000 )
@@ -359,6 +389,107 @@ bool CVisionTracker::IsCubeVisible( const CVec3 &vFrom, const CVec3 &ptTarget, c
 	return bRes;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail CVisionTracker::IsCubeVisible @0x2c9160 (vision vtbl+0x10) -- THE perception leaf, called by
+// the 4-arg CGame::CheckPositionVisibility @0x298fa0 per occupied cube of the target:
+//   MakeVisionQuery @0x2c8040 gate: 2D FOV cone (sign-preserving squared cosine, eps 1e-5
+//   @0x3727c5ac) -> effective range = min( koef*sqrt((2|dz|+range)^2 + dz^2), 2*koef*range )
+//   (NRPG::GetSightDistance @0x2c7f50; looking up/down stretches the range, capped at 2x) -> 3D
+//   distance < effRange; ACCEPT fills the cache key {from,to,effRange,cosHalfFOV}.
+//   Then the cached 9-point jittered-ray majority (> 3 of 9). RAY BUDGETS (retail quirk, decomp-
+//   proven): the CENTER ray's transparency budget divides by the RAW fRange (param_4); the 8 jitter
+//   rays divide by the EFFECTIVE range (query.fSightDistance). All 9 rays use the CENTER target's
+//   actual distance (fVar1 computed once).
+bool CVisionTracker::IsCubeVisible( const CVec3 &vFrom, const CVec3 &ptTarget, const CVec3 &ptForward,
+	float fRange, float fCosHalfFOV )
+{
+	CVec3 d = ptTarget - vFrom;
+	// 2D FOV cone: (cosHalf - eps) * |fwd2d|^2 * |d2d|^2 * |cosHalf| <= |dot| * dot. A 2pi FOV
+	// (cosHalf = -1) always passes.
+	float fDot = ptForward.u * d.u + ptForward.v * d.v;
+	float fLen2 = ( d.u * d.u + d.v * d.v ) * ( ptForward.u * ptForward.u + ptForward.v * ptForward.v );
+	if ( ( fCosHalfFOV - 1e-5f ) * fLen2 * (float)fabs( fCosHalfFOV ) > (float)fabs( fDot ) * fDot )
+		return false;
+	// height-adjusted effective range (@0x2c7f50), capped at 2x the nominal
+	float h = (float)fabs( d.q );
+	float t = h + h + fRange;
+	float fEff2 = ( h * h + t * t ) * fVisionKoef * fVisionKoef;
+	float fCap = fVisionKoef * fRange + fVisionKoef * fRange;
+	float fEff = ( fEff2 <= fCap * fCap ) ? sqrtf( fEff2 ) : fCap;
+	float fDist = sqrtf( d.u * d.u + d.v * d.v + d.q * d.q );
+	if ( fDist >= fEff )
+		return false;
+	SVisionQuery q;
+	q.vFrom = vFrom;
+	q.vWhat = ptTarget;
+	q.fRange = fEff;
+	q.fCosFOV = fCosHalfFOV;
+	CVisionHash::iterator i = visionCache.find( q );
+	if ( i != visionCache.end() )
+		return i->second;
+	int nCount = 0;
+	nCount += IsVisible( vFrom, ptTarget, fDist, fRange );                                    // center: RAW range
+	nCount += IsVisible( vFrom, ptTarget + CVec3(-0.2f, -0.2f, -0.2f), fDist, fEff );         // jitter: EFFECTIVE
+	nCount += IsVisible( vFrom, ptTarget + CVec3(0.2f, -0.2f, -0.2f), fDist, fEff );
+	nCount += IsVisible( vFrom, ptTarget + CVec3(-0.2f, 0.2f, -0.2f), fDist, fEff );
+	nCount += IsVisible( vFrom, ptTarget + CVec3(0.2f, 0.2f, -0.2f), fDist, fEff );
+	nCount += IsVisible( vFrom, ptTarget + CVec3(-0.2f, -0.2f, 0.2f), fDist, fEff );
+	nCount += IsVisible( vFrom, ptTarget + CVec3(0.2f, -0.2f, 0.2f), fDist, fEff );
+	nCount += IsVisible( vFrom, ptTarget + CVec3(-0.2f, 0.2f, 0.2f), fDist, fEff );
+	nCount += IsVisible( vFrom, ptTarget + CVec3(0.2f, 0.2f, 0.2f), fDist, fEff );
+	bool bRes = nCount > 3;
+	if ( visionCache.size() > 30000 )
+		visionCache.clear();
+	visionCache[q] = bRes;
+	return bRes;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+bool CVisionTracker::IsWithinSightRange( const CVec3 &ptFrom, const CVec3 &ptTarget, float fRange )
+{	// retail @0x2c7fa0 (vision vtbl+0x28): dist^2 < eff^2, eff = min(koef*sqrt(h^2+(2h+r)^2), 2*koef*r)
+	// -- the same height-stretched, 2x-capped effective range as IsCubeVisible above, minus the FOV cone.
+	float du = ptTarget.u - ptFrom.u, dv = ptTarget.v - ptFrom.v, dq = ptTarget.q - ptFrom.q;
+	float h = (float)fabs( dq );
+	float t = h + h + fRange;
+	float fEff2 = ( h * h + t * t ) * fVisionKoef * fVisionKoef;
+	float fCap = fVisionKoef * fRange + fVisionKoef * fRange;
+	float fEff = ( fEff2 <= fCap * fCap ) ? sqrtf( fEff2 ) : fCap;
+	return du * du + dv * dv + dq * dq < fEff * fEff;   // strict <
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail CVisionTracker::IsPointVisible @0x2c9440 == MakeVisionQuery @0x2c8040 (the range/FOV gates +
+// the effective-sight-distance computation) + ONE IsVisible voxel ray whose transparency budget is
+// scaled by the EFFECTIVE sight distance (retail IsVisible(from,to,dist,fSightDistance) @0x2c90e0 passes
+// fSightDistance/F_STEP as the budget). Decoded gates:
+//  * FOV: 2D (ground-plane) cone off ptForward -- sign-aware squared form of
+//    dot2d / (|dif2d||fwd2d|) >= cosHalfFOV, epsilon 1e-5 (@0x2c8040 const 0x3727c5ac).
+//  * range: effective = min( sqrt( h^2 + (2h + range)^2 ) * koef, 2 * koef * range ), h = |dz|
+//    (NRPG::GetSightDistance @0x2c7f50 -- looking up/down stretches the nominal range, capped at 2x).
+//    The retail fVisionKoef (SetVisionMultiplier @0x2c8450, night missions) is unported here -- koef = 1.
+//  * the retail per-query pointVisionCache is omitted (this leaf only serves the AI cover planner;
+//    the hot per-segment visibility stays on IsCubeVisible's cache).
+bool CVisionTracker::IsPointVisible( const CVec3 &ptFrom, const CVec3 &ptTarget, const CVec3 &ptForward,
+	float fRange, float fCosHalfFOV )
+{
+	const float F_VISION_KOEF = 1.0f;   // retail this->fVisionKoef (SetVisionMultiplier unported)
+	float du = ptTarget.u - ptFrom.u;
+	float dv = ptTarget.v - ptFrom.v;
+	float dq = ptTarget.q - ptFrom.q;
+	// FOV cone (2D): (cosHalfFOV - eps) * |dif2d|^2 * |fwd2d|^2 * |cosHalfFOV| <= |dot| * dot
+	float fDot = ptForward.u * du + ptForward.v * dv;
+	float fLen2 = ( du * du + dv * dv ) * ( ptForward.u * ptForward.u + ptForward.v * ptForward.v );
+	if ( ( fCosHalfFOV - 1e-5f ) * fLen2 * (float)fabs( fCosHalfFOV ) > (float)fabs( fDot ) * fDot )
+		return false;
+	// height-adjusted effective range (@0x2c7f50), capped at 2x the nominal
+	float h = (float)fabs( dq );
+	float t = h + h + fRange;
+	float fEff2 = ( h * h + t * t ) * F_VISION_KOEF * F_VISION_KOEF;
+	float fCap = F_VISION_KOEF * fRange + F_VISION_KOEF * fRange;
+	float fEff = ( fEff2 <= fCap * fCap ) ? sqrtf( fEff2 ) : fCap;
+	if ( sqrtf( du * du + dv * dv + dq * dq ) >= fEff )
+		return false;
+	// ONE voxel ray: distance = the ACTUAL point separation, budget denominator = the EFFECTIVE
+	// sight distance (retail @0x2c9440: IsVisible(from, to, |to-from|, query.fSightDistance)).
+	return IsVisible( ptFrom, ptTarget, sqrtf( du * du + dv * dv + dq * dq ), fEff );
+}
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 IVisionTracker* CreateVisionTracker( NAI::IAIMap *pAIMap )
 {

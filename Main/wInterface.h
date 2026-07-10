@@ -185,6 +185,9 @@ public:
 class IItem : virtual public CObjectBase
 {
 public:
+	// retail IItem vftable slot 0 (CDFrozenItem vft 6BIItem +0x4c, a COMDAT-folded trivial getter):
+	// the item's floor -- CMissionBase::FocusCameraOnItem @0x1a1740 cuts the scene to it.
+	virtual int GetFloor() const = 0;
 	virtual CVec3 GetPos() const = 0;
 	virtual NRPG::IInventoryItem* GetInvItem() const = 0;
 };
@@ -303,6 +306,10 @@ public:
 	virtual bool IsCarryingCorpse() const = 0;
 	virtual bool IsPerformingAction() const { return false; }
 	virtual CUnit* GetCorpseCarrier() const = 0;
+	// retail CUnit vtbl+0x94 = GetCorpseHLs @0x3c68e0: the 6 hit-location ray points of a downed body
+	// (CDumbUnitServer::corpseHLpos, refreshed in Segment @0x350960). Consumed by the corpse-sighting
+	// probe CGame::IsCorpseVisible @0x298da0. Default 0 for non-corpse-capable impls.
+	virtual const vector<CVec3>* GetCorpseHLs() const { return 0; }
 	virtual NDb::CModel* GetModel() const = 0;
 	virtual void GetVisible( vector<CPtr<CUnit> > *pTarget ) const = 0;
 	virtual void GetInfo( NRPG::SUnitInfo *pInfo ) const = 0;

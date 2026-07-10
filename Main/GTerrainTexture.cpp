@@ -39,7 +39,7 @@ void SetTerrainLoadingMode( bool bLoad )
 	bIsLoading = bLoad;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-//! ���������� ������
+//! Tile sorting
 struct STerrainTileSort
 {
 	bool operator()( const NDb::CTerrainTile* psTile1, NDb::CTerrainTile* psTile2 ) const 

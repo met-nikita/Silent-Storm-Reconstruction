@@ -19,6 +19,7 @@ namespace NWinFrame
 			LB_UP,
 			KEY_DOWN,
 			KEY_UP,
+			CHAR,
 			TIME,
 		};
 		NHPTimer::STime time;

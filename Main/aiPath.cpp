@@ -239,7 +239,7 @@ bool CPath::AddNewPoint( const SPathPlace& point )
 			return true;
 		}
 	}
-	// ���������� ��������� ����
+	// the real moves begin here
 	if (( tt >= TT_CLIMB_1 ) && ( tt <= TT_JUMP ))   // retail @0x48ad67 (cmp ebp,9) DELIBERATELY excludes
 		bCanDo = false;                              // TT_JUMP_BACK(10) -- a moving-origin jump-back stays on the moving-point branch
 	if ( tt == TT_TURN )
@@ -503,7 +503,7 @@ CPath* FindPath( IPathNetwork *_pNet, const SPathPlace &src, const vector<SPathP
 	if ( dst.empty() )
 	{
 		if ( bCanFindNotExactPath )
-			dst = _dst; // ����� ������ ��� ����� � ������, �� �� ���� ����� "����������" � ��������� ���������� �����...
+			dst = _dst; // even if there is nowhere passable here, we can still "crawl up" to the nearest passable point...
 		else
 		{
 			_pNet->UnlockSelected();

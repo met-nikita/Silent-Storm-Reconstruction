@@ -140,7 +140,7 @@ struct SBSPPoly
 			float fFinish = ptFinish * plane.n + plane.d;
 			if ( fabs( fStart ) < fBSPEpsilon && fabs( fFinish ) < fBSPEpsilon )
 			{
-				// ����� ��������� ����� �� ���������. ������ ��� ����������� � ������������, ���������� ������ ������ 
+				// edge lies entirely on the plane. check its direction against the one forming the right-handed triple
 				if ( bNowLeft )
 				{
 					pLeft->pts.push_back( ptStart );
@@ -156,7 +156,7 @@ struct SBSPPoly
 			}
 			if ( fabs( fStart ) > fBSPEpsilon )
 			{
-				// ���� ����� �� ����� �� ���������. ��������� ��� ���� ���� � ���� � ����. �����
+				// if the start does not lie on the plane. add it where needed and move on to the next edge
 				if ( fStart > fBSPEpsilon )
 					pRight->pts.push_back( ptStart );
 				else 
@@ -170,7 +170,7 @@ struct SBSPPoly
 			}
 			else
 			{
-				// c���� ����� �� ���c�����
+				// start lies on the plane
 				//ptStart = ptStart - plane.n * fStart;
 				if ( ( fFinish > fBSPEpsilon && bNowLeft ) || ( fFinish < -fBSPEpsilon && !bNowLeft ) )
 				{
@@ -556,7 +556,7 @@ float CBSPTreeConstructor::EdgePrice(
 	for ( SAnglePoint *it = &flatPoints[0]; it != &flatPoints[nPoints]; ++it )
 		if ( it->fAngle > 0 )
 			it->fAngle -= FP_PI;
-	// ���������� ��������� ��� ������ �� �����
+	// determine the cost for each of the points
 	int nIntersectEvery = 0;
 	int nUnignored = 0;
 	for ( int i = 0; i < nPoints; ++i )
@@ -940,7 +940,7 @@ void CBSPTreeConstructor::AddBeveling( const SBSPGeometry &mesh )
 			if ( fabs2(norm) < fBSPEpsilon * fBSPEpsilon )
 			{
 				norm = ( ptCommon1 - ptCommon2 ) ^ ( p1.norm - p2.norm );
-				// �������� �� ��, ��� ��������� ����� ������� ������
+				// check that the result will stick outward
 				float d = - norm * ptCommon1;
 				for (unsigned int m = 0; m < p1.pts.size(); ++m )
 				{

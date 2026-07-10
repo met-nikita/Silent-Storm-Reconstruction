@@ -14,11 +14,11 @@
 #include "UICommCtrls.h"
 #include "Console.h"
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// Время , за которое консоль меняет своё состояние
+// Time over which the console changes its state
 const int CONSOLE_SPEED = 300;
-// длинна промежутка между левым краем экрана и буквами
+// length of the gap between the left edge of the screen and the letters
 const int CONSOLE_SPACE_SIZE = 10;
-// шаг скрола в пикселях
+// scroll step in pixels
 const int CONSOLE_SCROLL_STEP = 20;
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 static int nCurentCommand = 0;
@@ -152,7 +152,7 @@ bool CConsole::ProcessMessage( const SEvent &sEvent )
 {
 	switch( sEvent.nEvent )
 	{
-	case EVENT_CHAR:
+	case EVENT_WINKEY:
 		{
 			switch( sEvent.nVal )
 			{
@@ -223,6 +223,16 @@ bool CConsole::ProcessMessage( const SEvent &sEvent )
 			}
 			break;
 		}
+	case EVENT_WINCHAR:
+		// The console-toggle key (`) arrives here as a translated char; swallow it so it is
+		// not typed into the edit line. (CConsole::ProcessMessage @0xd2440.)
+		if ( sEvent.nVal == 0x60 )
+			return true;
+		break;
+	case EVENT_CHAR:
+		// Swallow the still-active DirectInput edge key so PgUp/PgDn/Up/Down/Tab don't double-fire:
+		// navigation now rides the auto-repeating EVENT_WINKEY stream. (CConsole::ProcessMessage @0xd2440.)
+		return true;
 	case EVENT_NOTIFY:
 		{
 			if ( sEvent.szID == "edit")

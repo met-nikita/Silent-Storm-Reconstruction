@@ -46,7 +46,7 @@ public:
 	virtual void OnActionFinish() {}
 	virtual void OnStartNewTurn() {}
 	virtual void OnFinishOwnTurn() {}
-	virtual void OnFinishTimeOrTurn( bool bRealTime ) {} // ���������� �� OnFinishOwnTurn ���, ��� ���������� ������ N ������ � realtime
+	virtual void OnFinishTimeOrTurn( bool bRealTime ) {} // differs from OnFinishOwnTurn in that it is called every N seconds in realtime
 	virtual void OnStartRealTime() {}
 	virtual void OnDeath() {}
 	virtual void FilterCriticals();
@@ -75,8 +75,8 @@ class CUnitStateSniping: public CUnitState
 {
 	OBJECT_BASIC_METHODS(CUnitStateSniping);
 	ZDATA_(CUnitState)
-	int nBaseAP; // AP �� snipe
-	int nSnipeAP; // AP ��������� �� ����� snipe
+	int nBaseAP; // AP before snipe
+	int nSnipeAP; // AP accumulated during snipe
 	CPtr<CUnitServer> pTarget;
 	NAI::SUnitPosition InitialTargetPosition;
 	NAI::SUnitPosition TargetPosition;

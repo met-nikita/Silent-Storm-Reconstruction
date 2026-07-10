@@ -31,8 +31,8 @@ class CVoxelExpl;
 class CVoxelExplTracker;
 class CUnitServer;
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-const float F_VOXEL_SIZE = 0.2f; // �����
-const int N_CUBE_SIZE = 16; //30;//16; // voxels // ������ ���� ������ 2-�
+const float F_VOXEL_SIZE = 0.2f; // meters
+const int N_CUBE_SIZE = 16; //30;//16; // voxels // must be a multiple of 2
 const float F_CUBE_SIZE = N_CUBE_SIZE * F_VOXEL_SIZE;
 const int N_REAL_CUBE_SIZE = N_CUBE_SIZE + 2;
 const float F_REAL_CUBE_SIZE = N_REAL_CUBE_SIZE * F_VOXEL_SIZE;
@@ -144,7 +144,7 @@ private:
 	int nCurrentCube;
 public:
 	vector< CObj<CExplCube> > cubes;
-	NAI::CExplVoxelRenderer::CObjectsHash objects; // ������ � �������� 0 - ��������������, 1 - terrain
+	NAI::CExplVoxelRenderer::CObjectsHash objects; // object at index 0 is reserved, 1 is terrain
 	vector<SObjectDamageInfo> damageInfo;
 	int nObjectsEnd;
 	int nObjectsDestroyed;

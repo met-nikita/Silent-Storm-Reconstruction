@@ -16,7 +16,7 @@ class IAICriterion;
 class IAILogContainer;
 class IAIMap;
 class IAIUnit;
-class CAITacticalCommander;
+class CAICommander;
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 struct SAIUnitGroup
 {
@@ -28,37 +28,72 @@ struct SAIUnitGroup
 	SAIUnitGroup(): ptCenter( VNULL3 ) {}
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// IAIState
+// SAIState -- retail's flat AI-state VALUE struct (operator& @0x38c30). AI-convergence final structural
+// item: collapsed from the dev IAIState interface + CAIState impl (both dropped) into a single plain value
+// struct so CAICommander can EMBED IT BY VALUE at operator& tag7 (retail CallObjectSerialize<SAIState>),
+// exactly as retail. It is NOT a CObjectBase -- nothing refcounts it and nothing standalone-serializes it.
+// The only holder is CAIUnit::pAIState, a raw, TRANSIENT (unserialized) weak back-pointer re-established
+// every AI segment by Synchronize()'s SetAIState(this). (The dev CAIPlayer/CAIIterator GetAIState back-refs
+// were dead and were removed.) The state's own pAICommander back-ref points at the REGISTERED commander, so
+// there is no orphan on save/load. See the tag7 note in aiCommander.h.
+//
+// Special members (ctors / dtor / operator& / the smart-pointer SETTERS) are out-of-line in aistate.cpp:
+// assigning a CPtr/CObj member routes through CastToObjectBase, which needs the element type complete, so
+// those bodies live where aiUnit.h/aiPlayer.h are included. The pure-return getters are inline (a CPtr/CObj
+// -> T* conversion just hands back the stored pointer, no completeness required).
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-class IAIState: public CObjectBase
+struct SAIState
 {
+	ZDATA
+	CPtr<NWorld::CWorld> pWorld;
+	CObj<IAIPlayer> pAlly;
+	CObj<IAIPlayer> pEnemy;
+	CPtr<IAIUnit> pCurrentUnit;
+	CPtr<IAIUnit> pCurrentEnemy;
+	int nCurrentAction;
+	int nTurnStartAllyHP, nTurnStartEnemyHP; // HP � ������ ����
+	CPtr<CAICommander> pAICommander;   // back-ref to the OWNING commander (a registered object -> serializes clean)
+	vector<SAIUnitGroup> enemyGroups;
+	ZEND int operator&( CStructureSaver &f );
+	//
+	void MakeEnemyGroups();
+	//
 public:
-	virtual IAIPlayer *GetAllyAIPlayer() = 0;
-	virtual IAIPlayer *GetEnemyAIPlayer() = 0;
-	virtual NWorld::CWorld *GetWorld() = 0;
-	virtual IAIUnit *GetCurrentAIUnit() = 0;
-	virtual void SetCurrentAIUnit( IAIUnit *pAIUnit ) = 0;
-	virtual IAIUnit *GetCurrentAIEnemy() = 0;
-	virtual void SetCurrentAIEnemy( IAIUnit *pAIUnit ) = 0;
-	virtual bool IsPerformingAction() = 0;
-	virtual bool IsPositionLocked( SPathPlace &ptPos, IAIUnit *pAIUnit ) = 0;
-	virtual bool IsSomebodyKilled() = 0;
-	virtual bool IsContain( IAIUnit *_pAIUnit ) = 0;
-	virtual void RemoveUnit( IAIUnit *_pAIUnit ) = 0;
-	virtual int GetEnemyHP() = 0;
-	virtual int GetAllyHP() = 0;
-	virtual int GetTurnStartEnemyHP() = 0;
-	virtual int GetTurnStartAllyHP() = 0;
-	virtual int GetCurrentAction() = 0;
-	virtual void SetCurrentAction( int nAction ) = 0;
-	virtual CAITacticalCommander *GetAITacticalCommander() = 0;
-	virtual void OnTurnStarted() = 0;
-	virtual bool IsAITurn() = 0;
-	virtual const vector<SAIUnitGroup>& GetEnemyGroups() const = 0;
+	SAIState();
+	SAIState( NWorld::CWorld *pWorld, CAICommander *_pAICommander );
+	~SAIState();
+	//
+	IAIPlayer *GetAllyAIPlayer() { return pAlly; }
+	IAIPlayer *GetEnemyAIPlayer() { return pEnemy; }
+	NWorld::CWorld *GetWorld() { return pWorld; }
+	IAIUnit *GetCurrentAIUnit() { return pCurrentUnit; }
+	void SetCurrentAIUnit( IAIUnit *pAIUnit );
+	IAIUnit *GetCurrentAIEnemy() { return pCurrentEnemy; }
+	void SetCurrentAIEnemy( IAIUnit *pAIUnit );
+	bool IsPositionLocked( SPathPlace &ptPos, IAIUnit *pAIUnit );
+	bool IsPerformingAction();
+	bool IsSomebodyKilled();
+	bool IsContain( IAIUnit *_pAIUnit );
+	void RemoveUnit( IAIUnit *_pAIUnit );
+	int GetEnemyHP();
+	int GetAllyHP();
+	int GetTurnStartEnemyHP() { return nTurnStartEnemyHP; }
+	int GetTurnStartAllyHP() { return nTurnStartAllyHP; }
+	int GetCurrentAction() { return nCurrentAction; }
+	void SetCurrentAction( int nAction ) { nCurrentAction = nAction; }
+	void OnTurnStarted();
+	bool IsAITurn();
+	void Synchronize();
+	IAIUnit* GetDangerousAttackableEnemy( IAIUnit *pAIUnit );
+	const vector<SAIUnitGroup>& GetEnemyGroups() const { return enemyGroups; }
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-IAIState *CreateAIState( NWorld::CWorld *pWorld, CAITacticalCommander *pAITacticalCommander );
-////////////////////////////////////////////////////////////////////////////////////////////////////
 }
+// SAIState is a plain value struct, not a CObjectBase -- the framework's generic IsValid( T* ) would
+// CastToObjectBase its argument (a bodyless primary template for a non-CObjectBase T => link error). Give
+// it a plain non-null overload so the consumers' defensive IsValid( GetAIState() ) null-guards keep
+// compiling and behaving (a unit with no state still returns null). Non-template exact match => preferred
+// over the generic template.
+inline bool IsValid( NAI::SAIState *p ) { return p != 0; }
 
 #endif

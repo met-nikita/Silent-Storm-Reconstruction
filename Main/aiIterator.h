@@ -4,7 +4,7 @@
 namespace NAI
 {
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-class IAIState;
+struct SAIState;
 class IAIAction;
 class IAILogContainer;
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -21,9 +21,9 @@ public:
 	virtual void Reset() = 0; // сбросить все оптимизационные данные
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-IAIIterator *CreateAIPositionIterator( IAIState *pAIState );
-IAIIterator *CreateAIUnitIterator( IAIState *pAIState );
-IAIIterator *CreateAIActionIterator( IAIState *pAIState, int nCount );
+IAIIterator *CreateAIPositionIterator( SAIState *pAIState );
+IAIIterator *CreateAIUnitIterator( SAIState *pAIState );
+IAIIterator *CreateAIActionIterator( SAIState *pAIState, int nCount );
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 }
 

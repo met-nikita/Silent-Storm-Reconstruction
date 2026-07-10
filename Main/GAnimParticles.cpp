@@ -12,11 +12,15 @@
 #include "..\MiscDll\Commands.h"
 #include "wTSFlags.h"
 #include "GSceneUtils.h"
+#include "Bound.h"          // SBoundCalcer/SBound for the BeStopped resting corpse bound (retail @0xea4f0)
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // wOSBase.obj @0x347bd0 -- breakable-glass collider gate (defined in wOSBase.cpp). Declared here so the
 // particle-physics step can let flying debris pass THROUGH a breakable pane (and break it) instead of
 // bouncing off it. Forward-declared (not #include "wOSBase.h") to avoid pulling its heavy deps.
 namespace NWorld { bool CheckItemsBreakGlass( const NAI::SSourceInfo *pSrc ); }
+// wInformCorpseStop.obj @0x35e940 (defined in wInformCorpseStop.cpp) -- "a corpse has settled" world
+// notification, called by CParticleSkeleton::BeStopped @0xea4f0. Same fwd-decl pattern as above.
+namespace NWorld { void WorldInformCorpseStop( CUnitServer *pUS ); }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 externA5 vector<SSphere> sphereParticles; // test from RWGame.cpp
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -447,17 +451,17 @@ CAParticle::SStick addSofts[NUM_ADD_SOFTS] = {
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool VIS_ON = false;
-int NUM_ITERATIONS = 5;
-int NUM_CYCLES = 5;
-float FRICTION = 0.6f;
+int NUM_ITERATIONS = 5;              // retail .data 0x953ac0 = 5
+int NUM_CYCLES = 5;                  // retail .data 0x953ac4 = 5
+float FRICTION = 0.5f;               // retail .data 0x953ac8 = 0.5 (Jan03 had 0.6)
 float ITEMS_FRICTION = 0.9f;
 float ITEMS_RESISTANCE = 0.1f;
-float DELTA_T = 0.05f;
-DWORD DELTA_T_DWORD = (DWORD)(DELTA_T*1000);
-float STIFFNESS = 1.0f;
-// stopping rule
-float F_STOP_DELTA_INCREMENT = 0.015f;
-int N_INCREMENT_STEP = 0;
+float DELTA_T = 0.05f;               // retail .data 0x953acc = 0.05
+DWORD DELTA_T_DWORD = (DWORD)(DELTA_T*1000);   // retail .data 0x953bcc = 50
+float STIFFNESS = 0.9f;              // retail .data 0x953ad0 = 0.9 (Jan03 had 1.0)
+// stopping rule (retail Step @0xee9c0 watchdog; values read from the shipped .data)
+float F_STOP_DELTA_INCREMENT = 0.06f;   // retail .data 0x953ad4 = 0.06 (Jan03 had 0.015)
+int N_INCREMENT_STEP = 0;            // still present in retail .bss but no longer used by the stop rule
 
 const float F_STOP_DELTA = 0;//0.003f;
 
@@ -465,9 +469,11 @@ const float Z_LEVEL = -3;
 const float GRAVITY = 10.f;
 //const int N_HISTORY_DEPTH = 8;
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CParticleSkeleton::CParticleSkeleton( NGScene::CCInt *_pFloor, CPtrFuncBase<CFileSkeletonInfo> *_pSkeleton )
+CParticleSkeleton::CParticleSkeleton( NGScene::CCInt *_pFloor, CPtrFuncBase<CFileSkeletonInfo> *_pSkeleton,
+	NWorld::CUnitServer *_pServer )
  : pFloor(_pFloor), bStartPhys(false), bStopped(false)
 {
+	pUnit = _pServer;   // retail 3-arg ctor @0xed670 (read by BeStopped @0xea4f0 -> WorldInformCorpseStop; threaded now)
 	pSkeleton = _pSkeleton;
 
 	CFileSkeletonInfo *pSkel = pSkeleton->GetValue();
@@ -514,12 +520,6 @@ void CParticleSkeleton::Init( STime t, SSkeletonPose &pose, SSkeletonPose &nextP
 		history[i] = CVec3( 1e10f, 0, 0 );
 	nHistoryFrame = 0;
 */
-	CVec3 imp = impact;
-	Normalize(&imp);
-	imp.z = 1.0f;
-	Normalize(&imp);
-	imp *= random.GetFloat( 3, 7 );
-
 	CFileSkeletonInfo *pSkel = pSkeleton->GetValue();
 	defaultPose.resize( pSkel->bones.size() );
 	for ( int i = 0; i < defaultPose.size(); ++i )
@@ -553,6 +553,9 @@ void CParticleSkeleton::Init( STime t, SSkeletonPose &pose, SSkeletonPose &nextP
 		sticks[nS].nP1 = nPairs[ nS * 2 ];
 		sticks[nS].nP2 = nPairs[ nS * 2 + 1 ];
 		sticks[nS].fRest = fabs(particles[ sticks[nS].nP2 ] - particles[ sticks[nS].nP1 ]);
+		// retail Init @0xed8c0 precomputes the stick-relaxation divisor into SStick+0xc
+		// (fInvMasses is already final here: the effector zeroing above ran first, as in retail)
+		sticks[nS].fSumInvMasses = fInvMasses[ sticks[nS].nP1 ] + fInvMasses[ sticks[nS].nP2 ];
 	}
 	softs.resize( NUM_ANGLES + NUM_ADD_SOFTS );
 	for ( int nS = 0; nS < NUM_ANGLES; ++nS )
@@ -574,8 +577,38 @@ void CParticleSkeleton::Init( STime t, SSkeletonPose &pose, SSkeletonPose &nextP
 		softs[nS + NUM_ANGLES].fRest = addSofts[nS].fRest;
 		softs[nS + NUM_ANGLES].nMax = addSofts[nS].nMax;
 	}
-	CalcParticles( &particles, nextPose );
+	// retail Init @0xed8c0 particle seeding: `last` from the current pose first, then -- ONLY on a real
+	// impulse (impact != VNULL3, i.e. every pushed kill) -- the initial Verlet velocity is the scaled,
+	// impact-point-falloff impulse slid along the collision map; else the input-animation delta. The
+	// Jan03 predecessor computed a normalized random impulse and NEVER APPLIED it (dead local) -- a
+	// crouched victim's static idle gave ZERO initial velocity, the compact crouch cloud was
+	// constraint-stable, and the corpse froze holding the crouch pose (the reported bug).
 	CalcParticles( &last, pose );
+	if ( impact != VNULL3 )
+	{
+		CVec3 imp( impact.x * 3.0f, impact.y * 3.0f,
+		           (float)sqrt( impact.x * impact.x + impact.y * impact.y ) * 0.8f * 3.0f );   // 0x40400000/0x3f4ccccd
+		vector<SSphere> spheres;
+		spheres.resize( NUM_PARTICLES );
+		vector<CVec3> vels;
+		vels.resize( NUM_PARTICLES );
+		for ( int i = 0; i < NUM_PARTICLES; ++i )
+		{
+			spheres[i] = SSphere( last[i], fRadiuses[i] );
+			// distance-from-impact-point falloff: particles near ptWhereImpact take the strongest
+			// impulse (fFall -> 2), far ones taper (and past 2 units flip sign). ptWhereImpact is the
+			// hit-location bone's world point (the corpse-push resolves it), so this stays >0 across
+			// the struck part of the body.
+			float fFall = 2.0f - fabs( last[i] - ptWhereImpact );
+			vels[i] = imp * ( fFall * DELTA_T );
+		}
+		vector<CVec3> newPos;
+		NAI::PhysCollideSliding( pMap, spheres, vels, &newPos, NWorld::TS_ITEM_BLOCKER, 0 );
+		for ( int i = 0; i < NUM_PARTICLES; ++i )
+			particles[i] = newPos[i];
+	}
+	else
+		CalcParticles( &particles, nextPose );
 
 	for ( int i = 0; i < pSkeleton->GetValue()->bones.size(); ++i )
 	{
@@ -616,7 +649,10 @@ void CParticleSkeleton::CheckIfCollided( STime t, SSkeletonPose *pPose, SSkeleto
 	if ( t < tActive )
 		return;
 	nextPose.resize( pPose->size() );
-	pInput->GetFrame( t + DELTA_T_DWORD, &nextPose );
+	STime tNext = t + DELTA_T_DWORD;   // retail @0xee560: clamp the look-ahead to the dynamics window
+	if ( tMax < tNext )
+		tNext = t;
+	pInput->GetFrame( tNext, &nextPose );
 	if ( t > tMax - 2*DELTA_T_DWORD )
 	{
 		bStartPhys = true;
@@ -637,7 +673,7 @@ void CParticleSkeleton::CheckIfCollided( STime t, SSkeletonPose *pPose, SSkeleto
 		vels[i] -= centers[i];
 		fLen = Max( fLen, fabs( vels[i] ) );
 	}
-	ASSERT( fLen > 0.0f && "��������� �����, �������� ��������� �����" );
+	ASSERT( fLen > 0.0f && "Artists made a bug: animation of a hung corpse" );
 	if ( fLen < 0.01f * DELTA_T )
 	{
 		bStartPhys = true;
@@ -645,8 +681,12 @@ void CParticleSkeleton::CheckIfCollided( STime t, SSkeletonPose *pPose, SSkeleto
 	}
 	vector<NAI::SCollisionPoint> res;
 	NAI::PhysCollideInfo( pMap, spheres, vels, &res, NWorld::TS_ITEM_BLOCKER );
-	for ( int i = 0; i < 10; ++i )
+	// retail @0xee560 scans ALL 19 particles (the Jan03 i<10 missed the leg/derived slots), skipping
+	// the hand slots 9/10 until the body is actually falling.
+	for ( int i = 0; i < NUM_PARTICLES; ++i )
 	{
+		if ( !bIsFalling && ( i == 9 || i == 10 ) )
+			continue;
 		if ( res[i].fDist != NAI::FP_NO_COLLISION )
 			bStartPhys = true;
 	}
@@ -709,7 +749,17 @@ void CParticleSkeleton::Step()
 
 	for ( int nP = 0; nP < nParticles; ++nP )
 	{
-		CVec3 future = 2 * particles[nP] - last[nP] + gravity * DELTA_T * DELTA_T;
+		CVec3 delta = particles[nP] - last[nP];
+		// retail @0x4eea44..0x4eeac1: while the corpse is CARRIED (live effector) the per-step Verlet
+		// travel of every particle is clamped to 0.1 (fcomp 0x3dcccccd) so the dragged cloud cannot
+		// build up velocity; the effector liveness is re-tested per particle, as in retail.
+		if ( IsValid( pEffector ) )
+		{
+			float fLen = fabs( delta );
+			if ( fLen > 0.1f )
+				delta *= 0.1f / fLen;
+		}
+		CVec3 future = particles[nP] + delta + gravity * DELTA_T * DELTA_T;
 		last[nP] = particles[nP];
 		particles[nP] = future;
 		if ( particles[nP].z < Z_LEVEL )
@@ -871,21 +921,19 @@ void CParticleSkeleton::Step()
 			}
 		}
 
-		// sticks
+		// sticks -- retail @0x4efb80: the zero-mass guard tests the PRECOMPUTED SStick::fSumInvMasses
+		// FIRST (fucompp vs 0.0, before any distance math), the divisor is that stored sum, the
+		// correction is scaled by STIFFNESS (fmul 0x953ad0), and there is NO 1e-6 delta clamp --
+		// retail dropped the Jan03 epsilon here (only the softs loop above keeps it).
 		for ( int nS = 0; nS < sticks.size(); ++nS )
 		{
+			if ( sticks[nS].fSumInvMasses == 0 )
+				continue;
 			CVec3 &pos1 = particles[ sticks[nS].nP1 ];
 			CVec3 &pos2 = particles[ sticks[nS].nP2 ];
 			CVec3 delta = pos2 - pos1;
 			float fDelta = fabs(delta);
-			if ( fDelta < 1e-6f )
-			{
-				fDelta = 1e-6f;
-				delta = CVec3(fDelta,0,0);
-			}
-			if ( fInvMasses[sticks[nS].nP1] + fInvMasses[sticks[nS].nP2] == 0 )
-				continue;
-			float fDiff = (fDelta - sticks[nS].fRest)/fDelta/(fInvMasses[sticks[nS].nP1]+fInvMasses[sticks[nS].nP2]);
+			float fDiff = STIFFNESS * (fDelta - sticks[nS].fRest)/fDelta/sticks[nS].fSumInvMasses;
 			pos1 += fInvMasses[sticks[nS].nP1] * fDiff * delta;
 			pos2 -= fInvMasses[sticks[nS].nP2] * fDiff * delta;
 		}
@@ -925,28 +973,26 @@ void CParticleSkeleton::Step()
 		}
 */
 
-		float fStopDelta = F_STOP_DELTA;
-		if ( nStep > N_INCREMENT_STEP * DELTA_T )
-			fStopDelta = F_STOP_DELTA + (nStep / DELTA_T - N_INCREMENT_STEP) * F_STOP_DELTA_INCREMENT / 10000.0f;
-		bStopped = true;
-		for ( int nP = 0; nP < nParticles; ++nP )
-		{
-			if ( fabs2(particles[nP] - last[nP]) > sqr(fStopDelta) )
-				bStopped = false;
-		}
-		if ( bStopped )
-		{
-			for ( int nP = 0; nP < nParticles; ++nP )
-				last[nP] = particles[nP];
-		}
-		/*
+		// retail @0x4efccc stop rule: past 9.5f/DELTA_T (= 190) steps the ragdoll is FORCE-stopped
+		// unconditionally (the endless-sliding/never-settling corpse watchdog, fld 0x8b6694 = 9.5f);
+		// before that the rest threshold GROWS with simulated time:
+		//   fStopDelta = (float)(nStep * DELTA_T_DWORD) * F_STOP_DELTA_INCREMENT / 10000
+		// (unsigned ms product, fmul 0x953ad4 = 0.06, fmul 0x8b625c = 1e-4; the Jan03 F_STOP_DELTA /
+		// N_INCREMENT_STEP terms are gone from the retail formula).
+		if ( 9.5f / DELTA_T < (float)nStep )
+			bStopped = true;
 		else
 		{
+			float fStopDelta = (float)(nStep * DELTA_T_DWORD) * F_STOP_DELTA_INCREMENT / 10000.0f;
+			bStopped = true;
 			for ( int nP = 0; nP < nParticles; ++nP )
-				history[nHistoryFrame * nParticles + nP] = particles[nP];
-			nHistoryFrame = (nHistoryFrame + 1) % N_HISTORY_DEPTH;
+			{
+				if ( fabs2(particles[nP] - last[nP]) > sqr(fStopDelta) )
+					bStopped = false;
+			}
 		}
-		*/
+		if ( bStopped )
+			BeStopped();   // retail @0x4efeb9 (call 0x4ea4f0): snapshot + corpse bound + world notify
 	}
 
 	if ( VIS_ON ) // test visualization
@@ -955,6 +1001,29 @@ void CParticleSkeleton::Step()
 		for ( int nP = 0; nP < nParticles; ++nP )
 			sphereParticles.push_back( SSphere( particles[nP], fRadiuses[nP] ) );
 	}
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail @0xea4f0: the ragdoll came to rest. Snapshot the resting cloud into `last`, build the
+// per-particle-radius-inflated resting bound (SBoundCalcer::Add(p, fRadiuses[i]) @0x43d2b0,
+// SBound::BoxInit @0x42abc0 -- empty calcer degrades to a zero box) and tell the world the corpse
+// settled (WorldInformCorpseStop @0x35e940, unconditional in retail).
+void CParticleSkeleton::BeStopped()
+{
+	SBoundCalcer bc;
+	for ( int nP = 0; nP < nParticleBones.size(); ++nP )
+	{
+		last[nP] = particles[nP];
+		bc.Add( last[nP], fRadiuses[nP] );
+	}
+	SBound bound;
+	bc.Make( &bound );
+	// DEFERRED (retail @0xea4f0 middle hop): pMap->GetStabilityTrackers()->AddCorpse( pUnit, &bound )
+	// (IAIMap vtbl+0x48 -> IStabilityTrackers vtbl+0x10 = CStabilityTrackers::AddCorpse @0xa5db0)
+	// registers the resting bound as a per-cell stability object so building-collapse debris interacts
+	// with the corpse. The CStabilityTracker(s) grid subsystem (retail aiStability.obj) does not exist
+	// in this tree yet; the bound above is already computed the retail way, so the hop becomes a
+	// one-liner once that subsystem is ported.
+	NWorld::WorldInformCorpseStop( pUnit );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CParticleSkeleton::NeedUpdate( STime t )

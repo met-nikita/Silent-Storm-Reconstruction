@@ -40,7 +40,14 @@ inline NGfx::SPixel8888 StringToColor( const wstring &wsColor )
 	else if ( wsColor.compare( L"lightblue" ) == 0 )
 		sColor = NGfx::SPixel8888( 0, 101, 213, 0xFF );
 	else
-		swscanf( wsColor.c_str(), L"%x", &sColor.color );
+	{
+		// hex ARGB, e.g. "FFEA511C" -- and the game.db cursor/format strings 0x-PREFIX it ("0x..."); strip the
+		// prefix so swscanf %x reads the full value (an un-stripped "0x.." reads just the leading 0 -> black).
+		const wchar_t *p = wsColor.c_str();
+		if ( p[0] == L'0' && ( p[1] == L'x' || p[1] == L'X' ) )
+			p += 2;
+		swscanf( p, L"%x", &sColor.color );
+	}
 
 	return sColor;
 }

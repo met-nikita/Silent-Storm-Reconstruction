@@ -192,6 +192,10 @@ private:
 	int nActionAP;
 	bool bForced;
 	bool bActionUnavailable;
+	// BUG 8: retail MakeCursorString @0x1d7990 colours the cursor's AP line green/red by the action's
+	// AP-affordability (actionInfo+0xd). Captured here from the same CanDoCommand that fills nActionAP.
+	// Transient display state (recomputed every frame in UpdateBlockedState) -- NOT serialized.
+	bool bEnoughAP;
 	NUI::SCursorInfo sCursorInfo;
 	NAI::EHitLocation eHitLocation;
 	CObj<CObjectBase> pTraceSelection;

@@ -8,7 +8,7 @@
 #include "aiRoute.h"
 #include "rpgUnitMission.h"
 #include "aiUnit.h"
-#include "aiTaskCommander.h"
+#include "aiTaskCommand.h"
 #include "wUnitServer.h"
 #include "wMain.h"
 #include "wUnitGroup.h"

@@ -37,7 +37,8 @@ inline void FilterSounds( list<SAISound<TUnit> > *pRes, const list<CPtr<TUnit> >
 			continue;
 		}
 		bool bCheat = p->GetUnitRPG()->GetRPGUnit()->IsCheatEnabled( NRPG::CHEAT_SCRIPTSEQUENCE );
-		if ( !bCheat && find( visible.begin(), visible.end(), p ) == visible.end() )
+		bool bVis = find( visible.begin(), visible.end(), p ) != visible.end();
+		if ( !bCheat && !bVis )
 			++i;
 		else
 			i = pRes->erase( i );
@@ -105,12 +106,12 @@ public:
 	virtual list<SAISound<TUnit> > *GetSounds() { return &aiSounds; }
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// множество чуваков, все звуки которых мы слышим
+// the set of guys all of whose sounds we hear
 template<class TUnit>
 class CAudibleSet
 {
 	ZDATA
-	list< CPtr<TUnit> > audibleUnits; // слышимые вражеские Unit-ы
+	list< CPtr<TUnit> > audibleUnits; // audible enemy Units
 public:
 	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&audibleUnits); return 0; }
 	bool IsAudible( const TUnit *pUnitServer ) const

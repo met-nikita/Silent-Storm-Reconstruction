@@ -347,6 +347,25 @@ public:
 	NDb::CString* GetBiography() const { return pBiography; }
 	bool HasPerk( int nPerkID, float *pParam1 = 0, float *pParam2 = 0, float *pParam3 = 0 ) const;
 	bool IsHero() const { return bHero; }
+	// retail CUnit::GetSightDistance @0x2ba680: a FLAT 20.0 world units, scaled by perk 0x53's param when
+	// present. (The per-pose CUnitMission::GetSightDistance table is a different, older surface -- retail's
+	// AI cover/vision planning reads THIS one via CGame::GetUnitSightDistance @0x2984d0.)
+	float GetSightDistance() const
+	{
+		float fParam = 1.0f;
+		if ( HasPerk( 0x53, &fParam ) )
+			return fParam * 20.0f;   // 0x41a00000
+		return 20.0f;
+	}
+	// retail CUnit::GetSightFOV @0x2ba6c0: PI radians (a 180-degree total field of view), scaled by perk
+	// 0x52's param when present.
+	float GetSightFOV() const
+	{
+		float fParam = 1.0f;
+		if ( HasPerk( 0x52, &fParam ) )
+			return fParam * 3.1415927f;   // FP_PI
+		return 3.1415927f;
+	}
 };
 int GetSkillByCap( int nCap, float fXP );
 float GetXPBySkill( int nCap, int nLvl );

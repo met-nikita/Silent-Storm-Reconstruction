@@ -50,15 +50,15 @@ class CCoverInfo: public CObjectBase
 public:
 	struct SRay
 	{
-		CVec3 ptDir;		// ����������� ����������
+		CVec3 ptDir;		// direction of deflection
 		bool  isPenetrate;
-		float fDeviation;	// �������� ���������� �� ���������� ���������
+		float fDeviation;	// magnitude of deviation from the ideal hit
 	};
 	ZDATA
-	vector<SRay> hitRays;	// ����� �������� �����
-	CVec3 src;				// ����� ������ ��������
-	vector<SRay> looseRays;	// ����� �������������� �����
-	vector<SRay> obstRays; // ����� �����, ������� �������� � ����������� �� ������������ ���������� �� �������� �����
+	vector<SRay> hitRays;	// set of rays that hit
+	CVec3 src;				// point from which the shot is fired
+	vector<SRay> looseRays;	// set of rays that missed
+	vector<SRay> obstRays; // set of rays that ran into an obstacle at a certain distance from the source point
 	float fSummAPA;
 	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&hitRays); f.Add(3,&src); f.Add(4,&looseRays); f.Add(5,&obstRays); f.Add(6,&fSummAPA); return 0; }
 };
@@ -100,10 +100,14 @@ public:
 		NAI::ETileHitLocation eHitLocation, bool bFirstTurn );
 	virtual int GetBazookaToHit(  NWorld::CUnit *pAttacker, CVec3 ptTilePos, 
 		NAI::ETileHitLocation eHitLocation, bool bFirstTurn );
-	virtual bool CheckVisibility( const NWorld::CUnit *pObserver, const NWorld::CUnit *pDest );
+	virtual bool CheckVisibility( const NWorld::CUnit *pObserver, const NWorld::CUnit *pDest, bool bUseFOV );   // retail @0x298cb0
 	virtual bool CanSee( const NWorld::CUnit *pObserver, const CVec3 &vPos );
 	virtual bool CheckPositionVisibility( const NAI::SUnitPosition observerPos, const NAI::SPosition targetPos );
-	virtual bool CheckAIPositionVisibility( const NAI::SUnitPosition observerPos, const NAI::SPosition targetPos );
+	virtual bool IsCorpseVisible( const NWorld::CUnit *pObserver, const NWorld::CUnit *pCorpse );   // retail @0x298da0
+	virtual bool CheckPositionVisibility( const NAI::SUnitPosition observerPos, const NAI::SPosition targetPos,
+		float fRange, float fFOVAngle );   // retail @0x298fa0 (4-arg)
+	virtual float GetUnitSightDistance( NRPG::CUnit *pRPGUnit );   // retail @0x2984d0
+	virtual float GetMaxUnitSightDistance( NRPG::CUnit *pRPGUnit );   // retail @0x298520 (vtbl+0x38)
 	virtual void GetVisibilityArea( vector<SVisibilitySpot> *pRes, const NWorld::CUnit *pObserver );
 	virtual void GetVisibleFromArea( vector<SVisibilitySpot> *pRes, const NWorld::CUnit *pTarget, CVec3 &vNear, float fRadius, int nPoses );
 	virtual int GetCoverForAIUnit( CVec3 ptFrom, NWorld::CUnit *pIgnore, 
@@ -267,7 +271,7 @@ static void AddGridToCovers( CCoverInfo *pRes, const NAI::CFastRenderer &res, co
 				}
 				//
 				fTempPiercing -= GetAPASubstraction( p->fEnter, p->fExit, pArmor );
-				// ���� �������� � ������ ������� �� �����
+				// the bullet got stuck, no need to damage anything further
 				if ( fTempPiercing <= 0 )
 				{
 					bBlocked = true;
@@ -320,7 +324,7 @@ int CGame::GetCoverForAIUnit( CVec3 ptFrom, NWorld::CUnit *pIgnore,
 CCoverInfo* CGame::CalcCovers( const CVec3 &src, const CAttackPortion &attack, NWorld::CUnit *pIgnore,
 	NWorld::CUnit *pDest, int nTargetUserID, float fMinClearDistance, bool bAIMode )
 {
-	const float F_VIEW_BOUND = 2.f;			// ������� �����
+	const float F_VIEW_BOUND = 2.f;			// grid diameter
 	const int N_LOW_HALF_GRID = 5;
 	int N_HALF_GRID;
 	if ( !bAIMode )
@@ -390,11 +394,12 @@ void CGame::ProcessMeleeAttackPortion( const CAttackPortion &a, const CRay &ray,
 	for ( vector<IAttackable*>::const_iterator it = _ignore.begin(); it != _ignore.end(); ++it )
 		ignore.push_back( *it );
 	CAttackPortion tmpAttackPortion( a );
+	tmpAttackPortion.rTtrajectory = ray;   // Jan03 write the combat code reads (see ProcessRangedAttackPortion note)
 	pAIMap->Trace( ray, &intersect, NWorld::TS_FRAGMENTED );
 
 	for ( vector<NAI::SInterval>::iterator i = intersect.begin(); i != intersect.end(); ++i )
 	{
-		if ( i->enter.fT > 0 )	// ��� ��� �� ����� ���� ��� �� ���, � ������
+		if ( i->enter.fT > 0 )	// because this is actually not a ray but a straight line
 		{
 			CDynamicCast<IAttackable> pAttackCatcher( i->pSrc->pUserData );
 			if ( pAttackCatcher )
@@ -404,7 +409,7 @@ void CGame::ProcessMeleeAttackPortion( const CAttackPortion &a, const CRay &ray,
 				CDynamicCast<NWorld::CUnit> pTargetUnit( i->pSrc->pUserData );
 				if ( IsValid( pTargetUnit ) )
 				{
-					// ��������� �������� � ����������. "������ , ��� � � ������ ������ ;)"
+					// Let's try playing supermen. "Cheaters are cheaters even in Africa ;)"
 					if ( pTargetUnit->IsCheatEnabled( CHEAT_GODMODE ) )
 						continue;
 					ignore.push_back(pAttackCatcher);
@@ -415,13 +420,13 @@ void CGame::ProcessMeleeAttackPortion( const CAttackPortion &a, const CRay &ray,
 				pArmor = NDb::GetArmor( NDb::N_DEFAULT_ARMOR );
 			if ( !tmpAttackPortion.IsArmorIgnored(pArmor) && !tmpAttackPortion.CanDealDmg(pArmor) )
 				return;
-			// ������������ ��������� �����������
+			// tally up the damage inflicted
 			if ( pAttackCatcher && IsValid( i->pSrc->pUserData ) )
 				pAttackCatcher->ProcessAttack( i->nUserID, &tmpAttackPortion, pArmor );
 			tmpAttackPortion.nK -= GetAPASubstraction( i->enter.fT, i->exit.fT, pArmor );
 			//sTrail.explosions.push_back( SWound( i->pUserData, ray.Get( i->enter.fT ), -ray.ptDir, pArmor ) );
 			if ( tmpAttackPortion.nK <= 0 )
-				return;	// ���� �������� � ������ ������� �� �����
+				return;	// the bullet got stuck, no need to damage anything further
 		}
 	}
 }
@@ -434,6 +439,13 @@ void CGame::ProcessRangedAttackPortion( const CAttackPortion &a, const CRay &ray
 	for ( vector<IAttackable*>::const_iterator it = ignores.begin(); it != ignores.end(); ++it )
 		ignore.push_back( *it );
 	CAttackPortion tmpAttackPortion( a );
+	// Jan03 wrote the fired ray into the attack portion here; the combat code (ProcessAttack corpse-push,
+	// KillUnit, CreateBloodyMess) reads pAttack->rTtrajectory.ptDir for the shot direction. Retail moved
+	// that direction to a separate `dir` argument of ProcessAttack @0x350e20 (s2_dumbunit.h:2320) and
+	// dropped this write; the dev tree kept the Jan03 rTtrajectory READER but the reconstructed-from-retail
+	// body lost the WRITER, so every downed unit was pushed/killed with a ZERO direction (no ragdoll launch,
+	// no directional blood). Restore the Jan03 write so the trail-carried attack portion keeps the direction.
+	tmpAttackPortion.rTtrajectory = ray;
 	pAIMap->Trace( ray, &intersect, NWorld::TS_FRAGMENTED );
 
 	pTrails->clear();
@@ -441,7 +453,7 @@ void CGame::ProcessRangedAttackPortion( const CAttackPortion &a, const CRay &ray
 
 	for ( vector<NAI::SInterval>::iterator i = intersect.begin(); i != intersect.end(); ++i )
 	{
-		if ( i->enter.fT > 0 && i->enter.fT < N_WEAPONTRAIL_MAXDISTANCE )	// ��� ��� �� ����� ���� ��� �� ���, � ������
+		if ( i->enter.fT > 0 && i->enter.fT < N_WEAPONTRAIL_MAXDISTANCE )	// because this is actually not a ray but a straight line
 		{
 			CDynamicCast<IAttackable> pAttackCatcher( i->pSrc->pUserData );
 			if ( pAttackCatcher )
@@ -451,7 +463,7 @@ void CGame::ProcessRangedAttackPortion( const CAttackPortion &a, const CRay &ray
 				CDynamicCast<NWorld::CUnit> pTargetUnit( i->pSrc->pUserData );
 				if ( IsValid( pTargetUnit ) )
 				{
-					// ��������� �������� � ����������. "������ , ��� � � ������ ������ ;)"
+					// Let's try playing supermen. "Cheaters are cheaters even in Africa ;)"
 					if ( pTargetUnit->IsCheatEnabled( CHEAT_GODMODE ) )
 						continue;
 					ignore.push_back(pAttackCatcher);
@@ -470,7 +482,7 @@ void CGame::ProcessRangedAttackPortion( const CAttackPortion &a, const CRay &ray
 			}
 			tmpAttackPortion.nK -= GetAPASubstraction( i->enter.fT, i->exit.fT, pArmor );
 			if ( tmpAttackPortion.nK <= 0 )
-				return;	// ���� �������� � ������ ������� �� �����
+				return;	// the bullet got stuck, no need to damage anything further
 			if ( bDrawExit && i->exit.fT > 0 && i->exit.fT < N_WEAPONTRAIL_MAXDISTANCE )
 				pTrails->push_back( STrailPoint( i->nUserID, ray.ptDir, ray.Get( i->exit.fT ), tmpAttackPortion, 0, i->pSrc->pUserData, pArmor, -i->exit.ptNormal, i->pSrc->nFloor ) );
 		}
@@ -485,16 +497,16 @@ EAttackResult CGame::ProcessThrowingAttackPortion( CAttackPortion *pA, IAttackab
 		pTarget->ProcessAttack( nUserID, pA, pArmor );
 		return AR_BOUNCE_BODY;
 	}
-	// ������
+	// Foliage
 	if ( pArmor->pMaterial->nDR == 10 )
 		return AR_IGNORE;
-	// ������
+	// Glass
 	if ( pArmor->pMaterial->nDR == 0 )
 	{
 		pTarget->ProcessAttack( nUserID, pA, pArmor );
 		return AR_IGNORE;
 	}
-	// ������
+	// Wood
 	if ( pArmor->pMaterial->nDR == 1 || pArmor->pMaterial->nDR == 2 )
 		return AR_STUCK;
 	return AR_BOUNCE;
@@ -544,11 +556,14 @@ bool PeekRay( CCoverInfo *pCover, CRay *pRes, float fHit, bool *bIsMiss, bool bS
 				if ( fK < fMaxAngle )
 					fK /= 1000;
 			}
-			if ( i->isPenetrate )
-			{
-				fK *= fHit;
+			// RealPeekRay @0x2b3f00: on a rolled hit, only PENETRATING rays are eligible. Zero the weight of any
+			// obstacle-blocked (non-penetrating) ray so the roulette can never pick it as the fired trajectory
+			// while *bIsMiss (which drives the shooter's hit/miss bark) reports a hit -- the reported bug where a
+			// bullet flew into cover yet the shooter barked a hit. Retail does NOT scale the penetrating weight by fHit.
+			if ( !i->isPenetrate )
+				fK = 0;
+			else
 				*bIsMiss = false;
-			}
 			roulette.AddSector(fK);
 		}
 		if ( *bIsMiss )
@@ -558,12 +573,12 @@ bool PeekRay( CCoverInfo *pCover, CRay *pRes, float fHit, bool *bIsMiss, bool bS
 	}
 	else
 	{
-		ASSERT( pCover->looseRays.size() > 0 );	// ���� ��� � ����
+		ASSERT( pCover->looseRays.size() > 0 );	// same as above
 		if ( pCover->looseRays.empty() )
 			return false;
 
 		CRoulette roulette;
-		sort( pCover->looseRays.begin(), pCover->looseRays.end() ); // ��������� �� ������ � ������
+		sort( pCover->looseRays.begin(), pCover->looseRays.end() ); // sort from worst to best
 		float fStep = 1.f / float( pCover->looseRays.size() );
 		int n = 0;
 		for ( vector<CCoverInfo::SRay>::const_iterator i = pCover->looseRays.begin(); i != pCover->looseRays.end(); ++i, ++n )
@@ -615,7 +630,7 @@ int GetHitCover( const NWorld::CUnit *pAttacker, CCoverInfo *pCover )
 	float fAverageAPA = 0.0f;
 	if ( nPenetrateCount > 0 )
 		fAverageAPA = ( pCover->fSummAPA / float(nPenetrateCount) ) / attack.front().nK;
-	// ������� �������� �����
+	// percentage of rays that hit
 	int nHitCover = 0;
 	if ( !pCover->hitRays.empty() )
 	{
@@ -645,7 +660,7 @@ int GetAttackerToHit( const NWorld::CUnit *pAttacker, NWorld::CUnit *pTarget, in
 	//
 	int nHitCover = GetHitCover( pAttacker, pCover );
 	int nDistance = fabs(pAttacker->GetPosition().GetCP() - pTarget->GetPosition().GetCP()) / FP_GRID_STEP;
-	// CRAP: ���� �������� ��� ����� �� �����������
+	// CRAP: this parameter is no longer used anywhere
 	CVec3 ptAttacker = pAttacker->GetPosition().GetCenter();
 	//
 	bool bBackStab = !pTarget->IsUnitAudible( pAttacker ) && !pTarget->IsUnitVisible( pAttacker );
@@ -669,11 +684,19 @@ int CGame::GetCompositeToHit( NWorld::CUnit *pAttacker,
 		return 0;
 	}
 	CVec3 ptAttackPos;
+	// retail NRPG::GetToHit @0x2b5ee0 and the executor CExecMeleeUnit::OnLabel (wUnitAttackExec.cpp:1645) pass
+	// min-clear 0 for melee -- there is no muzzle to pull the cover-walk origin back from. Using the ranged
+	// GetMinClearDistance() here culled every cover ray at arm's reach, so GetHitCover returned <=0 and the
+	// cover-gated melee routing (throwing knives / destructible CUnitServer objects) displayed 0% on the attack
+	// cursor even though the executor (min-clear 0) computed and landed a non-zero chance. Mirrors the already-
+	// faithful sibling CGame::GetTileCompositeToHit.
+	float fMinClearDistance;
 	if ( NDb::IsMeleeWeapon( pRealAttacker->GetWeaponType() ) )
 	{
 		CVec3 pTargetHL;
 		pAIMap->GetUnitHLPos( &pTargetHL, pAIMap->GetHull(pTarget), eHL );
 		ptAttackPos = GetMeleeAttackPos( pAttacker, pTargetHL );
+		fMinClearDistance = 0;
 	}
 	else
 	{
@@ -681,9 +704,10 @@ int CGame::GetCompositeToHit( NWorld::CUnit *pAttacker,
 		NAI::EDirection dir = GetShootDirection( pos.pos.pNet, pos.pos.p, pTarget->GetPosition().GetCP() );
 		pos.pos.p.SetDirection( dir );
 		ptAttackPos = pAttacker->GetAttackOrigin( pos );
+		fMinClearDistance = pAttacker->GetMinClearDistance();
 	}
-	CObj<NRPG::CCoverInfo> pCover = CalcCovers( ptAttackPos, attack.front(), pAttacker, pTarget, eHL, pAttacker->GetMinClearDistance() );
-	vector<int> accessibleHLs; // ���������� ������ ��� ���������� Melee ToHit
+	CObj<NRPG::CCoverInfo> pCover = CalcCovers( ptAttackPos, attack.front(), pAttacker, pTarget, eHL, fMinClearDistance );
+	vector<int> accessibleHLs; // needed only for computing Melee ToHit
 	if ( NDb::IsMeleeWeapon( pRealAttacker->GetWeaponType() ) )
 	{
 		pAIMap->GetAccessibleUnitHL( &accessibleHLs, pAttacker->GetPosition().GetCenter(), pAIMap->GetHull(pAttacker), F_MELEE_DISTANCE );
@@ -852,13 +876,20 @@ static CVec3 GetForwardDir( const NAI::SUnitPosition &observerPos )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 const float F_LOWER_CUBE_DH = 0.5f;
 const float F_NEXT_CUBE_DH = 0.5f;
+// retail CGame::GetVisibilityArea @0x298840 (IGame vtbl+0x20, disasm-proven): gather radius =
+// NRPG::GetMaxSightDistance() (40, @0x2ba2e0) NOT N_SIGHTDISTANCE; pre-cull = the vision tracker's
+// height-stretched IsWithinSightRange @0x2c7fa0 with the observer's REAL GetUnitSightDistance; the
+// per-point probe = the range/FOV-gated 5-arg IsCubeVisible with cos(GetSightFOV()*0.5) (recomputed
+// per point in retail -- hoisted here, same value).
 void CGame::GetVisibilityArea( vector<SVisibilitySpot> *pRes, const NWorld::CUnit *pObserver )
 {
 	CVec3 ptFwdDir = GetForwardDir( pObserver->GetPosition() );
 	const CVec3 ptFrom = pObserver->GetPosition().GetEyePosition();
-	//CObj<NAI::CAIVisionCube> pCube = pAIMap->GetVisionCube( ptFrom );
+	NRPG::CUnit *pRPG = IsValid( pObserver->GetRPG() ) ? pObserver->GetRPG()->GetRPGUnit() : 0;
+	const float fRange = GetUnitSightDistance( pRPG );
+	const float fCosHalfFOV = cos( ( IsValid( pRPG ) ? pRPG->GetSightFOV() : FP_2PI ) * 0.5f );
 	vector<NAI::SPathPlace> testPlaces;
-	pNet->GetNearPlaces( SSphere( ptFrom, N_SIGHTDISTANCE ), &testPlaces );
+	pNet->GetNearPlaces( SSphere( ptFrom, NRPG::GetMaxSightDistance() ), &testPlaces );
 	pRes->clear();
 	for ( int k = 0; k < testPlaces.size(); ++k )
 	{
@@ -867,18 +898,14 @@ void CGame::GetVisibilityArea( vector<SVisibilitySpot> *pRes, const NWorld::CUni
 		pos.SetNetwork( pNet );
 		CVec3 ptTest = pos.GetCP();
 		ptTest += CVec3( 0,0,F_LOWER_CUBE_DH );
-		if ( fabs2( ptTest - ptFrom ) > sqr( N_SIGHTDISTANCE ) )
+		if ( !pVision->IsWithinSightRange( ptFrom, ptTest, fRange ) )
 			continue;
-		int nRes = 0;
-		for ( int k = 0; k < 3; ++k )
+		for ( int j = 0; j < 3; ++j )
 		{
-			CVec3 ptTestPoint = ptTest + CVec3(0,0,F_NEXT_CUBE_DH * k );
-			if ( pVision->IsCubeVisible( ptFrom, ptTestPoint, ptFwdDir ) )
-				nRes = k + 1;
-			else
-				pRes->push_back( SVisibilitySpot( ptTestPoint, k ) ); // designers asked for it
+			CVec3 ptTestPoint = ptTest + CVec3(0,0,F_NEXT_CUBE_DH * j );
+			if ( !pVision->IsCubeVisible( ptFrom, ptTestPoint, ptFwdDir, fRange, fCosHalfFOV ) )
+				pRes->push_back( SVisibilitySpot( ptTestPoint, j ) ); // designers asked for it
 		}
-		//pRes->push_back( SVisibilitySpot( ptTest, nRes ) );
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -980,17 +1007,26 @@ void GetTileOccupiedCubes( vector<CVec3> *pRes, const CVec3 &ptPos, NAI::ETileHi
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-bool CGame::CheckVisibility( const NWorld::CUnit *pObserver, const NWorld::CUnit *pDest )
+// retail CGame::CheckVisibility @0x298cb0 (IGame vtbl+0x10; disasm-proven): the per-unit visibility
+// probe -- FOV = bUseFOV ? observer's GetSightFOV() (pi default, perk 0x52) : 2pi (0x40c90fdb);
+// range = GetUnitSightDistance(observer) (20 x perk 0x53, night x1.5015 perk 0x51); then the 4-arg
+// CheckPositionVisibility (per-cube retail 9-ray). Replaces the legacy 2-arg CheckPositionVisibility
+// route (hardcoded N_SIGHTDISTANCE + 180-degree half-space + flat range).
+bool CGame::CheckVisibility( const NWorld::CUnit *pObserver, const NWorld::CUnit *pDest, bool bUseFOV )
 {
-	return CheckPositionVisibility( pObserver->GetPosition(), pDest->GetPosition().pos );
+	NRPG::CUnit *pRPG = IsValid( pObserver->GetRPG() ) ? pObserver->GetRPG()->GetRPGUnit() : 0;
+	float fFOV = ( bUseFOV && IsValid( pRPG ) ) ? pRPG->GetSightFOV() : FP_2PI;
+	float fRange = GetUnitSightDistance( pRPG );
+	return CheckPositionVisibility( pObserver->GetPosition(), pDest->GetPosition().pos, fRange, fFOV );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CGame::CanSee( const NWorld::CUnit *pObserver, const CVec3 &vPos )
-{
+{	// retail: CalcViewerInfo @0x298570 (range = GetUnitSightDistance, cosHalfFOV = cos(GetSightFOV*0.5))
+	// + CanSeeCenter @0x298750 -> the SINGLE-RAY IsPointVisible @0x2c9440 (vision vtbl+0x14).
 	const NAI::SUnitPosition &observerPos = pObserver->GetPosition();
-	CVec3 ptFwdDir = GetForwardDir( observerPos );
-	CVec3 ptFrom = observerPos.GetEyePosition();
-	return pVision->IsCubeVisible( ptFrom, vPos, ptFwdDir );
+	NRPG::CUnit *pRPG = IsValid( pObserver->GetRPG() ) ? pObserver->GetRPG()->GetRPGUnit() : 0;
+	return pVision->IsPointVisible( observerPos.GetEyePosition(), vPos, GetForwardDir( observerPos ),
+		GetUnitSightDistance( pRPG ), cos( ( IsValid( pRPG ) ? pRPG->GetSightFOV() : FP_2PI ) * 0.5f ) );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CGame::CheckPositionVisibility( const NAI::SUnitPosition observerPos, const NAI::SPosition targetPos )
@@ -1006,14 +1042,72 @@ bool CGame::CheckPositionVisibility( const NAI::SUnitPosition observerPos, const
 	}
 	return false;
 }
+// (CheckAIPositionVisibility deleted: retail has no such function -- absent from the CGame vtable --
+// and the dev tree had ZERO callers; its body even read testPoints[1] unchecked.)
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-bool CGame::CheckAIPositionVisibility( const NAI::SUnitPosition observerPos, const NAI::SPosition targetPos )
+// retail CGame::IsCorpseVisible @0x298da0 (game vtbl+0x50): eye + facing of the observer; range = the
+// 1x GetUnitSightDistance (vtbl+0x34); cosHalfFOV = cos(GetSightFOV*0.5); one 9-ray IsCubeVisible per
+// corpse hit-location point (CUnit vtbl+0x94 GetCorpseHLs = CDumbUnitServer::corpseHLpos); first
+// visible point wins.
+bool CGame::IsCorpseVisible( const NWorld::CUnit *pObserver, const NWorld::CUnit *pCorpse )
+{
+	if ( pObserver == 0 || pCorpse == 0 )
+		return false;
+	const NAI::SUnitPosition &pos = pObserver->GetPosition();
+	CVec3 ptFwdDir = GetForwardDir( pos );
+	CVec3 ptFrom = pos.GetEyePosition();
+	NRPG::CUnit *pRPG = IsValid( pObserver->GetRPG() ) ? pObserver->GetRPG()->GetRPGUnit() : 0;
+	float fRange = GetUnitSightDistance( pRPG );
+	float fCosHalfFOV = cos( ( IsValid( pRPG ) ? pRPG->GetSightFOV() : FP_2PI ) * 0.5f );
+	const vector<CVec3> *pts = pCorpse->GetCorpseHLs();
+	for ( int k = 0; pts && k < (int)pts->size(); ++k )
+		if ( pVision->IsCubeVisible( ptFrom, (*pts)[k], ptFwdDir, fRange, fCosHalfFOV ) )
+			return true;
+	return false;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail CGame::CheckPositionVisibility @0x298fa0 -- the 4-arg overload (oracle s2_rpggame.h:219-250):
+//   ptFwdDir   = (cos dir, sin dir, 0) off the observer's facing
+//   ptFrom     = the observer's eye position
+//   cosHalfFOV = cos( fFOVAngle * 0.5 )
+//   for each occupied cube of the target: ONE range/FOV-gated ray -> the first visible cube wins.
+bool CGame::CheckPositionVisibility( const NAI::SUnitPosition observerPos, const NAI::SPosition targetPos,
+	float fRange, float fFOVAngle )
 {
 	CVec3 ptFwdDir = GetForwardDir( observerPos );
 	CVec3 ptFrom = observerPos.GetEyePosition();
+	const float fCosHalfFOV = cos( fFOVAngle * 0.5f );
 	vector<CVec3> testPoints;
 	GetOccupiedCubes( &testPoints, targetPos );
-	return pVision->IsCubeVisible( ptFrom, testPoints[1], ptFwdDir );
+	for ( int k = 0; k < testPoints.size(); ++k )
+	{
+		// retail leaf (disasm @0x298fa0: vision vtbl+0x10) = the 9-ray IsCubeVisible @0x2c9160, NOT the
+		// single-ray IsPointVisible the first port assumed.
+		if ( pVision->IsCubeVisible( ptFrom, testPoints[k], ptFwdDir, fRange, fCosHalfFOV ) )
+			return true;
+	}
+	return false;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail CGame::GetUnitSightDistance @0x2984d0: the unit's flat sight range (CUnit::GetSightDistance
+// @0x2ba680 -- 20.0, perk 0x53), boosted x1.5015 (0x3fc03133) at night for a unit with the night-vision
+// perk 0x51.
+float CGame::GetUnitSightDistance( NRPG::CUnit *pRPGUnit )
+{
+	if ( !IsValid( pRPGUnit ) )
+		return 0.0f;
+	float fDist = pRPGUnit->GetSightDistance();
+	if ( bNight && pRPGUnit->HasPerk( 0x51 ) )
+		return fDist * 1.5015015f;   // 0x3fc03133
+	return fDist;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail CGame::GetMaxUnitSightDistance @0x298520 (vtbl+0x38): 2x the unit's sight range -- the
+// perception sweep's candidate-gather radius (decomp: fVar1 + fVar1).
+float CGame::GetMaxUnitSightDistance( NRPG::CUnit *pRPGUnit )
+{
+	float f = GetUnitSightDistance( pRPGUnit );
+	return f + f;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 IGame* CreateGame( NAI::IAIMap *pAIMap, NAI::IPathNetwork *pNet )

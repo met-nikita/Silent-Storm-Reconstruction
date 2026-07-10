@@ -1388,7 +1388,7 @@ void CUnitAnimator::Climb( const NAI::SUnitPosition &prevPos, const NAI::SUnitPo
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CUnitAnimator::ForcedMove( const NAI::SUnitPosition &cmdPos )
 {
-	// crap - ��������, �� ������ ���������� ���� �������������� ���������
+	// crap - it works, but overriding constants is an awfully ugly thing to do
 	STime backup = N_DEFAULT_TRANSIT_TIME;
 	N_DEFAULT_TRANSIT_TIME = N_FORCED_MOVE_TIME;
 	DefaultAction( cmdPos );
@@ -1584,7 +1584,8 @@ static NDb::CAnimation::EType GetDeathType( const NAI::SUnitPosition &cmdPos, co
 // retail @0x33bb90. The death CLIP is optional (bPlayDeath + idle gates + data), the ragdoll
 // handoff (AddDynamics) is UNCONDITIONAL -- a death that skips it leaves the corpse frozen in
 // its last animation pose with the render transform stuck at the death spot.
-void CUnitAnimator::Die( const NAI::SUnitPosition &cmdPos, const CVec3 &ptDir, bool bPlayDeath )
+void CUnitAnimator::Die( const NAI::SUnitPosition &cmdPos, const CVec3 &ptDir, bool bPlayDeath,
+	NWorld::CUnitServer *pServer, const CVec3 *pWhereImpact )
 {
 	bool bWasCannon = false;
 	if ( IsValid( pCannon ) )
@@ -1616,8 +1617,22 @@ void CUnitAnimator::Die( const NAI::SUnitPosition &cmdPos, const CVec3 &ptDir, b
 	STime tDeathTime = 0;
 	if ( pDeath )
 	{
-		pDeath->SetStand( tCur, cmdPos.GetCPNoHeight(), cmdPos.GetDirection() );
-		pAnimator->AddAnimator( tCur, PutOnTerrain(pDeath) );
+		if ( fDeathFall <= 0 )
+		{
+			pDeath->SetStand( tCur, cmdPos.GetCPNoHeight(), cmdPos.GetDirection() );
+			pAnimator->AddAnimator( tCur, PutOnTerrain(pDeath) );
+		}
+		else
+		{
+			// retail falling-death branch (@0x33bb90, disasm 0x73bd3f): the unit died while FALLING
+			// (CUnitServer::ForcedMove @0x3c0b80 stored the pre-fall height into fDeathFall) -- the
+			// death clip MOVES from (cp.x, cp.y, fDeathFall) straight down with velocity {0,0,-16}
+			// (0xc1800000 disasm-verified) and zero angular velocity, and is added RAW (no
+			// PutOnTerrain -- the corpse must not be snapped onto the terrain it is falling past).
+			pDeath->SetMove( tCur, CVec3( cmdPos.GetCPNoHeight(), fDeathFall ), cmdPos.GetDirection(),
+				CVec3( 0, 0, -16.0f ), 0 );
+			pAnimator->AddAnimator( tCur, pDeath );
+		}
 		// retail does NOT advance to GetTimeLabel1() -- the dynamics window is the WHOLE clip
 		// [tNow, tNow+len] so the ragdoll can take over mid-clip on collision; the old
 		// label1-based window delayed the physics takeover past the clip end.
@@ -1626,7 +1641,17 @@ void CUnitAnimator::Die( const NAI::SUnitPosition &cmdPos, const CVec3 &ptDir, b
 
 	// retail impact: VNULL3 while a clip is standing the body (it settles from the clip pose),
 	// the raw impulse dir only on the clipless instant-ragdoll path.
-	pAnimator->AddDynamics( tCur, tCur + tDeathTime, pDeath ? VNULL3 : ptDir, pAIMap, pFloor );
+	// ptWhereImpact = the WORLD impact point (the body's ground position). CParticleSkeleton::Init's
+	// per-particle falloff is `2 - |last[i]_world - ptWhereImpact|`: particles NEAR the impact take the
+	// strongest impulse, far ones taper off. The prior reconstruction reinterpret_cast'd the raw
+	// SUnitPosition bytes (packed place + ptr) as the CVec3 -> a near-zero garbage point ~|worldPos|
+	// away from the body, so the falloff went large-NEGATIVE and inverted the (always-upward) impulse
+	// into a downward shove that drove the corpse straight through the floor on frame 1. That garbage
+	// path was never exercised before (crouch/scripted deaths take the impact==VNULL3 branch, no
+	// impulse). Feed the real impact point so the falloff behaves as designed (retail-observable: the
+	// corpse ragdolls/launches instead of pancaking into the ground).
+	pAnimator->AddDynamics( tCur, tCur + tDeathTime, pDeath ? VNULL3 : ptDir,
+		pWhereImpact ? *pWhereImpact : cmdPos.GetCP(), pAIMap, pFloor, pServer, 0, fDeathFall > 0 );
 	pAnimator->AddMemorizer( tCur + 10000 );
 	IdleOff();
 }
@@ -1944,7 +1969,7 @@ void CUnitAnimator::DropCorpse( const NAI::SUnitPosition &cmdPos )
 	IdleOn( cmdPos );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CUnitAnimator::BeTaken( CUnit *_pCarrier, CUnitAnimator *pTaker )
+void CUnitAnimator::BeTaken( CUnit *_pCarrier, CUnitAnimator *pTaker, CUnitServer *pServer )
 {
 	pCarrier = _pCarrier;
 	bIsCarried = true;   // retail @0x33bea0 (read by the ProcessAttack corpse-push gate @0x350e20)
@@ -1957,15 +1982,18 @@ void CUnitAnimator::BeTaken( CUnit *_pCarrier, CUnitAnimator *pTaker )
 	NAnimation::CABoneFilter *pChestAnim = new NAnimation::CABoneFilter;
 	pChestAnim->pSource = pTaker->pAnimator;
 	pChestAnim->nIndex = nIndex;
-	pAnimator->AddDynamics( t, t, VNULL3, pAIMap, pFloor, pChestAnim );
+	// retail @0x33bea0: pServer (the corpse's own CUnitServer) -> CParticleSkeleton::pUnit.
+	pAnimator->AddDynamics( t, t, VNULL3, VNULL3, pAIMap, pFloor, pServer, pChestAnim );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CUnitAnimator::BeDropped()
+void CUnitAnimator::BeDropped( CUnitServer *pServer )
 {
 	pCarrier = 0;
 	bIsCarried = false;   // retail @0x33b1b0
 	STime t = pTime->GetValue();
-	pAnimator->AddDynamics( t, t, VNULL3, pAIMap, pFloor );
+	// retail @0x33b1b0: pServer (the corpse's own CUnitServer) -> CParticleSkeleton::pUnit, so the
+	// settling ragdoll's BeStopped -> WorldInformCorpseStop has a live unit instead of null.
+	pAnimator->AddDynamics( t, t, VNULL3, VNULL3, pAIMap, pFloor, pServer );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////

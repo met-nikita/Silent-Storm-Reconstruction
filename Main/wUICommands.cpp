@@ -26,6 +26,7 @@ using namespace NWorld;
 REGISTER_SAVELOAD_CLASS( 0xB1011160, CUICmd )
 REGISTER_SAVELOAD_CLASS( 0xB1011161, CUICmdTurn )
 REGISTER_SAVELOAD_CLASS( 0xB1011162, CUICmdUnit )
+REGISTER_SAVELOAD_CLASS( 0x02973150, CUICmdAIUnitWillMove )		// AI "unit will move" hint (release id, $E93 @0x4a94c0)
 REGISTER_SAVELOAD_CLASS( 0x51402130, CUICmdMoveCamera )
 REGISTER_SAVELOAD_CLASS( 0x53102130, CUICmdPlayDialog )
 REGISTER_SAVELOAD_CLASS( 0x50412160, CUICmdContinueChapter )
@@ -61,4 +62,5 @@ REGISTER_SAVELOAD_CLASS( 0x5311517A, CUICmdEnableFeature )		// LUA convergence (
 // CUICmdSetCameraClipDistance uses its real release id (0xA0623201, unused in dev).
 REGISTER_SAVELOAD_CLASS( 0xB1011163, CUICmdCameraLocator )
 REGISTER_SAVELOAD_CLASS( 0x51402133, CUICmdScriptMoveCamera )
+REGISTER_SAVELOAD_CLASS( 0x53115181, CUICmdUnitCamera )		// fresh id: retail 0xB1011162 = kept dev CUICmdUnit; layout/operator& byte-exact
 REGISTER_SAVELOAD_CLASS( 0xA0623201, CUICmdSetCameraClipDistance )

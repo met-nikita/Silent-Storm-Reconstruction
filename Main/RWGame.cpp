@@ -1183,11 +1183,6 @@ void CRenderGame::FastUpdate( STime currentTime )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CRenderGame::UpdateViewWorld( bool bAdvanceTime, STime currentTime, NWorld::IPlayer *pViewFrom, bool bShowAllUnits )
 {
-	if ( bShowAllUnits )
-		UpdateVisible( 0, true );//bShowUnits );
-	else
-		UpdateVisible( pViewFrom, true );//bShowUnits );
-
 	timer.Advance( bAdvanceTime, currentTime );
 
 	pHeadsController->Advance( currentTime );
@@ -1206,6 +1201,15 @@ void CRenderGame::UpdateViewWorld( bool bAdvanceTime, STime currentTime, NWorld:
 		testSpheres.push_back( pScene->CreateMesh( pModel, color, 0 ) );
 	}
 	//sphereParticles.clear();
+
+	// retail @0x2cf620 frame order: UpdateWorld -> pGrass/testSpheres -> UpdateVisible -> Sync (the Jan03
+	// source ran UpdateVisible first). Match retail so the visibility feed is refreshed against the world
+	// state produced THIS frame.
+	if ( bShowAllUnits )
+		UpdateVisible( 0, true );//bShowUnits );
+	else
+		UpdateVisible( pViewFrom, true );//bShowUnits );
+
 	// render them all
 	r.Sync();
 	rUnits.Sync();

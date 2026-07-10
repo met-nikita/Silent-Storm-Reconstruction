@@ -10,7 +10,7 @@ namespace NAI
 {
 enum ECheckPose
 {
-	CP_INACTIVE = 0x01, // ����������� ������, ����� ������ ������ � �� ���������
+	CP_INACTIVE = 0x01, // can't act; can only stand still and not fidget
 	CP_LAY1     = 0x02,
 	CP_LAY2     = 0x04,
 	CP_LAY3     = 0x08,
@@ -166,12 +166,12 @@ public:
 		int nRotation;
 		int nFloor;
 	};
-	vector<SNotYetCreatedLadder> ladders; // ladders �� � "�������" ZDATA - ZEND, 
-	// �.�. � ������ ������������ ���� ������ ������ ������ ���� ������.
+	vector<SNotYetCreatedLadder> ladders; // ladders are kept outside the ZDATA - ZEND "brackets",
+	// because at serialization time this vector must always be empty.
 	ZDATA
-	// ������ ���� ������ ����� ���� ������ 0 ��� ����� � ���������
+	// a group's first floor may be below 0 for groups with basements
 	int nFirstFloor;
-	// ����� ������ ��� ���� �����
+	// data shared by all layers
 	CVec2 ptOrigin;
 	CVec2 ptXDir;
 	CArray2D<char> squareLevel;   // level of data ready for each region (0-nothing; 1-height+potential out; 2-full)
@@ -248,13 +248,13 @@ public:
 		vector<char> pointPassable;
 		vector<char> pointOnUpperHalf;
 		vector<char> nLocks;
-		SPathPlace placeOnBottom; // ����� ��������/��������� �������� � ������ �����
-		SPathPlace placeOnTop; // ����� ��������/��������� �������� � ������� �����
+		SPathPlace placeOnBottom; // spot to get off/onto the ladder at the bottom point
+		SPathPlace placeOnTop; // spot to get off/onto the ladder at the top point
 		SPathPlace upperLink;
 		ELadderDirection eDir;
 		CObj<CLadderTracker> pTracker;
 		bool bNeedRecalc;
-		bool bConsistent; // �������� ����, �.�. ��������� ��������� ������ ������
+		bool bConsistent; // ladder is intact, i.e. fully passable from top to bottom
 		ZEND int operator&( CStructureSaver &f ) { f.Add(2,&pointPassable); f.Add(3,&pointOnUpperHalf); f.Add(4,&nLocks); f.Add(5,&placeOnBottom); f.Add(6,&placeOnTop); f.Add(7,&upperLink); f.Add(8,&eDir); f.Add(9,&pTracker); f.Add(10,&bNeedRecalc); f.Add(11,&bConsistent); return 0; }
 		int GetHeight() const { return pointPassable.size(); }
 	};

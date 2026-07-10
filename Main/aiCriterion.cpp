@@ -43,7 +43,7 @@
 //	ZEND int operator&( CStructureSaver &f ) { f.Add(2,(CAICriterion*)this); f.Add(3,&vAICriterions); return 0; }
 //public:
 //	//
-//	CAICriterionContainer( IAIState *_pAIState = 0 ): CAICriterion( _pAIState ) {}
+//	CAICriterionContainer( SAIState *_pAIState = 0 ): CAICriterion( _pAIState ) {}
 //	//
 //	void AddCriterion( IAICriterion *pAICriterion, float fWeight )
 //	{
@@ -75,12 +75,12 @@
 //public:
 //	//
 //	CAIToHitCriterion() {}
-//	CAIToHitCriterion( IAIState *pAIState );
+//	CAIToHitCriterion( SAIState *pAIState );
 //	//
 //	virtual float GetExpediency();
 //};
 //////////////////////////////////////////////////////////////////////////////////////////////////////
-//CAIToHitCriterion::CAIToHitCriterion( IAIState *pAIState ):
+//CAIToHitCriterion::CAIToHitCriterion( SAIState *pAIState ):
 //	CAICriterion(pAIState)
 //{
 //	//pConverter = new CScaleConverter();
@@ -163,12 +163,12 @@
 //public:
 //	//
 //	CAIHideCriterion() {}
-//	CAIHideCriterion( IAIState *pAIState );
+//	CAIHideCriterion( SAIState *pAIState );
 //	//
 //	virtual float GetExpediency();
 //};
 //////////////////////////////////////////////////////////////////////////////////////////////////////
-//CAIHideCriterion::CAIHideCriterion( IAIState *pAIState ): 
+//CAIHideCriterion::CAIHideCriterion( SAIState *pAIState ): 
 //	CAICriterion(pAIState)
 //{
 //	pToHitConverter = new CScaleConverter();
@@ -210,12 +210,12 @@
 //public:
 //	//
 //	CAIDamageCriterion() {}
-//	CAIDamageCriterion( IAIState *pAIState );
+//	CAIDamageCriterion( SAIState *pAIState );
 //	//
 //	virtual float GetExpediency();
 //};
 //////////////////////////////////////////////////////////////////////////////////////////////////////
-//CAIDamageCriterion::CAIDamageCriterion( IAIState *pAIState ): 
+//CAIDamageCriterion::CAIDamageCriterion( SAIState *pAIState ): 
 //	CAICriterion(pAIState)
 //{
 //	pHPConverter = new CScaleConverter();
@@ -242,22 +242,22 @@
 //	return pHPConverter->Convert( nEnemyDamage );
 //}
 //////////////////////////////////////////////////////////////////////////////////////////////////////
-//IAICriterion *CreateAIDamageCriterion( IAIState *pAIState )
+//IAICriterion *CreateAIDamageCriterion( SAIState *pAIState )
 //{
 //	return new CAIDamageCriterion( pAIState );
 //}
 //////////////////////////////////////////////////////////////////////////////////////////////////////
-//IAICriterion *CreateAIToHitCriterion( IAIState *pAIState )
+//IAICriterion *CreateAIToHitCriterion( SAIState *pAIState )
 //{
 //	return new CAIToHitCriterion( pAIState );
 //}
 //////////////////////////////////////////////////////////////////////////////////////////////////////
-//IAICriterion *CreateAIHideCriterion( IAIState *pAIState )
+//IAICriterion *CreateAIHideCriterion( SAIState *pAIState )
 //{
 //	return new CAIHideCriterion( pAIState );
 //}
 //////////////////////////////////////////////////////////////////////////////////////////////////////
-//IAICriterion *CreateAICautiousToHitCriterion( IAIState *pAIState )
+//IAICriterion *CreateAICautiousToHitCriterion( SAIState *pAIState )
 //{
 //	CAICriterionContainer *pAICriterion = new CAICriterionContainer( pAIState );
 //	pAICriterion->AddCriterion( CreateAIToHitCriterion( pAIState ), 1.f );

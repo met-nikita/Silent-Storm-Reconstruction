@@ -15,6 +15,8 @@
 #include "iMission.h"
 #include "UnitTracker.h"
 #include "PlayerTracker.h"
+#include "aiCommander.h"     // NAI::CSequenceCommander (the retail human-player commander, @0x287d70)
+#include "wMain.h"           // NWorld::CWorld (complete type for the commander ctor dyncast)
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 namespace NGame
 {
@@ -24,8 +26,19 @@ namespace NGame
 CPlayerTracker::CPlayerTracker( IMission *_pMission, NRPG::CGlobalPlayer *_pGlobalPlayer, const wstring &_wsName ): 
 	pMission( _pMission ), pGlobalPlayer( _pGlobalPlayer ), wsName( _wsName )
 {
-	pCommander = new NWorld::CCommander;
+	// retail CPlayerTracker ctor @0x287d70: the HUMAN player's commander is a NAI::CSequenceCommander
+	// (a CAICommander that only auto-drives during cinematic sequences, GenerateCommand @0x358d0).
+	// This is the retail infrastructure that makes NAI::GetAIUnit @0x742c0 resolve for the human's
+	// units (CAICommander::GetAIUnit map @0x33eb0): every AI perception event about a player unit
+	// (CreateAIEnemyEvent / CreateAIPossibleEnemyEvent from the threat tracker's OnSeeEnemy / OnBullet /
+	// OnHearEnemy / OnGrenade handlers) carries that wrapper as payload. With the old plain
+	// NWorld::CCommander the resolve returned 0, every player-payload event was null, and the whole
+	// stimulus layer (heard gunfire -> possibleEnemy -> HUNT, mid-turn sighting -> pEnemy) was inert.
+	CDynamicCast<NWorld::CWorld> pWorld( pMission->GetWorld() );
+	NAI::CSequenceCommander *pSeqCommander = new NAI::CSequenceCommander( pWorld );
+	pCommander = pSeqCommander;
 	pPlayer =  pMission->GetWorld()->AddPlayer( wsName, pGlobalPlayer, pCommander );
+	pSeqCommander->SetPlayer( pPlayer.GetPtr() );   // retail @0x287d70 tail: CAICommander::SetPlayer @0x33e60
 
 	NAI::SPosition sPos;
 	pPlayer->GetDeploySpot( &sPos.p );

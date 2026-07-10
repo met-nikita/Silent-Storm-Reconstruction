@@ -32,7 +32,7 @@ const float F_BACKSTAB_MELEE_COEFF = 2.5f;
 struct SCriticalType
 {
 	ZDATA
-	int nStartPos;					// ������ ��������� � ������� ������� ������ ����������� �����������
+	int nStartPos;					// start of the range within which this critical damage is rolled
 	CDBPtr<NDb::CRPGCritical> pCritical;
 	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&nStartPos); f.Add(3,&pCritical); return 0; }
 	SCriticalType( int nStart, NDb::CRPGCritical *p ): nStartPos(nStart), pCritical(p) {}
@@ -115,10 +115,10 @@ private:
 	float fLightPerception;
 	float fSoundPerception;
 	NDb::SToHitConstants tohit;
-	NDb::SAISoundConstants sAISoundConstants; // ��������� AI sound
-	NDb::SInterruptsConstants SInterruptsConstants; // ��������� Interrupt-��
+	NDb::SAISoundConstants sAISoundConstants; // AI sound constants
+	NDb::SInterruptsConstants SInterruptsConstants; // Interrupt constants
 	CVec3 ptLastCP;
-	vector<ECriticalState> criticalsState; // ������ ������ �� roll ����� ����������
+	vector<ECriticalState> criticalsState; // affects only the roll of new criticals
 public:
 	CPtr<NDb::CModel> pModel;
 	CObj<CUnit> pRPGUnit;
@@ -246,6 +246,7 @@ public:
 	virtual int GetGrenadeTrapDC( NDb::CRPGGrenade *pGrenade );
 	virtual int GetMineDC( NDb::CRPGMine *pMine );
 	virtual bool CanSeeMine( float fDistance, int nDC );
+	virtual float GetMineSpotRange( int nDC );
 	virtual bool CanClear( int nDC, int nSkillModif );
 	virtual int GetUnhideProbability( IUnitMission *pTarget, float fDistance ) const;
 };
@@ -255,7 +256,7 @@ inline bool DBCriticalCmp( const SCriticalType &a, const SCriticalType &b )
 	return a.nStartPos < b.nStartPos;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// ��������� ��������� � ������ � ����������� � �������� ������������� ������������
+// place the criticals in the list in the order specified by the user
 void RangeCriticals( vector<SCriticalType> *pCriticals )
 {
 	if ( pCriticals->empty() )
@@ -346,8 +347,8 @@ bool CUnitMission::GetAck( int *pAckID, IUnitMissionInfo **ppAttacker )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 int CUnitMission::GetUnhideProbability( IUnitMission *pTarget, float fDistance ) const
 {
-	int n0 = 45; // ����������� ��� ���������� 0 ������
-	int n30 = 1; // ����������� ��� ���������� 30 ������
+	int n0 = 45; // probability at distance 0 tiles
+	int n30 = 1; // probability at distance 30 tiles
 	int nBase = ( int )( ( n30 - n0 ) / 30.f * fDistance + n0 );
 	int nProbability = 
 		GetRPGUnit()->Skills( NDb::ST_SPOT ) -	pTarget->GetRPGUnit()->Skills( NDb::ST_STEALTH ) + nBase;
@@ -505,7 +506,7 @@ void CUnitMission::StartRealTime()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 int CUnitMission::GetActionAP( NAI::EPose curPose, EAction action ) const
 {
-	// �������� ��������� ������� �� ������� �� ����
+	// actions whose cost does not depend on the pose
 	switch ( action )
 	{
 		case AC_NONE: return 0;
@@ -547,7 +548,7 @@ int CUnitMission::GetActionAP( NAI::EPose curPose, EAction action ) const
 				NRPG::IFirstAidItem *pItem = pRPGUnit->GetFirstAidItem();
 				if ( pItem )
 					return pItem->GetDBFirstAid()->nAPToUse;
-				ASSERT( 0 && "���������� ��������?" );
+				ASSERT( 0 && "manual therapist?" );
 				return 15;
 			}
 		case AC_MELEE:
@@ -612,7 +613,7 @@ int CUnitMission::GetActionAP( NAI::EPose curPose, EAction action ) const
 			return 0;
 	}
 
-	// �������� ��������� ������� ������� �� ����
+	// actions whose cost depends on the pose
 	int nAddedAP = 0;
 	if ( pPanzerklein )
 		nAddedAP = pPanzerklein->nAddMoveAP;
@@ -691,7 +692,7 @@ int CUnitMission::GetUnconsciousProbability( IUnitMissionInfo *pAttacker,
 	return ( - 1.f / ( 2.f * nMaxHits ) * nHits + 1 ) * nBaseProbability;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// �����. true, ���� ��� ������� �������� (�� ����� ������� �� ����� ���� �������� �� �����)
+// Returns true if the whole shot is finished (during a burst it may not finish at once)
 bool CUnitMission::CreateAttack( vector<CAttackPortion> *pRes, bool bSpendAmmo, 
 	bool bAnonymous, IUnitMissionInfo *pTarget, bool bBackStab )
 {
@@ -704,7 +705,7 @@ bool CUnitMission::CreateAttack( vector<CAttackPortion> *pRes, bool bSpendAmmo,
 	{
 		if ( pWeapon->GetDBWeapon()->pWeaponType->bTwoHanded && !CanUseTwoHanded() )
 		{
-			// �� ������ �� ����� ������������ ��������� ������
+			// we currently cannot use a two-handed weapon
 			return true;
 		}
 		switch ( pWeapon->GetShootMode() )
@@ -737,7 +738,7 @@ bool CUnitMission::CreateAttack( vector<CAttackPortion> *pRes, bool bSpendAmmo,
 			//
 			if ( IsValid(savedSnipeAP.pTarget) && pTarget == savedSnipeAP.pTarget )
 			{
-				// ����������� �������
+				// sniper shot
 				a.nCrtical += savedSnipeAP.nAP / 5.f * 3;
 				a.nCrticalDifficulty += savedSnipeAP.nAP / 5.f * 3;
 				if ( bSpendAmmo )
@@ -745,7 +746,7 @@ bool CUnitMission::CreateAttack( vector<CAttackPortion> *pRes, bool bSpendAmmo,
 			}
 			else
 			{
-				// ������� �������
+				// ordinary shot
 				a.nCrtical += nSnipeSkill / 10;
 			}
 		}
@@ -753,7 +754,7 @@ bool CUnitMission::CreateAttack( vector<CAttackPortion> *pRes, bool bSpendAmmo,
 	else if ( pMW )
 	{
 		NDb::CRPGMeleeWeapon *pW = pMW->GetDBMeleeWeapon();
-				pRes->push_back( CAttackPortion( 110, 2, 0, 0, 0, 0 ) ); // ��������� ������ Epik
+				pRes->push_back( CAttackPortion( 110, 2, 0, 0, 0, 0 ) ); // constants given by Epik
 		CAttackPortion &a = pRes->front();
 		const int nStr = pRPGUnit->Skills( NDb::ST_STR );
 		int nMelee = pRPGUnit->Skills( NDb::ST_MELEE );
@@ -793,7 +794,7 @@ int CUnitMission::ProcessAttackForPK( int nUserID, CAttackPortion *pAttack, NDb:
 {
 	if ( pAttack->CanRicochet() && random.Check( pPanzerklein->nRicochetProb ) )
 	{
-		pAttack->nK = 0; // ���� CRAP
+		pAttack->nK = 0; // CRAP for now
 			return -1;
 	}
 	
@@ -808,7 +809,7 @@ int CUnitMission::ProcessAttackForPK( int nUserID, CAttackPortion *pAttack, NDb:
 	int nDmg = 0;
 	if ( random.Check( int( pPanzerklein->fCriticalResist * float(pAttack->nCrtical) ) ) )
 	{
-		// ������ ������ ������
+		// we damage only the pilot
 		csRPG << CC_RED << " \tCritical, PK Ignored!" << endl;
 		pAttack->nCrtical = 2000;
 	}
@@ -846,7 +847,7 @@ void CUnitMission::WearBrokenPK()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 int CUnitMission::ProcessAttack( int nUserID, CAttackPortion *pAttack, NDb::CRPGArmor *pRealArmor )
 {
-	if ( GetRPGPers()->pPanzerklein ) // ��� �� �� ���� � �� �� �����, �.�. ������ ���� ��� �� ���� ��
+	if ( GetRPGPers()->pPanzerklein ) // this is a PK on the zone and not on the pers, i.e. this pers is itself a PK
 	{
 		if ( !pPanzerklein )
 			pPanzerklein =  GetRPGPers()->pPanzerklein;
@@ -863,7 +864,7 @@ int CUnitMission::ProcessAttack( int nUserID, CAttackPortion *pAttack, NDb::CRPG
 	if ( pAttack->CanDealDmg(pArmor) && pAttack->nK > 0 )
 	{
 		csRPG << "<font size=16pt>";
-		// � ����� � ���������?
+		// Maybe I dodged?
 		if ( this != pAttack->pTarget && !GetPanzerklein() && CheckIC() && pAttack->atkType != NRPG::AT_CLICK_OF_DEATH )
 		{
 			csRPG << CC_RED << " damage avoided!" << endl;
@@ -902,7 +903,7 @@ int CUnitMission::ProcessAttack( int nUserID, CAttackPortion *pAttack, NDb::CRPG
 			else
 				nDmg = 100000;
 		}
-		// � GetCriticalDmgModifier ����� ���������� ����. �����������
+		// a critical injury may arise inside GetCriticalDmgModifier
 		float fCriticalDmgModifier = 
 			GetCriticalDmgModifier( (NAI::EHitLocation)nUserID, pAttack->nCrtical, pAttack->nCrticalDifficulty );
 		fDmgModifier += fCriticalDmgModifier;
@@ -1301,7 +1302,7 @@ int CUnitMission::GetIC() const
 bool CUnitMission::CheckIC()
 {
 	UseSkill(NDb::ST_IC);
-	// �������� ����???
+	// Target movement???
 	bool isCheck = random.Check(GetIC());
 	csRPG << "\t" << GetName() << " Dodge:" << isCheck << endl;
 	return isCheck;
@@ -1310,7 +1311,7 @@ bool CUnitMission::CheckIC()
 int CUnitMission::CalcInterruptProbability( const IUnitMission *pEnemy,
 	bool bIsMutual, bool bWasShot )
 {
-	int nRes = 0; // ����������� interrupt-�
+	int nRes = 0; // interrupt probability
 	NDb::SInterruptsConstants *pConst = GetInterruptsConstants();
 
 	SUnitInfo sUnitInfo;
@@ -1318,8 +1319,8 @@ int CUnitMission::CalcInterruptProbability( const IUnitMission *pEnemy,
 	if ( sUnitInfo.nAP <= pConst->nMinInterruptAP )
 		return nRes;
 
-	int nASkill = pRPGUnit->Skills(NDb::ST_INTERRUPT); 	// A - ��� 
-	int nBSkill = pEnemy->GetRPGUnit()->Skills(NDb::ST_INTERRUPT); 	// B - ����
+	int nASkill = pRPGUnit->Skills(NDb::ST_INTERRUPT); 	// A - who
+	int nBSkill = pEnemy->GetRPGUnit()->Skills(NDb::ST_INTERRUPT); 	// B - whom
 
 	if ( bWasShot )
 	{
@@ -1337,11 +1338,11 @@ int CUnitMission::CalcInterruptProbability( const IUnitMission *pEnemy,
 		}
 	}
 
-	// ��������� ����������� �� ����������� AP
+	// reduce the probability for spent AP
 	int nAPPenalty = 0;
 	nAPPenalty = pConst->fAPInterruptReduction * ( sUnitInfo.nMaxAP - sUnitInfo.nAP );
 
-	// ������� ���������
+	// compute the result
 	nRes -= nAPPenalty;
 	nRes = Clamp( nRes, 5, 95 );
 
@@ -1370,7 +1371,7 @@ bool CUnitMission::RemoveCritical( NDb::ECritical eCritical )
 	{
 		if ( (*i)->GetCritical().eCritical == eCritical )
 		{
-			i = criticals.erase( i ); // ������� ������ ���� �������� ������ ����
+			i = criticals.erase( i ); // remove only one critical of this type
 			return true;
 		}
 		else
@@ -1868,13 +1869,30 @@ int CUnitMission::GetMineDC( NDb::CRPGMine *pMine )
 	return GetRPGUnit()->Skills( NDb::ST_ENGINEERING );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-bool CUnitMission::CanSeeMine( float fDistance, int nDC )
+// retail CUnitMission::GetMineSpotRange @0x2c0340 (disasm-verified): the Jan03 CanSeeMine formula
+// hoisted into its own virtual, plus a perk adjustment Jan03 lacked --
+//   eng  = Skills(ST_ENGINEERING)                                  (effective value, skills[8])
+//   spot = Skills(ST_SPOT)                                         (skills[6])
+//   if ( HasPerk( 0x50, &fPerk ) ) spot = (int)( ( fPerk + 1.0f ) * spot )   // @0x6c03b2:
+//        fld perkOut; fadd 1.0 (imm @0x8b1a24); fimul spotInt; fistp with RC=11 (TRUNCATE)
+//   return Max( Max( spot - nSpotSkillModif, eng ) - nMinerEngineerSkillModif - nDC, 0 )
+//          / (float)nMineSpotModif                                 (fild/fidiv @0x6c0409)
+float CUnitMission::GetMineSpotRange( int nDC )
 {
 	int nEngSkill = GetRPGUnit()->Skills( NDb::ST_ENGINEERING );
 	int nSpotSkill = GetRPGUnit()->Skills( NDb::ST_SPOT );
+	float fPerk = 0;
+	if ( HasPerk( 0x50, &fPerk ) )
+		nSpotSkill = (int)( ( fPerk + 1.0f ) * nSpotSkill );
 	int nSkill = Max( nSpotSkill - pMinesConstants->nSpotSkillModif, nEngSkill );
-	float fSpotDistance = Max( nSkill - nDC - pMinesConstants->nMinerEngineerSkillModif, 0 ) * 1.f / pMinesConstants->nMineSpotModif;
-	return fDistance <= fSpotDistance;
+	return Max( nSkill - nDC - pMinesConstants->nMinerEngineerSkillModif, 0 ) * 1.f / pMinesConstants->nMineSpotModif;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail CUnitMission::CanSeeMine @0x2bec30: a pure delegate through the GetMineSpotRange virtual
+// (vtbl+0x168) -- `return fDistance <= GetMineSpotRange( nDC );`.
+bool CUnitMission::CanSeeMine( float fDistance, int nDC )
+{
+	return fDistance <= GetMineSpotRange( nDC );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CUnitMission::CanClear( int nDC, int nSkillModif )
@@ -1884,7 +1902,7 @@ bool CUnitMission::CanClear( int nDC, int nSkillModif )
 	return random.Get( 0, 100 ) < nProb;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// ������� ��� �������� ����� �� NRPG::Unit-�, ��� ���������� ������
+// Variant for creating a unit from an NRPG::Unit, for the player's characters
 IUnitMission* CreateUnit( CUnit *pSrc )
 {
 	static int nUnitN = 0;
@@ -1896,7 +1914,7 @@ IUnitMission* CreateUnit( CUnit *pSrc )
 	return pRes;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// ������� ��� �������� �������
+// Variant for creating a monster
 // pInHandItem/pBackpack = the map builder's rolled loot (retail NRPG::CreateUnit @0x2c4f50 params
 // 4/5 from SMapUnit); they thread into the CUnit ctor and replace the pers-default equipment.
 IUnitMission* CreateUnit( NDb::CRPGPers *pSrc, NDb::CRPGItem *pInHandItem, NDb::CRPGChestReal *pBackpack )

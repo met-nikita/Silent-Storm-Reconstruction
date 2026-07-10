@@ -6,7 +6,6 @@ namespace NAI
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class IAIUnit;
 class CAICommander;
-class CTask;
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 enum EAIManager
 {
@@ -16,9 +15,9 @@ enum EAIManager
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 enum EAIControlType
 {
-	AI_CONTROL_UNINTERRUPTABLE = 0, // непрерываемый другими заданиями
-	AI_CONTROL_INTERRUPTABLE, // прерываемый другими заданиями
-	AI_CONTROL_ERASABLE, // удаляется при поступлении нового задания
+	AI_CONTROL_UNINTERRUPTABLE = 0, // пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ
+	AI_CONTROL_INTERRUPTABLE, // пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ
+	AI_CONTROL_ERASABLE, // пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ
 	N_AI_CONTROL_TYPE_COUNT
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -38,9 +37,8 @@ public:
 	virtual EAIManager GetManager() const = 0;
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-IAIControl* CreateAITacticalControl( CAICommander *pAICommander, IAIUnit *pAIUnit, EAIManager manager );
-IAIControl* CreateAITaskControl( CAICommander *pAICommander, CTask *pAITask, EAIControlType ControlType, EAIManager manager );
-CTask* GetTaskFromControl( IAIControl *pControl );
+// AI-convergence Stage 2: CreateAITacticalControl (and its CAITacticalControl) are REMOVED with the
+// tactical commander. The interface + the CAIControl base stay (the CAIUnit control stack is unchanged).
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 }
 //

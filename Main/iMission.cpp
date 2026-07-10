@@ -45,6 +45,7 @@
 #include "iShowHint.h"
 #include "iCluesMenu.h"
 #include "iObjectivesMenu.h"
+#include "iShowObjectives.h"		// NGame::CICShowObjectives -- the retail framed objectives modal (replaces the flat CICObjectives)
 #include "iCharGen.h"
 #include "iTeamMngMenu.h"
 #include "iAIViewer.h"
@@ -166,12 +167,13 @@ CMission::CMission():
 {
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-bool CMission::Initialize( int _nTemplateID, int _nVariantID, NScenario::CScenarioZone *_pZone, const vector<string> &params, NRPG::CGlobalGame *_pGlobalGame )
+bool CMission::Initialize( int _nTemplateID, int _nVariantID, NScenario::CScenarioZone *_pZone, const vector<string> &params, NRPG::CGlobalGame *_pGlobalGame, NDb::CUITexture *_pPWLImage )
 {
 	pZone = _pZone;
 	nTemplateID = _nTemplateID;
 	nVariantID = _nVariantID;
 	pGlobalGame = _pGlobalGame;
+	pPWLImage = _pPWLImage;		// retail @0x200690: this->pPWLImage = param_6 (chapter splash carried into the mission)
 
 	int nMobsLevel = 0;
 	SRandomSeed sSeed;
@@ -189,7 +191,7 @@ bool CMission::Initialize( int _nTemplateID, int _nVariantID, NScenario::CScenar
 	}
 	else
 	{
-		// ��������� ��������� random encounter-�
+		// calculate the difficulty of the random encounter
 		int nDelta = 0;
 		for ( int i = 0; i < 10; ++i )
 			nDelta += random.Get( 0, Max( 1, 2 * pGlobalGame->pDifficulty->nREDifficulty ) );
@@ -368,6 +370,21 @@ bool CMission::Initialize( int _nTemplateID, int _nVariantID, NScenario::CScenar
 		if ( pSeedUnit )
 			GetScene()->SetCutFloor( pSeedUnit->GetPosition().pos.GetFloor() );
 	}
+
+	// retail @0x200690 (asm 0x601655): BEFORE the InternalStep drain below, Initialize primes the render
+	// with ONE pRender->UpdateViewWorld -- proven from disassembly: this->[0x48] is the CreateRenderGame
+	// result (pRender), and the call is pRender->vtbl+0x24 (UpdateViewWorld) right before call 0x5a29f0
+	// (CMissionBase::InternalStep). This one prime runs while the mission is still in its pre-sequence
+	// VIEWER state (bCheatVisibility is false until the movieUI BorderShow fires), so CRenderGame::
+	// UpdateVisible switches rUnits OFF its ctor raw-GetUnits() source onto the viewer/heard source
+	// (pPrevViewFrom 0 -> active player). A mission that opens straight into a cinematic sequence
+	// (GFirst: DelayGameStart + BeginSequence before StartGame) otherwise presents its FIRST rendered
+	// frame already cinematic (pViewFrom==0), which MATCHES the ctor state (pPrevViewFrom==0,
+	// bPrevShowUnits==true) so the source-switch never fires -- rUnits keeps raw GetUnits and the
+	// heard-marker CBoolSyncSrc<CSubtractFunc> is never installed => the cutscene silhouette leak.
+	// Dev omitted this prime; adding it (mirroring the Step() call args) establishes the source so the
+	// later cinematic frame's player->0 switch installs the subtract.
+	pRender->UpdateViewWorld( false, GetTime(), pActivePlayer->GetPlayer(), bShowAllCheat || bCheatVisibility );
 
 	// retail @0x200690 tail runs ONE CMissionBase::InternalStep (@0x1a29f0) here = ProcessWorldCommands
 	// + ProcessCameraCommands + camera refresh ONLY. The mission-start script (DelayGameStart ->
@@ -873,6 +890,19 @@ public:
 	}
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// release keeps the tactical cut floor on the camera; this dev build owns it on the render scene, so the
+// camera reaches it through this accessor (installed like the height source) for the two-point framing.
+class CMissionCameraCutFloor: public ICameraCutFloor
+{
+	OBJECT_BASIC_METHODS(CMissionCameraCutFloor);
+	CPtr<NGame::IMission> pMission;
+public:
+	CMissionCameraCutFloor() {}
+	CMissionCameraCutFloor( NGame::IMission *_pMission ): pMission( _pMission ) {}
+	virtual int  GetCutFloor() const { return IsValid( pMission ) ? pMission->GetCutFloor() : 0; }
+	virtual void SetCutFloor( int nFloor ) { if ( IsValid( pMission ) ) pMission->SetCutFloor( nFloor ); }
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
 void CMission::SetCameraParams( ECameraType eType, float _fFOV, const ICamera::SCameraLimits &limits )
 {
 	CPtr<ICamera> pNewCamera;
@@ -898,6 +928,10 @@ void CMission::SetCameraParams( ECameraType eType, float _fFOV, const ICamera::S
 	// release: the camera's IWorld handle powers the terrain focus-height legs; installed here
 	// (the only camera-creation path) so camera-type switches keep it too
 	pNewCamera->SetHeightSource( new CMissionCameraHeightSource( GetWorld() ) );
+	// release CCamera +0xF4 IWorld handle (the occlusion raycast for the two-point framing) + the render
+	// cut-floor accessor -- installed here alongside the height source so camera-type switches keep them.
+	pNewCamera->SetWorld( GetWorld() );
+	pNewCamera->SetCutFloorSource( new CMissionCameraCutFloor( this ) );
 	pCamera = pNewCamera;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -914,7 +948,11 @@ void CMission::OnSnapshotRestored()
 	if ( IsValid( pWorld ) )
 		pWorld->CreateRestored( pGlobalGame );
 	if ( IsValid( pCamera ) )
+	{
 		pCamera->SetHeightSource( new CMissionCameraHeightSource( GetWorld() ) );
+		pCamera->SetWorld( GetWorld() );
+		pCamera->SetCutFloorSource( new CMissionCameraCutFloor( this ) );
+	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CMission::FreezeCamera( bool bState )
@@ -931,6 +969,19 @@ void CMission::FocusCameraOnUnit( NWorld::CUnit *pUnit )
 	sPos.ptAnchor = pUnit->GetPosition().pos.GetCP();
 	pCamera->SetPlacement( sPos );
 	GetScene()->SetCutFloor( pUnit->GetPosition().pos.GetFloor() );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail CMissionBase::FocusCameraOnItem @0x1a1740 (mission vtbl+0xc4): anchor the camera on the
+// item's position and cut the scene to the item's floor -- the same camera vtbl+0x58 anchor+floor
+// call as FocusCameraOnUnit @0x1a16e0, minus that path's +0.5z lift (items anchor on their pos).
+// Fired by the in-world hint/clue icons' RBUTTONUP (retail SEvent 0x6000034).
+void CMission::FocusCameraOnItem( NWorld::IItem *pItem )
+{
+	ICamera::SCameraPos sPos;
+	pCamera->GetPlacement( &sPos );
+	sPos.ptAnchor = pItem->GetPos();
+	pCamera->SetPlacement( sPos );
+	GetScene()->SetCutFloor( pItem->GetFloor() );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 int CMission::GetCutFloor()
@@ -1181,6 +1232,16 @@ void CMission::InternalStep()
 			pCmdExec = 0;
 		}
 	}
+	// release: drive the dedicated camera-locator executor (auto-focus) each frame in its OWN slot, in
+	// parallel with pCmdExec (so a shot/death focus never blocks the general UI-command drain).
+	if ( IsValid( pExecLocator ) )
+	{
+		if ( pExecLocator->Update( GetTime() ) )
+		{
+			pExecLocator->Finished();
+			pExecLocator = 0;
+		}
+	}
 
 	pCamera->Update( GetTime() );
 
@@ -1203,13 +1264,25 @@ void CMission::InternalStep()
 
 	if ( pActivePlayer->IsPlayerLoser() )
 	{
-		NMainLoop::Command( new CICLoseMenu );
-		// retail GameStep (iMission.c:5023): fire the lua lose hook once per mission. Param = bScenarioGameOver
-		// (1) vs natural defeat (0); the dev has no scenario-failure source wired yet, so pass 0 (natural defeat).
+		// BUG 3 (delayed Lose dialog): retail does NOT open the lose menu the instant the hero dies. Retail
+		// GameStep @0x2017a0 (single-player defeat) fires OnPlayerLose wrapped in a CCmdDelayedCallGameOver
+		// (nMaxDelay = 4000ms, ctor @0x204b50): CWorld stashes it (pGameOverCall @+0x1c4) and fires it when the
+		// hero's corpse SETTLES (CWorld::InformCorpseStop @0x362180), capped at 4000ms (CWorld::Segment tail
+		// @0x36bce0). The a5dll lacks that command/CWorld plumbing, so approximate the observable delay with
+		// the 4000ms cap: on the first loss frame, fire the lua lose hook + stamp the deferral clock; open the
+		// menu only once ~4s has passed, so the death animation plays out first (matching retail).
 		if ( !bLoseSignalSended )
 		{
 			bLoseSignalSended = true;
+			tGameOverTime = GetTime();
+			// retail GameStep (iMission.c:5023): fire the lua lose hook once per mission. Param = bScenarioGameOver
+			// (1) vs natural defeat (0); the dev has no scenario-failure source wired yet, so pass 0 (natural defeat).
 			Command( new NWorld::CCmdCallScriptFunction( "OnPlayerLose", "i", 0 ) );
+		}
+		else if ( !bLoseMenuShown && GetTime() - tGameOverTime > 4000 )
+		{
+			bLoseMenuShown = true;
+			NMainLoop::Command( new CICLoseMenu );
 		}
 	}
 
@@ -1315,7 +1388,10 @@ bool CMission::ProcessEvent( const NInput::SEvent &sEvent )
 	// the on-screen Objectives-Menu (HUD) button -- open the objectives/journal modal (renders stored goals/tasks).
 	else if ( bindObjectivesMenu.ProcessEvent( sEvent ) )
 	{
-		NMainLoop::Command( new CICObjectives( GetRPGGame() ) );
+		// retail: the HUD Objectives button opens the FRAMED objectives modal (CICShowObjectives ->
+		// CShowObjectivesUI: CClueLine "?" title rows + numbered CTaskLine rows in bordered boxes, only the
+		// next open task per goal), not the old flat CMLText list (CICObjectives). Exec no-ops when not in a zone.
+		NMainLoop::Command( new NGame::CICShowObjectives( this, GetRPGGame()->pCurrentZone ) );
 		return true;
 	}
 
@@ -2066,7 +2142,7 @@ void CMission::TraceCursor()
 			// INTENTIONAL DIVERGENCE from retail: retail targets a heard-not-seen unit ONLY through
 			// its ear icon (CSoundIcon CActionDecorator hover -> SetStateTarget); this world-trace
 			// pick of the silhouette CDMesh itself is an ADDITION so the model is hover-targetable
-			// too. Keep both paths (the ear icon path lives in iMissionUI.cpp CClueIcon).
+			// too. Keep both paths (the ear icon path lives in iMissionUI.cpp CSoundIcon).
 			NWorld::CUnit *pHeardUnit = dynamic_cast<NWorld::CUnit*>( NWorld::GetDMeshUnit( *iTemp ) );
 			if ( pHeardUnit )
 			{
@@ -2178,6 +2254,20 @@ void CMission::ExecWorldCommands()
 			bool bLock = CDynamicCast<NWorld::CUICmdLockCamera>( pCmd )->bLock;
 			pCamera->FreezeCamera( bLock );
 			pScene->SetCutFloorLock( bLock );
+		}
+		// release CMissionBase::ExecWorldCommand @0x1a30c0: a camera-locator command (CUICmdUnitCamera
+		// auto-focus) goes to the dedicated pExecLocator slot, NOT the general pCmdExec -- so it never stalls
+		// the UI-command drain and is preempted by priority (MustReplaceCameraExecutor: higher wins; equal
+		// wins unless the newcomer is priority 2). Keep the running exec unless the newcomer must replace it.
+		else if ( CDynamicCast<NWorld::CUICmdCameraLocator>( pCmd ) )
+		{
+			NWorld::CUICmdCameraLocator *pLoc = CDynamicCast<NWorld::CUICmdCameraLocator>( pCmd );
+			if ( IsValid( pExecLocator ) && !NGame::MustReplaceCameraExecutor( pExecLocator->GetPriority(), pLoc->GetPriority() ) )
+				continue;                                   // keep the current focus, drop the newcomer
+			if ( IsValid( pExecLocator ) )
+				pExecLocator->Cancel();
+			pExecLocator = NGame::CreateCameraExecutor( pLoc, this );
+			// does NOT stall pCmdExec: continue draining the queue (the focus runs in its own slot)
 		}
 		// LUA convergence PART B: PlaySound opens a sound channel on the mission's sound scene and
 		// parks the live handle in the command (retail CMissionBase::ExecWorldCommand @0x1a30c0:
@@ -3097,15 +3187,15 @@ static void CommandGetItem( const string &szID, const vector<wstring> &paramsSet
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CICBeginMission
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CICBeginMission::CICBeginMission( int _nTemplateID, int _nVariantID, const vector<string> &_params, NRPG::CGlobalGame *_pGlobalGame ):
-	nTemplateID( _nTemplateID ), nVariantID( _nVariantID ), pGlobalGame( _pGlobalGame ), params(_params)
+CICBeginMission::CICBeginMission( int _nTemplateID, int _nVariantID, const vector<string> &_params, NRPG::CGlobalGame *_pGlobalGame, NDb::CUITexture *_pPWLImage ):
+	nTemplateID( _nTemplateID ), nVariantID( _nVariantID ), pGlobalGame( _pGlobalGame ), params(_params), pPWLImage( _pPWLImage )
 {
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CICBeginMission::CICBeginMission( NScenario::CScenarioZone *_pZone,
-		int _nTemplateID, const vector<string> &_params, NRPG::CGlobalGame *_pGlobalGame, bool _bEmulateChapter ):
+		int _nTemplateID, const vector<string> &_params, NRPG::CGlobalGame *_pGlobalGame, bool _bEmulateChapter, NDb::CUITexture *_pPWLImage ):
 	pZone( _pZone ), nTemplateID( _nTemplateID ), nVariantID( -1 ), pGlobalGame( _pGlobalGame ), params(_params),
-	bEmulateChapter( _bEmulateChapter )
+	bEmulateChapter( _bEmulateChapter ), pPWLImage( _pPWLImage )
 {
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -3115,9 +3205,13 @@ void CICBeginMission::Exec()
 	// is the zone's PreWorldLoad image (CDBScenarioZone::pPWLImage, release [pDBZone+0x48]); a null/dead image
 	// makes SetLoadingImage fall back to the default texture 0x373. Then paint the first loading frame at 0%
 	// (disasm: xor ecx,ecx -> ShowLoadingScreen(0)). Replaces the placeholder ShowLogo() (a no-op in retail).
+	// retail @0x20ba00 3-way pick: (1) the zone's own PWL image [pDBZone+0x48]; else (2) this->pPWLImage
+	// [+0x30] the chapter/caller-supplied splash; else (3) SetLoadingImage(NULL) falls back to 0x373.
 	NDb::CUITexture *pSplash = 0;
 	if ( IsValid( pZone ) && IsValid( pZone->GetDBZone() ) )
 		pSplash = pZone->GetDBZone()->pPWLImage;
+	if ( !IsValid( pSplash ) && IsValid( pPWLImage ) )
+		pSplash = pPWLImage;
 	SetLoadingImage( pSplash );
 	ShowLoadingScreen( 0 );
 
@@ -3133,7 +3227,7 @@ void CICBeginMission::Exec()
 	}
 
 	CMission *pRes = new CMission();
-	if ( pRes->Initialize( nTemplateID, nVariantID, pZone, params, pGlobalGame ) )
+	if ( pRes->Initialize( nTemplateID, nVariantID, pZone, params, pGlobalGame, pPWLImage ) )
 		SetInterface( pRes );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -3234,11 +3328,11 @@ static void CommandStartScenarioZone( const string &szID, const vector<wstring> 
 		{
 			if ( nSize > 2 )
 			{
-				// ������� clues-�
+				// remove clues
 				vector< CPtr<NScenario::CScenarioClue> > tmpClues = pZone->GetClues();
 				for ( vector< CPtr<NScenario::CScenarioClue> >::iterator i  = tmpClues.begin(); i != tmpClues.end(); ++i )
 					pZone->RemoveClue( *i );
-				// ��������� clues-�
+				// add clues
 				for ( vector<string>::iterator i = clues.begin(); i != clues.end(); ++i )
 				{
 					CPtr<NScenario::CScenarioClue> pClue = pScenario->GetClueByName( *i );

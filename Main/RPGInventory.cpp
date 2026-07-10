@@ -10,7 +10,7 @@
 namespace NRPG
 {
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// ��� �������� ���������
+// For storing items
 class CInventory: public IInventory
 {
 	OBJECT_BASIC_METHODS(CInventory);
@@ -299,7 +299,7 @@ void CInventory::SetPanzerklein( NDb::CPanzerklein *_pPK, IInventory *pPKInvento
 	pPK = _pPK; 
 	if ( pPKInventory )
 	{
-		if ( pPK ) // ������� ��
+		if ( pPK ) // put on the PK
 		{
 			for ( int where = NDb::SLOT_1; where < NDb::N_SLOTS; ++where )
 			{
@@ -308,7 +308,7 @@ void CInventory::SetPanzerklein( NDb::CPanzerklein *_pPK, IInventory *pPKInvento
 			}
 			Activate( NDb::SLOT_1 );
 		}
-		else // ������� ��
+		else // take off the PK
 		{
 			for ( int where = NDb::SLOT_1; where < NDb::N_SLOTS; ++where )
 			{

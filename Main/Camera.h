@@ -7,6 +7,8 @@
 #include "Time.h"
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CTransformStack;
+class CObjectBase;
+namespace NWorld { class IWorld; }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 const float	F_FOV = 35;
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -33,6 +35,17 @@ public:
 	virtual bool EstimateAverageHeight( float fWorldX, float fWorldY, int nHalf, float *pfAvg ) = 0;
 	// bilinear terrain height (world z) at world XY (release GetHeight @0xccc10); false off-grid.
 	virtual bool GetHeight( float fWorldX, float fWorldY, float *pfHeight ) = 0;
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// release keeps the tactical cut floor ON the camera (CBaseCamera +0x38, vtbl 0x44/0x48 GetCutFloor/
+// SetCutFloor) -- the framing helpers (CanSeeOneRay ray floors, ShowTwoPlaces tail) read/write it. This dev
+// camera relocated the cut floor to the render scene (IMission::Get/SetCutFloor -> CScene), so the mission
+// installs this thin accessor over the single owner, like ICameraHeightSource.
+class ICameraCutFloor: public CObjectBase
+{
+public:
+	virtual int  GetCutFloor() const = 0;
+	virtual void SetCutFloor( int nFloor ) = 0;
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class ICamera: public CObjectBase
@@ -123,6 +136,17 @@ public:
 	// install the terrain-height source for the release terrain legs (see ICameraHeightSource);
 	// default no-op so non-tactical cameras need not override.
 	virtual void SetHeightSource( ICameraHeightSource *pSource ) {}
+
+	// release CCamera cinematic two-point framing: frame world points ptA (shooter) + ptB (target) from the
+	// best-visible camera pose (ShowPlacesFromBestPoint @0xcf1c0, ICamera vtbl+0x5c), and latch a follow
+	// target (FollowUnit @0xd0520). Default no-op so the menu / first-person / maya cameras need not override.
+	virtual void ShowPlacesFromBestPoint( const CVec3 &ptA, const CVec3 &ptB, int nFloor, float fRodIn,
+		int nSloMoRatio, float fDivisor, bool bKeepFollow, bool bForceRod ) {}
+	virtual void FollowUnit( CObjectBase *pUnit ) {}
+	// the terrain-raycast world handle (release CCamera +0xF4) + the render cut-floor accessor -- installed by
+	// the mission after world creation (like SetHeightSource). Default no-op for non-tactical cameras.
+	virtual void SetWorld( NWorld::IWorld *pWorld ) {}
+	virtual void SetCutFloorSource( ICameraCutFloor *pSource ) {}
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 ICamera* CreateCamera( ECameraType eType = CAMERA_PC, float fCameraSpeed = 1.0f );

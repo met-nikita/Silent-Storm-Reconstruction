@@ -26,15 +26,13 @@ class CPath;
 // to the release. Reached places at the LAY(0) / INACTIVE(3) check-poses are dropped; the rest are kept
 // unless impassable.
 //
-// TWO release-vs-dev faithfulness REFINEMENTS (the release evolved these path primitives; the dev tree
-// has the predecessor form, so this wiring is functional + behaviour-CLOSE, not bit-exact):
-//   (1) the release passed bNoDynamicLocks=true (ignore ALL transient unit-locks); the in-tree free
-//       PrepareAllPaths accounts for the find-path units (minus self) -- so this version can EXCLUDE
-//       places another unit transiently blocks. Bit-faithful needs the CMultiMovesTable member
-//       PrepareAllPaths called with an EMPTY accountUnits list (+ the move-cost table).
-//   (2) the release filtered with GetPassability (EPassable: drops AIP_NOT_PASSABLE + AIP_CANNOT_LAY);
-//       the dev tree has the predecessor bool IsPassable, which lacks the lay-direction (CANNOT_LAY)
-//       distinction. Bit-faithful needs the release per-place GetPassability(EPassable).
+// The two release-vs-dev faithfulness refinements are now PORTED (2026-07-10, retail @0xa05d0
+// disasm-verified; they had shrunk the cover-wave target set GetCoveredPosition feeds FindPath and
+// flipped the GFirst car-guy's Defence-entry verdict vs retail's rush):
+//   (1) bNoDynamicLocks=true -- the wave ignores ALL transient unit-locks (the free PrepareAllPaths
+//       grew the retail flag; every other caller keeps the lock-accounting default);
+//   (2) reached places filter with GetPassability: drop only AIP_NOT_PASSABLE + AIP_CANNOT_LAY
+//       (locked and door places PASS as targets; the predecessor bool IsPassable == AIP_YES-only).
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void GetNearestPlaces( NWorld::CUnitServer *pServer, const SPathPlace &place, int nMaxCost, EPose nPose,
 	vector<SPathPlace> *pRes, CMultiMovesTable *pTable = 0 );

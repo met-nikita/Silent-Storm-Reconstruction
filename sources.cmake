@@ -166,8 +166,7 @@ set(Main_SRC
   "aiSmoothPath.cpp"
   "aiStability.cpp"
   "aistate.cpp"
-  "aiTacticalCommander.cpp"
-  "aiTaskCommander.cpp"
+  "aiTaskCommand.cpp"
   "aiTerrain.cpp"
   "aiTrace.cpp"
   "aiUnit.cpp"
@@ -435,6 +434,7 @@ set(Main_SRC
   "wUnitServer.cpp"
   "wUnitStates.cpp"
   "wVision.cpp"
+  "WinInputConv.cpp"
 )
 
 set(Game_SRC

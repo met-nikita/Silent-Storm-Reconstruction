@@ -609,7 +609,7 @@ void CExecMove::DoCommand()
 					if (TestSingleGameMove(pJump))
 					{
 						animator.Jump(position, pJump->pos, pJump->bRealJump);
-						//��� ��������, ���� ����� ���������� (���� ����� ��������, �������)
+						// enable this if you want a laugh (if it works, of course)
 						//animator.Fall( pJump->pos, position.GetCP().z );
 						pCurCmd = pCmd;
 						float fLastH = position.GetCP().z;

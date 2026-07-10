@@ -228,25 +228,25 @@ int CAIFireArmsWeapon::GetAmmoCountPerAP( int _nAP ) const
 	int nRes = 0;
 	int nAP = _nAP;
 	int nMinAPToShoot = GetMinAPToShoot( nAP );
-	// ���������� ���-�� �������� � ������ ������
+	// remember the number of rounds in each magazine
 	list<int> AmmoCount;
 	AmmoCount.push_back( GetCurrentClip()->GetAmmoCount() );
 	for ( vector< CObj<CAIFireArmsWeaponClip> >::const_iterator i = clips.begin(); i != clips.end(); ++i )
 		AmmoCount.push_back( (*i)->GetAmmoCount() );
 	int nAmmoCount = AmmoCount.front();
-	// ������� ������� �������� ����� ����������
+	// count how many rounds we can fire
 	while ( nAP > 0 )
 	{
-		// ��������
+		// shots
 		if ( nAmmoCount > 0 )
 		{
-			// ��������� ������-�� AP �� �������
+			// check whether there are enough AP for a burst
 			if ( nAP < nMinAPToShoot ) 
 			{
 				nAP = 0;
 				break;
 			}
-			// ������������ �������
+			// fire off the rounds
 			int nAmmoToShoot = min( nAmmoCount, GetAmmoCountPerShot( _nAP ) );
 			for ( int k = 0; k < nAmmoToShoot; ++k )
 			{
@@ -262,7 +262,7 @@ int CAIFireArmsWeapon::GetAmmoCountPerAP( int _nAP ) const
 				--nAmmoCount;				
 			}
 		}
-		// �����������
+		// reload
 		if ( nAmmoCount <= 0 )
 		{
 			nAP -= GetReloadAP();
@@ -316,7 +316,7 @@ void CAIFireArmsWeapon::GetShotParameters( const NAI::SUnitPosition &pos, IAIUni
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-int CAIFireArmsWeapon::GetDamage( const NAI::SUnitPosition &pos, IAIUnit *pTarget, 
+int CAIFireArmsWeapon::GetDamage( const NAI::SUnitPosition &pos, IAIUnit *pTarget,
 	int nHitCover, NAI::EPose ePose, int nAP, NDb::EShootMode eShootMode, int *nMaxToHit ) const
 {
 	int nRes = 0;
@@ -326,22 +326,25 @@ int CAIFireArmsWeapon::GetDamage( const NAI::SUnitPosition &pos, IAIUnit *pTarge
 	int nAmmoCount = GetAmmoCountPerAP( nAP );
 	//
 	int nExtraAP = 0;
-	int nTmpExtraAP = 0;
 	if ( eShootMode == NDb::SM_Careful )
-	{
 		nExtraAP = max( 0, nAP - GetShotAP() );
-		nTmpExtraAP = max( 0, pOwner->GetMaxAP() - GetShotAP() );
-	}
 	//
-	CPtr<NRPG::CAIUnitToHitCalcer> pTmpToHit = new NRPG::CAIUnitToHitCalcer( pOwner, 
-		pos, pTarget, nHitCover, NAI::HL_ANY, 0, GetItem(), nTmpExtraAP );
-	*nMaxToHit = pTmpToHit->GetToHit();
-	//
+	// ‼️ RETAIL AFFORDABILITY GATE (disasm-proven @0xb5fd0, 2026-07-10): the out to-hit is ZEROED at entry
+	// and accumulated (max) ONLY inside the per-bullet loop, which is bounded by GetAmmoCountPerAP(nAP) --
+	// a candidate place whose leftover AP cannot fund a single shot reports nMaxToHit = 0 (and damage 0),
+	// so CAIShootAction::GetInfoInner's nToHit>0 gate marks it un-shootable. The dev predecessor computed
+	// an UNCONDITIONAL pre-loop to-hit (a calcer seeded from GetMaxAP-derived extra AP -- no such code
+	// exists in retail): every LOS place looked shootable regardless of budget, so the place choice
+	// degenerated into a to-hit hill-climb toward the enemy -- the "one step per think until AP dies"
+	// creep -- while retail units hold position once no candidate can afford a shot.
+	*nMaxToHit = 0;
 	for ( int n = 0; n < nAmmoCount; ++n )
 	{
-		CPtr<NRPG::CAIUnitToHitCalcer> pToHit = new NRPG::CAIUnitToHitCalcer( pOwner, 
+		CPtr<NRPG::CAIUnitToHitCalcer> pToHit = new NRPG::CAIUnitToHitCalcer( pOwner,
 			pos, pTarget, nHitCover, NAI::HL_ANY, n % GetAmmoCountPerShot( nAP ), GetItem(), nExtraAP );
-		nRes += pToHit->GetToHit() / 100.f * nDamage;
+		const int nToHit = pToHit->GetToHit();
+		*nMaxToHit = max( *nMaxToHit, nToHit );
+		nRes += nToHit / 100.f * nDamage;
 	}
 	pWeaponItem->SetShootMode( eTmpShootMode );
 	return nRes;

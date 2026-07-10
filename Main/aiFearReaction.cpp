@@ -42,7 +42,10 @@ void CAIFearReaction::Update()
 	IAIUnit *pU = GetUnit();
 	if ( !IsValid( pU ) )
 		return;
-	// [SetRoute(NULL) elided -- see banner]  the per-unit threat state (populated by the commander each think).
+	// retail SetRoute(NULL) RESTORED (release IAIUnit vtbl+0x5c @0xadb90 -- possible now that the route
+	// slot exists): the panicking unit abandons its route for good.
+	pU->SetRouteLogic( 0 );
+	// the per-unit threat state (populated by the commander each think).
 	SAIUnitState *us = GetAIUnitState();   // plain struct ptr -- not a CObjectBase, so no IsValid()
 	if ( us == 0 )
 		return;

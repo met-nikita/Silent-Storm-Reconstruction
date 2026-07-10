@@ -5,6 +5,7 @@
 #endif // _MSC_VER > 1000
 namespace NWorld
 {
+template<class TUnit> struct SAISound;   // wUnitSounds.h (CanPlayerSeeOrHearAction's heard part)
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 enum ETBSEvent
 {
@@ -176,15 +177,14 @@ private:
 	}
 	bool IsRealTimePossible() const
 	{
-		if ( IsForcedRealTime() )
-			return true;
-		if ( !IsTBSRealTimeModePossible() )
-			return false;
-		return true;
+		// retail CTBSWorld vtbl+0x3c is PURE -- CWorld::IsRealTimePossible @0x364f10 is the whole body
+		// (and has NO sequence term; the sequence gate lives in StartNextPlayerTurn @0x375f80, gate 2).
+		// The old forced-RT short-circuit here was the Jan03 flag model.
+		return IsTBSRealTimeModePossible();
 	}
 	void StartPlayerTurn( TPlayer *pPlayer )
 	{
-		if ( IsForcedRealTime() )
+		if ( IsSequence() )   // retail @0x375e90 gate: no player turn may start under the ownerless top
 			return;
 		if ( !IsValid( pPlayer ) )
 			return;
@@ -205,8 +205,12 @@ private:
  	}
 	void StartNextPlayerTurn()
 	{
+		// retail @0x375f80: TWO gates in this order -- IsRealTimePossible (vtbl+0x3c) first,
+		// IsSequence (vtbl+0x24) second; either true means no rotation.
 		if ( !IsRealTimePossible() )
 		{
+			if ( IsSequence() )
+				return;
 			TPlayer *pNext;
 			pNext = GetNextPlayer( nTurnPlayerID + 1 );
 			if ( !pNext )
@@ -219,49 +223,57 @@ private:
 	}
 	void RecalcCurrentPlayerCommands()
 	{
-		// forced-RT (sequence): retail's stack top is the OWNERLESS sequence interrupt -- there is no
-		// current player to recalc. With the owned turn now PRESERVED beneath the sequence span, this
-		// must not zap that player's executors (TBS_RECALC pExec=0) on every mid-cutscene action edge.
-		if ( IsForcedRealTime() )
+		// retail @0x36f850 three-way (disasm-proven, runs during sequences on action-finish edges):
+		// empty stack -> every PLAYER recalcs (player-level event, commander included); OWNERLESS top
+		// (sequence) -> every player's UNITS recalc (unit-level event 6, no commander notify); owned
+		// top -> ONLY the top interrupt's unit set. The unit-level RECALC drop is recoverable by
+		// design: pCurrentCmd survives, the next CCmdContinue re-creates the executor (retail
+		// IsCancelableExec @0x392fe0 only spares cannon execs). The round-2 forced-RT early-return
+		// here protected the BURIED turn owner from the old player-level recalc -- obsolete.
+		if ( interrupts.empty() )
+		{
+			for ( TPlayerList::iterator i = players.begin(); i != players.end(); ++i )
+				(*i)->OnTBSEvent( TBS_RECALC_COMMAND );
 			return;
-		if ( !interrupts.empty() )
-			interrupts.back().pPlayer->OnTBSEvent( TBS_RECALC_COMMAND );//RecalcCommands();
+		}
+		if ( interrupts.back().pPlayer == 0 )
+		{
+			for ( TPlayerList::iterator i = players.begin(); i != players.end(); ++i )
+			{
+				const vector< CMObj<TUnit> > &pUnits = (*i)->GetPlayerUnits();
+				for ( unsigned int k = 0; k < pUnits.size(); ++k )
+					if ( IsValid( pUnits[k].GetPtr() ) )
+						pUnits[k]->OnTBSEvent( TBS_RECALC_COMMAND );
+			}
+			return;
+		}
+		for ( list< CPtr<TUnit> >::iterator u = interrupts.back().units.begin(); u != interrupts.back().units.end(); ++u )
+			if ( IsValid( *u ) )
+				(*u)->OnTBSEvent( TBS_RECALC_COMMAND );
 	}
+	// Retail CTBSWorld::OnPassControl @0x372bf0 queues STBSEvent tag9 -> ProcessTBSEvents @0x3675d0
+	// throws CEventOnPassControl on EVERY control hand-over: base turn via StartPlayerTurn @0x375e90,
+	// stacked interrupt via AddInterrupt @0x377400, interrupt-pop resume via EndOfTurn @0x3776f0.
+	// The event drives the begin-turn threat refresh (tracker OnNewTurn @0xab180 -> CAIBeginTurnEvent
+	// -> PrepareEnemies @0xb17a0). The dev tree used to throw it only from OnNewPlayerTurn (base-turn
+	// start), so an interrupting AI unit entered its interrupt turn WITHOUT the threat refresh ->
+	// enemy=0 -> IsEndOfTurn -> instant give-back. Dev expression of the retail queue: a virtual
+	// notify hook (CWorld throws the event). The hook is virtual INSTEAD of OnPassControl itself
+	// because a virtual OnPassControl instantiates with the vtable in every TU and drags
+	// RecalcCurrentPlayerCommands' TUnit::OnTBSEvent calls into TUs where TUnit is incomplete.
+	virtual void OnPassControlNotify() {}
 	void OnPassControl()
 	{
 		TPlayer *pCurrentPlayer = 0;
 		if ( !interrupts.empty() )
 			pCurrentPlayer = interrupts.back().pPlayer;
 
+		OnPassControlNotify();
 		RecalcCurrentPlayerCommands();
 		for ( TPlayerList::iterator i = players.begin(); i != players.end(); ++i )
 			(*i)->GetCommander()->OnPassControl( pCurrentPlayer );
 	}
-	void EndOfTurn()
-	{
-		//ASSERT( !interrupts.empty() );
-		if ( interrupts.empty() )
-			return;
-		CPtr<TPlayer> pPrevPlayer = interrupts.back().pPlayer;
-		interrupts.pop_back();
-		//if ( !interrupts.empty() )
-		if ( !IsRealTime() )
-		{
-			OnPassControl();
-			return;
-		}
-		bFirstTurn = false;
-		if ( IsValid( pPrevPlayer ) )
-			pPrevPlayer->OnTBSEvent( TBS_FINISH_OWN_TURN );//FinishOwnTurn();
-		StartNextPlayerTurn();
-		//if ( interrupts.empty() )
-		if ( IsRealTime() )
-		{
-			OnRealTimeStarted();
-			for ( TPlayerList::iterator i = players.begin(); i != players.end(); ++i )
-				(*i)->OnTBSEvent( TBS_START_REAL_TIME );
-		}
-	}
+	// (EndOfTurn moved to the public section -- retail vtbl+0x1c is public; luaEndSequence calls it.)
 	void FetchPlayerCommands( TPlayer *pPlayer, bool bAllowNotSkippable )
 	{
 		for(;;)
@@ -353,10 +365,13 @@ protected:
 	}
 	void MakeUnitInactive( TUnit *pUnit )
 	{
+		// retail RemoveTBSUnit @0x377390 erase condition: units EMPTY *** AND pPlayer != null *** --
+		// the OWNERLESS sequence entry (always unit-less) is explicitly exempted, which is how the
+		// sequence survives mid-cutscene unit deaths.
  		for ( TInterruptList::iterator i = interrupts.begin(); i != interrupts.end(); )
 		{
 			i->RemoveUnit( pUnit );
-			if ( !i->HasUnits() )
+			if ( !i->HasUnits() && i->pPlayer != 0 )
 				i = interrupts.erase( i );
 			else
 				++i;
@@ -381,14 +396,53 @@ protected:
 			StartNextPlayerTurn();
 		bFirstTurn = !interrupts.empty();
 	}
-	virtual const bool IsForcedRealTime() const = 0;
 	virtual void OnNewTurn() = 0;
 public:
-	// the EndSequence edge: retail luaEndSequence @0x2f1a60 pops the ownerless sequence top via
-	// EndOfTurn (CTBSWorld vtbl+0x1c @0x3776f0), whose !IsRealTime() branch re-fires OnPassControl to
-	// the RESUMED owned turn (its commander re-syncs and thinks: lua OnStartTurn, tactical Think). The
-	// dev forced-RT model REVEALS the preserved turn instead of popping -- fire the same control-pass.
-	void OnSequenceEndPassControl() { if ( !IsRealTime() ) OnPassControl(); }
+	// retail CTBSWorld::StartSequence @0x375dd0 (vtbl+0x18; reached from luac_BeginSequence @0x2f1890
+	// AFTER the per-unit OnSequenceStarted notifies): queue STBSEvent{7} -- applied synchronously here
+	// as GlobalSituationHasChanged, cf. GivePlayerTurn -- then push the OWNERLESS sequence interrupt
+	// {pPlayer=null, units empty} and pass control. The ownerless top IS the sequence state: the
+	// IsRealTime/IsSequence/IsTurnBased tri-state keys on it, GetTBSCurrentPlayer() returns null for
+	// the whole span (CMission::IsRealTime, CUnitServer::IsMoving et al. see retail's ownerless top),
+	// and a turn begun BEFORE the sequence stays buried beneath it and RESUMES when EndOfTurn pops.
+	// Nested sequences stack one entry per Begin (retail nests through the stack itself).
+	void StartSequence()
+	{
+		GlobalSituationHasChanged();
+		interrupts.push_back( SInterrupt() );
+		OnPassControl();
+	}
+	// retail CTBSWorld::EndOfTurn @0x3776f0 (vtbl+0x1c) -- PUBLIC in retail; the normal CCmdEndOfTurn
+	// pop AND the EndSequence edge (luaEndSequence @0x2f1a60 calls it FIRST, before the per-unit
+	// OnSequenceFinished notifies). Pop the top: if an owned turn remains (a turn preserved beneath a
+	// sequence, or the interrupted turn beneath an interrupt), OnPassControl re-fires to it; else
+	// bFirstTurn=false, TBS_FINISH_OWN_TURN to the popped owner (null for the ownerless sequence top
+	// -> no event), StartNextPlayerTurn (gated on IsRealTimePossible/IsSequence -- GFirst: both sides
+	// saw each other mid-cutscene => the next player's turn starts THAT FRAME), and a realtime
+	// broadcast if the rotation decided real time is back.
+	void EndOfTurn()
+	{
+		//ASSERT( !interrupts.empty() );
+		if ( interrupts.empty() )
+			return;
+		CPtr<TPlayer> pPrevPlayer = interrupts.back().pPlayer;
+		interrupts.pop_back();
+		if ( !IsRealTime() )
+		{
+			OnPassControl();
+			return;
+		}
+		bFirstTurn = false;
+		if ( IsValid( pPrevPlayer ) )
+			pPrevPlayer->OnTBSEvent( TBS_FINISH_OWN_TURN );//FinishOwnTurn();
+		StartNextPlayerTurn();
+		if ( IsRealTime() )
+		{
+			OnRealTimeStarted();
+			for ( TPlayerList::iterator i = players.begin(); i != players.end(); ++i )
+				(*i)->OnTBSEvent( TBS_START_REAL_TIME );
+		}
+	}
 	CTBSWorld()
 	{
 		nLastPlayerID = 10000;
@@ -397,7 +451,7 @@ public:
 		bFirstTurn = false;
 		nActionLag = 0;
 	}
-	virtual void UpdateVisible() = 0;
+	virtual void UpdateVisible( bool bForce = false ) = 0;
 	CActionCounter* GetSkippableCounter() { bWasAction = true; return RenewActionCounter( &pSkippableCount ); }
 	CActionCounter* GetActiveCounter( int _nLag = 0 ) { nActionLag = Max( _nLag, nActionLag ); bWasAction = true; return RenewActionCounter( &pActiveCount ); }
 	bool IsAction() const { return IsValid( pSkippableCount ) || IsValid( pActiveCount ) || nActionLag > 0; }
@@ -446,14 +500,13 @@ public:
 	}
 	// retail CTBSWorld::GivePlayerTurn @0x377650 (ITBSWorld vtbl+0x14): force the active turn to a specific
 	// player -- reset the situation, drop the whole interrupt stack, and start that player's fresh base turn.
-	// Retail bails during a scripted sequence (CWorld::IsSequence); this dev snapshot has no world-level
-	// sequence predicate, so it uses IsForcedRealTime() (set by BeginSequence -- already the guard
-	// StartPlayerTurn uses). The retail STBSEvent-7 (TBS_GLOBAL_SITUATION_CHANGED) is applied synchronously
-	// here via GlobalSituationHasChanged(). Must be a CTBSWorld member: StartPlayerTurn + interrupts are
-	// private (and this mirrors retail, where GivePlayerTurn is itself a CTBSWorld vtbl slot).
+	// Bails during a scripted sequence (IsSequence -- the ownerless top). The retail STBSEvent-7
+	// (TBS_GLOBAL_SITUATION_CHANGED) is applied synchronously here via GlobalSituationHasChanged().
+	// Must be a CTBSWorld member: StartPlayerTurn + interrupts are private (and this mirrors retail,
+	// where GivePlayerTurn is itself a CTBSWorld vtbl slot).
 	void GivePlayerTurn( TPlayer *pPlayer )
 	{
-		if ( IsForcedRealTime() )
+		if ( IsSequence() )   // retail @0x377650 gate (CWorld::IsSequence)
 			return;
 		if ( !IsValid( pPlayer ) )
 			return;
@@ -463,7 +516,7 @@ public:
 	}
 	void AddInterrupt( const list<TUnit*> &units )
 	{
-		if ( IsForcedRealTime() )
+		if ( IsSequence() )   // retail @0x377400 gate 1 (vtbl+0x24): no interrupt while a sequence runs
 			return;
 		//
 		ASSERT( !units.empty() );
@@ -491,17 +544,16 @@ public:
 	}
 	void Segment()
 	{
-		// retail StartSequence @0x375dd0 pushes an OWNERLESS interrupt ON TOP of any owned turn and
-		// EndSequence pops it back: a turn begun BEFORE the sequence (GFirst starts one at zone load --
-		// Diplomacies record 36 makes 0<->2 hostile, so StartTBSGame finds real time impossible)
-		// SURVIVES the cutscene and RESUMES afterwards -- the enemies do not act while the sequence
-		// fades out and the first post-cutscene turn keeps its retail owner. The Jan03 forced-RT wipe
-		// that used to live here destroyed that turn (and the robbers' WantTurnBased then seized the
-		// first turn on the EndSequence edge). The bForcedRealTime span now PRESERVES the stack:
-		// IsRealTime() is forced-true regardless, the fetch below runs the every-player sequence fetch
-		// (retail FetchNewCommands' sequence branch), and IsTBSUnitActive() opens every unit to script
-		// commands while forced. Nothing can push onto the stack meanwhile (AddInterrupt /
-		// WantTurnBased / StartPlayerTurn / GivePlayerTurn all bail on IsForcedRealTime).
+		// The OWNERLESS-INTERRUPT sequence model (retail 1:1): StartSequence @0x375dd0 pushes an
+		// ownerless entry ON TOP of any owned turn and luaEndSequence pops it via EndOfTurn @0x3776f0.
+		// A turn begun BEFORE the sequence (GFirst starts one at zone load -- Diplomacies record 36
+		// makes 0<->2 hostile, so StartTBSGame finds real time impossible) stays BURIED beneath it and
+		// RESUMES on the pop. While the ownerless top sits: GetTBSCurrentPlayer()==null (retail's
+		// ownerless top -- CMission::IsRealTime / CUnitServer::IsMoving consumers see real time),
+		// IsRealTime() is true (the fetch below runs the every-player sequence branch of retail
+		// FetchNewCommands @0x372950), IsTBSUnitActive() opens every unit to script commands, and
+		// nothing can push onto the stack (AddInterrupt / WantTurnBased / StartPlayerTurn /
+		// GivePlayerTurn all bail on IsSequence, all retail-gated).
 
 		for ( TPlayerList::iterator i = players.begin(); i != players.end(); ++i )
 			(*i)->GetCommander()->Segment();
@@ -532,6 +584,12 @@ public:
 				// one segment after the first, wrecking the just-started AI turn's job bookkeeping.
 				addInterrupts.clear();
 			}
+			else if ( interrupts.back().pPlayer == 0 )
+			{
+				// retail AddInterrupt @0x377400: an OWNERLESS top (sequence) silently discards the
+				// request -- no truncation, no push, no pass-control (disasm 0x7774bb early-return).
+				addInterrupts.clear();
+			}
 			else
 			{
 				// no more then one interrupt in stack is allowed
@@ -555,7 +613,9 @@ public:
 			{
 				TPlayer *pPlayer = *i;
 				TCommander *pC = pPlayer->GetCommander();
-				if ( pC->IsRequestInterrupt() && !IsForcedRealTime() )
+				// retail CheckCancelAndInterruptRequests @0x377830 empty-stack branch: both requests
+				// honored, no sequence term (the stack is never empty during a sequence).
+				if ( pC->IsRequestInterrupt() )
 				{
 					CancelAllAction();
 					bFirstTurn = true;
@@ -566,28 +626,32 @@ public:
 					pPlayer->OnTBSEvent( TBS_CANCEL_ACTION );//CancelAction();
 			}
 		}
-		else if ( !IsForcedRealTime() )
+		else if ( interrupts.back().pPlayer != 0 )
 		{
+			// retail @0x377830 stacked branch: `if (back().pControl != 0 && cancel-requested)
+			// CancelAllAction()` -- an ownerless top ignores (and below clears) all requests.
 			TCommander *pCommander = interrupts.back().pPlayer->GetCommander();
 			if ( pCommander->IsRequestCancel() )//|| pCommander->IsRequestInterrupt() )
 				CancelAllAction();
 		}
 		for ( TPlayerList::iterator i = players.begin(); i != players.end(); ++i )
 			(*i)->GetCommander()->ClearRequests();
-		// decide on commands for next segment. Keyed on IsRealTime() (forced-RT OR empty stack), NOT on
-		// stack emptiness: while a sequence runs over a PRESERVED owned turn the world must fetch from
-		// EVERY player (retail FetchNewCommands' sequence branch), not just the interrupt top.
+		// decide on commands for next segment. Keyed on IsRealTime() (empty stack OR ownerless top):
+		// retail FetchNewCommands @0x372950 fetches from EVERY player both in real time (arg false)
+		// and during a sequence (arg true, fetched even mid-action); an owned top fetches only the
+		// current player when idle. (Retail's bool is vestigial -- FetchPlayerCommands @0x371610
+		// never reads it -- but the dev ASSERT in FetchPlayerCommands still keys on it.)
 		if ( IsRealTime() )
 		{
 			// real time mode
 			// pick commands from every player
 			for ( TPlayerList::iterator i = players.begin(); i != players.end(); ++i )
-				FetchPlayerCommands( *i, IsForcedRealTime() );
+				FetchPlayerCommands( *i, IsSequence() );
 		}
 		else
 		{
 			// turn based mode
-			ASSERT( !IsForcedRealTime() );
+			ASSERT( !IsSequence() );
 			if ( !IsAction() )
 			{
 				// pick commands from current player regarding current units
@@ -598,17 +662,20 @@ public:
 		}
 		bWasAction = IsAction();
 	}
+	// retail GetTBSCurrentPlayer @0x375ab0: the stack top's owner -- NULL during a sequence (ownerless
+	// top) and in real time (empty stack). THE key consumer fix: CWorld::GetCurrentPlayer and the
+	// CMission::IsRealTime / CUnitServer::IsMoving family now see retail's ownerless top mid-cutscene.
 	TPlayer* GetTBSCurrentPlayer() const { if ( interrupts.empty() ) return 0; return interrupts.back().pPlayer; }
-	bool IsRealTime() const { return IsForcedRealTime() || interrupts.empty(); }
-	// The AI world-executor tri-state (retail CTBSWorld vtbl+0x20/+0x24/+0x28 = IsRealTime/IsSequence/IsTurnBased,
-	// probed by CAICombatLogic IsNeedToThink/IsEndOfTurn/IsIdleJob). IsTurnBased == !IsRealTime (disasm-exact,
-	// @0x00375a50). IsSequence models retail's player-less current interrupt via IsForcedRealTime() -- the a5dll
-	// has no world-level sequence predicate (cf. GivePlayerTurn), a documented minor divergence for the idle probe.
+	// The retail three-way stack-top partition (CTBSWorld vtbl+0x20/+0x24/+0x28 @0x375a10/@0x375a30/
+	// @0x375a50): IsRealTime = empty stack OR ownerless top; IsSequence = non-empty stack with an
+	// OWNERLESS top; IsTurnBased = owned top. Jan03's bForcedRealTime term is GONE -- the ownerless
+	// sequence interrupt (StartSequence @0x375dd0) subsumes it.
+	bool IsRealTime() const { return GetTBSCurrentPlayer() == 0; }
 	bool IsTurnBased() const { return !IsRealTime(); }
-	bool IsSequence() const { return !interrupts.empty() && IsForcedRealTime(); }
-	// forced-RT (sequence) opens EVERY unit to commands -- the dev analog of retail's every-player
-	// sequence fetch; a preserved owned turn must not block other players' scripted moves mid-cutscene.
-	bool IsTBSUnitActive( TUnit *pUnit ) const { if ( IsForcedRealTime() || interrupts.empty() ) return true; return IsInSet( interrupts.back().units, pUnit ); }
+	bool IsSequence() const { return !interrupts.empty() && interrupts.back().pPlayer == 0; }
+	// retail IsTBSUnitActive @0x375ad0: everyone acts in real time or under an ownerless top (every
+	// unit stays open to script commands mid-cutscene); otherwise only the top interrupt's set.
+	bool IsTBSUnitActive( TUnit *pUnit ) const { if ( interrupts.empty() || interrupts.back().pPlayer == 0 ) return true; return IsInSet( interrupts.back().units, pUnit ); }
 	bool CanPlayerSeeAction( TPlayer *_pPlayer ) const
 	{
 		// check if _pPlayer see any units performing skippable action
@@ -623,17 +690,43 @@ public:
 		}
 		return false;
 	}
+	// retail CWorld::CanSeeOrHearAction @0x36b020: real time / sequence always counts as "seen"
+	// (vtbl+0x1a0 IsRealTime covers the ownerless top; retail also probes vtbl+0x1a8 IsSequence,
+	// subsumed); else the SEE part (the TBS-visible loop above), else the HEAR part -- collect every
+	// sound heard by _pPlayer's units (CSoundsTracker::AddSounds, unit+0x15c) and count it "seen"
+	// when a sound's SOURCE unit is alive, fightable, and performing an action (a heard firefight
+	// must not be fast-forwarded).
+	bool CanPlayerSeeOrHearAction( TPlayer *_pPlayer ) const
+	{
+		if ( IsRealTime() )
+			return true;
+		if ( CanPlayerSeeAction( _pPlayer ) )
+			return true;
+		list< SAISound<TUnit> > sounds;
+		const vector< CMObj<TUnit> > &units = _pPlayer->GetPlayerUnits();
+		for ( unsigned int k = 0; k < units.size(); ++k )
+			if ( IsValid( units[k].GetPtr() ) )
+				units[k]->AddSounds( &sounds );
+		for ( list< SAISound<TUnit> >::const_iterator i = sounds.begin(); i != sounds.end(); ++i )
+		{
+			TUnit *pWho = i->pWho;
+			if ( IsValid( pWho ) && pWho->CanFight() && pWho->IsPerformingAction() )
+				return true;
+		}
+		return false;
+	}
 	bool CanSkip( TPlayer *_pPlayer ) const
 	{
-		if ( !interrupts.empty() && interrupts.back().pPlayer != _pPlayer )
+		// retail CWorld::CanSkip @0x36b1f0 (and the inlined gate in UpdateWorld @0x36c290):
+		// GetTBSCurrentPlayer() must be NON-NULL and another player's -- the ownerless sequence top
+		// (null) NEVER fast-forwards hidden actions (the Jan03 `back().pPlayer != _pPlayer` let the
+		// null top pass, fast-forwarding unseen cutscene movement). Then a running skippable action
+		// is skipped iff the player can neither SEE nor HEAR it.
+		TPlayer *pCurrent = GetTBSCurrentPlayer();
+		if ( pCurrent != 0 && pCurrent != _pPlayer )
 		{
-			// is not real time & not current player is active
 			if ( IsSkippableAction() )
-			{
-				// some skippable action is taking place
-				// check if _pPlayer see any units performing skippable action
-				return !CanPlayerSeeAction( _pPlayer );
-			}
+				return !CanPlayerSeeOrHearAction( _pPlayer );
 		}
 		return false;
 	}
@@ -649,7 +742,7 @@ public:
 	}
 	void WantTurnBased( TPlayer *pPlayer )
 	{
-		if ( IsForcedRealTime() )
+		if ( IsSequence() )   // retail @0x375b10 gate (redundant with the empty check below, kept 1:1)
 			return;
 		if ( interrupts.empty() && addInterrupts.empty() )
 		{

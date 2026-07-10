@@ -5,9 +5,9 @@
 #endif // _MSC_VER > 1000
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // wHintsFunc -- retail-new module (release compiland wHintsFunc.obj, no Jan03 counterpart).
-// Scatters freshly created in-world hint pickups over the map. Additive parity surface: the
-// hint-item factory is a deferred stub (this fork carries no in-world hint-item subsystem),
-// so the placement is behaviour-neutral, but the module's source/types converge.
+// Scatters freshly created in-world hint pickups over the map. The hint-item factory
+// (NRPG::CreateHintItem @0x2a21a0, RPGItemSet.cpp) is real now; PlaceHintsToMap itself still has
+// no caller in this fork (the world-side hint-slot feed is not wired yet).
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 #include "MapBuildingInfo.h"		// SMapPosition
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -29,10 +29,9 @@ struct SHintSlot
 	CVec2 ptAlignTo;
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// PlaceHintsToMap @0x35e840: for each slot create one hint item, drop it onto the surface
-// under the slot position, rotate it by the slot angle (Z axis) and freeze it into the debris
-// controller. Behaviour-faithful to retail; the hint-item factory is a deferred stub (see
-// wHintsFunc.cpp), so with no item created the per-slot placement branch is skipped.
+// PlaceHintsToMap @0x35e840: for each slot create one hint item (NRPG::CreateHintItem @0x2a21a0),
+// drop it onto the surface under the slot position, rotate it by the slot angle (Z axis) and
+// freeze it into the debris controller.
 void PlaceHintsToMap( CDebrisController *pDebris, NAI::IAIMap *pMap, const vector<SHintSlot> &hints );
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 } // namespace NWorld

@@ -23,7 +23,7 @@ namespace NInput
 {
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 //
-// вспомогательные структуры данных
+// пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ
 //
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 struct SKeyInfo
@@ -276,7 +276,7 @@ BOOL CALLBACK EnumDeviceObjectsCallback( const DIDEVICEOBJECTINSTANCE* lpdidObje
 // Initialization / Deinitialization / message handling
 //
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// Инициализировать DirectInput
+// пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ DirectInput
 bool InitInput( HWND hWnd, bool _bNonExclusiveMode, int nSampleBufferSize )
 {
 	HRESULT hRes;
@@ -396,7 +396,7 @@ bool SetCoopLevel()
 	return true;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// выкачать все event'ы, произошедшие с последней выкачки
+// пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅ event'пїЅ, пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ
 struct SSeqNumberLessThenFunctional
 {
 	bool operator()( const SInputEvent &sEvent1, const SInputEvent &sEvent2 ) const 
@@ -574,6 +574,22 @@ bool GetMessage( SMessage *pMsg )
 	return true;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// NInput::AddWinMessage @0x3ccb00 -- push a synthesised window-message input onto the
+// queue: SMessage{ nAction=-1, ePOVAxis=PA_UNKNOWN, cType, nParam, bState=true,
+// tTime=GetTickCount() }. Used by the Win32->NInput bridge (SWinToInputMessageConverter)
+// so held keys inherit the OS keyboard auto-repeat via the WM_KEYDOWN/WM_CHAR stream.
+void AddWinMessage( EControlType cType, int nParam )
+{
+	SMessage sMessage;
+	sMessage.nAction = -1;
+	sMessage.ePOVAxis = PA_UNKNOWN;
+	sMessage.cType = cType;
+	sMessage.nParam = nParam;
+	sMessage.bState = true;
+	sMessage.tTime = GetTickCount();
+	messages.push_back( sMessage );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 bool GetCharForKey( int nVirtualKey, WCHAR *pwcChar )
 {
 	HKL hKL = GetKeyboardLayout( 0 );
@@ -730,7 +746,7 @@ void StopEmulateInput()
 //	Internal functions
 //
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// получит / отдать контроль над девайсами
+// пїЅпїЅпїЅпїЅпїЅпїЅпїЅ / пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ
 bool SetFocus( bool bFocus )
 {
 	HRESULT hRes;
@@ -768,7 +784,7 @@ bool SetFocus( bool bFocus )
 	return true;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// добавить информацию про девайс
+// пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ
 void AddDeviceInfo( IDirectInputDevice8 *pdiDevice, DWORD dwFormatSize )
 {
 	HRESULT hRes;
@@ -802,7 +818,7 @@ void AddDeviceInfo( IDirectInputDevice8 *pdiDevice, DWORD dwFormatSize )
 	return;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// Добавить информацию про неизвестный девайс
+// пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ
 void AddDeviceEnum( IDirectInputDevice8 *pdiDevice )
 {
 	HRESULT hRes;
@@ -901,7 +917,7 @@ void AddDeviceEnum( IDirectInputDevice8 *pdiDevice )
 	return;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// Занести в hash действия для данного устройства
+// пїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅ hash пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ
 void AddDeviceKeys( int nID, int nDevType )
 {
 	int nTemp = 0;

@@ -55,12 +55,12 @@ static ETransitionType GetLadderTransitionType(
 		}
 		return TT_NO_WAY;
 	}
-	// ���������, � �� �� ��� ���� ��������...
+	// check whether this is even the right ladder...
 	if ( p1.GetX() != p2.GetX() )
 		return TT_NO_WAY;
 	if ( p1.GetLayer() != p2.GetLayer() )
 		return TT_NO_WAY;
-	// ����� ��, � �� ������� �� �� ������ ���������?
+	// looks like the right one, but haven't we gone too far?
 	if ( p1.GetLadderStep() == p2.GetLadderStep() + 1 )
 		return TT_LADDER_MOVE;
 	if ( p1.GetLadderStep() == p2.GetLadderStep() - 1 )
@@ -266,7 +266,7 @@ void GetNonStandartMoves(
 		pLayer->pGroup->RefreshSpot( src, pMap, 2 );
 	if ( !src.IsIntegral() )  // we are on ladder
 	{
-		//OutputDebugString("[ LADDER ]�� �� ��������...\n");
+		//OutputDebugString("[ LADDER ]We are on the ladder...\n");
 		CNodesLayer::SLadder &ladder = pLayer->ladders[ nX ];
 		int nLastStep = ladder.GetHeight() - 4;
 		if ( nY < nLastStep )
@@ -287,7 +287,7 @@ void GetNonStandartMoves(
 		}
 		else
 		{
-			// �������� �������� ������
+			// leave the ladder from the top
 			//OutputDebugString("[ LADDER ]Can try leave ladder from up\n");
 			CNodesLayer *pLeaveLayer = pNet->GetLayer( ladder.placeOnTop.GetLayer() );
 			CNodesLayer::STile &t = pLeaveLayer->tiles[ladder.placeOnTop.GetY()][ladder.placeOnTop.GetX()];
@@ -325,7 +325,7 @@ void GetNonStandartMoves(
 		}
 		else
 		{
-			// �������� �������� �����
+			// leave the ladder from the bottom
 			CNodesLayer *pLeaveLayer = pNet->GetLayer( ladder.placeOnBottom.GetLayer() );
 			CNodesLayer::STile &t = pLeaveLayer->tiles[ladder.placeOnBottom.GetY()][ladder.placeOnBottom.GetX()];
 			if ( ( t.nPassable & CP_STAND ) && t.nLocks == 0 )
@@ -639,7 +639,7 @@ void GetNonStandartMoves(
 								++pResPos;
 							}
 							//else
-								//OutputDebugString("[ LADDER ]�� ��� ������-�� ���� ��������\n");
+								//OutputDebugString("[ LADDER ]But for some damn reason it's locked\n");
 						}
 					}
 				}

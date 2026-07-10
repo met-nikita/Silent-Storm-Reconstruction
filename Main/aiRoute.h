@@ -4,6 +4,7 @@
 #include "aiWaypoint.h"
 //
 class CMapWaypoint;
+struct SMapUnit;
 //
 namespace NWorld
 {
@@ -67,6 +68,10 @@ public:
 void SetUnitRoute( NWorld::CUnitServer *pUS, CAIRoute *pRoute, bool bCircled, NAI::EAIManager manager );
 void SetGroupRoute( NWorld::CUnitGroup *pGroup, CAIRoute *pRoute, bool bCircled, NAI::EAIManager manager );
 void SetUnitRoaming( NWorld::CUnitServer *pUS, const NAI::SPathPlace &p, int nAPradius, NAI::EAIManager manager );
+// retail NAI::CreateUnitRoute @0x96d20 (aiRoute.obj) -- the map-deploy route glue, replacing the dev
+// CAITaskCommander::CreateRoute. Installs the map unit's route/roaming behaviour on the unit's OWN
+// IAILogic slot (per-unit CAIRouteLogic); a routeless UL_DEFAULT unit gets NOTHING.
+void CreateUnitRoute( NWorld::CUnitServer *pUnitServer, SMapUnit *pMapUnit );
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 }
 //

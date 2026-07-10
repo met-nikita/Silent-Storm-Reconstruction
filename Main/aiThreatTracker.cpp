@@ -9,6 +9,9 @@
 #include "wDumbUnit.h"          // NWorld::CDumbUnitServer (OnUnhide dyncast source)
 #include "wMain.h"              // NWorld::IPlayer / NWorld::CPlayer
 #include "../DBFormat/DataMap.h"// NDb::EDiplomacyState / DS_ENEMY (== 0)
+#include "RPGGame.h"            // NRPG::IGame::GetMaxUnitSightDistance / IsCorpseVisible (corpse scan @0xab7a0)
+#include "RPGUnitMission.h"     // NRPG::IUnitMission (GetUnitRPG()->GetRPGUnit())
+#include "RPGUnit.h"            // NRPG::CUnit (GetMaxUnitSightDistance arg)
 
 using namespace NWorld;
 
@@ -18,18 +21,27 @@ using namespace NWorld;
 namespace
 {
 // Release CWorld range query (world vtbl+0x10c): collect the unit servers whose control point lies
-// within fRadius of center. MISSING_IN_DEV (no ServersAtRange / UnitsInRange equivalent), so the
-// behaviour-deferred corpse scan that needs it finds no candidates -> returns an empty set.
-void GetUnitServersAtRange( CUnitServer * /*pUS*/, const CVec3 & /*center*/, float /*fRadius*/,
+// within fRadius of center. item 7 parity: wired to CWorld::GetUnitsNear (wMain.h:423) -- the exact dev
+// twin UpdateVisible itself uses -- adapting its list result to the vector this caller expects.
+void GetUnitServersAtRange( CUnitServer *pUS, const CVec3 &center, float fRadius,
 	vector< CPtr<CUnitServer> > *pRes )
 {
 	pRes->clear();
+	if ( !IsValid( pUS ) || pUS->GetWorld() == 0 || fRadius <= 0.f )
+		return;
+	list< CPtr<CUnitServer> > tmp;
+	pUS->GetWorld()->GetUnitsNear( center, &tmp, fRadius );
+	for ( list< CPtr<CUnitServer> >::iterator i = tmp.begin(); i != tmp.end(); ++i )
+		pRes->push_back( *i );
 }
-// Release corpse-scan radius (RPG mission vtbl+0x58 -> CWorld vtbl+0x38). MISSING_IN_DEV; 0 keeps the
-// deferred corpse scan radius empty.
-float GetCorpseScanRange( CUnitServer * /*pUS*/ )
+// Release corpse-scan radius, decoded @0xab7a0: pWorld->GetGame() (world vtbl+0x1c @0x376e90) ->
+// IGame::GetMaxUnitSightDistance (vtbl+0x38 @0x298520, = 2x per-unit sight; night/perk-aware) --
+// the same gather radius UpdateVisible uses. The old N_SIGHTDISTANCE approximation is gone.
+float GetCorpseScanRange( CUnitServer *pUS )
 {
-	return 0.f;
+	if ( !IsValid( pUS ) || pUS->GetWorld() == 0 || pUS->GetWorld()->GetGame() == 0 )
+		return 0.f;
+	return pUS->GetWorld()->GetGame()->GetMaxUnitSightDistance( pUS->GetUnitRPG()->GetRPGUnit() );
 }
 }
 
@@ -319,11 +331,13 @@ void CAIEventTrackerImpl::OnStartGame( const CEventOnStartGame & )
 	ThrowAIEvent( CreateAIBeginTurnEvent() );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// CheckForVisibleCorpses @0xab7a0: a live, fight-capable, AI unit scans the servers within the corpse-
-// sight radius of its eye; every visible other unit that can no longer fight, is not already a known
-// corpse, and is NOT an enemy raises a corpse event. The range query + corpse-scan radius have no dev
-// twin (stubbed empty above), so the scan iterates nothing -- the per-candidate body is faithful but
-// unreachable.
+// CheckForVisibleCorpses @0xab7a0 (fully decoded + live): a live, fight-capable, AI unit gathers the
+// servers within GetMaxUnitSightDistance of its eye (GetUnitsNear, world vtbl+0x10c); every other unit
+// that can no longer fight, is not already a known corpse, is NOT an enemy (enemy corpses ignored),
+// and passes the geometric IsCorpseVisible @0x298da0 probe (range/FOV-gated rays at the body's
+// corpseHLpos points -- NOT the TBS visible-list, which excludes corpses) raises CAICorpseEvent.
+// NOTE: in retail the event only records the corpse (SAIUnitState::knownCorpses); the killer ->
+// possibleEnemy arm is inert because CUnitServer::pKiller is never written (byte-scan proven).
 void CAIEventTrackerImpl::CheckForVisibleCorpses()
 {
 	CUnitServer *pUS = pUnit;
@@ -349,7 +363,7 @@ void CAIEventTrackerImpl::CheckForVisibleCorpses()
 			continue;
 		if ( pUS->GetDiplomacyState( pOther ) == NDb::DS_ENEMY )   // enemies don't count
 			continue;
-		if ( !pUS->IsUnitVisible( pOther ) )                       // dev vision seam (release world vtbl+0x50)
+		if ( !pUS->GetWorld()->GetGame()->IsCorpseVisible( pUS, pOther ) )   // retail IGame vtbl+0x50 @0x298da0
 			continue;
 		ThrowAIEvent( CreateAICorpseEvent( pAI ) );
 	}

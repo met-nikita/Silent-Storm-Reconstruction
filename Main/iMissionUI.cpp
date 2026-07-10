@@ -7,6 +7,7 @@
 #include "RPGItemInfo.h"
 #include "..\Misc\StrProc.h"
 #include "..\Input\Bind.h"
+#include "..\MiscDll\Commands.h"	// NGlobal::GetVar -- the "ui_showhints" gate of the hint-icon pass (retail @0x2130c0)
 #include "..\DBFormat\DataFormat.h"
 #include "..\DBFormat\DataAck.h"
 #include "..\DBFormat\DataInterface.h"
@@ -101,7 +102,7 @@ inline wstring ConvertLineBreaks( const wstring &szStr )
 				if ( i != szStr.end() && *i == L'\n' )
 					++i;
 				continue;
-			case 133: // symbol L'�'
+			case 133: // symbol L'...' (ellipsis)
 				szRet += L"...";
 				break;
 			default:
@@ -271,41 +272,77 @@ void CAckIcon::Draw( const STime &sTime, NGScene::I2DGameView *pView )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CItemText
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail NUI::CItemText (ctor @0x212300, AddItem @0x212510, GenerateText @0x20fee0, GetTarget @0x20fec0,
+// ProcessMessage @0x2101c0): one label per 1.875m-cell GROUP of same-DBItem ground items ("Name x N"),
+// parented to the CLIENT window (clicks/hover work through the stock decorator -- same mechanism as the
+// enemy/ear icons). Serialized shape = retail's {1:base, 2:itemsList, 3:pMission, 4:pText} @0x21a0a0.
 class CItemText: public CActionDecorator<CImage>
 {
 	OBJECT_BASIC_METHODS(CItemText)
+public:
+	struct SItem   // retail NUI::CItemText::SItem @0x21a220
+	{
+		ZDATA
+		CPtr<NWorld::IItem> pWorldItem;
+		CPtr<NRPG::IInventoryItem> pInvItem;
+		ZEND int operator&( CStructureSaver &f ) { f.Add(2,&pWorldItem); f.Add(3,&pInvItem); return 0; }
+	};
 private:
 	ZDATA_(TBaseClass)
-	CPtr<CMissionUI> pMissionUI;
+	list<SItem> itemsList;
 	CPtr<NGame::IMission> pMission;
-	////
-	NWorld::SItem sItem;
 	CObj<CTextDraw> pText;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(TBaseClass*)this); f.Add(2,&pMissionUI); f.Add(3,&pMission); f.Add(4,&sItem); f.Add(5,&pText); return 0; }
+	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(TBaseClass*)this); f.Add(2,&itemsList); f.Add(3,&pMission); f.Add(4,&pText); return 0; }
+	void GenerateText();
 
 public:
 	CItemText() {}
-	CItemText( const SWindowInfo &sInfo, NGame::IMission *pMission, CMissionUI *pMissionUI, const NWorld::SItem &sItem );
+	CItemText( const SWindowInfo &sInfo, NGame::IMission *pMission, NWorld::IItem *pWItem, NRPG::IInventoryItem *pInv );
 
 	bool CanHandleState( NGame::IState *pState ) const;
 	CObjectBase* GetTarget();
 
-	const NWorld::SItem& GetItem() const { return sItem; }
+	void AddItem( NWorld::IItem *pWItem, NRPG::IInventoryItem *pInv );   // retail @0x212510
+	const list<SItem>& GetItems() const { return itemsList; }
 	const SPoint& GetRealSize( NGScene::I2DGameView *pView ) { return pText->GetSize( pView ); }
 
 	bool ProcessMessage( const SEvent &sEvent );
 	void Draw( const STime &sTime, NGScene::I2DGameView *pView );
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CItemText::CItemText( const SWindowInfo &sInfo, NGame::IMission *_pMission, CMissionUI *_pMissionUI, const NWorld::SItem &_sItem ):
-	TBaseClass( sInfo, _pMission ), pMission( _pMission ), pMissionUI( _pMissionUI ), sItem( _sItem )
+// retail GenerateText @0x20fee0: first item's DB name; "x N" suffix when the label groups several.
+void CItemText::GenerateText()
 {
-	wstring wsText( L"<font face=Courier size=16pt><color=white>[UNKNOWN]" );
-	if ( sItem.pItem->GetDBItem()->pName )
-		wsText = L"<font face=Courier size=16pt><color=white>" + sItem.pItem->GetDBItem()->pName->szStr;
-
+	wstring wsName( L"[UNKNOWN]" );
+	if ( !itemsList.empty() && IsValid( itemsList.front().pInvItem )
+		&& itemsList.front().pInvItem->GetDBItem() && itemsList.front().pInvItem->GetDBItem()->pName )
+		wsName = itemsList.front().pInvItem->GetDBItem()->pName->szStr;
+	wchar_t wsText[512];
+	if ( itemsList.size() > 1 )
+		swprintf( wsText, L"<font face=Courier size=16pt><color=white>%s x %d", wsName.c_str(), (int)itemsList.size() );
+	else
+		swprintf( wsText, L"<font face=Courier size=16pt><color=white>%s", wsName.c_str() );
 	pText = new CTextDraw( SPoint( 0, 0 ), SPoint( -1, -1 ), wsText );
-	SetColor( NGfx::SPixel8888( 0x1F, 0x1F, 0x1F, 0xDF ) );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+CItemText::CItemText( const SWindowInfo &sInfo, NGame::IMission *_pMission, NWorld::IItem *pWItem, NRPG::IInventoryItem *pInv ):
+	TBaseClass( sInfo, _pMission ), pMission( _pMission )
+{
+	SItem s;
+	s.pWorldItem = pWItem;
+	s.pInvItem = pInv;
+	itemsList.push_back( s );
+	GenerateText();
+	SetColor( NGfx::SPixel8888( 0x1F, 0x1F, 0x1F, 0xDF ) );   // retail ctor @0x212300: 0xdf1f1f1f
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CItemText::AddItem( NWorld::IItem *pWItem, NRPG::IInventoryItem *pInv )
+{
+	SItem s;
+	s.pWorldItem = pWItem;
+	s.pInvItem = pInv;
+	itemsList.push_back( s );
+	GenerateText();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CItemText::CanHandleState( NGame::IState *pState ) const
@@ -314,8 +351,10 @@ bool CItemText::CanHandleState( NGame::IState *pState ) const
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CObjectBase* CItemText::GetTarget()
-{
-	return CDynamicCast<CObjectBase>( sItem.pWorldItem );
+{	// retail @0x20fec0: the FIRST item's world object (the CDFrozenItem the cursor would pick)
+	if ( itemsList.empty() )
+		return 0;
+	return CDynamicCast<CObjectBase>( itemsList.front().pWorldItem.GetPtr() );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CItemText::ProcessMessage( const SEvent &sEvent )
@@ -324,12 +363,12 @@ bool CItemText::ProcessMessage( const SEvent &sEvent )
 	{
 	case EVENT_MOUSEENTER:
 		{
-			SetColor( NGfx::SPixel8888( 0x1F, 0x1F, 0xDF, 0xFF ) );
+			SetColor( NGfx::SPixel8888( 0xDF, 0x1F, 0x1F, 0xFF ) );   // retail @0x2101c0: 0xff1f1fdf
 			break;
 		}
 	case EVENT_MOUSEEXIT:
 		{
-			SetColor( NGfx::SPixel8888( 0x1F, 0x1F, 0x1F, 0xDF ) );
+			SetColor( NGfx::SPixel8888( 0x1F, 0x1F, 0x1F, 0xDF ) );   // retail @0x2101c0: 0xdf1f1f1f
 			break;
 		}
 	}
@@ -461,16 +500,17 @@ void CEnemyIcon::Draw( const STime &sTime, NGScene::I2DGameView *pView )
 	TBaseClass::Draw( sTime, pView );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// CClueIcon (retail name: NUI::CSoundIcon) -- the "ear" marker drawn over a heard-not-seen noise.
+// CSoundIcon (retail NUI::CSoundIcon; formerly misnamed CClueIcon in this fork) -- the "ear"
+// marker drawn over a heard-not-seen noise.
 // Textures = the retail Sound Icons folder (CSoundIcon::Draw @0x210960 disasm): on-screen ear 674
 // 'Icon - OnScreen', off-screen 8-direction arrows {666,672,673,667,668,669,670,671} for buckets
-// 0g,45g..315g. (The 675-683 set is the UNRELATED scenario-clue key/bell marker of retail's real
-// CClueIcon @0x2102e0.) The icon anchors on the SOUND MARKER (CDMesh) position -- never on the
+// 0g,45g..315g. (The 675-683 set belongs to retail's real NUI::CClueIcon @0x2102e0 -- the
+// clue-ITEM marker, now ported below.) The icon anchors on the SOUND MARKER (CDMesh) position -- never on the
 // live unit -- and its action target is THE MARKER (retail CSoundIcon::GetTarget @0x2165a0), so
 // hovering/attacking through the icon can't spoil the hidden unit's identity or movement.
-class CClueIcon: public CActionDecorator<CImage>
+class CSoundIcon: public CActionDecorator<CImage>
 {
-	OBJECT_BASIC_METHODS(CClueIcon)
+	OBJECT_BASIC_METHODS(CSoundIcon)
 private:
 	ZDATA_(TBaseClass)
 	CPtr<CMissionUI> pMissionUI;
@@ -483,8 +523,8 @@ private:
 	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(TBaseClass*)this); f.Add(2,&pMissionUI); f.Add(3,&pMission); f.Add(4,&fAngle); f.Add(5,&pUnit); f.Add(6,&pTexture); f.Add(7,&pMarker); return 0; }
 
 public:
-	CClueIcon() {}
-	CClueIcon( const SWindowInfo &sInfo, NGame::IMission *pMission, CMissionUI *pMissionUI );
+	CSoundIcon() {}
+	CSoundIcon( const SWindowInfo &sInfo, NGame::IMission *pMission, CMissionUI *pMissionUI );
 
 	bool CanHandleState( NGame::IState *pState ) const;
 	CObjectBase* GetTarget();
@@ -497,30 +537,30 @@ public:
 	void Draw( const STime &sTime, NGScene::I2DGameView *pView );
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CClueIcon::CClueIcon( const SWindowInfo &sInfo, NGame::IMission *_pMission, CMissionUI *_pMissionUI ):
+CSoundIcon::CSoundIcon( const SWindowInfo &sInfo, NGame::IMission *_pMission, CMissionUI *_pMissionUI ):
 	TBaseClass( sInfo, _pMission ), pMission( _pMission ), pMissionUI( _pMissionUI )
 {
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-bool CClueIcon::CanHandleState( NGame::IState *pState ) const
+bool CSoundIcon::CanHandleState( NGame::IState *pState ) const
 {
 	return true;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CObjectBase* CClueIcon::GetTarget()
+CObjectBase* CSoundIcon::GetTarget()
 {
 	// retail CSoundIcon::GetTarget @0x2165a0 returns the SOUND MARKER -- handing the unit to the
 	// states here would re-open the identity/death spoil the trace-side fix closed.
 	return pMarker;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CClueIcon::SetPosition( const SPoint &_sPosition )
+void CSoundIcon::SetPosition( const SPoint &_sPosition )
 {
 	TBaseClass::SetSize( SPoint( 0, 0 ) );
 	TBaseClass::SetPosition( _sPosition );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CClueIcon::Set( CObjectBase *_pMarker, NWorld::CUnit *_pUnit, float _fAngle )
+void CSoundIcon::Set( CObjectBase *_pMarker, NWorld::CUnit *_pUnit, float _fAngle )
 {
 	// retail CSoundIcon::Draw @0x210960 (disasm 0x610a04..0x610ab1): the Sound Icons (ear) set --
 	// directional buckets 0g..315g map to {666,672,673,667,668,669,670,671}, on-screen ear = 674.
@@ -541,7 +581,7 @@ void CClueIcon::Set( CObjectBase *_pMarker, NWorld::CUnit *_pUnit, float _fAngle
 	SetImage( pTexture );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-bool CClueIcon::ProcessMessage( const SEvent &sEvent )
+bool CSoundIcon::ProcessMessage( const SEvent &sEvent )
 {
 	switch ( sEvent.nEvent )
 	{
@@ -555,13 +595,228 @@ bool CClueIcon::ProcessMessage( const SEvent &sEvent )
 	return TBaseClass::ProcessMessage( sEvent );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CClueIcon::Draw( const STime &sTime, NGScene::I2DGameView *pView )
+void CSoundIcon::Draw( const STime &sTime, NGScene::I2DGameView *pView )
 {
 	SPoint sNewSize( pTexture->nWidth, pTexture->nHeight );
 	SPoint sSize = GetSize();
 	SPoint sPosition = GetPosition();
 
 	// position/clamp are CLIENT-window-local now (icons are view children, retail @0x213e70)
+	const SPoint &sParentSize = pMissionUI->GetClientWindow()->GetSize();
+	SRect sViewRect( 0, 0, sParentSize.x, sParentSize.y );
+	sPosition.x = min( max( sViewRect.x1 + sNewSize.x / 2, sPosition.x ), sViewRect.x2 - sNewSize.x / 2 );
+	sPosition.y = min( max( sViewRect.y1 + sNewSize.y / 2, sPosition.y ), sViewRect.y2 - sNewSize.y / 2 );
+
+	TBaseClass::SetSize( sNewSize );
+	TBaseClass::SetPosition( SPoint( sPosition.x + sSize.x / 2 - sNewSize.x / 2, sPosition.y + sSize.y / 2 - sNewSize.y / 2 ) );
+
+	TBaseClass::Draw( sTime, pView );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// CClueIcon -- retail NUI::CClueIcon (item ctor @0x211410, unit ctor @0x211390, ProcessMessage
+// @0x210250, Draw @0x2102e0, GetTarget @0x2162f0 [COMDAT-folded with CUnitIcon's: the +0x90 CPtr as
+// CObjectBase], GetIndex @0x210010, saveload id 0xB3123180): the key/bell "clue" marker projected
+// over a discovered scenario-CLUE ground item. CMissionUI::UpdateVisibleItems @0x2130c0 rebuilds one
+// per visible NRPG::IClueItem -- UNGATED (disasm: the IClueItem branch @0x613800 has no bool test,
+// unlike the hint branch @0x613a38 which honours "ui_showhints").
+// Draw @0x2102e0 (disasm): anchor z += 0.6 (fadd [0x8b1fe8] = 0.6f @0x61039b), then GetPositionInfo
+// @0x60f610; ON-screen (ret != 0 @0x6103c3) -> texture 0x2ab (683); OFF-screen -> sequential arrow
+// array 0x2a3..0x2aa (675..682) indexed by Clamp(round(angle/45),0,7) (fmul [0x8be994] = 1/45).
+// Retail also builds these icons over heard-not-seen UNITS (@0x211390, clueUnitIconsList) -- that
+// role is covered in this fork by the CSoundIcon ear markers above, so the unit flavor is carried
+// for shape parity but never constructed here.
+class CClueIcon: public CActionDecorator<CImage>
+{
+	OBJECT_BASIC_METHODS(CClueIcon)
+private:
+	ZDATA_(TBaseClass)
+	CPtr<NGame::IMission> pMission;
+	CPtr<NWorld::IItem> pWorldItem;			// retail +0x90
+	CPtr<NWorld::CUnit> pWorldUnit;			// retail +0x94 (heard-unit flavor; unused in this fork)
+	CPtr<NRPG::IInventoryItem> pInvItem;	// retail +0x98 -- the UpdateHash reuse key (@0x217220)
+	CDBPtr<NDb::CUITexture> pTexture;
+	CPtr<CMissionUI> pMissionUI;			// dev icon pattern: client-rect clamp in Draw
+	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(TBaseClass*)this); f.Add(2,&pMission); f.Add(3,&pWorldItem); f.Add(4,&pWorldUnit); f.Add(5,&pInvItem); f.Add(6,&pTexture); f.Add(7,&pMissionUI); return 0; }
+
+public:
+	CClueIcon() {}
+	CClueIcon( const SWindowInfo &sInfo, NGame::IMission *pMission, NWorld::IItem *pWItem, NRPG::IInventoryItem *pInv, CMissionUI *pMissionUI );
+
+	bool CanHandleState( NGame::IState *pState ) const;		// retail @0x2162e0: true
+	CObjectBase* GetTarget();								// retail @0x2162f0: pWorldItem as CObjectBase
+
+	NRPG::IInventoryItem* GetInvItem() const { return pInvItem; }
+	void Set( float fAngle );		// texture pick (retail folds it into Draw; dev icons pick in the update pass)
+	void SetPosition( const SPoint &sPosition );
+
+	bool ProcessMessage( const SEvent &sEvent );
+	void Draw( const STime &sTime, NGScene::I2DGameView *pView );
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
+CClueIcon::CClueIcon( const SWindowInfo &sInfo, NGame::IMission *_pMission, NWorld::IItem *pWItem, NRPG::IInventoryItem *pInv, CMissionUI *_pMissionUI ):
+	TBaseClass( sInfo, _pMission ), pMission( _pMission ), pWorldItem( pWItem ), pInvItem( pInv ), pMissionUI( _pMissionUI )
+{
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+bool CClueIcon::CanHandleState( NGame::IState *pState ) const
+{
+	return true;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+CObjectBase* CClueIcon::GetTarget()
+{	// retail @0x2162f0 (folded body): the +0x90 CPtr -- the world item -- adjusted to CObjectBase
+	return CDynamicCast<CObjectBase>( pWorldItem.GetPtr() );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CClueIcon::Set( float fAngle )
+{
+	// retail CClueIcon::Draw @0x2102e0 texture pick: on-screen (fAngle == -1 here, i.e.
+	// GetPositionInfo returned "unclamped") -> 683 'Icon - OnScreen'; off-screen -> the SEQUENTIAL
+	// arrow ids 675..682 (stack array 0x2a3..0x2aa @0x6103cf..0x610415) by Clamp(round(angle/45),0,7).
+	if ( fAngle == -1 )
+		pTexture = NDb::GetUITexture( 683 );
+	else
+		pTexture = NDb::GetUITexture( 675 + min( max( Float2Int( fAngle / 45 ), 0 ), 7 ) );
+
+	SetImage( pTexture );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CClueIcon::SetPosition( const SPoint &_sPosition )
+{
+	TBaseClass::SetSize( SPoint( 0, 0 ) );
+	TBaseClass::SetPosition( _sPosition );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+bool CClueIcon::ProcessMessage( const SEvent &sEvent )
+{
+	// retail @0x210250: SEvent 0x6000034 (== dev EVENT_RBUTTONUP) -> live unit? mission vtbl+0xc0
+	// FocusCameraOnUnit : else item? vtbl+0xc4 FocusCameraOnItem; returns true either way.
+	// 0x6000035 (== dev EVENT_RBUTTONDOWN) is swallowed. Anything else -> base decorator.
+	switch ( sEvent.nEvent )
+	{
+	case EVENT_RBUTTONDOWN:
+		return true;
+	case EVENT_RBUTTONUP:
+		if ( IsValid( pWorldUnit ) )
+			pMission->FocusCameraOnUnit( pWorldUnit );
+		else if ( IsValid( pWorldItem ) )
+			pMission->FocusCameraOnItem( pWorldItem );
+		return true;
+	}
+
+	return TBaseClass::ProcessMessage( sEvent );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CClueIcon::Draw( const STime &sTime, NGScene::I2DGameView *pView )
+{
+	SPoint sNewSize( pTexture->nWidth, pTexture->nHeight );
+	SPoint sSize = GetSize();
+	SPoint sPosition = GetPosition();
+
+	// position/clamp are CLIENT-window-local (icons are view children, like the ear/enemy icons)
+	const SPoint &sParentSize = pMissionUI->GetClientWindow()->GetSize();
+	SRect sViewRect( 0, 0, sParentSize.x, sParentSize.y );
+	sPosition.x = min( max( sViewRect.x1 + sNewSize.x / 2, sPosition.x ), sViewRect.x2 - sNewSize.x / 2 );
+	sPosition.y = min( max( sViewRect.y1 + sNewSize.y / 2, sPosition.y ), sViewRect.y2 - sNewSize.y / 2 );
+
+	TBaseClass::SetSize( sNewSize );
+	TBaseClass::SetPosition( SPoint( sPosition.x + sSize.x / 2 - sNewSize.x / 2, sPosition.y + sSize.y / 2 - sNewSize.y / 2 ) );
+
+	TBaseClass::Draw( sTime, pView );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// CHintIcon -- retail NUI::CHintIcon (ctor @0x2114a0, ProcessMessage @0x210510, Draw @0x210550,
+// GetTarget @0x2162f0 [folded], CanHandleState @0x2162e0, saveload id 0xB3212140): the marker over a
+// discovered in-world HINT pickup (an NRPG::IHintItem, retail CSimpleItem<IHintItem>).
+// UpdateVisibleItems @0x2130c0 rebuilds one per visible non-clue IHintItem, gated by the
+// "ui_showhints" var (disasm @0x613a38: cmp byte bShowHints,0).
+// Draw @0x210550 (disasm): anchor = pWorldItem->GetPos, z += 0.6 (fadd [0x8b1fe8] @0x61058a);
+// ON-screen -> texture 0x321 (801, @0x610670); OFF-screen -> sequential arrows 0x322..0x329
+// (802..809, @0x6105c3..0x610609) by Clamp(round(angle/45),0,7).
+class CHintIcon: public CActionDecorator<CImage>
+{
+	OBJECT_BASIC_METHODS(CHintIcon)
+private:
+	ZDATA_(TBaseClass)
+	CPtr<NGame::IMission> pMission;
+	CPtr<NWorld::IItem> pWorldItem;			// retail +0x90
+	CPtr<NRPG::IInventoryItem> pInvItem;	// retail +0x94 -- the UpdateHash reuse key (@0x217170)
+	CDBPtr<NDb::CUITexture> pTexture;
+	CPtr<CMissionUI> pMissionUI;			// dev icon pattern: client-rect clamp in Draw
+	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(TBaseClass*)this); f.Add(2,&pMission); f.Add(3,&pWorldItem); f.Add(4,&pInvItem); f.Add(5,&pTexture); f.Add(6,&pMissionUI); return 0; }
+
+public:
+	CHintIcon() {}
+	CHintIcon( const SWindowInfo &sInfo, NGame::IMission *pMission, NWorld::IItem *pWItem, NRPG::IInventoryItem *pInv, CMissionUI *pMissionUI );
+
+	bool CanHandleState( NGame::IState *pState ) const;		// retail @0x2162e0: true
+	CObjectBase* GetTarget();								// retail @0x2162f0: pWorldItem as CObjectBase
+
+	NRPG::IInventoryItem* GetInvItem() const { return pInvItem; }
+	void Set( float fAngle );
+	void SetPosition( const SPoint &sPosition );
+
+	bool ProcessMessage( const SEvent &sEvent );
+	void Draw( const STime &sTime, NGScene::I2DGameView *pView );
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
+CHintIcon::CHintIcon( const SWindowInfo &sInfo, NGame::IMission *_pMission, NWorld::IItem *pWItem, NRPG::IInventoryItem *pInv, CMissionUI *_pMissionUI ):
+	TBaseClass( sInfo, _pMission ), pMission( _pMission ), pWorldItem( pWItem ), pInvItem( pInv ), pMissionUI( _pMissionUI )
+{
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+bool CHintIcon::CanHandleState( NGame::IState *pState ) const
+{
+	return true;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+CObjectBase* CHintIcon::GetTarget()
+{	// retail @0x2162f0 (folded body): pWorldItem adjusted to CObjectBase
+	return CDynamicCast<CObjectBase>( pWorldItem.GetPtr() );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CHintIcon::Set( float fAngle )
+{
+	// retail CHintIcon::Draw @0x210550 texture pick: on-screen -> 801 (0x321 @0x610670);
+	// off-screen -> sequential arrows 802..809 (0x322..0x329) by Clamp(round(angle/45),0,7).
+	if ( fAngle == -1 )
+		pTexture = NDb::GetUITexture( 801 );
+	else
+		pTexture = NDb::GetUITexture( 802 + min( max( Float2Int( fAngle / 45 ), 0 ), 7 ) );
+
+	SetImage( pTexture );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CHintIcon::SetPosition( const SPoint &_sPosition )
+{
+	TBaseClass::SetSize( SPoint( 0, 0 ) );
+	TBaseClass::SetPosition( _sPosition );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+bool CHintIcon::ProcessMessage( const SEvent &sEvent )
+{
+	// retail @0x210510: 0x6000034 (dev EVENT_RBUTTONUP) -> mission vtbl+0xc4 FocusCameraOnItem(pWorldItem),
+	// true; 0x6000035 (dev EVENT_RBUTTONDOWN) swallowed; else base decorator.
+	switch ( sEvent.nEvent )
+	{
+	case EVENT_RBUTTONDOWN:
+		return true;
+	case EVENT_RBUTTONUP:
+		if ( IsValid( pWorldItem ) )
+			pMission->FocusCameraOnItem( pWorldItem );
+		return true;
+	}
+
+	return TBaseClass::ProcessMessage( sEvent );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CHintIcon::Draw( const STime &sTime, NGScene::I2DGameView *pView )
+{
+	SPoint sNewSize( pTexture->nWidth, pTexture->nHeight );
+	SPoint sSize = GetSize();
+	SPoint sPosition = GetPosition();
+
+	// position/clamp are CLIENT-window-local (icons are view children, like the ear/enemy icons)
 	const SPoint &sParentSize = pMissionUI->GetClientWindow()->GetSize();
 	SRect sViewRect( 0, 0, sParentSize.x, sParentSize.y );
 	sPosition.x = min( max( sViewRect.x1 + sNewSize.x / 2, sPosition.x ), sViewRect.x2 - sNewSize.x / 2 );
@@ -898,20 +1153,6 @@ void CMissionUI::Draw( const STime &sTime, NGScene::I2DGameView *pView )
 	CDesktopWindow::Draw( sTime, pView );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-struct SInvItemSort
-{
-	bool operator()( CItemText *p1, CItemText *p2 ) const 
-	{
-		const SPoint &sSize1 = p1->GetItem().pItem->GetSize();
-		const SPoint &sSize2 = p2->GetItem().pItem->GetSize();
-
-		int nW1 = Max( sSize1.x, sSize1.y ) + sSize1.x * sSize1.y;
-		int nW2 = Max( sSize2.x, sSize2.y ) + sSize2.x * sSize2.y;
-
-		return nW1 > nW2; 
-	}
-};
-////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CanPlace( const CArray2D<bool> &sMap, const SPoint &sPos, const SPoint &sSize )
 {
 	if ( ( sPos.x < 0 ) || ( sPos.y < 0 ) || ( sPos.x + sSize.x > sMap.GetXSize() ) || ( sPos.y + sSize.y > sMap.GetYSize() ) )
@@ -942,46 +1183,196 @@ void Place( CArray2D<bool> *pMap, const SPoint &sPos, const SPoint &sSize )
 			(*pMap)[sPos.y + nTempY][sPos.x + nTempX] = true;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// shared projection for the item-anchored overlay icons (the dev expression of retail
+// CProjectedIcon::GetPositionInfo @0x20f610, mirrored line-for-line from UpdateEnemies/UpdateClues:
+// TestRayInFrustrum -> *1024/768 -> in-rect test -> compass bearing -> clamp). Returns the
+// off-screen bearing in degrees, or -1 when the projected point lies inside the view; *pIconPos
+// receives the clamped 1024x768-space screen point.
+static float ProjectOverlayIconPos( const CVec3 &vAnchor, CTransformStack &sTS, const CVec2 &vScreenRect, const SRect &sViewRect, CVec2 *pIconPos )
+{
+	CVec2 vScreenPos;
+	TestRayInFrustrum( vAnchor, &sTS, vScreenRect, &vScreenPos );
+	vScreenPos.x = vScreenPos.x * 1024 / vScreenRect.x;
+	vScreenPos.y = vScreenPos.y * 768 / vScreenRect.y;
+
+	bool bRet = false;
+	if ( ( sViewRect.x1 < vScreenPos.x ) && ( sViewRect.x2 > vScreenPos.x ) && ( sViewRect.y1 < vScreenPos.y ) && ( sViewRect.y2 > vScreenPos.y ) )
+		bRet = true;
+
+	float fAngle = -1;
+	if ( !bRet )
+	{
+		fAngle = ToDegree( atan2( vScreenPos.x - ( sViewRect.x2 - sViewRect.x1 ) / 2, -( vScreenPos.y - ( sViewRect.y2 - sViewRect.y1 ) / 2 ) ) );
+		if ( fAngle < 0 )
+			fAngle += 360;
+	}
+
+	vScreenPos.x = max( min( vScreenPos.x, sViewRect.x2 ), sViewRect.x1 );
+	vScreenPos.y = max( min( vScreenPos.y, sViewRect.y2 ), sViewRect.y1 );
+	*pIconPos = vScreenPos;
+	return fAngle;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 void CMissionUI::UpdateItems( NGScene::I2DGameView *pView )
 {
-	if ( bindShowItems.IsActive() )
-	{
-		list<CObj<CItemText> > newItemTextsList;
+	// retail CMissionUI::UpdateVisibleItems @0x2130c0 -- THREE passes over the ACTIVE player's
+	// ACCUMULATED discovered-objects set (GetActivePlayer -> GetPlayer -> GetVisibleObjects, the
+	// merged per-unit LOS history):
+	//   1. the Alt-held "Name x N" ground-item labels     (gate: bindShowItems @0x61316a/@0x6134bc);
+	//   2. a CClueIcon marker per discovered IClueItem    (UNGATED -- the clue branch @0x613800 has
+	//      no bool test);
+	//   3. a CHintIcon marker per discovered non-clue IHintItem (gate: "ui_showhints" read as
+	//      GetVar("ui_showhints").GetFloat() != 0 -- fucompp vs 0.0f @0x61312c..0x613140; NO
+	//      tutorial-mode OR here, unlike the script-hint gate in iMission.cpp -- branch @0x613a38).
+	// A clue item always wins over a hint item (the RTDynamicCast pair @0x6137b7 tests IClueItem
+	// first). All rebuilt lists are assigned at the end of the walk (@0x613c9f).
+	const bool bShowHints = NGlobal::GetVar( "ui_showhints" ).GetFloat() != 0;
+	const bool bShowItems = bindShowItems.IsActive();
 
-		unordered_map<CPtr<NRPG::IInventoryItem>, CPtr<CItemText>, SPtrHash> itemsMap;
+	// the discovered-set enumeration runs BEFORE any gate (@0x61318e..0x6131b4) -- it feeds all passes
+	NWorld::IPlayer *pPlayer = 0;
+	if ( pMission->GetActivePlayer() )
+		pPlayer = pMission->GetActivePlayer()->GetPlayer();
+	list< CPtr<CObjectBase> > visObjs;
+	if ( pPlayer )
+		pPlayer->GetVisibleObjects( &visObjs );
+
+	// retail UpdateHash<CObjectBase,CHintIcon> @0x217170 / <CObjectBase,CClueIcon> @0x217220: key
+	// every existing icon by its inventory item so the rebuild reuses the live widget.
+	unordered_map<CPtr<NRPG::IInventoryItem>, CPtr<CHintIcon>, SPtrHash> knownHintIcons;
+	for ( list<CObj<CHintIcon> >::const_iterator iIcon = hintIconsList.begin(); iIcon != hintIconsList.end(); ++iIcon )
+		knownHintIcons[ (*iIcon)->GetInvItem() ] = *iIcon;
+	unordered_map<CPtr<NRPG::IInventoryItem>, CPtr<CClueIcon>, SPtrHash> knownClueIcons;
+	for ( list<CObj<CClueIcon> >::const_iterator iIcon = clueItemIconsList.begin(); iIcon != clueItemIconsList.end(); ++iIcon )
+		knownClueIcons[ (*iIcon)->GetInvItem() ] = *iIcon;
+
+	// PASS-1 keep step (gated): keep an existing label only while ALL its grouped items stay
+	// discovered+valid; a new item merges into a label iff same DBItem AND same 1.875m ground cell
+	// (F_ITEMS_SECTOR_SIZE @0x57d108, x/y only -- the z-blind grouping is a retail quirk, reproduced).
+	// NOT per-selected-unit FindCloseGroundItems (that @0x369970 walk is the pickup-REACH path).
+	list<CObj<CItemText> > newItemTextsList;
+	unordered_map<CPtr<NRPG::IInventoryItem>, CPtr<CItemText>, SPtrHash> knownItems;
+	if ( bShowItems )
+	{
 		for ( list<CObj<CItemText> >::const_iterator iTemp = itemTextsList.begin(); iTemp != itemTextsList.end(); iTemp++ )
 		{
-			CItemText *pItemText = *iTemp;
-			itemsMap[ pItemText->GetItem().pItem ] = pItemText;
-		}
-
-		vector<CPtr<NGame::IUnitTracker> > unitsSet;
-		pMission->GetSelectedUnits( &unitsSet );
-		for ( int nTemp = 0; nTemp < unitsSet.size(); nTemp++ )
-		{
-			vector<NWorld::SItem> tempItems;
-			pMission->GetWorld()->FindCloseGroundItems( unitsSet[nTemp]->GetUnit(), &tempItems );
-
-			for ( int nTemp = 0; nTemp < tempItems.size(); nTemp++ )
+			CItemText *pIt = *iTemp;
+			bool bKeep = !pIt->GetItems().empty();
+			for ( list<CItemText::SItem>::const_iterator iS = pIt->GetItems().begin(); bKeep && iS != pIt->GetItems().end(); ++iS )
 			{
-				const NWorld::SItem &sItem = tempItems[nTemp];
-
-				if ( !IsValid( sItem.pItem ) )
-					continue;
-				if ( !IsValid( sItem.pWorldItem ) )
-					continue;
-
-				unordered_map<CPtr<NRPG::IInventoryItem>, CPtr<CItemText>, SPtrHash>::iterator iFindRes = itemsMap.find( sItem.pItem );
-				if ( iFindRes == itemsMap.end() )
-					newItemTextsList.push_back( new CItemText( SWindowInfo( this, SPoint( 0, 0 ), SPoint( 0, 0 ), "", STYLE_ENABLED | STYLE_VISIBLE ), pMission, this, sItem ) );
-				else
-					newItemTextsList.push_back( iFindRes->second.GetPtr() );
+				CObjectBase *pObj = CDynamicCast<CObjectBase>( iS->pWorldItem.GetPtr() );
+				bKeep = IsValid( pObj ) && IsInSet( visObjs, pObj );
 			}
+			if ( !bKeep )
+				continue;
+			newItemTextsList.push_back( pIt );
+			for ( list<CItemText::SItem>::const_iterator iS = pIt->GetItems().begin(); iS != pIt->GetItems().end(); ++iS )
+				knownItems[ iS->pInvItem ] = pIt;
+		}
+	}
+	else
+		itemTextsList.clear();		// retail @0x6133b3: bind inactive -> drop the labels (icons still rebuild)
+
+	// icon projection setup -- mirrors UpdateEnemies/UpdateClues (the zero-width client rect
+	// early-out is the same dev projection guard those passes use)
+	CVec2 vIconScreenRect = pMission->GetScene()->GetScreenRect();
+	CTransformStack sIconTS = pMission->GetCameraTransform();
+	SRect sIconViewRect;
+	SPoint sIconViewPosition;
+	GetClientWindow()->ClientToScreen( &sIconViewPosition, &sIconViewRect );
+	const bool bCanProject = sIconViewRect.Width() != 0;
+
+	list<CObj<CHintIcon> > newHintIconsList;
+	list<CObj<CClueIcon> > newClueItemIconsList;
+
+	const float F_ITEMS_SECTOR_SIZE = 1.875f;   // retail .data @0x57d108
+	for ( list< CPtr<CObjectBase> >::iterator iObj = visObjs.begin(); iObj != visObjs.end(); ++iObj )
+	{
+		CDynamicCast<NWorld::IItem> pWItem( iObj->GetPtr() );
+		if ( !IsValid( pWItem ) )
+			continue;                            // mines/units/non-items fall out here
+		NRPG::IInventoryItem *pInv = pWItem->GetInvItem();
+		if ( !IsValid( pInv ) )
+			continue;
+		// PASS 1 (gated @0x6134bc): merge-or-create the ground-item label
+		if ( bShowItems && knownItems.find( pInv ) == knownItems.end() )
+		{
+			int nSX = (int)( pWItem->GetPos().x / F_ITEMS_SECTOR_SIZE + 0.5f );
+			int nSY = (int)( pWItem->GetPos().y / F_ITEMS_SECTOR_SIZE + 0.5f );
+			CItemText *pMerge = 0;
+			for ( list<CObj<CItemText> >::iterator iN = newItemTextsList.begin(); !pMerge && iN != newItemTextsList.end(); ++iN )
+			{
+				const CItemText::SItem &sF = (*iN)->GetItems().front();
+				if ( !IsValid( sF.pInvItem ) || !IsValid( sF.pWorldItem ) )
+					continue;
+				if ( sF.pInvItem->GetDBItem() != pInv->GetDBItem() )
+					continue;
+				if ( (int)( sF.pWorldItem->GetPos().x / F_ITEMS_SECTOR_SIZE + 0.5f ) == nSX
+				  && (int)( sF.pWorldItem->GetPos().y / F_ITEMS_SECTOR_SIZE + 0.5f ) == nSY )
+					pMerge = *iN;
+			}
+			if ( pMerge )
+				pMerge->AddItem( pWItem, pInv );
+			else
+				// CLIENT-window parent = retail @0x2130c0 (GetClientWindow -> SWindowInfo). A
+				// desktop-parented label never receives EVENT_MOUSEENTER (see the enemy-icon note
+				// below), which is exactly why the dev labels were unclickable.
+				newItemTextsList.push_back( new CItemText( SWindowInfo( GetClientWindow(), SPoint( 0, 0 ), SPoint( 0, 0 ), "", STYLE_ENABLED | STYLE_VISIBLE ), pMission, pWItem, pInv ) );
 		}
 
+		// PASSES 2+3: classify the INVENTORY item (retail RTDynamicCast pair @0x6137b7; clue wins)
+		NRPG::IClueItem *pClue = dynamic_cast<NRPG::IClueItem*>( pInv );
+		NRPG::IHintItem *pHint = dynamic_cast<NRPG::IHintItem*>( pInv );
+		if ( !bCanProject || ( !pClue && !pHint ) )
+			continue;
+
+		// anchor = item pos raised 0.6 (retail CClueIcon::Draw fadd [0x8b1fe8] @0x61039b /
+		// CHintIcon::Draw @0x61058a -- both add the same 0.6f before projecting)
+		CVec3 vIconAnchor( pWItem->GetPos() );
+		vIconAnchor += CVec3( 0, 0, 0.6f );
+		CVec2 vIconScreenPos;
+		float fAngle = ProjectOverlayIconPos( vIconAnchor, sIconTS, vIconScreenRect, sIconViewRect, &vIconScreenPos );
+		SPoint sIconPos;	// icons are CLIENT-window children -- convert the 1024x768 screen point
+		GetClientWindow()->ScreenToClient( SPoint( vIconScreenPos.x, vIconScreenPos.y ), &sIconPos );
+
+		if ( pClue )
+		{
+			// PASS 2 (ungated, @0x613800): reuse the keyed icon or build a fresh one (@0x61391b ctor)
+			CClueIcon *pIcon = 0;
+			unordered_map<CPtr<NRPG::IInventoryItem>, CPtr<CClueIcon>, SPtrHash>::iterator iKnown = knownClueIcons.find( pInv );
+			if ( iKnown != knownClueIcons.end() )
+				pIcon = iKnown->second;
+			if ( !pIcon )
+				pIcon = new CClueIcon( SWindowInfo( GetClientWindow(), SPoint( 0, 0 ), SPoint( 0, 0 ), "", STYLE_ENABLED | STYLE_VISIBLE ), pMission, pWItem, pInv, this );
+			pIcon->Set( fAngle );
+			pIcon->SetPosition( sIconPos );
+			newClueItemIconsList.push_back( pIcon );
+		}
+		else if ( bShowHints )
+		{
+			// PASS 3 (gated by ui_showhints, @0x613a38): reuse or build (@0x613b5a ctor)
+			CHintIcon *pIcon = 0;
+			unordered_map<CPtr<NRPG::IInventoryItem>, CPtr<CHintIcon>, SPtrHash>::iterator iKnown = knownHintIcons.find( pInv );
+			if ( iKnown != knownHintIcons.end() )
+				pIcon = iKnown->second;
+			if ( !pIcon )
+				pIcon = new CHintIcon( SWindowInfo( GetClientWindow(), SPoint( 0, 0 ), SPoint( 0, 0 ), "", STYLE_ENABLED | STYLE_VISIBLE ), pMission, pWItem, pInv, this );
+			pIcon->Set( fAngle );
+			pIcon->SetPosition( sIconPos );
+			newHintIconsList.push_back( pIcon );
+		}
+	}
+
+	// retail assigns every rebuilt list at the end of the walk (@0x613c9f); with a gate off its
+	// fresh list is simply empty, which clears the member -- reproduced.
+	hintIconsList = newHintIconsList;
+	clueItemIconsList = newClueItemIconsList;
+
+	if ( bShowItems )
+	{
 		itemTextsList = newItemTextsList;
 
-		const int 
+		const int
 			N_X_STEP = 4,
 			N_Y_STEP = 16,
 			N_X_SIZE = 1024 / N_X_STEP,
@@ -990,16 +1381,19 @@ void CMissionUI::UpdateItems( NGScene::I2DGameView *pView )
 		CArray2D<bool> sMap( N_X_SIZE, N_Y_SIZE );
 		sMap.FillEvery( false );
 
-		itemTextsList.sort( SInvItemSort() );
-
 		CVec2 vScreenRect = pView->GetViewportSize();
 		CTransformStack sTS = pMission->GetCameraTransform();
 		for ( list<CObj<CItemText> >::const_iterator iTemp = itemTextsList.begin(); iTemp != itemTextsList.end(); iTemp++ )
 		{
 			CItemText *pItemText = *iTemp;
 
+			if ( pItemText->GetItems().empty() || !IsValid( pItemText->GetItems().front().pWorldItem ) )
+			{
+				pItemText->SetStyle( STYLE_VISIBLE, false );
+				continue;
+			}
 			CVec2 vRes;
-			if ( !TestRayInFrustrum( pItemText->GetItem().pWorldItem->GetPos(), &sTS, vScreenRect, &vRes ) )
+			if ( !TestRayInFrustrum( pItemText->GetItems().front().pWorldItem->GetPos(), &sTS, vScreenRect, &vRes ) )
 			{
 				pItemText->SetStyle( STYLE_VISIBLE, false );
 				continue;
@@ -1060,11 +1454,11 @@ void CMissionUI::UpdateItems( NGScene::I2DGameView *pView )
 			}
 
 			pItemText->SetStyle( STYLE_VISIBLE, bComplete );
-			pItemText->SetPosition( SPoint( sItemPos.x * N_X_STEP, sItemPos.y * N_Y_STEP ) );
+			SPoint sClientPos;   // retail ReflowItemTexts @0x20faa0: labels are CLIENT-window children --
+			GetClientWindow()->ScreenToClient( SPoint( sItemPos.x * N_X_STEP, sItemPos.y * N_Y_STEP ), &sClientPos );
+			pItemText->SetPosition( sClientPos );
 		}
 	}
-	else
-		itemTextsList.clear();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CMissionUI::UpdateHits( const STime &sTime )
@@ -1207,8 +1601,8 @@ void CMissionUI::UpdateClues()
 	// CSoundIcon hash by the sound IVisObj). The icon anchors on the MARKER's position -- the live
 	// unit's position would leak its movement while unseen. No dead/unconscious filtering either:
 	// hiding the ear on death would itself leak the death.
-	list<CObj<CClueIcon> > newClueIconsList;
-	list<CObj<CClueIcon> >::iterator iOldIcons = clueIconsList.begin();
+	list<CObj<CSoundIcon> > newClueIconsList;
+	list<CObj<CSoundIcon> >::iterator iOldIcons = clueIconsList.begin();
 	for ( int nTemp = 0; nTemp < soundsList.size(); nTemp++ )
 	{
 		CObjectBase *pMarker = soundsList[nTemp];
@@ -1221,7 +1615,7 @@ void CMissionUI::UpdateClues()
 		if ( find( visibleList.begin(), visibleList.end(), pHeard ) != visibleList.end() )
 			continue;
 
-		CClueIcon *pIcon;
+		CSoundIcon *pIcon;
 		if ( iOldIcons != clueIconsList.end() )
 		{
 			pIcon = (*iOldIcons);
@@ -1231,7 +1625,7 @@ void CMissionUI::UpdateClues()
 		{
 			// client-window parent for the same reason as CEnemyIcon above (retail @0x213e70): the
 			// decorator hover push is what makes the heard silhouette targetable through its ear icon.
-			pIcon = new CClueIcon( SWindowInfo( GetClientWindow(), SPoint( 0, 0 ), SPoint( 0, 0 ), "", STYLE_ENABLED | STYLE_VISIBLE ), pMission, this );
+			pIcon = new CSoundIcon( SWindowInfo( GetClientWindow(), SPoint( 0, 0 ), SPoint( 0, 0 ), "", STYLE_ENABLED | STYLE_VISIBLE ), pMission, this );
 		}
 
 		CVec2 vScreenPos;
@@ -1318,6 +1712,18 @@ void CMissionUI::UpdateCameraScroll( const STime &sTime )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CAckEvent* CMissionUI::PlayAckEvent( const STime &sTime, NWorld::CAckEvent *pEvent )
 {
+	// ACK FOG-OF-WAR (retail CMissionUI::PlayAckEvent @0x211930): bark an ack ONLY if its SPEAKER is
+	// currently visible to the active player -- GetActivePlayer()->IsUnitVisible(pEvent->pUnit) (retail
+	// mission vtbl+0x5c = GetActivePlayer, tracker vtbl+0x2c = IsUnitVisible). The player's own units are
+	// always in its GetVisible set so their acks still bark; enemy chatter from a unit you (and your allies)
+	// cannot see is DROPPED (no voice, no subtitle). Retail returns 0 on the gated path, and the caller
+	// (CDesktopWindow::Update) just stores it as the active event, so returning 0 is safe.
+	if ( IsValid( pEvent ) && IsValid( pMission ) )
+	{
+		if ( pMission->GetActivePlayer() == 0 ||
+			 !pMission->GetActivePlayer()->IsUnitVisible( pEvent->pUnit.GetPtr() ) )
+			return 0;
+	}
 	// retail: the NUI wrapper is constructed around the world-side ack with bReady=false. It is NOT
 	// armed here -- bReady flips later (via the single-unit face's ACK_WAIT step, or its fallback),
 	// so the deferred voice/lipsync only fire once the speaker's face is on screen.
@@ -1344,4 +1750,6 @@ REGISTER_SAVELOAD_CLASS( 0xB0241942, CMissionUI );
 REGISTER_SAVELOAD_CLASS( 0xB0241947, CItemText );
 REGISTER_SAVELOAD_CLASS( 0xB0241948, CEnemyIcon );
 REGISTER_SAVELOAD_CLASS( 0xB0241949, CHitTracker );
-REGISTER_SAVELOAD_CLASS( 0xB024194A, CClueIcon );
+REGISTER_SAVELOAD_CLASS( 0xB024194A, CSoundIcon );	// dev-established id (class formerly named CClueIcon here)
+REGISTER_SAVELOAD_CLASS( 0xB3123180, CClueIcon );	// retail NUI::CClueIcon id (gen/classreg.json)
+REGISTER_SAVELOAD_CLASS( 0xB3212140, CHintIcon );	// retail NUI::CHintIcon id (gen/classreg.json)

@@ -64,6 +64,9 @@ public:
 	virtual void Run();
 	virtual bool TimeLabelReached();
 	virtual void Cancel();
+	// BUG 5: retail CExecAttack::UpdateCamera @0x3a3e70 (slot +0x44) -- post the arbitrated auto-focus camera
+	// for this attack. Base = shooter, no target (tile/object/melee); CExecShootUnit overrides with pTarget.
+	virtual void UpdateCamera();
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CExecShoot
@@ -165,6 +168,7 @@ public:
 	CExecShootUnit( CUnitServer *_pUS, NWorld::CUnitServer *_pTarget, NAI::EHitLocation _eHL, int _nExtraAttackAP );
 
 	virtual EUnitCommandResult CanDoIt( const NAI::SUnitPosition &from, bool bIgnoreTarget = false ) const;
+	virtual void UpdateCamera();   // BUG 5: retail CExecShootUnit::UpdateCamera @0x3a47c0 -- focus with the shot target
 	virtual void SelectRay();
 	virtual void CheckShotResult();
 	virtual bool IsAttackCanceled();

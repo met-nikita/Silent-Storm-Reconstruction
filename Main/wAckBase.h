@@ -30,21 +30,21 @@ class IAck: virtual public CObjectBase
 public:
 	//
 	virtual NDb::CDBAck *GetDBAck() { return 0; }
-	// ����������� �������
-	virtual void OnSegment() {} // �������
+	// event handlers
+	virtual void OnSegment() {} // segment
 	virtual void OnEnemyBecomesVisible( CUnitServer *pWatcher, 
 		CUnitServer *pTarget, bool bRealTime ) {}
-	virtual void OnLastPieceOfAmmo( CUnitServer *pUnit ) {} // ��������� �������
-	virtual void OnWeaponJammed( CUnitServer *pUnit ) {} // ������ ���������
-	virtual void OnOrderConfirmation( CUnitServer *pUnit ) {} // ������������� �������
-	virtual void OnImpossibleToPerformAction( CUnitServer *pUnit ) {} // ���������� ��������� �������
-	virtual void OnSuffersLightDamage( CUnitServer *pUnit ) {} // ������� ������ �����������
-	virtual void OnSuffersHardDamage( CUnitServer *pUnit ) {} // ������� ������� �����������
-	virtual void OnUnitDied( CUnitServer *pUnit ) {} // unit ����
-	virtual void OnTargetHit( CUnitServer *pUnit ) {} // Unit ����� � ����
-	virtual void OnHardTargetHit( CUnitServer *pUnit ) {} // Unit ����� � ������� ����
-	virtual void OnTargetMissed( CUnitServer *pUnit ) {} // Unit �� ����� � ����
-	virtual void OnGrenadeExplosion( CUnitServer *pUnit, int nUnitsDestroyed, int nObjectsDestroyed ) {} // ����������� �� �������
+	virtual void OnLastPieceOfAmmo( CUnitServer *pUnit ) {} // out of ammo
+	virtual void OnWeaponJammed( CUnitServer *pUnit ) {} // weapon jammed
+	virtual void OnOrderConfirmation( CUnitServer *pUnit ) {} // order confirmation
+	virtual void OnImpossibleToPerformAction( CUnitServer *pUnit ) {} // cannot perform command
+	virtual void OnSuffersLightDamage( CUnitServer *pUnit ) {} // took light damage
+	virtual void OnSuffersHardDamage( CUnitServer *pUnit ) {} // took heavy damage
+	virtual void OnUnitDied( CUnitServer *pUnit ) {} // unit died
+	virtual void OnTargetHit( CUnitServer *pUnit ) {} // Unit hit the target
+	virtual void OnHardTargetHit( CUnitServer *pUnit ) {} // Unit hit a hard target
+	virtual void OnTargetMissed( CUnitServer *pUnit ) {} // Unit missed the target
+	virtual void OnGrenadeExplosion( CUnitServer *pUnit, int nUnitsDestroyed, int nObjectsDestroyed ) {} // damage from grenade
 	virtual void OnDoDamage( CUnitServer *pAttacker, CUnitServer *pTarget ) {}
 	virtual void OnDoAccidentalDamage( CUnitServer *pAttacker, CUnitServer *pTarget ) {}
 	virtual void OnDoCriticalDamage( CUnitServer *pAttacker, CUnitServer *pTarget ) {}
@@ -75,7 +75,7 @@ class CGlobalAck: public IAck
 	};
 	ZDATA
 	vector< CObj<IAck> > vAck;
-	list< SAck > sequences; // ����������� sequence � ������������ ����������� �� ����������� ack
+	list< SAck > sequences; // accumulated sequences with the highest priority from triggered acks
 	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&vAck); f.Add(3,&sequences); return 0; }
 
 	bool IsContainUnit( const list< CPtr<CUnit> > &visibleUnits, int nRPGPersID );
@@ -87,11 +87,11 @@ class CGlobalAck: public IAck
 	int FetchHighestAcks();
 public:
 	CGlobalAck() {}
-	// ���������� � vAck
+	// add to vAck
 	void AddAck( CUnitServer *pUnit );
-	// ���������� � sequences
+	// add to sequences
 	void AddAckSequence( CUnitServer *pUnit, NDb::CDBAck *pAck ); 
-	// �������� ��������� �� ����������� sequence � ������ ����, ��� �������
+	// get a random one from the accumulated sequences, accounting for who is watching
 	// retail @0x339230 hands back the SPEAKER too (bool GetSequence(CUnitServer**, CDBAckSequence**, int*)):
 	// the ack ROWS are keyed by the voice-DONOR pers id (GetAckPersID), which belongs to no live unit,
 	// so the speaker can only come from the queued SAck itself -- re-deriving it by pers id finds nobody.
@@ -135,8 +135,8 @@ public:
 class CAckBase: public IAck
 {
 	ZDATA
-	CPtr<CUnitServer> pUnit; // ���� ����������� ��� �������� ack ��� ������ ���������������� Unit-�
-	CDBPtr<NDb::CDBAck> pDBAck; // ��������� ack-�
+	CPtr<CUnitServer> pUnit; // field needed to remove the ack when the corresponding Unit dies
+	CDBPtr<NDb::CDBAck> pDBAck; // ack parameters
 public:
 	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&pUnit); f.Add(3,&pDBAck); return 0; }
 

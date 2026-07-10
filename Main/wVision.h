@@ -8,10 +8,22 @@ namespace NWorld
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // vision support
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail IVisible (Game.exe vftable @0x8c9d2c, the CDFrozenItem IVisible-base table; disasm-proven):
+//   slot 0  void GetVisiblePos( vector<CVec3>* )  -- fills the LOS PROBE POINTS of the object
+//           (CDFrozenItem @0x749e50: the model's mass-sphere centres world-transformed, fallback the
+//            matrix translation; CDItem @0x58b790: `ret 4` == adds NO points, dynamics are never rayed);
+//   slot 1  bool IsTemporaryVisible()             -- route to the per-update tempVisibleObjects list
+//           instead of the PERSISTENT visibleObjects (CDFrozenItem @0x74c2d0 reads bIsTemporaryVisible
+//            @+0x88; CDItem @0x488d00 returns true);
+//   slot 2  CObjectBase* GetVisibilityParent()    -- the object an in-flight item flew off of
+//           (CDItem @0x773810 reads pVisibilityParent @+0x2c; CDFrozenItem @0x7538d0 returns 0).
+// The Jan03 single-point `CVec3 GetVisiblePos()` does not exist in retail.
 class IVisible : virtual public CObjectBase
 {
 public:
-	virtual CVec3 GetVisiblePos() const = 0;
+	virtual void GetVisiblePos( vector<CVec3> *pRes ) const = 0;
+	virtual bool IsTemporaryVisible() const = 0;
+	virtual CObjectBase* GetVisibilityParent() const = 0;
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 template <class TUnit, class TPlayer>
@@ -22,11 +34,17 @@ protected:
 	list<CPtr<TUnit> > visible;
 	list<CPtr<CObjectBase> > visibleObjects, trappedObjects;
 	list<CPtr<CObjectBase> > addToVisibleTraps;
+	// retail CTBSUnitVision carries a FIFTH list (PDB member order: visible, visibleObjects,
+	// trappedObjects, tempVisibleObjects @+0xc, addToVisibleTraps): the IsTemporaryVisible items this
+	// unit sees THIS update. Rebuilt from scratch every CUnitServer::UpdateVisible @0x3c4450 (cleared
+	// @0x7c5032), NOT serialized (retail operator& @0x3c7330 saves only the other four -- tags 2..5).
+	list<CPtr<CObjectBase> > tempVisibleObjects;
 public:
 	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&visible); f.Add(3,&visibleObjects); f.Add(4,&trappedObjects); f.Add(5,&addToVisibleTraps); return 0; }
 	const list<CPtr<TUnit> >& GetTBSVisible() const { return visible; }
 	const list<CPtr<CObjectBase> >& GetTBSVisibleObjects() const { return visibleObjects; }
 	const list<CPtr<CObjectBase> >& GetTBSTrappedObjects() const { return trappedObjects; }
+	const list<CPtr<CObjectBase> >& GetTBSTempVisibleObjects() const { return tempVisibleObjects; }
 	bool CanSeePlayer( TPlayer *pThisPlayer ) const
 	{
 		for ( list<CPtr<TUnit> >::const_iterator k = visible.begin(); k != visible.end(); ++k )
@@ -66,6 +84,11 @@ protected:
 	TUnitList visible;
 	TObjectList visibleObjects;
 	TObjectList prevTrappedObjects, trappedObjects, addToVisibleTraps;
+	// retail CPlayerBaseVision carries a FIFTH object list (PDB +0x10, temporaryVisibleObjects):
+	// the per-update union of the watchers' tempVisibleObjects. Rebuilt every UpdateVisible
+	// @0x3726b0 (clear + a 4th per-watcher MergeSets), NOT serialized (retail operator& @0x3781a0
+	// saves only the six lists above -- tags 2..7).
+	TObjectList temporaryVisibleObjects;
 public:
 	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&addToVisible); f.Add(3,&visible); f.Add(4,&visibleObjects); f.Add(5,&prevTrappedObjects); f.Add(6,&trappedObjects); f.Add(7,&addToVisibleTraps); return 0; }
 private:
@@ -135,7 +158,11 @@ public:
 		
 		AddVisibleTrapsToAddVisible();
 		trappedObjects = addToVisibleTraps;
-		
+		// retail UpdateVisible @0x3726b0: the per-update temporary set restarts empty, then a FOURTH
+		// per-watcher MergeSets folds each fighting watcher's tempVisibleObjects in (decomp-confirmed
+		// additions (b)+(c) over the Jan03 shape -- see s2_scratch/src/s2_playervision.h).
+		temporaryVisibleObjects.clear();
+
 		vector<CPtr<TUnit> > units;
 		GetUnits( &units );
 		for ( int k = 0; k < units.size(); ++k )
@@ -148,6 +175,7 @@ public:
 				MergeSets( &visible, pWatcher->GetTBSVisible() );
 				MergeSets( &visibleObjects, pWatcher->GetTBSVisibleObjects() );
 				MergeSets( &trappedObjects, pWatcher->GetTBSTrappedObjects() );
+				MergeSets( &temporaryVisibleObjects, pWatcher->GetTBSTempVisibleObjects() );
 			}
 		}
 

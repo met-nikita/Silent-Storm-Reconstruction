@@ -48,6 +48,7 @@ class CUnitTerrain;
 class CCannon;
 class CUnit;
 class CWorld;
+class CUnitServer;   // Die's retail 4th arg (the dying server -> ragdoll pUnit)
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CUnitAnimator
 {
@@ -180,7 +181,12 @@ public:
 	// retail @0x33bb90: bPlayDeath gates ONLY the death CLIP -- the ragdoll handoff (AddDynamics)
 	// ALWAYS runs. bPlayDeath=false is the pure ragdoll-push entry (corpse push @0x350e20 /
 	// blast impulse @0x3c0370 / SpillPK @0x3a62e0); true plays a directional death anim when idle.
-	void Die( const NAI::SUnitPosition &cmdPos, const CVec3 &ptDir, bool bPlayDeath = true );
+	// pWhereImpact = the WORLD impact point that seeds CParticleSkeleton::Init's per-particle impulse
+	// falloff (2 - |particle - impact|). NULL falls back to the body's ground position (cmdPos.GetCP());
+	// the corpse-push passes the actual HIT-LOCATION bone so the ragdoll reacts to WHERE it was hit.
+	void Die( const NAI::SUnitPosition &cmdPos, const CVec3 &ptDir, bool bPlayDeath = true,
+		NWorld::CUnitServer *pServer = 0,     // retail 4th arg: the dying server (-> ragdoll pUnit)
+		const CVec3 *pWhereImpact = 0 );
 	void ActivateItem( const NAI::SUnitPosition &cmdPos,
 		bool bHeavy, bool bBackpack, NDb::EItemPlace place,
 		NDb::EWeaponType eAWT, bool bHide = false, bool bInstantly = false );   // retail @0x33e800 inserted bHide at slot 6
@@ -198,8 +204,11 @@ public:
 	// corpses
 	void TakeCorpse( const NAI::SUnitPosition &cmdPos );
 	void DropCorpse( const NAI::SUnitPosition &cmdPos );
-	void BeTaken( CUnit *pCarrier, CUnitAnimator *pTaker );
-	void BeDropped();
+	// retail @0x33bea0/@0x33b1b0 thread the CORPSE's own CUnitServer as the last arg -> AddDynamics
+	// pServer -> CParticleSkeleton::pUnit, read by BeStopped -> WorldInformCorpseStop when the ragdoll
+	// settles. Dropping this arg (hardcoding pServer=0) left pUnit null -> AV on the dropped-corpse settle.
+	void BeTaken( CUnit *pCarrier, CUnitAnimator *pTaker, CUnitServer *pServer );
+	void BeDropped( CUnitServer *pServer );
 	// cannons
 	void EnterCannon( const NAI::SUnitPosition &cmdPos, CCannon *pCannon );
 	void LeaveCannon( const NAI::SUnitPosition &cmdPos );

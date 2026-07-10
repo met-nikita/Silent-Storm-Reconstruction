@@ -15,7 +15,6 @@
 #include "aiWeapon.h"
 #include "aiInventory.h"
 #include "aiMultiMoves.h"
-#include "aiTacticalCommander.h"
 
 #include "rpgUnitMission.h"
 #include "rpgUnitInfo.h"
@@ -34,12 +33,15 @@ class CAIIterator: public IAIIterator
 	ZDATA
 public:
 	int nMaxAP;
-	CPtr<IAIState> pAIState;
+	// SAIState is now a plain value struct (aiState.h): hold it as a raw, UNSERIALIZED weak back-ptr (tag3
+	// dropped) exactly like CAIUnit::pAIState. (These iterators are dead in the a5dll -- CreateAI*Iterator has
+	// no callers -- so nothing ever persists this; the raw pointer never dangles at runtime.)
+	SAIState *pAIState;
 	CObj<IAILogContainer> pAILog;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&nMaxAP); f.Add(3,&pAIState); f.Add(4,&pAILog); return 0; }
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&nMaxAP); f.Add(4,&pAILog); return 0; }
 	//
-	CAIIterator() {}
-	CAIIterator( IAIState *_pAIState ): 
+	CAIIterator(): pAIState( 0 ) {}
+	CAIIterator( SAIState *_pAIState ):
 		pAIState(_pAIState), pAILog( CreateAILogContainer() ) {}
 	//
 	virtual IAILogContainer *GetAILog() { return pAILog; }
@@ -78,7 +80,7 @@ class CAIPositionIterator: public CAIIterator
 public:
 	//
 	CAIPositionIterator() {}
-	CAIPositionIterator( IAIState *_pAIState ): 
+	CAIPositionIterator( SAIState *_pAIState ): 
 		CAIIterator( _pAIState ), pPrevAIUnit( 0 ), nPrevMaxAP( -1 ) {}
 	// IAIIterator
 	virtual void First();
@@ -205,9 +207,9 @@ void CAIPositionIterator::SetCurrentUnitPosition()
 		SPosition pos;
 		pos.SetNetwork( pAIUnit->GetUnitServer()->GetWorld()->GetPathNetwork() );
 		pos.p = places[ nCurrentPlace ].place;
-		if ( pos.p.GetPose() == NAI::CM_CROUCH ) // сидеть !
+		if ( pos.p.GetPose() == NAI::CM_CROUCH ) // пїЅпїЅпїЅпїЅпїЅпїЅ !
 			GetAILog()->Add( new CAILogExpediency( pAIUnit, 100 ), true );
-		if ( bInactivePose ) // но не заборе
+		if ( bInactivePose ) // пїЅпїЅ пїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ
 			GetAILog()->Add( new CAILogExpediency( pAIUnit, N_AI_INACTIVE_EXPEDIENCY ), true );
 		//
 		if ( !IsSamePos( pAIUnit->GetUnitServer()->GetPosition().pos.p, pos.p ) )
@@ -261,7 +263,7 @@ public:
 	ZEND int operator&( CStructureSaver &f ) { f.Add(2,(CAIIterator*)this); f.Add(3,&nCount); f.Add(4,&nCurrent); return 0; }
 	//
 	CAINumberIterator() {}
-	CAINumberIterator( IAIState *_pAIState, int _nCount );
+	CAINumberIterator( SAIState *_pAIState, int _nCount );
 	//
 	virtual void ModifyState() = 0;
 	virtual int GetCount();
@@ -274,7 +276,7 @@ public:
 	}
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CAINumberIterator::CAINumberIterator( IAIState *_pAIState, int _nCount ):
+CAINumberIterator::CAINumberIterator( SAIState *_pAIState, int _nCount ):
 	CAIIterator( _pAIState ), nCount( _nCount )
 {
 }
@@ -313,7 +315,7 @@ class CAIActionIterator: public CAINumberIterator
 public:
 	//
 	CAIActionIterator() {}
-	CAIActionIterator( IAIState *_pAIState, int _nCount ):
+	CAIActionIterator( SAIState *_pAIState, int _nCount ):
 		CAINumberIterator( _pAIState, _nCount ) {}
 	//
 	virtual void ModifyState()
@@ -333,14 +335,15 @@ class CAIUnitIterator: public CAINumberIterator
 	ZEND int operator&( CStructureSaver &f ) { f.Add(2,(CAINumberIterator *)this); return 0; }
 public:
 	CAIUnitIterator() {}
-	CAIUnitIterator( IAIState *_pAIState ):
+	CAIUnitIterator( SAIState *_pAIState ):
 		CAINumberIterator( _pAIState, 0 ) {}
 	//
 	virtual void ModifyState()
 	{
 		IAIUnit *pAIUnit = (*pAIState->GetAllyAIPlayer()->GetUnits())[nCurrent];
 		pAIState->SetCurrentAIUnit( pAIUnit );
-		pAIState->SetCurrentAIEnemy( pAIState->GetAITacticalCommander()->GetDangerousAttackableEnemy( pAIUnit ) );
+		// AI-convergence Stage 2: GetDangerousAttackableEnemy moved onto CAIState (was the tactical commander's).
+		pAIState->SetCurrentAIEnemy( pAIState->GetDangerousAttackableEnemy( pAIUnit ) );
 	}
 	virtual int GetCount()
 	{
@@ -348,17 +351,17 @@ public:
 	}
 };
 //////////////////////////////////////////////////////////////////////////////////////
-IAIIterator *CreateAIPositionIterator( IAIState *pAIState )
+IAIIterator *CreateAIPositionIterator( SAIState *pAIState )
 {
 	return new CAIPositionIterator( pAIState );
 }
 //////////////////////////////////////////////////////////////////////////////////////	
-IAIIterator *CreateAIUnitIterator( IAIState *pAIState )
+IAIIterator *CreateAIUnitIterator( SAIState *pAIState )
 {
 	return new CAIUnitIterator( pAIState );
 }
 //////////////////////////////////////////////////////////////////////////////////////	
-IAIIterator *CreateAIActionIterator( IAIState *pAIState, int nCount )
+IAIIterator *CreateAIActionIterator( SAIState *pAIState, int nCount )
 {
 	return new CAIActionIterator( pAIState, nCount );
 }

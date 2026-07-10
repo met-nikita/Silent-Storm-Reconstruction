@@ -2,11 +2,12 @@
 //
 #include "mapBuild.h"
 #include "aiPosition.h"
-#include "aiTaskCommander.h"
+#include "aiTaskCommand.h"
 #include "aiWaypoint.h"
 #include "aiControl.h"
 #include "aiCommander.h"
 #include "aiUnit.h"
+#include "aiRouteLogic.h"   // NAI::CreateAIRouteLogic / CreateAIRoamingLogic (the per-unit route logic)
 #include "..\DBFormat\DataMap.h"
 #include "wUnitCommands.h"
 #include "wUnitGroup.h"
@@ -154,7 +155,7 @@ CTask *CAIRoute::GetTask( NWorld::CUnitServer *pUS, NWorld::CUnitGroup *_pUnitGr
 	for ( vector< CPtr<CAIRouteWaypoint> >::iterator 
 		i = waypoints.begin(); i != waypoints.end(); ++i, ++nSync )
 	{
-		// ��������� Waypoint
+		// add Waypoint
 		int nIndex = -1;
 		vector< NAI::SPosition > unitPlaces;
 		for ( int i = 0; i < pUnitGroup->units.GetSize(); ++i )
@@ -166,7 +167,7 @@ CTask *CAIRoute::GetTask( NWorld::CUnitServer *pUS, NWorld::CUnitGroup *_pUnitGr
 		pUS->GetWorld()->GetPathNetwork()->FormationMoveTo( &unitPlaces, (*i)->pos );
 		//
 		pTask->AddCommand( new CTaskCommandGoto( unitPlaces[ nIndex ] ) );
-		// ��������� ��������
+		// add commands
 		for ( vector<NAI::SCommand>::iterator 
 			c = (*i)->commands.begin(); c != (*i)->commands.end(); ++c )
 		{
@@ -194,7 +195,37 @@ CTask *CAIRoute::GetTask( NWorld::CUnitServer *pUS, NWorld::CUnitGroup *_pUnitGr
 	//
 	return pTask;
 }
-//////////////////////////////////////////////////////////////////////////////////////	
+//////////////////////////////////////////////////////////////////////////////////////
+// CAITaskCommander removal (Stage 1): the route entry points no longer wrap a CTask in a CAITaskControl
+// that lives in the per-player task queue. Instead they build the SAME waypoint command list (via the
+// surviving CAIRoute::GetTask) and install it on the unit's OWN IAILogic slot as a CAIRouteLogic -- retail's
+// per-unit-logic model. The `manager` (AIM_AI/AIM_SCRIPT) governed the dev control-stack priority; with a
+// single per-unit logic slot the last SetLogic wins, and script routes are installed AFTER the AI deploy
+// route (so scripts still take precedence). Adversarial note: a route logic installed here is pumped by the
+// retail CAICommander::GenerateCommand @0x353d0 units-tracker round-robin, which lands in Stage 2 (the
+// CAITacticalCommander removal). Per the AI-convergence philosophy (build-green is the gate; runtime deferred
+// until the layer is fully converged) route/roaming units are un-pumped between Stage 1 and Stage 2.
+//////////////////////////////////////////////////////////////////////////////////////
+// Build a CAIRouteLogic from a CAIRoute-produced CTask (reusing GetTask's waypoint->command translation +
+// formation/sync handling) and install it on the unit's logic slot. Returns nothing; a null/empty task or
+// missing AI unit installs nothing.
+static void InstallRouteLogic( NAI::CAICommander *pAICommander, NWorld::CUnitServer *pUS,
+	NAI::CAIRoute *pRoute, NWorld::CUnitGroup *pGroup,
+	const vector< CPtr<NAI::CTaskSyncObject> > &syncs, bool bCircled )
+{
+	NAI::IAIUnit *pAIUnit = pAICommander->GetAIUnit( pUS );
+	if ( !IsValid( pAIUnit ) )
+		return;
+	CPtr<NAI::CTask> pTask = pRoute->GetTask( pUS, pGroup, syncs, bCircled );
+	if ( !IsValid( pTask ) || pTask->IsEmpty() )
+		return;
+	vector< CPtr<NAI::CTaskCommand> > cmds;
+	pTask->GetCommands( &cmds );
+	NAI::IAILogic *pLogic = NAI::CreateAIRouteLogic( pAIUnit, cmds, pTask->IsCircled() );
+	if ( IsValid( pLogic ) )
+		pAIUnit->SetRouteLogic( pLogic );   // retail SetRoute @0xadb90: routes are a SLOT apart from combat logic
+}
+//////////////////////////////////////////////////////////////////////////////////////
 void SetUnitRoute( NWorld::CUnitServer *pUS, CAIRoute *pRoute, bool bCircled, NAI::EAIManager manager )
 {
 	CPtr<CAIRoute> pHolder = pRoute;
@@ -207,11 +238,9 @@ void SetUnitRoute( NWorld::CUnitServer *pUS, CAIRoute *pRoute, bool bCircled, NA
 	if ( IsValid( pAICommander ) )
 	{
 		vector< CPtr<NAI::CTaskSyncObject> > syncs;
-		CPtr<NAI::CTask> pTask = pRoute->GetTask( pUS, 0, syncs, bCircled );
-		CPtr<NAI::IAIControl> pAIControl = 
-			NAI::CreateAITaskControl( pAICommander, pTask, NAI::AI_CONTROL_INTERRUPTABLE, manager );
-		pAICommander->GetAIUnit( pUS )->AssignControl( pAIControl );
+		InstallRouteLogic( pAICommander, pUS, pRoute, 0, syncs, bCircled );
 	}
+	(void)manager;   // see the note above -- the control-stack manager collapses onto the single logic slot
 }
 //////////////////////////////////////////////////////////////////////////////////////
 void SetGroupRoute( NWorld::CUnitGroup *pGroup, CAIRoute *pRoute, bool bCircled, NAI::EAIManager manager )
@@ -228,18 +257,14 @@ void SetGroupRoute( NWorld::CUnitGroup *pGroup, CAIRoute *pRoute, bool bCircled,
 	for ( int i = 0; i < pGroup->units.GetSize(); ++i )
 	{
 		CPtr<NWorld::CUnitServer> pUS = pGroup->units[ i ];
-		CPtr<NAI::CTask> pTask = pRoute->GetTask( pUS, pGroup, syncs, bCircled );
 		CDynamicCast<NAI::CAICommander> pAICommander( pUS->GetPlayer()->GetCommander() );
 		if ( IsValid( pAICommander ) )
-		{
-			CPtr<NAI::IAIControl> pAIControl = 
-				NAI::CreateAITaskControl( pAICommander, pTask, NAI::AI_CONTROL_INTERRUPTABLE, manager );
-			pAICommander->GetAIUnit( pUS )->AssignControl( pAIControl );
-		}
+			InstallRouteLogic( pAICommander, pUS, pRoute, pGroup, syncs, bCircled );
 	}
+	(void)manager;
 }
-//////////////////////////////////////////////////////////////////////////////////////	
-void SetUnitRoaming( NWorld::CUnitServer *pUS, 
+//////////////////////////////////////////////////////////////////////////////////////
+void SetUnitRoaming( NWorld::CUnitServer *pUS,
 	const NAI::SPathPlace &p, int nAPradius, NAI::EAIManager manager )
 {
 	ASSERT( IsValid( pUS ) );
@@ -249,14 +274,74 @@ void SetUnitRoaming( NWorld::CUnitServer *pUS,
 	CDynamicCast<NAI::CAICommander> pAICommander( pUS->GetPlayer()->GetCommander() );
 	if ( IsValid( pAICommander ) )
 	{
-		CPtr<NAI::CTask> pTask = new NAI::CTask( pUS, true );
-		pTask->AddRoaming( p, nAPradius );
-		NAI::IAIControl *pAIControl = 
-			CreateAITaskControl( pAICommander, pTask, AI_CONTROL_INTERRUPTABLE, manager );
-		pAICommander->GetAIUnit( pUS )->AssignControl( pAIControl );
+		NAI::IAIUnit *pAIUnit = pAICommander->GetAIUnit( pUS );
+		if ( IsValid( pAIUnit ) )
+		{
+			// dev SetUnitRoaming built a CTask( AddRoaming ) -> retail's roaming route logic.
+			NAI::IAILogic *pLogic = NAI::CreateAIRoamingLogic( pAIUnit, p, nAPradius );
+			if ( IsValid( pLogic ) )
+				pAIUnit->SetRouteLogic( pLogic );   // retail SetRoute @0xadb90
+		}
 	}
+	(void)manager;
 }
-//////////////////////////////////////////////////////////////////////////////////////	
+//////////////////////////////////////////////////////////////////////////////////////
+// retail NAI::CreateUnitRoute @0x96d20 (aiRoute.obj) -- the map-deploy route glue. Reconstructed by (a) the
+// @0x96d20 decode (gate: live non-destroyed AI unit; empty-route -> roaming (UL_ROAMING) else a small idle
+// command list; non-empty route -> CAIRoute + route install) and (b) mirroring the branch logic of the
+// dev CAITaskCommander::CreateRoute. Installs on the unit's OWN CAIRouteLogic; a routeless UL_DEFAULT unit
+// gets NOTHING -- this is exactly the deletion that fixes the Jan03 AddLookAround scripted-pose cancel bug
+// (Jan03 gave a routeless default unit a random look-around, each ChangeDirection a command that popped
+// EFirst's lying wounded commander back to standing on his first random turn).
+//////////////////////////////////////////////////////////////////////////////////////
+void CreateUnitRoute( NWorld::CUnitServer *pUnitServer, SMapUnit *pMapUnit )
+{
+	ASSERT( IsValid( pUnitServer ) );
+	if ( !IsValid( pUnitServer ) || pMapUnit == 0 || !pUnitServer->IsAIUnit() )   // @0x96d20 gate
+		return;
+	//
+	CDynamicCast<NAI::CAICommander> pAICommander( pUnitServer->GetPlayer()->GetCommander() );
+	if ( !IsValid( pAICommander ) )
+		return;
+	NAI::IAIUnit *pAIUnit = pAICommander->GetAIUnit( pUnitServer );
+	if ( !IsValid( pAIUnit ) )
+		return;
+	//
+	SMapUnit &sMapUnit = *pMapUnit;
+	NAI::IAILogic *pLogic = 0;
+	// (1) SCRIPTED ROUTE first (mirrors CreateRoute's pRoute->GetTask branch): the waypoint command list
+	//     re-homed onto the unit's route logic.
+	CObj<CAIRoute> pRoute = new CAIRoute( pUnitServer->GetWorld(), sMapUnit.route );
+	vector< CPtr<NAI::CTaskSyncObject> > syncs;
+	CPtr<NAI::CTask> pTask = pRoute->GetTask( pUnitServer, 0, syncs, true );
+	if ( IsValid( pTask ) && !pTask->IsEmpty() )
+	{
+		vector< CPtr<NAI::CTaskCommand> > cmds;
+		pTask->GetCommands( &cmds );
+		pLogic = NAI::CreateAIRouteLogic( pAIUnit, cmds, pTask->IsCircled() );
+	}
+	else if ( sMapUnit.eLogic == NDb::UL_ROAMING )
+	{
+		// (2) UL_ROAMING -> the roaming route logic (retail CreateAIRoamingLogic @0x9aec0).
+		pLogic = NAI::CreateAIRoamingLogic( pAIUnit, pUnitServer->GetPosition().pos.p, sMapUnit.nRoamingRadius );
+	}
+	else if ( sMapUnit.eLogic == NDb::UL_EMPTY )
+	{
+		// (3) UL_EMPTY -> a custom guard idle then a wait, as a route logic (mirrors CreateRoute's UL_EMPTY
+		//     branch; designers don't want the unit to walk back after other commands).
+		vector< CPtr<NAI::CTaskCommand> > cmds;
+		cmds.push_back( new CTaskCommandCustomIdleAnimation( sMapUnit.pGuardAnimation ) );
+		cmds.push_back( new CTaskCommandWait( 3000 ) );
+		pLogic = NAI::CreateAIRouteLogic( pAIUnit, cmds, true );
+	}
+	// (4) UL_DEFAULT routeless -> install NOTHING (retail @0x96d20; the AddLookAround-cancel-fix deletion).
+	// Faithfulness note: the dev CreateRoute prefixed a DelayExecution( random(1,20) ) 1-20s route-start
+	// stagger via CTask::tTime; CAIRouteLogic has no delay field and the @0x96d20 decode shows no stagger,
+	// so it is dropped (routed units now start on the first pump).
+	if ( IsValid( pLogic ) )
+		pAIUnit->SetRouteLogic( pLogic );   // retail SetRoute @0xadb90: the deploy route lives in the ROUTE slot
+}
+//////////////////////////////////////////////////////////////////////////////////////
 }
 //
 using namespace NAI;

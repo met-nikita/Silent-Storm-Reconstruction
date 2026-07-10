@@ -18,7 +18,6 @@
 #include "wAnimation.h"
 #include "..\MiscDll\LogStream.h"
 #include "aiCommander.h"
-#include "aiTacticalCommander.h"
 #include "aiUnit.h"				// IAIUnit::De/ActivateCurrentControl (sequence route suspend/resume)
 #include "aiMap.h"						// NAI::IAIMap::Sync (SlowSyncAIMap)
 //
@@ -27,14 +26,17 @@
 namespace NScript
 {
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// NESTED-SEQUENCE DEPTH GUARD: retail nests sequences through the ownerless-interrupt STACK
-// (StartSequence @0x375dd0 pushes one interrupt per c_BeginSequence, EndSequence pops one;
-// CWorld::IsSequence @0x376ff0 is "stack non-empty"). The dev bForcedRealTime flag analog must behave
-// the same: only the OUTERMOST BeginSequence applies the per-unit suspension + forced real time, and
-// only the LAST EndSequence releases them. Without the guard a nested Begin/End pair (Common.l
+// NESTED-SEQUENCE DEPTH GUARD: the WORLD edge now nests through the ownerless-interrupt STACK itself,
+// exactly like retail (StartSequence @0x375dd0 pushes one interrupt per c_BeginSequence, luaEndSequence
+// @0x2f1a60 pops one via EndOfTurn @0x3776f0; IsSequence stays true until the last pop) -- the script
+// commands below call those edges PER CALL, no guard. This guard now covers ONLY the per-unit block:
+// the dev-only cheat/idle/cancel lines (CHEAT_SCRIPTSEQUENCE does not exist in retail Game.exe -- byte
+// scan MISSING; it is the dev analog of retail's world-IsSequence probes) and the AI notifies. Retail
+// runs GetAIUnits+OnSequenceStarted/Finished per CALL, but the dev CAIUnit carries extra AIM_SCRIPT
+// control-stack handling inside those notifies, and running THAT per nested Begin/End (Common.l
 // DialogPlayWithSequence, EBase's pkrepair OnOpenObject handler) CCmdCancel'ed the outer cutscene's
-// live script routes on its Begin and dropped CHEAT_SCRIPTSEQUENCE + bForcedRealTime mid-cutscene on
-// its End. The depth is per-world (the weak CPtr detects a destroyed/replaced world and resets).
+// live script routes -- a documented divergence until the control stack itself is converged.
+// The depth is per-world (the weak CPtr detects a destroyed/replaced world and resets).
 static CPtr<NWorld::CWorld> s_pSequenceWorld;
 static int s_nSequenceDepth = 0;
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -57,10 +59,8 @@ static void SetSequenceCheat( NWorld::CWorld *pWorld, bool bOn )
 		if ( s_nSequenceDepth > 0 )
 			return;                    // nested End: the outer sequence is still running
 	}
-	// the Begin/EndSequence world edge: ForceRealTime rides the same depth edge (in retail the
-	// pushed/popped ownerless interrupt IS both the sequence predicate and the forced-real-time state).
-	pWorld->ForceRealTime( bOn );
-	//
+	// (the world edge -- StartSequence push / EndOfTurn pop -- rides PER CALL in the script commands
+	// below, retail-1:1; this function is now only the depth-guarded per-unit block)
 	vector< CPtr<NWorld::CUnit> > units;
 	pWorld->GetAllUnits( &units );
 	for ( vector< CPtr<NWorld::CUnit> >::iterator i = units.begin(); i != units.end(); ++i )
@@ -93,18 +93,10 @@ static void SetSequenceCheat( NWorld::CWorld *pWorld, bool bOn )
 			}
 		}
 	}
-	if ( bOn )
-	{
-		// release all tactical commander units
-		vector<CPtr<NWorld::CPlayer> > players;
-		pWorld->GetPlayersList( &players );
-		for ( vector< CPtr<NWorld::CPlayer> >::const_iterator i = players.begin(); i != players.end(); ++i )
-		{
-			CDynamicCast<NAI::CAICommander> pCommander((*i)->GetCommander());
-			if (pCommander)
-				pCommander->GetAITacticalCommander()->DismissAllUnits();
-		}
-	}
+	// AI-convergence Stage 2: the tactical commander's DismissAllUnits (clear the combat rosters when a
+	// sequence begins) is re-homed to the per-unit SetLogic(0) sweep above -- CAIUnit::OnSequenceStarted
+	// (called for every unit in the bOn loop) already drops each unit's combat logic + suspends its route.
+	// There is no per-player combat roster to clear anymore, so the extra pass is gone.
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // retail @0x2f1890 ("b[false]" -- NOT b[true]; the arg is the letterbox's skip-fade flag, Common.l
@@ -112,7 +104,11 @@ static void SetSequenceCheat( NWorld::CWorld *pWorld, bool bOn )
 // command WITH an id and return it -- lua BeginSequence() = WaitForUI(c_BeginSequence(b)) blocks until
 // the letterbox fade-in completes (movieUI BorderShow @0x20e210 posts CCmdInterfaceEvent(id)).
 BEGIN_SCRIPT_COMMAND( c_BeginSequence, "b[false]" );
-	SetSequenceCheat( pScript->pWorld, true );   // ForceRealTime(true) rides the depth edge inside
+	// retail @0x2f1890 order (decomp-proven): per-unit OnSequenceStarted notifies FIRST (so SetLogic
+	// still works -- the world is not yet in sequence mode), THEN CTBSWorld::StartSequence (push the
+	// ownerless interrupt; one per Begin, nesting stacks), THEN queue the letterbox command.
+	SetSequenceCheat( pScript->pWorld, true );
+	pScript->pWorld->StartSequence();
 	return pScript->AddUICommandWithID( new NWorld::CUICmdBeginSequence( luaParams[ 0 ].b ) );
 END_SCRIPT_COMMAND
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -126,13 +122,16 @@ END_SCRIPT_COMMAND
 // teardown). Queues PartFinished (plain) + the EndSequence command WITH an id and returns it -- lua
 // StartGame() = WaitForUI(EndSequence()) blocks until the letterbox fade-out completes (BorderHide).
 BEGIN_SCRIPT_COMMAND( EndSequence, "b[false]b[false]" );
+	// retail luaEndSequence @0x2f1a60 order (decomp-proven): EndOfTurn FIRST (pop the ownerless top --
+	// the !IsRealTime() branch re-fires OnPassControl to the RESUMED owned turn; an emptied stack
+	// re-evaluates via StartNextPlayerTurn), then queue PartFinished + the EndSequence command, then
+	// UpdateVisible, then per-unit OnSequenceFinished LAST (the world is out of sequence mode by the
+	// time the notifies run, so SetLogic works -- retail's exact edge order).
+	pScript->pWorld->EndOfTurn();
 	pScript->AddUICommand( new NWorld::CUICmdPartFinished() );
-	SetSequenceCheat( pScript->pWorld, false );   // ForceRealTime(false) rides the depth edge inside
-	// retail pop analog (luaEndSequence @0x2f1a60 pops the ownerless top via CTBSWorld::EndOfTurn
-	// @0x3776f0, whose !IsRealTime() branch re-fires OnPassControl to the RESUMED owned turn)
-	pScript->pWorld->OnSequenceEndPassControl();
 	int nRet = pScript->AddUICommandWithID( new NWorld::CUICmdEndSequence( luaParams[ 0 ].b, luaParams[ 1 ].b ) );
 	pScript->pWorld->UpdateVisible();
+	SetSequenceCheat( pScript->pWorld, false );
 	return nRet;
 END_SCRIPT_COMMAND
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -213,7 +212,7 @@ END_SCRIPT_COMMAND
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // retail @0x2ef460 (EndSequence's last step): refresh every player's visibility now.
 BEGIN_SCRIPT_COMMAND( UpdateVisible, "" )
-	pScript->pWorld->UpdateVisible();
+	pScript->pWorld->UpdateVisible( true );   // retail luaUpdateVisible @0x2ef460: force the sweep NOW (bForce), not deferred
 	return 0;
 END_SCRIPT_COMMAND
 ////////////////////////////////////////////////////////////////////////////////////////////////////

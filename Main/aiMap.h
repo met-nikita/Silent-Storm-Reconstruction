@@ -85,6 +85,11 @@ public:
 	virtual void GetUnitHLPos( CVec3 *pRes, CObjectBase *pHull, int nUserID ) = 0;
 	virtual void GetAccessibleUnitHL( vector<int> *pRes, const CVec3 &ptFrom, CObjectBase *pHull, float fMaxDistance ) = 0;
 	virtual CObjectBase* GetHull( CObjectBase *pUser ) = 0;
+	// retail NAI::CAIMap::GetObjectBound @0x465800 (IAIMap vtbl+0x2c): the union bound of EVERY hull
+	// registered for `pSrc` (retail: CUserHullsTracker::GetHulls + SBoundCalcer over each hull's
+	// bound). Zeroes *pRes and returns false when the object has no hulls. Consumer:
+	// CUnitServer::UpdateVisible's mine-LOS probe pull-back (@0x7c4d53).
+	virtual bool GetObjectBound( SBound *pRes, CObjectBase *pSrc ) = 0;
 	virtual bool CalcIntersection( const CVec3 &ptCenter, float fRadius, int s, CObjectBase *pIgnoreUser = 0 ) = 0;
 	virtual void PrepareCollider( IPrepareCollider *pRes, const SBound &bound, float fElementSize,
 		const int nMask, bool bSelect2DoorHulls = false ) = 0;

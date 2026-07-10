@@ -570,7 +570,6 @@ void CStateMove::DoMove( bool bInstant )
 		SayAckForAll( GetMission(), NWorld::IA_IMPOSSIBLE_TO_PERFORM );
 		return;
 	}
-
 	vector< NAI::SPosition > unitPlaces;
 	for ( vector< CPtr<NGame::IUnitTracker> >::iterator iTemp = unitsSet.begin(); iTemp != unitsSet.end(); iTemp++ )
 	{
@@ -617,15 +616,15 @@ void CStateMove::Step()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CStateAttack
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CStateAttack::CStateAttack(): 
-	eHitLocation( NAI::HL_ANY ),
+CStateAttack::CStateAttack():
+	eHitLocation( NAI::HL_ANY ), bEnoughAP( true ),
 	bindHitLocationHead( "hitlocation_head" ), bindHitLocationBody( "hitlocation_body" ), 
 	bindHitLocationLArm( "hitlocation_larm" ), bindHitLocationRArm( "hitlocation_rarm" ), bindHitLocationLLeg( "hitlocation_lleg" ), bindHitLocationRLeg( "hitlocation_rleg" )
 {
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CStateAttack::CStateAttack( bool _bForced ):
-	bForced( _bForced ), eHitLocation( NAI::HL_ANY ),
+	bForced( _bForced ), eHitLocation( NAI::HL_ANY ), bEnoughAP( true ),
 	bindHitLocationHead( "hitlocation_head" ), bindHitLocationBody( "hitlocation_body" ), 
 	bindHitLocationLArm( "hitlocation_larm" ), bindHitLocationRArm( "hitlocation_rarm" ), bindHitLocationLLeg( "hitlocation_lleg" ), bindHitLocationRLeg( "hitlocation_rleg" )
 {
@@ -889,13 +888,16 @@ void CStateAttack::UpdateCursorInfo()
 						if (bTraceOk)
 							nToHit = pWorld->GetGame()->GetGrenadeCompositeToHit((*iTemp)->GetUnit(), pos.GetCP(), pWorld->IsFirstTurn(), pGrenade->GetDBGrenade());
 					}
-					else {
-						CDynamicCast<NRPG::IMeleeWeaponItem> pMelee((*iTemp)->GetUnit()->GetRPG()->GetInventoryInfo()->GetActive());
-						if (pMelee)
-						{
-							//if ( pMelee->GetDBMeleeWeapon()->bThrowing )
-							nToHit = pWorld->GetGame()->GetCompositeToHit((*iTemp)->GetUnit(), pUnit, eHitLocation, pWorld->IsFirstTurn());
-						}
+					else
+					{
+						// retail @0x1da200 routes EVERY CCmdShootObject (swung melee weapon OR BARE FISTS)
+						// through the object GetToHit unconditionally -- GetCompositeToHit reads the firing
+						// unit's own weapon class (GetToHitType -> GetMeleeWeaponItem, which returns the
+						// default fists weapon when the hand is empty => TH_MELEE), so an unarmed punch is
+						// scored exactly like a knife swing. The old `if (pMelee)` cast tested the INVENTORY
+						// active item, which is null for bare fists (nothing equipped), so no calc ran and
+						// nToHit stayed 0.
+						nToHit = pWorld->GetGame()->GetCompositeToHit((*iTemp)->GetUnit(), pUnit, eHitLocation, pWorld->IsFirstTurn());
 					}
 				}
 			}
@@ -914,18 +916,17 @@ void CStateAttack::UpdateCursorInfo()
 							nToHit = pWorld->GetGame()->GetBazookaToHit((*iTemp)->GetUnit(), pos.GetCP(),
 								NAI::THL_MIDDLE, pWorld->IsFirstTurn());
 					}
-					else {
-						CDynamicCast<NRPG::IMeleeWeaponItem> pMelee((*iTemp)->GetUnit()->GetRPG()->GetInventoryInfo()->GetActive());
-						if (pMelee)
-						{
-							// retail UpdateCursorInfo @0x1da200 routes EVERY weapon at a tile target
-							// through the same NRPG::GetToHit tile overload (via the CCmdShootTile
-							// target command) -- the throwing-vs-swinging dispatch happens inside
-							// RPGUnitGetTileToHit @0x2b4df0 (TH_THROWING -> knife calcer, TH_MELEE ->
-							// 100 when the cover walk connects). The old bThrowing-only gate left
-							// nToHit at 0 for a swung melee weapon aimed at ground/walls/objects.
-							nToHit = pWorld->GetGame()->GetTileCompositeToHit((*iTemp)->GetUnit(), pos.GetCP(), NAI::THL_MIDDLE, pWorld->IsFirstTurn());
-						}
+					else
+					{
+						// retail UpdateCursorInfo @0x1da200 routes EVERY non-AoE weapon at a tile target
+						// through the same NRPG::GetToHit tile overload (via the CCmdShootTile target
+						// command) -- the throwing-vs-swinging-vs-UNARMED dispatch happens inside
+						// RPGUnitGetTileToHit @0x2b4df0 (TH_THROWING -> knife calcer, TH_MELEE -> 100 when
+						// the cover walk connects). Bare fists have NO inventory active item, so the old
+						// `if (pMelee)` cast was null and a punch aimed at ground/walls/objects showed 0%;
+						// GetTileCompositeToHit derives TH_MELEE from the unit's default fists weapon and
+						// casts covers from GetMeleeAttackPos, matching retail's TH_MELEE tile rule.
+						nToHit = pWorld->GetGame()->GetTileCompositeToHit((*iTemp)->GetUnit(), pos.GetCP(), NAI::THL_MIDDLE, pWorld->IsFirstTurn());
 					}
 				}
 			}
@@ -940,18 +941,40 @@ void CStateAttack::UpdateCursorInfo()
 			nMin = min( nMin, nToHit );
 			nMax = max( nMax, nToHit );
 
-			WCHAR wsString[256];
-			if ( unitsSet.size() == 1 )
+			// BUG 8: the retail cursor caption is built ENTIRELY from DB strings, in retail's order (retail
+			// MakeCursorString @0x1d7990 then CStateAttack::UpdateCursorInfo @0x1da200 append):
+			//   <format 19807>  then (turn-based only)  <"AP: " 19808> <AP | "N/A" 19810>  then
+			//   <"<br>ToHit: " 19809> <ToHit %>.
+			// The DB strings carry BOTH the localized labels ("AP: " / "Шанс: ") AND the font/colour markup.
+			// There are TWO full format strings, differing only in <color>: 19807 = RED (0xFFEA511C),
+			// 20276 = GREEN (0xFF9BD315). Retail colours each line DYNAMICALLY (MakeCursorString @0x1d7990 +
+			// UpdateCursorInfo @0x1da200): the AP line is green iff the unit can AFFORD the action
+			// (actionInfo+0xd == bEnoughAP; `cmp byte[edi+0xd],0; jne green`), and the ToHit line is green iff
+			// the to-hit chance is non-zero (`cmp nToHit,2; jge green`). Each format string re-issues the full
+			// <font ...> so re-appending only changes the colour of the text that follows.
+			wstring wsText;
+			if ( !GetMission()->IsRealTime() )                     // AP line only in turn-based (retail vtbl+0x50)
 			{
-				if ( !GetMission()->IsRealTime() )
-					swprintf( wsString, L"<normal>%2d%%<br>AP: %d", nMin, nActionAP );
+				wsText += NUI::GetDBString( bEnoughAP ? 20276 : 19807 );   // AP line: green if affordable, else red
+				wsText += NUI::GetDBString( 19808 );               // "AP: "
+				if ( nActionAP >= 0 )
+				{
+					WCHAR wsAP[32];
+					swprintf( wsAP, L"%d", nActionAP );
+					wsText += wsAP;
+				}
 				else
-					swprintf( wsString, L"<normal>%2d%%", nMin );
+					wsText += NUI::GetDBString( 19810 );           // "N/A"
 			}
+			wsText += NUI::GetDBString( nMin >= 2 ? 20276 : 19807 );       // ToHit line: green if hit chance > 0, else red
+			wsText += NUI::GetDBString( 19809 );                   // "<br>ToHit: " (localized label)
+			WCHAR wsToHit[32];
+			if ( unitsSet.size() == 1 )
+				swprintf( wsToHit, L"%d%%", nMin );
 			else
-				swprintf( wsString, L"<normal>%2d-%2d%%", nMin, nMax );
-
-			sCursorInfo.wsText = wsString;
+				swprintf( wsToHit, L"%d-%d%%", nMin, nMax );
+			wsText += wsToHit;
+			sCursorInfo.wsText = wsText;
 		}
 	}
 }
@@ -960,6 +983,7 @@ void CStateAttack::UpdateBlockedState()
 {
 	nActionAP = 0;
 	bActionUnavailable = true;
+	bEnoughAP = true;
 
 	SActionInfo sInfo;
 	CObj<NWorld::CCmd> pCmd = GetTargetCmd();
@@ -970,6 +994,7 @@ void CStateAttack::UpdateBlockedState()
 
 	nActionAP = sInfo.nActionAP;
 	bActionUnavailable = !sInfo.bAvailable || !sInfo.bOk;
+	bEnoughAP = sInfo.bEnoughAP;   // BUG 8: retail actionInfo+0xd -- drives the AP line's green/red colour
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CStateAttack::UpdateTraceSelection()

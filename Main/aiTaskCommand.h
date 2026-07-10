@@ -1,5 +1,5 @@
-#ifndef __AITASKCOMMANDER_H_
-#define __AITASKCOMMANDER_H_
+#ifndef __AITASKCOMMAND_H_
+#define __AITASKCOMMAND_H_
 
 #include "aiPosition.h"
 #include "time.h"
@@ -13,51 +13,21 @@ namespace NWorld
 	class CWorld;
 }
 
-struct SMapUnit;
-
 namespace NAI
 {
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// aiTaskCommand -- the CTask command-list walker + the CTaskCommand step family. Split out of
+// aiTaskCommander.h (Stage-0 of the CAITaskCommander removal): the CTaskCommand family is retail's
+// CRouteCommand family (its saveload ids already match the release exactly) and CTask is threaded through
+// ~15 files (IAIUnit::GetRoute() returns CTask*, aiRoute/aiControl/aiRouteLogic/aiRouteMisc/scriptUnit/
+// wUnitServer/aiSignal), so it survives the CAITaskCommander deletion. Only the CAITaskCommander container
+// stays in aiTaskCommander.h (deleted in Stage-1). REGISTER_SAVELOAD ids are kept byte-identical -- their
+// bodies moved verbatim to aiTaskCommand.cpp.
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 enum EPose;
 class IAIUnit;
 class CAICommander;
 class CTaskCommand;
-////////////////////////////////////////////////////////////////////////////////////////////////////
-// CAITaskCommander
-////////////////////////////////////////////////////////////////////////////////////////////////////
-class CTask;
-class CAITaskCommander: public CObjectBase
-{
-	OBJECT_BASIC_METHODS(CAITaskCommander);
-	ZDATA
-	list< CObj<CTask> > Tasks;
-	CPtr<CAICommander> pAICommander;
-	list< CObj<CTask> > TasksToAddOrRemove;
-	list<bool> TasksAddFlag;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&Tasks); f.Add(3,&pAICommander); f.Add(4,&TasksToAddOrRemove); f.Add(5,&TasksAddFlag); return 0; }
-	//
-	bool CanGetCommand() const;
-	NWorld::CWorld *GetWorld() const;
-public:
-	//
-	CAITaskCommander() {}
-	CAITaskCommander( CAICommander *_pAICommander ): pAICommander( _pAICommander ) {}
-	//
-	virtual void AddTask( CTask *pTask );
-	virtual void RemoveTask( CTask *pTask );
-	virtual NWorld::CCommand* GetCommand();
-	virtual bool IsEndOfTurn() const;
-	virtual bool IsUnderControl( IAIUnit *pAIUnit ) const;
-	virtual bool IsUnderControl( NWorld::CUnitServer *pUnitServer ) const;
-	virtual void CreateRoute( NWorld::CUnitServer *pUnitServer, SMapUnit sMapUnit );
-	virtual void Segment();
-	virtual void OnTurnStarted();
-	virtual void OnTurnFinished() {}
-	virtual void OnUnitWasKilled( NWorld::CUnitServer *pUS );
-	void RemoveUnit( NWorld::CUnitServer *pUS );
-	void Synchronize();
-	bool HasActiveTasks() const;
-};
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CTaskCommandList
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -65,11 +35,11 @@ class CTask: public CObjectBase
 {
 	OBJECT_BASIC_METHODS(CTask);
 	ZDATA
-	bool bCircled; // ���� true, �� �������� ����������� �� �����	
-	CPtr<NWorld::CUnitServer> pUnitServer; // ��� ��������� ��������
-	vector< CObj<CTaskCommand> > Commands; // ��������
-	int nCurrentCommand; // �������� ���������� �� ���������� ���������
-	STime tTime; // ����� � �������� �������� ���������� task-�
+	bool bCircled; // if true, commands are executed in a loop
+	CPtr<NWorld::CUnitServer> pUnitServer; // who executes the commands
+	vector< CObj<CTaskCommand> > Commands; // commands
+	int nCurrentCommand; // command last handed off for execution
+	STime tTime; // time at which the task starts executing
 	bool bActive;
 	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&bCircled); f.Add(3,&pUnitServer); f.Add(4,&Commands); f.Add(5,&nCurrentCommand); f.Add(6,&tTime); f.Add(7,&bActive); return 0; }
 	//
@@ -96,6 +66,20 @@ public:
 	bool IsActive() { return bActive; }
 	virtual void OnPerformerDied();
 	virtual void OnTaskStarted();
+	// aiTaskCommand additions (CAITaskCommander-removal re-home helpers): expose the walked command list
+	// + the loop flag so a CAIRouteLogic can be built from a CAIRoute-produced CTask (SetUnitRoute /
+	// CreateUnitRoute) without re-implementing CAIRoute::GetTask's waypoint->command translation. The
+	// CObj-owned commands are handed out as CPtr refs (refcounted) -- the temporary CTask releases its
+	// own refs on destruction while the route logic keeps the commands alive.
+	bool IsCircled() const { return bCircled; }
+	void GetCommands( vector< CPtr<CTaskCommand> > *pOut ) const
+	{
+		for ( vector< CObj<CTaskCommand> >::const_iterator i = Commands.begin(); i != Commands.end(); ++i )
+		{
+			CTaskCommand *pCmd = *i;
+			pOut->push_back( pCmd );
+		}
+	}
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CTaskSyncObject
@@ -127,10 +111,10 @@ class CTaskCommand: virtual public CObjectBase
 {
 	ZDATA
 public:
-	CPtr<NWorld::CUnitServer> pUnitServer; // unit server ����������� ��������
-	list< CPtr<NWorld::CCmd> > Commands; // ����� ��� �������
+	CPtr<NWorld::CUnitServer> pUnitServer; // unit server executing the commands
+	list< CPtr<NWorld::CCmd> > Commands; // buffer for commands
 	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&pUnitServer); f.Add(3,&Commands); return 0; }
-	
+
 	CTaskCommand( NWorld::CUnitServer *_pUnitServer = 0 ): pUnitServer(_pUnitServer) {}
 
 	virtual NWorld::CCmd *GetCommand();
@@ -197,19 +181,19 @@ class CTaskCommandRoaming: public CTaskCommand
 	ZEND int operator&( CStructureSaver &f ) { f.Add(2,(CTaskCommand *)this); f.Add(3,&p); f.Add(4,&nAPRadius); return 0; }
 public:
 	CTaskCommandRoaming(): CTaskCommand() {}
-	CTaskCommandRoaming( const NAI::SPathPlace &_p, int _nAPRadius ): 
+	CTaskCommandRoaming( const NAI::SPathPlace &_p, int _nAPRadius ):
 		CTaskCommand(), p( _p ), nAPRadius( _nAPRadius ) {}
 	//
 	virtual void Do();
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// �TaskCommandChangePose
+// CTaskCommandChangePose
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CTaskCommandChangePose: public CTaskCommand
 {
 	OBJECT_BASIC_METHODS(CTaskCommandChangePose);
 	ZDATA_(CTaskCommand)
-	EPose nPose; 
+	EPose nPose;
 	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CTaskCommand*)this); f.Add(2,&nPose); return 0; }
 public:
 	CTaskCommandChangePose() {}
@@ -218,15 +202,15 @@ public:
 	virtual void Do();
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// �TaskCommandWait
+// CTaskCommandWait
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CTaskCommandWait: public CTaskCommand
 {
 	OBJECT_BASIC_METHODS(CTaskCommandWait);
 	ZDATA_(CTaskCommand)
-	STime tTime; // �� ������ ������� �����
-	STime tLength; // ������� �����
-	bool bIsWaiting; // ���� ��� ���
+	STime tTime; // until what moment to wait
+	STime tLength; // how long to wait
+	bool bIsWaiting; // waiting or not
 	bool bNewTurnStarted;
 	int nStartTurnID;   // turn id captured when the wait began -- makes the wait self-determining inside a CAIRouteLogic
 	                    // (which never propagates OnNewTurn). release CRouteCommandWait::nTurnID@24.
@@ -272,4 +256,4 @@ public:
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 }
-#endif 
+#endif // __AITASKCOMMAND_H_

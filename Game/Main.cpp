@@ -12,6 +12,7 @@
 #include "..\Main\iLoading.h"      // NGame::InitLoadingScreen / TermLoadingScreen -- loading-screen UI built once at boot
 #include "..\Main\iSaveManager.h" // CRAP, to start from mission
 #include "..\Main\Sound.h"
+#include "..\Main\WinInputConv.h" // Win32->NInput bridge: replays WM_KEYDOWN/WM_CHAR (OS auto-repeat)
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 //void DumpMemoryStats() {}
 
@@ -152,11 +153,16 @@ int APIENTRY WinMain( HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdL
 		NMainLoop::Command( new NMainLoop::CICLoad( string( NMainLoop::S_SLOT_QUICKSAVE ) ) );
 	else
 		NMainLoop::Command( new CICInterMission( szCfg ) );
+	SWinToInputMessageConverter sWinInputConv;
 	for (;;)
 	{
 		NWinFrame::PumpMessages();
 		bool bActive = NWinFrame::IsAppActive();
 		NInput::PumpMessages( bActive );
+		// Re-emit the coalesced Win32 keyboard stream (WM_KEYDOWN/WM_CHAR, OS auto-repeated)
+		// as NInput messages, exactly as the retail main loop does (WinMain @0x9810: right
+		// after NInput::PumpMessages, before StepApp) -- this is what gives held keys repeat.
+		sWinInputConv.Do();
 		if ( NWinFrame::IsExit() )
 			break;
 		if ( !NMainLoop::StepApp( bActive, bActive ) )

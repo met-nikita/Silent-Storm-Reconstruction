@@ -2,7 +2,7 @@
 //
 #include "aiUnit.h"            // NAI::IAIUnit (GetUnitServer / GetUnitPosition / GetAP / GetHideProbability)
 #include "aiUnitState.h"       // NAI::SAIUnitState::pEnemy (CreateAICheckPositionLogic no-enemy gate)
-#include "aiTaskCommander.h"   // NAI::CTaskCommand + CTaskCommandGoto / CTaskCommandChangePose (reused command family)
+#include "aiTaskCommand.h"   // NAI::CTaskCommand + CTaskCommandGoto / CTaskCommandChangePose (reused command family)
 #include "aiMisc.h"            // NAI::HasPath
 #include "wUnitServer.h"       // NWorld::CUnitServer: GetUnitPosition / HasCommand / GetWorld
 #include "wUnitCommands.h"     // NWorld::CCmd / CCmdSetCommand (the CCmd->CCommand wrap) / CCmdLook
@@ -12,7 +12,7 @@
 #include "aiRouteMisc.h"       // NAI::RouteAddLookAround / RouteAddRoaming
 #include "../DBFormat/DataMap.h" // NDb::EDiplomacyState / DS_ENEMY (the Hide diplomacy gate)
 #include "aiEvent.h"           // NAI::CreateAIPossibleEnemyEvent / CreateAIHelpCalledEvent (the alarm's per-unit events)
-#include "aiState.h"           // NAI::IAIState::GetAllyAIPlayer
+#include "aiState.h"           // NAI::SAIState::GetAllyAIPlayer
 #include "aiPlayer.h"          // NAI::IAIPlayer::GetUnits / GetNearestUnit
 //
 #include "aiRouteLogic.h"
@@ -105,7 +105,7 @@ void CTaskCommandAlarm::Do()
 	IAIUnit *pEnemyAI = IsValid( pEnemy ) ? GetAIUnit( pEnemy ) : 0;
 	if ( !IsValid( pEnemyAI ) || pEnemyAI->IsDead() )
 		return;
-	IAIState *pSt = pU->GetAIState();
+	SAIState *pSt = pU->GetAIState();
 	if ( pSt == 0 )
 		return;
 	IAIPlayer *pAllyPlayer = pSt->GetAllyAIPlayer();
@@ -353,7 +353,7 @@ IAILogic* CreateAIAlarmLogic( IAIUnit *pUnit, IAIUnit *pEnemy )
 {
 	if ( !RouteUnitAndServerAlive( pUnit ) || !IsValid( pEnemy ) )
 		return 0;
-	IAIState *pSt = pUnit->GetAIState();
+	SAIState *pSt = pUnit->GetAIState();
 	if ( pSt == 0 )
 		return 0;
 	IAIPlayer *pAllyPlayer = pSt->GetAllyAIPlayer();

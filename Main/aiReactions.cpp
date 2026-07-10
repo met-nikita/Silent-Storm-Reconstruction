@@ -3,7 +3,7 @@
 #include "aiReactions.h"
 #include "aiUnit.h"          // IAIUnit
 #include "aiUnitState.h"     // SAIUnitState (the per-unit threat tracker)
-#include "aiState.h"         // IAIState
+#include "aiState.h"         // SAIState
 #include "aiLogic.h"         // IAILogic
 #include "aiCombatLogic.h"   // CreateAIAttackLogic / CreateAIAfterCombatLogic / CreateAIRetreatLogic / CreateAIGuardLogic / IsAttackLogic
 #include "aiDefenceReaction.h"   // CanUseDefenceReaction / CreateAIDefenceReaction (the flag-gated Defence branch)
@@ -86,7 +86,7 @@ static int CountActiveAllies( IAIUnit *u )
 {
 	if ( !IsValid( u ) )
 		return 0;
-	IAIState *pSt = u->GetAIState();
+	SAIState *pSt = u->GetAIState();
 	if ( pSt == 0 )
 		return 0;
 	IAIPlayer *p = pSt->GetAllyAIPlayer();
@@ -108,17 +108,12 @@ void CAINormalReaction::Update()
 	IAIUnit *u = GetUnit();
 	if ( !IsValid( u ) )
 		return;
-	// SQUAD-ALARM stability: while an alarm route this reaction installed is mid-run, let it finish -- the dev's
-	// poll-Populate re-derives the enemy every think and would otherwise re-roll/clobber the route each think
-	// (retail's event-driven state does not thrash). Re-evaluate normally once the route ends (IsEndOfTurn).
-	{
-		CDynamicCast<CAIRouteLogic> pRoute( u->GetLogic() );   // engine RTTI, cf. IsAttackLogic (aiCombatLogic.cpp)
-		// Exclude CIRCLED routes (Roaming/LookRound): they never Finish() so IsEndOfTurn() is never true -- guarding
-		// one would freeze the Normal reaction's escalation forever. The alarm route is non-circled; a non-circled
-		// leftover is at worst delayed a few turns until it completes (benign).
-		if ( pRoute != 0 && !pRoute->IsCircled() && !pRoute->IsEndOfTurn() )
-			return;
-	}
+	// (A dev-only "let a mid-run route finish" top guard lived here; REMOVED for retail parity @0x47f190.
+	// Its rationale -- the poll-Populate re-deriving the enemy EVERY think and re-rolling the squad-alarm
+	// route each time -- died with the poll (item-7 event-driven state: modified now fires only on real
+	// changes). Retail has no such guard, and keeping it would shield the new HUNT route below from
+	// re-decisions: a unit that RE-SPOTS its enemy mid-hunt must switch to the attack logic immediately,
+	// not walk out the stale investigation first.)
 	// the per-unit threat tracker (SAIUnitState, populated by the commander before Update) supplies the
 	// current enemy + the bScared flag. A live pEnemy means combat.
 	SAIUnitState *us = GetAIUnitState();   // plain struct ptr - not a CObjectBase, so no IsValid()
@@ -172,6 +167,26 @@ void CAINormalReaction::Update()
 		}
 		// no unit server (shouldn't happen): hold and fight.
 	}
+	// Release @0x47f190 possible-enemy preference (computed before the Defence rung, consumed after
+	// Assassin): a merely SUSPECTED enemy (pPossibleEnemy -- lost from sight / heard / shot from
+	// concealment) is worth hunting when there is no live enemy at all, or when the suspect is closer
+	// than a THIRD of the live enemy's distance (@0x47f3xx: dist(me,enemy) * 0.33333 <= dist(me,suspect)
+	// -> prefer the enemy). A unit whose own place is the invalid sentinel (top two place bits set,
+	// the same 0xC0000000 test as aiDefenceReaction's IsValidPlace) never hunts.
+	IAIUnit *pPossible = ( us != 0 ) ? us->pPossibleEnemy.GetPtr() : 0;
+	bool bCheckPossible = IsValid( pPossible );
+	if ( bCheckPossible && IsValid( pEnemy ) )
+	{
+		CVec3 me = u->GetPosition().GetCP();
+		float fEnemyDist = fabs( pEnemy->GetPosition().GetCP() - me );
+		float fSuspectDist = fabs( pPossible->GetPosition().GetCP() - me );
+		if ( fEnemyDist * ( 1.0f / 3.0f ) <= fSuspectDist )
+			bCheckPossible = false;
+	}
+	const bool bOwnPlaceInvalid =
+		( (unsigned)u->GetUnitPosition().pos.p.GetData() & 0xc0000000u ) == 0xc0000000u;   // @0x47f47a, [esp+0x13]
+	if ( bCheckPossible && bOwnPlaceInvalid )
+		bCheckPossible = false;
 	// Release escalation rung (after the scared early-returns, before the attack block -- matches @0x47f190):
 	// an armed unit near usable cover takes cover and pops out rather than charging. Pass `this` (the current
 	// Normal reaction) as the fall-back the Defence reaction reverts to -- it is held in the Defence reaction's
@@ -197,16 +212,54 @@ void CAINormalReaction::Update()
 		u->SetReaction( CreateAIAssassinReaction( u ) );
 		return;
 	}
+	// Release @0x47f190 HUNT rung (immediately after Assassin, before the attack block) -- THE rung that
+	// keeps retail AI aggressive across line-of-sight breaks: go CHECK the suspect's last-known position
+	// at a RUN (CreateAICheckForEnemyLogic @0x9a710 -- the RouteAddRoundUp flanking script + 6s wait; the
+	// pose constant 3 == RUN, the 4th arg is the suspect for the IsAudible silent-approach query). On a
+	// successful install the update is DONE (retail skips the attack/after-combat tail); a factory miss
+	// (no reachable round-up) falls through to the normal ladder. Without this rung a unit whose enemy
+	// ducked out of sight (demoted to pPossibleEnemy by the lost-from-sight event / begin-turn
+	// PrepareEnemies sweep) dropped straight to AfterCombat -> SetLogic(0) and stood around doing nothing.
+	if ( bCheckPossible )
+	{
+		CObj<IAILogic> pHunt = CreateAICheckForEnemyLogic( u, pPossible->GetUnitPosition(), RUN, pPossible );
+		if ( IsValid( pHunt ) )
+		{
+			SetLogic( pHunt.GetPtr() );
+			return;
+		}
+	}
 	if ( IsValid( pEnemy ) )
 	{
 		// Keep the existing attack logic across turns (release: if IsAttackLogic, don't rebuild). The
 		// commander re-Think()s + re-Add()s the logic-job each think; CAICombatLogic::Think now re-arms the
 		// CAIJob finished-state, so the reused job runs again instead of being skipped as already-finished.
-		if ( !IsAttackLogic( u->GetLogic() ) )
+		bool bNew = !IsAttackLogic( u->GetLogic() );
+		if ( bNew )
 			SetLogic( CreateAIAttackLogic( u ) );
 		bWasCombat = true;
+		return;   // release @0x47f635->0x47f6f3: enemy-valid skips the ally rung + tail
 	}
-	else if ( bWasCombat )
+	// Release ALLY-ASSIST rung @0x47f5d3: no live enemy, but an ally called for help (us->pAlly is
+	// populated ONLY by CAIAllyNeedHelpEvent now -- event-only allies semantics, see aiUnitState.cpp
+	// Populate) -> run to the ally's position with the same CheckForEnemy round-up logic (pose 3 == RUN,
+	// NULL suspect @0x47f683 -> CreateAICheckForEnemyLogic @0x9a710) and consume the help call
+	// (retail @0x47f6bf AddEvent(CreateAILostAllyEvent) -> Modify == RemoveAlly, clears pAlly). On a
+	// handled assist the after-combat/idle tail is skipped and bWasCombat is PRESERVED (@0x47f6ca).
+	IAIUnit *pAlly = ( us != 0 ) ? us->pAlly.GetPtr() : 0;
+	if ( IsValid( pAlly ) && !bOwnPlaceInvalid )
+	{
+		CObj<IAILogic> pAssist = CreateAICheckForEnemyLogic( u, pAlly->GetUnitPosition(), RUN, 0 );
+		if ( IsValid( pAssist ) )
+		{
+			SetLogic( pAssist.GetPtr() );
+			CObj<IAIEvent> e = CreateAILostAllyEvent( pAlly );   // consume: RemoveAlly + clear pAlly
+			if ( IsValid( e ) )
+				e->Modify( us );
+			return;
+		}
+	}
+	if ( bWasCombat )
 	{
 		SetLogic( CreateAIAfterCombatLogic( u, false ) );   // regroup once combat is over (loot off: stub body)
 		bWasCombat = false;
@@ -244,7 +297,9 @@ void CAIRetreatReaction::Update()
 	IAIUnit *u = GetUnit();
 	if ( !IsValid( u ) )
 		return;
-	// [SetRoute(NULL) elided -- see banner]
+	// retail SetRoute(NULL) RESTORED (release IAIUnit vtbl+0x5c @0xadb90 -- possible now that the route
+	// slot exists): the retreating unit abandons its route for good.
+	u->SetRouteLogic( 0 );
 	SAIUnitState *us = GetAIUnitState();   // plain struct ptr -- not a CObjectBase, so no IsValid()
 	if ( us == 0 )
 		return;

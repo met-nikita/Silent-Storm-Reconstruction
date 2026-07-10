@@ -7,9 +7,9 @@
 namespace NWorld
 {
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void PrepareAllPaths( NAI::IPathNetwork *pPathNetwork, NAI::CMultiMovesTable *pTable, 
-	list<NAI::SPathPlace> *pResult, CUnit *pWho, const NAI::SPathPlace &ptSrc, 
-	int nPriceLimit, CUnit *pIgnore, bool bCheckSuicide )
+void PrepareAllPaths( NAI::IPathNetwork *pPathNetwork, NAI::CMultiMovesTable *pTable,
+	list<NAI::SPathPlace> *pResult, CUnit *pWho, const NAI::SPathPlace &ptSrc,
+	int nPriceLimit, CUnit *pIgnore, bool bCheckSuicide, bool bNoDynamicLocks )
 {
 	static int nCosts[ NAI::N_MOVE_TYPES ];
 	vector<NAI::SPoint> points;
@@ -24,9 +24,14 @@ void PrepareAllPaths( NAI::IPathNetwork *pPathNetwork, NAI::CMultiMovesTable *pT
 	}
 
 	pPathNetwork->Unlock( pWho );
+	// retail @0x37d1b0: the dynamic obstacle set is gathered ONLY when !bNoDynamicLocks (an empty
+	// account-units list makes the wave ignore every transient unit lock -- GetNearestPlaces' mode).
 	list<CObjectBase*> vis;
-	SelectFindPathUnits( pWho, &vis );
-	vis.remove( pIgnore );
+	if ( !bNoDynamicLocks )
+	{
+		SelectFindPathUnits( pWho, &vis );
+		vis.remove( pIgnore );
+	}
 
 	NAI::EPose curPose = pUS->GetWishPose();
 	const NRPG::IUnitMissionInfo *pRPG = pUS->GetRPG();

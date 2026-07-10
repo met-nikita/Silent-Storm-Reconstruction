@@ -25,7 +25,7 @@ namespace NWorld { class CCommand; class CUnitServer; class IWorld; }
 namespace NAI
 {
 class IAIUnit;
-class IAIState;
+struct SAIState;
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // anti-cycling tracker: remembers the unit's last place+AP to detect a logic looping in place.
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -100,7 +100,7 @@ public:
 	IAIUnit*             GetUnit() const;
 	NWorld::CUnitServer* GetUnitServer() const;
 	NWorld::IWorld*      GetWorld() const;
-	IAIState*            GetAIState() const;
+	SAIState*            GetAIState() const;
 	//
 	int operator&( CStructureSaver &f );
 };

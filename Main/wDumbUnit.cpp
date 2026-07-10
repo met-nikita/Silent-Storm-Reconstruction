@@ -1,6 +1,8 @@
 #include "StdAfx.h"
 #include "wDumbUnit.h"
+#include "wUnitServer.h"     // NWorld::CUnitServer (Die's retail server arg -- cross-cast from this)
 #include "wMain.h"
+#include "wUICommands.h"     // BUG 5: NWorld::CUICmdUnitCamera (death-beauty auto-focus, ProcessAttack)
 #include "..\DBFormat\DataFormat.h"
 #include "..\DBFormat\DataGeometry.h"
 #include "RPGGame.h"
@@ -23,6 +25,7 @@
 #include "..\DBFormat\DataSound.h"
 #include "aiSignal.h"
 #include "aiMap.h"
+#include "aiNearestPosition.h"   // NAI::GetNearestPosition (corpse logical-place re-snap @0x350960)
 #include "aiLocker.h"
 #include "GSceneUtils.h"
 #include "..\MiscDll\Commands.h"
@@ -356,7 +359,7 @@ void CDumbUnitServer::SetPosition( const NAI::SUnitPosition &dst )
 {
 	bool bNeedUpdate = dst.pos.GetFloor() != position.pos.GetFloor();
 	bool bRealMove = false;
-	if ( position.GetPose() == dst.GetPose() && position.GetDir() == dst.GetDir() ) // ���������� �����������
+	if ( position.GetPose() == dst.GetPose() && position.GetDir() == dst.GetDir() ) // the actual movement
 			bRealMove = true;
 
 	SetPositionCore( dst );
@@ -529,7 +532,9 @@ void CDumbUnitServer::FallAsIfDead( const CVec3 &ptDir, bool bDropItemsFromBackP
 	CDumbUnitServer *pCarried = GetCorpse();
 	if ( IsValid( pCarried ) )
 	{
-		pCarried->animator.BeDropped();
+		// retail @0x7507cc pushes the corpse pointer (the GetCorpse result) as BeDropped's server arg;
+		// the carried corpse is always a CUnitServer (narrowed to CDumbUnitServer* by the GetCorpse vtable).
+		pCarried->animator.BeDropped( static_cast<CUnitServer*>( pCarried ) );
 		pCarried->Update();
 	}
 	//
@@ -540,7 +545,7 @@ void CDumbUnitServer::FallAsIfDead( const CVec3 &ptDir, bool bDropItemsFromBackP
 		// Retail passes a VNULL3 direction (disasm 0x7507ff..0x750818: the CRay is filled from ::VNULL3);
 		// the push direction only ever enters via the bPlayDeath=false entries.
 		if ( bPlayDeathAnim )
-			animator.Die( position, VNULL3, true );
+			animator.Die( position, VNULL3, true, CDynamicCast<CUnitServer>( this ) );   // retail passes the dying server @0x75081e
 		pWorld->GetPathNetwork()->Unlock( this );
 	}
 	else
@@ -659,6 +664,12 @@ int CDumbUnitServer::ProcessAttack( int nUserID, NRPG::CAttackPortion *pAttack, 
 		//pWorld->AddDebris( dynamic_cast<CUnit*>(this), pWorld->GetAIMap(), vHeadPos, qPos, vVel, pWorld->GetTime() );
 		AttachMiscObject( CreateDParticles( vHeadPos, qPos, NDb::GetTEffect( 821 )->GetEffect( &rnd ), GetFloor() ) );
 		bHeadless = true;
+		// ORIGINAL BUG (confirmed retail @0x350e20): the behead flag is written as a BYTE into the
+		// LOW BYTE of animator.fDeathFall (`*(char*)&fDeathFall = 1` -> the float becomes the 1.4e-45
+		// denormal, which is still > 0.0f), so a beheaded unit's Die @0x33bb90 takes the falling-death
+		// SetMove branch with a ~zero fall height. Reproduced bit-exactly (the guards keep reading the
+		// dev bHeadless mirror, exactly as they read the byte in retail).
+		*(unsigned char *)&animator.fDeathFall = 1;
 		KillUnit( pAttack->rTtrajectory.ptDir );
 	}
 
@@ -704,9 +715,35 @@ int CDumbUnitServer::ProcessAttack( int nUserID, NRPG::CAttackPortion *pAttack, 
 			if ( bFootball )
 				fCoeff = pAttack->fPushCoeff <= 0 ? 0.33f : 1.0f;   // retail GetPushCorpseCoeff(pAttack)
 			vPush *= fCoeff;
-			// retail posts a CUICmdUnitCamera(PR_UNIT_DIED_BEAUTY, t=(coeff<=0.5 ? 1 : 2*coeff+0.5)) when
-			// bDied -- dev has no arbitrated camera-command class (see wUnitMove.cpp GLUE FIX); omitted.
-			animator.Die( position, vPush, false );
+			// BUG 5 (auto-focus): retail ProcessAttack @0x350e20 posts CUICmdUnitCamera(dyingUnit,
+			// PR_UNIT_DIED_BEAUTY, useSloMo=true, prob=(coeff<=0.5?1:2*coeff+0.5), null) for a killed/KO'd
+			// pushed corpse -- the slow-mo death "beauty shot". CDynamicCast<CUnit> because CUnit is a SIBLING
+			// base of CUnitServer (not a parent of this CDumbUnitServer), so `this` needs a cross-cast.
+			if ( bDied )
+			{
+				float t = fCoeff <= 0.5f ? 1.0f : ( fCoeff + fCoeff + 0.5f );
+				NWorld::CUnit *pDeadCUnit = CDynamicCast<NWorld::CUnit>( this );
+				GetWorld()->AddUICommand( new NWorld::CUICmdUnitCamera( pDeadCUnit,
+					NWorld::PR_UNIT_DIED_BEAUTY, true, t, 0 ) );
+			}
+			// Impact point = the HIT-LOCATION bone's world position (nUserID is the EHitLocation of
+			// this portion). CParticleSkeleton::Init's falloff (2-|particle-impact|) then puts the
+			// strongest impulse where the shot landed -> a head shot flings the head, a leg shot the
+			// legs, instead of every corpse tilting forward off its feet (the generic-GetCP fallback).
+			const char *pszHitBone;
+			switch ( nUserID )
+			{
+				case NAI::HL_HEAD:  pszHitBone = "Head";     break;
+				case NAI::HL_RHAND: pszHitBone = "R_UArm";   break;
+				case NAI::HL_LHAND: pszHitBone = "L_UArm";   break;
+				case NAI::HL_RLEG:  pszHitBone = "R_Thigh";  break;
+				case NAI::HL_LLEG:  pszHitBone = "L_Thigh";  break;
+				default:            pszHitBone = "Spine";    break;   // HL_BODY / HL_ANY
+			}
+			CVec3 vImpact;
+			CQuat qImpact;
+			GetBonePos( &vImpact, &qImpact, pszHitBone );
+			animator.Die( position, vPush, false, CDynamicCast<CUnitServer>( this ), &vImpact );   // retail @0x751511
 		}
 	}
 
@@ -726,8 +763,28 @@ void CDumbUnitServer::Segment()
 	// do NOT add the write-backs here. Branch (A) is the floor change; branch (B) is the track-sequence flag, gated
 	// on CWorld::IsSequence @0x376ff0 (the interrupt/real-time predicate, delegated to CTBSWorld::IsSequence and
 	// exposed as an IWorld default-no-op virtual). bTrackSequence is written back in Visit above.
-	if ( !CanFight() )
+	// Retail's full corpse gate (disasm @0x350960): !CanFight && not a Panzerklein pers && no corpse
+	// carrier. Inside it, BEFORE the Update branches, the corpse hit-location refresh: when the physical
+	// body drifted > sqrt(2) from the last snapshot (or the points were never filled), re-snap the logical
+	// place to the body (NAI::GetNearestPosition @0x7ef50) and rebuild the 6 corpseHLpos ray points from
+	// the AI-map hull (CAIMap::GetUnitHLPos @0x65ee0, retail fill order 1,0,3,2,5,4). These points feed
+	// CGame::IsCorpseVisible @0x298da0 -- the tracker's corpse-sighting probe.
+	if ( !CanFight() && pRPG->GetRPGPers()->pPanzerklein == 0
+	     && !IsValid( animator.GetCorpseCarrier() ) )
 	{
+		CVec3 ptReal;
+		GetRealUnitPosition( &ptReal );
+		if ( fabs2( ptReal - vPrevGetCorpseAIPosition ) > 2.0f || corpseHLpos.empty() )
+		{
+			position.pos = NAI::GetNearestPosition( ptReal, position.pos.GetNetwork() );
+			vPrevGetCorpseAIPosition = ptReal;
+			corpseHLpos.resize( 6 );
+			NAI::IAIMap *pMap = pWorld->GetAIMap();
+			CObjectBase *pHull = pMap->GetHull( this );
+			static const int order[6] = { 1, 0, 3, 2, 5, 4 };   // retail fill order @0x750ac0..0x750b4f
+			for ( int k = 0; k < 6; ++k )
+				pMap->GetUnitHLPos( &corpseHLpos[k], pHull, order[k] );
+		}
 		if ( GetFloor() != nPrevFloor )
 			Update();
 		if ( bTrackSequence != GetWorld()->IsSequence() )

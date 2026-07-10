@@ -435,6 +435,13 @@ bool CInterface::ProcessEvent( const NInput::SEvent &eEvent )
 		bRet |= ProcessMessage( SEvent( EVENT_SCROLL, sPoint.x, sPoint.y, -bindScroll.GetDelta() ) );
 	if ( NInput::GetKeyForMessage( eEvent.mMessage, &nVirtualKey ) )
 		bRet |= ProcessMessage( SEvent( EVENT_CHAR, nVirtualKey ) );
+	// Raw Windows message-derived keys (auto-repeating via the OS WM_KEYDOWN/WM_CHAR stream).
+	// CT_WIN_CHAR carries a translated wide char, CT_WIN_KEY a virtual-key code.
+	// (CInterface::ProcessEvent @0x31c090 steps 9-10 -> EVENT_WINCHAR / EVENT_WINKEY.)
+	if ( eEvent.mMessage.cType == NInput::CT_WIN_CHAR )
+		bRet |= ProcessMessage( SEvent( EVENT_WINCHAR, eEvent.mMessage.nParam ) );
+	if ( eEvent.mMessage.cType == NInput::CT_WIN_KEY )
+		bRet |= ProcessMessage( SEvent( EVENT_WINKEY, eEvent.mMessage.nParam ) );
 
 	if ( cmdFPSShow.ProcessEvent( eEvent ) )
 	{

@@ -5,6 +5,7 @@
 #include "Grid.h"
 #include "wMain.h"
 #include "wUnitCommands.h"
+#include "wUICommands.h"      // BUG 5: NWorld::CUICmdUnit -- auto-focus camera producer on shoot/grenade
 #include "RPGItem.h"
 #include "RPGItemSet.h" // CRAP
 #include "RPGUnitMission.h"
@@ -923,6 +924,15 @@ void CExecAttack::Run()
 	pUS->GetUnitRPG()->StartAttack();
 	Start();
 	StartAction( pUS->GetWorld(), NORMAL );
+	UpdateCamera();   // BUG 5: retail CExecAttack::Run @0x3a1460 tail -- post the arbitrated auto-focus camera
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// BUG 5: retail CExecAttack::UpdateCamera @0x3a3e70 -- the base attack focuses on the shooter with no second
+// framing point (tile / object / melee shots have no unit target).
+void CExecAttack::UpdateCamera()
+{
+	if ( IsValid( pUS ) && IsValid( pUS->GetWorld() ) )
+		pUS->GetWorld()->AddUICommand( new NWorld::CUICmdUnitCamera( pUS, NWorld::PR_UNIT_ACTION, false, 1.0f, 0 ) );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CExecAttack::TimeLabelReached()
@@ -1153,6 +1163,8 @@ void CExecShoot::Start()
 	}
 
 	csRPG << CC_WHITE << "Shoot begin :\n";
+	// (BUG 5: the auto-focus camera is posted from CExecAttack::Run -> UpdateCamera (retail @0x3a1460 tail),
+	// NOT here in Start -- so it fires once per attack Run and carries the shot target, for unit shots only.)
 	CheckUnhide();
 	CalculateExtraAP();
 	SelectRay();
@@ -1360,7 +1372,7 @@ EUnitCommandResult CExecShootTile::CanDoIt( const NAI::SUnitPosition &from, bool
 	return UCR_OK;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CExecShootTile::SelectRay() // false, ����� ��������� �������
+void CExecShootTile::SelectRay() // false, when it is the last shot
 {
 	// retail SelectRay builds a SINGLE `attack` portion into the member (was the vector Attack); NO CheckBurst
 	// here (that moved to the OnBulletGo/Segment pipeline). cover+to-hit+peek inlined from the retail solver
@@ -1420,7 +1432,15 @@ EUnitCommandResult CExecShootUnit::CanDoIt( const NAI::SUnitPosition &from, bool
 	return UCR_OK;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CExecShootUnit::SelectRay() // false, ����� ��������� �������
+// BUG 5: retail CExecShootUnit::UpdateCamera @0x3a47c0 -- a unit shot frames the shooter against the shot
+// TARGET (the two-point best-point framing), unlike the base tile/object attack.
+void CExecShootUnit::UpdateCamera()
+{
+	if ( IsValid( pUS ) && IsValid( pUS->GetWorld() ) )
+		pUS->GetWorld()->AddUICommand( new NWorld::CUICmdUnitCamera( pUS, NWorld::PR_UNIT_ACTION, false, 1.0f, pTarget.GetPtr() ) );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CExecShootUnit::SelectRay() // false, when it is the last shot
 {
 	// retail SelectRay builds a SINGLE `attack` portion into the member (was the vector Attack); NO CheckBurst
 	// here (moved to the OnBulletGo/Segment pipeline). cover+to-hit+peek inlined from NRPG::AttackObjectRanged.
@@ -1457,7 +1477,7 @@ void CExecShootUnit::CheckShotResult()
 	{
 		if ( nToHit > 60 )
 			pWorld->GetGlobalAck()->OnTargetMissed( pUS );
-		// ��������� interrupt
+		// add interrupt
 		CDynamicCast<CUnitServer> pUnit( pTarget );
 		if ( IsValid(pUnit) )
 		{
@@ -1603,7 +1623,7 @@ void CExecMeleeUnit::Start()
 	CWorld *pWorld = pUS->GetWorld();
 	if ( NAI::HL_ANY == eHL )
 	{
-		// �������� ���� ����� ����
+		// choose where to strike
 		vector<int> hls;
 		pWorld->GetAIMap()->GetAccessibleUnitHL( &hls, pUS->GetPosition().GetCenter(), pWorld->GetAIMap()->GetHull(pTarget), F_MELEE_DISTANCE );
 		if ( !hls.empty() )
@@ -1634,7 +1654,7 @@ void CExecMeleeUnit::OnLabel()
 	ASSERT( bComplete );
 	if ( !attack.empty() )
 	{
-		vector<int> accessibleHLs; // ���������� ������ ��� ���������� Melee ToHit
+		vector<int> accessibleHLs; // needed only for computing Melee ToHit
 		//
 		if ( bIsHitLocationShot )//-1 == eHL )//pCmd->nSpentAP )
 			accessibleHLs.push_back( eHL );
@@ -1700,16 +1720,16 @@ int CExecThrowGrenade::GetStartAP() const
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CExecThrowGrenade::CheckToHitAndDelay( NDb::CRPGGrenade *pGrenade )
 {
-	// ��������� ToHit � ������� ����� � ������� ������������� ������ �������
+	// check ToHit and find the point where the grenade is actually thrown
 	int nToHit = pToHitCalcer->GetToHit();
 	pToHitCalcer->Log();
 
-	// ������� �������������� �������� ������ �������
+	// find the actual grenade explosion delay
 	int nRandom = random.Get(100);
 	if ( nRandom > nToHit )
 	{
-		// �������������
-			// ���� ���� ������������� ������� �������
+		// we miss
+			// find where the grenade will actually fly
 		float fD = 0.2f * fabs( grenadeParams.vel );
 		grenadeParams.vel.x += random.GetFloat( -fD, +fD );
 		grenadeParams.vel.y += random.GetFloat( -fD, +fD );
@@ -1718,14 +1738,14 @@ void CExecThrowGrenade::CheckToHitAndDelay( NDb::CRPGGrenade *pGrenade )
 	csRPG << "<font size=16pt>";
 	csRPG << CC_ORANGE << " \tCheck:" << nRandom;
 
-	// ��������������� ����� ����� � ��������
+	// convert flight time into a delay
 	grenadeParams.fT = Clamp( grenadeParams.fT, 0.f, float(pGrenade->nMaxDelay) );
 	grenadeParams.fT = pGrenade->nMaxDelay - grenadeParams.fT;
 	csRPG << " True delay: " << grenadeParams.fT;
 	nRandom = random.Get(100);
 	if ( nRandom >= 99 || nRandom >= pToHitCalcer->GetSkill() ) 
 	{
-		// ������ ����� ��������
+		// change the delay time
 		grenadeParams.fT *= random.GetFloat( 0.5f, 2.f );
 		grenadeParams.fT = Clamp( grenadeParams.fT, 0.f, float(pGrenade->nMaxDelay) * 0.75f );
 	}
@@ -1776,6 +1796,10 @@ void CExecThrowGrenade::Run()
 	pUS->DoAction( NRPG::AC_THROW_GRENADE );
 	pUS->animator.ThrowGrenade( position, grenadeParams.ptOriginalTarget, grenadeParams.nSide );
 	StartAction( pUS->GetWorld(), NORMAL );
+	// BUG 5 (auto-focus): retail CExecThrowGrenade::Run @0x3acda0 posts the arbitrated auto-focus as its LAST
+	// action (after StartAction): CUICmdUnitCamera(thrower, PR_UNIT_ACTION, false, 1.0, null).
+	if ( IsValid( pUS ) && IsValid( pUS->GetWorld() ) )
+		pUS->GetWorld()->AddUICommand( new NWorld::CUICmdUnitCamera( pUS, NWorld::PR_UNIT_ACTION, false, 1.0f, 0 ) );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CExecThrowGrenade::TimeLabelReached()
@@ -2158,7 +2182,7 @@ void CExecCorpse::Run()
 		pDeadUnit->FlipPanzerklein( 0 );
 		// retail @0x3a62e0 (SpillPK): Die(pos, VNULL3, bPlayDeath=FALSE) -- the spilled pilot corpse
 		// drops as a pure ragdoll, no death clip and no synthetic (1,0) push direction.
-		pDeadUnit->animator.Die( pDeadUnit->GetPosition(), VNULL3, false );
+		pDeadUnit->animator.Die( pDeadUnit->GetPosition(), VNULL3, false, pDeadUnit );
 		pUS->GetWorld()->GetPathNetwork()->Unlock( pDeadUnit );
 	}
 	else if ( bTake )
@@ -2190,7 +2214,7 @@ bool CExecCorpse::TimeLabelReached()
 			pUS->animator.DropCorpse( pUS->GetPosition() );
 			return false;
 		}
-		pDeadUnit->animator.BeTaken( pUS, &pUS->animator );
+		pDeadUnit->animator.BeTaken( pUS, &pUS->animator, pDeadUnit );
 		pUS->SetState( new CUnitStateCorpseCarrier( pUS, pDeadUnit ) );
 	}
 	else
@@ -2209,13 +2233,13 @@ void CExecCorpse::Cancel()
 		if ( bTake )
 		{
 			pUS->animator.DropCorpse( pUS->GetPosition() );
-			pDeadUnit->animator.BeDropped();
+			pDeadUnit->animator.BeDropped( pDeadUnit );
 			pUS->SetState( new CUnitStateNormal( pUS ) );
 		}
 		else
 		{
 			pUS->animator.TakeCorpse( pUS->GetPosition() );
-			pDeadUnit->animator.BeTaken( pUS, &pUS->animator );
+			pDeadUnit->animator.BeTaken( pUS, &pUS->animator, pDeadUnit );
 			pUS->SetState( new CUnitStateCorpseCarrier( pUS, pDeadUnit ) );
 		}
 	}
@@ -2284,7 +2308,7 @@ void CExecTakeCorpseOnDeploy::Run()
 	//
 	pCarrier->animator.InitAsCorpseCarrier( pCarrier->GetPosition() );
 	pCarrier->SetState( new CUnitStateCorpseCarrier( pCarrier, pCorpse ) );
-	pCorpse->animator.BeTaken( pCarrier, &pCarrier->animator );
+	pCorpse->animator.BeTaken( pCarrier, &pCarrier->animator, pCorpse );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CExecTakeCorpseOnDeploy::TimeLabelReached()
@@ -2621,7 +2645,7 @@ EUnitCommandResult CExecDisarmMine::CanDoIt( const NAI::SUnitPosition &from, boo
 	{
 		if ( !pUS->GetTBSPlayer()->CanSeeObject( pTarget ) || !pUS->GetTBSPlayer()->CanSeeTrap( pTarget ) )
 			return UCR_GENERAL_FAILURE;
-		// ��������� ����-�� � ��� ����������� tool
+		// check whether we have the special tool
 		NRPG::IToolItem *pTool = GetMineClearingTool( pUS );
 		if ( !IsValid( pTool ) )
 			return UCR_GENERAL_FAILURE;
@@ -2937,8 +2961,8 @@ void CExecThrowKnife::ThrowKnife()
 	speed *= fSpeed;
 	if ( random.Get( 1, 100 ) > nToHit )
 	{
-		// �������������
-		// ���� ���� ������������� ������� �����
+		// we miss
+		// find where the knife will actually fly
 		float fD = 0.15f * fabs( fSpeed );
 		speed.x += random.GetFloat( -fD, +fD );
 		speed.y += random.GetFloat( -fD, +fD );

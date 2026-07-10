@@ -242,7 +242,7 @@ void CAIThrowGrenadeAction::GetInfoInner( const SPlaceWithAP &place, SInfo *pInf
 	// the inventory: CAIUnit::GetAIState is a weak back-pointer that is null for a unit not currently in an
 	// AI state, and GetEnemyGroups() below would null-deref it.
 	CPtr<IAIUnit> pUnit = GetUnit();
-	IAIState *pState = IsValid( pUnit ) ? pUnit->GetAIState() : 0;
+	SAIState *pState = IsValid( pUnit ) ? pUnit->GetAIState() : 0;
 	if ( !IsValid( pUnit ) || pState == 0 )
 		return;
 	pInfo->pGrenade = pUnit->GetAIInventory()->GetBestGrenade( VNULL3 );
@@ -319,7 +319,7 @@ void CAILaunchRocketAction::GetInfoInner( const SPlaceWithAP &place, SInfo *pInf
 	pInfo->nTargetSize = 0;
 	// same up-front guard as the grenade action: a null AI-state weak back-pointer would null-deref at the
 	// GetEnemyGroups() below (the combat logic only runs for AI-controlled units that are in a state).
-	IAIState *pState = IsValid( pUnit ) ? pUnit->GetAIState() : 0;
+	SAIState *pState = IsValid( pUnit ) ? pUnit->GetAIState() : 0;
 	if ( !IsValid( pUnit ) || pState == 0 )
 		return;
 	//
@@ -531,7 +531,7 @@ void CAIThrowKnifeAction::GetInfoInner( const SPlaceWithAP &place, SInfo *pInfo 
 	pInfo->pWeapon = 0;
 	CPtr<IAIUnit> pUnit = GetUnit();
 	CPtr<IAIUnit> pEnemy = GetEnemy();
-	IAIState *pState = IsValid( pUnit ) ? pUnit->GetAIState() : 0;
+	SAIState *pState = IsValid( pUnit ) ? pUnit->GetAIState() : 0;
 	if ( !IsValid( pUnit ) || !IsValid( pEnemy ) || pState == 0 )
 		return;
 	pInfo->pWeapon = pUnit->GetAIInventory()->GetBestThrowingWeapon();
@@ -707,7 +707,7 @@ void CAIWearPKAction::Do( CAILog *pLog ) const   // @0x0048dd10
 // resolution: the decode's IsUnitBusy gate is the release IAIUnit::IsInPK (DIA-confirmed @0x4ad4f0 ==
 // valid unit-server wearing a live PK record); the suit-HP read is the suit-server RPG unit's ST_VP
 // skill (current via operator int, max via GetMaxValue); enemy-group centroids come from
-// IAIState::GetEnemyGroups; the rampage target is GetUnitPos(GetNearestPosition(centroid)).
+// SAIState::GetEnemyGroups; the rampage target is GetUnitPos(GetNearestPosition(centroid)).
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CAITerrorPKAction::GetInfoInner( const SPlaceWithAP &place, SInfo *pInfo ) const   // @0x004aa420
 {
@@ -737,7 +737,7 @@ void CAITerrorPKAction::GetInfoInner( const SPlaceWithAP &place, SInfo *pInfo ) 
 		return;   // still healthy -> no rampage yet
 	// walk into the nearest enemy group, unless already standing in it (< 1.0 m^2 away).
 	CVec3 cp = pUnit->GetPosition().GetCP();
-	IAIState *pState = pUnit->GetAIState();
+	SAIState *pState = pUnit->GetAIState();
 	if ( !IsValid( pState ) )
 		return;
 	const vector<SAIUnitGroup> &groups = pState->GetEnemyGroups();

@@ -188,12 +188,12 @@ struct SObjectPosition
 	int operator&( CStructureSaver &f );
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-enum EPose	// �� ������ �������! ��� ��������� �� ���������� AP!
+enum EPose	// DO NOT REORDER! This is tied to AP calculation!
 {
-	CRAWL = 0,	// �������
-	CROUCH,		// ������
-	WALK,		// ����
-	RUN			// �����
+	CRAWL = 0,	// prone (crawling)
+	CROUCH,		// crouched
+	WALK,		// standing
+	RUN			// running
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 enum EDirection

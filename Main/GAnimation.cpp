@@ -1028,13 +1028,15 @@ void CSkeletonAnimator::AddSimpleIK( STime tFrom, const char *pszBoneName, CAnim
 	pIK->pTarget = pEffector;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CSkeletonAnimator::AddDynamics( STime tFrom, STime tMaxAnim, const CVec3 &impact, 
-	NAI::IAIMap *pMap, NGScene::CCInt *pFloor, CAnimator *pEffector )
+void CSkeletonAnimator::AddDynamics( STime tFrom, STime tMaxAnim, const CVec3 &impact,
+	const CVec3 &ptWhereImpact, NAI::IAIMap *pMap, NGScene::CCInt *pFloor,
+	NWorld::CUnitServer *pServer, CAnimator *pEffector, bool bFall )
 {
 	if ( !IsValid( pEffector ) )
 	{
-		CParticleSkeleton *pPart = new CParticleSkeleton( pFloor, pSkeleton );
+		CParticleSkeleton *pPart = new CParticleSkeleton( pFloor, pSkeleton, pServer );
 		pPart->impact = impact;
+		pPart->SetImpactSource( ptWhereImpact, bFall );   // retail @0xdd4e0: stored on this branch only
 		pPart->pInput = pSeq->Apply( tFrom, pPart );
 		pPart->tActive = tFrom;
 		pPart->tMax = tMaxAnim;
@@ -1043,7 +1045,7 @@ void CSkeletonAnimator::AddDynamics( STime tFrom, STime tMaxAnim, const CVec3 &i
 	else
 	{
 		CAInterpolator *pTransit = new CAInterpolator;
-		CParticleSkeleton *pPart = new CParticleSkeleton( pFloor, pSkeleton );
+		CParticleSkeleton *pPart = new CParticleSkeleton( pFloor, pSkeleton, pServer );
 		pPart->impact = impact;
 		pPart->pInput = pSeq->Apply( tFrom, pTransit );
 		pPart->tActive = tFrom;

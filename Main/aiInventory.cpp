@@ -79,7 +79,7 @@ void CAIInventory::GetInventoryItems( list< CPtr<NRPG::IInventoryItem> > *pItems
 {
 	pItems->clear();
 	CPtr<NRPG::IInventory> pInventory = pOwner->GetUnitMission()->GetInventory();
-	// ���� �� ��������
+	// items from the backpack
 	const vector<NRPG::SBackPackItem> &vBackPackItems = pInventory->GetItems();
 	vector<NRPG::SBackPackItem>::const_iterator i;
 	for ( i = vBackPackItems.begin(); i != vBackPackItems.end(); ++i )
@@ -89,7 +89,7 @@ void CAIInventory::GetInventoryItems( list< CPtr<NRPG::IInventoryItem> > *pItems
 		if ( IsValid( pItem ) )
 			pItems->push_back( pItem );
 	}
-	// ���� �� ������
+	// items from the equipment slots
 	for ( int nSlot = 0; nSlot < NDb::N_SLOTS; ++nSlot )
 	{
 		CPtr<NRPG::IInventoryItem> pItem = pInventory->Get( (NDb::ESlot)nSlot );
@@ -320,16 +320,23 @@ CAIFireArmsWeapon* CAIInventory::GetBestFireArms( const NAI::SUnitPosition &pos,
 		{
 			if ( !pWeaponItem->IsShootModeSupported( ( NDb::EShootMode )nShootMode ) )
 				continue;
-			//
+			// retail @0x560e0: per-mode owner disable gate (IAIUnit vtbl+0x84 == CAIUnit::IsShootModeDisabled
+			// @0xad590) -- sits between the support check and GetDamage; fed by the Defence-dance
+			// Disable/EnableShootMode brackets (aiDefenceReaction.cpp Update @0x3b160).
+			if ( pOwner->IsShootModeDisabled( ( NDb::EShootMode )nShootMode ) )
+				continue;
 			int nTmpMaxToHit;
 			int nTmpQuality = (*i)->GetDamage( pos, pTarget, nHitCover, NAI::WALK, nAP, ( NDb::EShootMode )nShootMode, &nTmpMaxToHit );
-			*nMaxToHit = max( *nMaxToHit, nTmpMaxToHit );
 			if ( nTmpQuality > *pQuality )
 			{
+				// retail @0x560e0: the out nMaxToHit is updated ONLY in the quality-winner branch (the
+				// reported to-hit belongs to the CHOSEN weapon/mode); dev's unconditional max() inflated
+				// nToHit with losing modes' values, pushing extra places over the ComparePlaces bar.
 				pBestWeapon = *i;
 				*pQuality = nTmpQuality;
 				*eShootMode = (NDb::EShootMode)nShootMode;
 				*pBestWeaponHitCover = nHitCover;
+				*nMaxToHit = nTmpMaxToHit;
 			}
 		}
 	}

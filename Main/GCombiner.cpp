@@ -1117,7 +1117,7 @@ void CVBCombiner::Recalc()
 
 	float fLMSize1 = 1.0f / 1024;//NGfx::GetLMTexResolution();
 	NGfx::CBufferLock<SGfxVertex> geom( &pValue, nLMs * 4, bufUsage );
-	// ������� ����� ������� �����, � ������� ����� ��� �������
+	// Create a common vertex buffer into which all the pieces are merged
 	int iVert = 0;
 	SPartTransformer<SGenericTransformer> trans;
 	for ( i = parts.begin(); i != parts.end(); ++i )

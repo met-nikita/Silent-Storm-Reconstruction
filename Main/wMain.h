@@ -250,10 +250,26 @@ public:
 	unordered_map< string, CObj<NAI::CAIRouteWaypoint> > waypoints;
 	vector< CObj<CUnitGroup> > unitGroups;
 	vector<int> createFlags;
-	bool bForcedRealTime;
+	// (bForcedRealTime REMOVED -- retail has no such field; a sequence is the ownerless SInterrupt on
+	// the TBS stack, StartSequence @0x375dd0 / EndOfTurn @0x3776f0. Save tag 37 retired with it: old
+	// saves' chunk 37 is simply never requested by operator&.)
+	// BUG 2 (realtime reaction delay): retail CWorld willWantTBS -- a per-AI-player deferred "want turn-based"
+	// request armed on a one-sided real-time sighting. CWorld::WillWantTBS @0x3683e0 pushes {player,
+	// nTimeLeft=0x32}; CWorld::Segment @0x36bce0 counts each down and fires WantTurnBased at 0, so the AI
+	// reacts after a short delay instead of seizing turn-based the instant it spots you. Transient (like
+	// bIsBase below): NOT in operator& -- a mid-countdown save just re-arms on the next spot.
+	struct SWillWantTBS { CPtr<CPlayer> pPlayer; int nTimeLeft; };
+	vector<SWillWantTBS> willWantTBS;
 	bool bScriptWantTurnBased = false;  // retail @CWorld+0x1c0 -- script's turn-based wish (saved state; ScriptWantTurnBased)
 	bool bIsBase = false;               // retail @CWorld+0x1b9 -- current zone IS the scenario "base"; computed in
 	                                    // StartGame @0x36bb50, NOT serialized (retail omits it from operator&)
+	// retail CWorld @+0x1ba/+0x1bb -- transient per-segment vision-refresh COALESCING state (NOT serialized,
+	// reset every Segment). During a Segment, UpdateVisible(bForce=false) requests are DEFERRED into
+	// bCallUpdateVisible and flushed once at the Segment tail (@0x36bce0), so the per-unit FilterSounds sweep
+	// runs AFTER the segment's SetPosition/MakeAISound marker creation -- which is what erases the heard-not-seen
+	// CDMesh silhouette markers during a c_BeginSequence cutscene (their makers carry CHEAT_SCRIPTSEQUENCE).
+	bool bDelayUpdateVisibleCalc = false;   // +0x1ba
+	bool bCallUpdateVisible = false;        // +0x1bb
 	bool bFreezeStart = false;          // retail @CWorld+0x1b8 -- a script froze the game start (c_DelayGameStartEx);
 	                                    // StartFirstSegments keeps segmenting while it's set (DelayGameStart sets it)
 	bool bFirstSegment = true;          // retail @CWorld -- one-shot latch: fire global lua OnEnterZone() on the
@@ -274,7 +290,7 @@ public:
 	vector< CPocket::SSmthPtrHolder<CObjectServerBase> > objectPocket;
 	unordered_map< string, CPtr<CObjectBase> > nameToObj;
 	vector<CPtr<IVisObj> > allSoundStuff;   // @CWorld+0x1a8: weak refs to the live heard-not-seen markers (CDMesh), tag 48
-	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(TTBSWorld*)this); f.Add(2,&pShow); f.Add(3,&pShowUnits); f.Add(4,&uiCmdsList); f.Add(5,&eventHits); f.Add(6,&pTerrain); f.Add(7,&pTime); f.Add(8,&pAimTime); f.Add(9,&tPrev); f.Add(10,&tHiddenDelta); f.Add(11,&pAIMap); f.Add(12,&pPathNetwork); f.Add(13,&pRPGGame); f.Add(14,&pDefaultLight); f.Add(15,&units); f.Add(16,&objects); f.Add(17,&segmentObjects); f.Add(18,&miscObjects); f.Add(19,&buildings); f.Add(20,&pGlobalAck); f.Add(21,&pTerrainInfo); f.Add(22,&deploySpots); f.Add(23,&bLeanAndMean); f.Add(24,&nRootLayersGroup); f.Add(25,&nPartiesAdded); f.Add(26,&sMapSafeZone); f.Add(27,(CDebrisController*)this); f.Add(28,&pAIJobManager); f.Add(29,&pOwnScript); f.Add(30,&pAISignalManager); f.Add(31,&nAIUnitsCreated); f.Add(32,&pGlobalGame); f.Add(33,&pDeployedDeadUnitsPlayer); f.Add(34,&waypoints); f.Add(35,&unitGroups); f.Add(36,&createFlags); f.Add(37,&bForcedRealTime); f.Add(38,&nTurnID); f.Add(39,&prevTurnTime); f.Add(40,&pDiplomacy); f.Add(41,&trappedObjects); f.Add(42,&pMineTracker); f.Add(43,&prevFastTurnTime); f.Add(44,&pocket); f.Add(45,&nameToObj); f.Add(46,&bScriptWantTurnBased); f.Add(47,&bFreezeStart); f.Add(48,&allSoundStuff); f.Add(49,&objectPocket); f.Add(50,&bAttackAllowed); return 0; }
+	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(TTBSWorld*)this); f.Add(2,&pShow); f.Add(3,&pShowUnits); f.Add(4,&uiCmdsList); f.Add(5,&eventHits); f.Add(6,&pTerrain); f.Add(7,&pTime); f.Add(8,&pAimTime); f.Add(9,&tPrev); f.Add(10,&tHiddenDelta); f.Add(11,&pAIMap); f.Add(12,&pPathNetwork); f.Add(13,&pRPGGame); f.Add(14,&pDefaultLight); f.Add(15,&units); f.Add(16,&objects); f.Add(17,&segmentObjects); f.Add(18,&miscObjects); f.Add(19,&buildings); f.Add(20,&pGlobalAck); f.Add(21,&pTerrainInfo); f.Add(22,&deploySpots); f.Add(23,&bLeanAndMean); f.Add(24,&nRootLayersGroup); f.Add(25,&nPartiesAdded); f.Add(26,&sMapSafeZone); f.Add(27,(CDebrisController*)this); f.Add(28,&pAIJobManager); f.Add(29,&pOwnScript); f.Add(30,&pAISignalManager); f.Add(31,&nAIUnitsCreated); f.Add(32,&pGlobalGame); f.Add(33,&pDeployedDeadUnitsPlayer); f.Add(34,&waypoints); f.Add(35,&unitGroups); f.Add(36,&createFlags); f.Add(38,&nTurnID); f.Add(39,&prevTurnTime); f.Add(40,&pDiplomacy); f.Add(41,&trappedObjects); f.Add(42,&pMineTracker); f.Add(43,&prevFastTurnTime); f.Add(44,&pocket); f.Add(45,&nameToObj); f.Add(46,&bScriptWantTurnBased); f.Add(47,&bFreezeStart); f.Add(48,&allSoundStuff); f.Add(49,&objectPocket); f.Add(50,&bAttackAllowed); return 0; }
 	
 	CObjectServerBase* AddObject( const SObjectPlace &pos, 
 		NRPG::IObject *pRPGObject, const SMapElement &mapElement, CPostWorldCreateInfo *pPostInfo = 0 );
@@ -320,7 +336,6 @@ private:
 	void AddAIPlayer( const wstring &wsName, int nScenarioPlayerID );
 	void CreateAIUnits( const SMapInfo &mapInfo, const ClueToSlot &personClueToSlot, 
 		int nMobsLevel, unordered_map< int, CPtr<CUnitServer> > *pIDToUnit, CVec3 ptDeltaPos = VNULL3 );
-	virtual const bool IsForcedRealTime() const;
 	virtual void OnNewTurn();
 	void CreateUnitGroups( const SMapInfo &mapInfo, 
 		unordered_map< int, CPtr<CUnitServer> > *pIDToUnit );
@@ -346,7 +361,7 @@ public:
 	void OnNewPlayerFastTurnOrTime( const CEventOnNewPlayerFastTurnOrTime &event );
 	//
 	void MergeFriendlyPlayersVisibleSets();
-	virtual void UpdateVisible();
+	virtual void UpdateVisible( bool bForce = false );
 	virtual CSyncSrc<IVisObj>* GetActive() const { return pShow; }
 	virtual CSyncSrc<IVisObj>* GetUnits() const { return pShowUnits; }
 	virtual CUICmd* GetUICommand();
@@ -369,6 +384,7 @@ public:
 			(*pInterrups)[k] = ints[k];
 	}
 	virtual void CheckInterrupt( SInterruptInfo *info );
+	void WillWantTBS( CPlayer *pPlayer );   // BUG 2: arm the deferred realtime->TBS switch (retail @0x3683e0)
 	virtual CGlobalAck *GetGlobalAck() const { return pGlobalAck; }	
 	//
 	virtual const CTRect<float>& CWorld::GetMapSafeZone() const;
@@ -389,20 +405,20 @@ public:
 		CCommander *pCommander, bool bAddOnManyDeploySpots = false );
 	virtual void RemovePlayer( IPlayer *pPlayer );
 	virtual IPlayer* GetCurrentPlayer() const { return GetTBSCurrentPlayer(); }
+	// retail throws CEventOnPassControl on EVERY control hand-over (CTBSWorld::OnPassControl @0x372bf0
+	// queues STBSEvent tag9 -> ProcessTBSEvents @0x3675d0 throws) -- base turn AND stacked interrupt AND
+	// interrupt-pop resume. The event drives the per-unit begin-turn threat refresh (tracker OnNewTurn
+	// @0xab180 -> CAIBeginTurnEvent -> PrepareEnemies @0xb17a0 == dev Populate). Defined in wMain.cpp.
+	virtual void OnPassControlNotify();
 	virtual bool IsUnitActive( CUnit *pTest ) const { return IsTBSUnitActive( GetUnit(pTest) ); }
 	virtual void GetActiveUnits( IPlayer *pPlayer, list<CUnit*> *pRes );
 	virtual bool IsFirstTurn() const { return TTBSWorld::IsFirstTurn(); }
 	virtual bool IsInterrupt() const { return TTBSWorld::IsInterrupt(); }
 	// retail CWorld::IsSequence @0x376ff0 -> CTBSWorld::IsSequence @0x375a30: "non-empty interrupt stack
-	// with an OWNERLESS top". Retail dropped Jan03's bForcedRealTime: ForceRealTime(true) (called ONLY by
-	// luac_BeginSequence @0x2f1890) pushes that ownerless sequence interrupt (StartSequence @0x375dd0) and
-	// EndSequence pops it -- so retail IsSequence is true for exactly the c_BeginSequence..EndSequence span,
-	// EVEN when the sequence starts from clean real time (empty stack). The dev TBS layer kept the Jan03
-	// forced-RT flag instead of the ownerless interrupt, and its TTBSWorld::IsSequence requires
-	// !interrupts.empty() -- FALSE for a real-time cutscene, so nothing knew a sequence was running (camera,
-	// AI, heard-render all mis-gated). bForcedRealTime has the same lifetime as retail's ownerless interrupt
-	// (only scriptSequence.cpp toggles it), so it IS the sequence predicate here.
-	virtual bool IsSequence() const { return IsForcedRealTime(); }
+	// with an OWNERLESS top". luac_BeginSequence @0x2f1890 pushes that ownerless entry (StartSequence
+	// @0x375dd0), luaEndSequence @0x2f1a60 pops it (EndOfTurn) -- true for exactly the
+	// c_BeginSequence..EndSequence span, EVEN when the sequence starts from clean real time.
+	virtual bool IsSequence() const { return TTBSWorld::IsSequence(); }
 	virtual void ClickOfDeath( const CRay &ray, int nMaxFloor );
 	virtual CUnit* GetUnit( const NAI::SUnitPosition &pos );
 	virtual CUnit* GetUnitInTile( const NAI::SUnitPosition &pos );
@@ -480,7 +496,6 @@ public:
 	NDb::CRPGArmor* GetArmor( const CVec3 &vPos );
 	void CreateBloodyMess( const CVec3 &vCenter, const CVec3 &vDirection, CObjectBase *pIgnore, int nParts );
 	virtual const vector<int>& GetCreateFlags() const { return createFlags; }
-	void ForceRealTime( bool _bForceRealTime = true );
 	CObjectServerBase* GetObjectByName( const string &szName );
 	NScript::CScript* GetOwnScript() const { return pOwnScript; }
 	void ExecuteOwnScript();   // set the global active-script context (pScript=pOwnScript) THEN tick its threads, exactly as Segment does -- a context-less ExecuteThreads() crashes (GetScript()==0)

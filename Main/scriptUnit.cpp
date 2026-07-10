@@ -31,7 +31,7 @@
 #include "scScenarioTracker.h"
 #include "scFlowChartItems.h"
 #include "wUnitStates.h"
-#include "aiTaskCommander.h"
+#include "aiTaskCommand.h"
 #include "aiInventory.h"
 #include "aiMisc.h"			// NAI::GetAIUnit
 #include "aiLogic.h"		// NAI::IAILogic
@@ -127,7 +127,7 @@ BEGIN_SCRIPT_COMMAND( HasInventoryItem, "n" )
 	NWorld::IPlayer *pPlayer = pWorld->GetNextPlayerForScript( 0 );
 	while ( pPlayer )
 	{
-		if ( CDynamicCast<NAI::CAICommander>( pPlayer->GetCommander() ) )
+		if ( NAI::IsAIPlayer( pPlayer ) )   // retail luaWhoHasInventoryItem @0x2f61d0 walks NON-AI players via IsAIPlayer (a sequence-commander human must NOT be skipped)
 		{
 			pPlayer = pWorld->GetNextPlayerForScript( pPlayer );
 			continue;
@@ -352,7 +352,7 @@ BEGIN_SCRIPT_COMMAND( UnitIsSeeUnit, "uu" )
 	CDynamicCast<NWorld::CUnitServer> pTarget( luaParams[ 1 ].p );
 	if ( IsValid( pWatcher ) && IsValid( pTarget ) )
 	{
-		if ( pScript->pWorld->GetGame()->CheckVisibility( pWatcher, pTarget ) )
+		if ( pScript->pWorld->GetGame()->CheckVisibility( pWatcher, pTarget, true ) )
 		{
 			pScript->PushNumber( 1 );
 			return 1;
@@ -497,7 +497,7 @@ BEGIN_SCRIPT_COMMAND( UnitRemove, "u" )
 	CDynamicCast<NWorld::CUnitServer> pUS(luaParams[0].p);
 	if (pUS)
 	{
-		// ���� ��� clue, �� �� ��������� ������������
+		// if this is a clue, it is considered destroyed
 		CPtr<NScenario::CScenarioTracker> pTracker = pScript->pWorld->GetGlobalGame()->pScenarioTracker;
 		if ( IsValid( pTracker ) )
 		{

@@ -54,9 +54,16 @@ void GetGoalsFromZone( CScenarioZone *pZone, list< SGoalDescription > *pGoals )
 			sGoal.pString = pGoal->GetDBGoal()->pName;
 		sGoal.state = TaskStateToScenario( pGoal->GetState() );
 
+		// retail CScenarioTracker::GetGoalDescription @0x303940 shows only the NEXT open task: it appends tasks
+		// while the running state is STS_COMPLETED and breaks at the first non-completed one -> the goal's task
+		// list becomes {all completed tasks} + {the single next-open task}. (Dev CScenarioTask carries no
+		// bVisible, so retail's visible-only filter is a no-op here -- every script task counts as visible.)
 		const vector< CObj<CScenarioTask> > &tasks = pGoal->GetTasks();
+		EScenarioTaskState taskScan = STS_COMPLETED;
 		for ( int t = 0; t < tasks.size(); ++t )
 		{
+			if ( taskScan != STS_COMPLETED )	// @0x303940 top-of-loop break: stop after the first non-completed task
+				break;
 			CScenarioTask *pTask = tasks[ t ];
 			if ( !IsValid( pTask ) )
 				continue;
@@ -64,7 +71,8 @@ void GetGoalsFromZone( CScenarioZone *pZone, list< SGoalDescription > *pGoals )
 			STaskDescription sTask;
 			if ( IsValid( pTask->GetDBTask() ) )
 				sTask.pString = pTask->GetDBTask()->pDescription;
-			sTask.state = TaskStateToScenario( pTask->GetState() );
+			taskScan = TaskStateToScenario( pTask->GetState() );
+			sTask.state = taskScan;
 			sGoal.tasks.push_back( sTask );
 		}
 
@@ -135,15 +143,26 @@ bool CClueLine::ProcessMessage( const SEvent &sEvent )
 				pDescription->SetText( IsValid( pStr ) ? GetDBString( pStr ) : wstring( L"" ) );
 			}
 
+			// per-state UI-texture ids RECOVERED from raw disasm of @0x21eb90 (Ghidra dropped the immediates;
+			// verified: mov ecx,0x2bd/0x2bb/0x2be/0x2bc + add ecx,0x33e/0x340/0x33f, dbl-line delta +0x7e).
+			// pType = the "?" title glyph; pState = the small status icon (checkmark/cross/hidden).
+			const int nDbl = bDoubleLine ? 1 : 0;
 			switch ( goal.state )
 			{
-			case NScenario::STS_COMPLETED:
-			case NScenario::STS_FAILED:
-				// per-state type/state UI-texture ids LOST in decode -- SetImage selections elided.
+			case NScenario::STS_COMPLETED:	// @0x61ee86: glyph 0x2bb, checkmark 0x2bc, green bar 0x33f(+0x7e dbl)
+				if ( IsValid( pType ) )				pType->SetImage( NDb::GetUITexture( 0x2bb ) );
+				if ( IsValid( pState ) )			pState->SetImage( NDb::GetUITexture( 0x2bc ) );
+				if ( IsValid( pBackgroundImage ) )	pBackgroundImage->SetImage( NDb::GetUITexture( 0x33f + nDbl * 0x7e ) );
 				break;
-			default:	// STS_UNKNOWN / active: hide the state icon (recovered behaviour).
-				if ( IsValid( pState ) )
-					pState->SetStyle( STYLE_VISIBLE, false );
+			case NScenario::STS_FAILED:		// @0x61edf3: glyph 0x2bb, cross 0x2be, bar 0x340(+0x7e dbl)
+				if ( IsValid( pType ) )				pType->SetImage( NDb::GetUITexture( 0x2bb ) );
+				if ( IsValid( pState ) )			pState->SetImage( NDb::GetUITexture( 0x2be ) );
+				if ( IsValid( pBackgroundImage ) )	pBackgroundImage->SetImage( NDb::GetUITexture( 0x340 + nDbl * 0x7e ) );
+				break;
+			default:	// @0x61ed96 (STS_UNKNOWN/active): glyph 0x2bd, hide the state icon, bar 0x33e(+0x7e dbl)
+				if ( IsValid( pType ) )				pType->SetImage( NDb::GetUITexture( 0x2bd ) );
+				if ( IsValid( pState ) )			pState->SetStyle( STYLE_VISIBLE, false );
+				if ( IsValid( pBackgroundImage ) )	pBackgroundImage->SetImage( NDb::GetUITexture( 0x33e + nDbl * 0x7e ) );
 				break;
 			}
 			break;
@@ -286,17 +305,26 @@ bool CShowObjectivesUI::ProcessMessage( const SEvent &sEvent )
 			int nCount = 0;
 			for ( list< NScenario::SGoalDescription >::const_iterator iGoal = goals.begin(); iGoal != goals.end(); ++iGoal )
 			{
-				pObjectives->AddItem( nCount++, new CClueLine(
+				// retail @0x21f3c0: build the row, load its framed sub-template (GetUIContainer + LoadTemplate,
+				// which fires EVENT_TEMPLATELOAD so the row binds its type/state/background/text children), THEN
+				// AddItem. Without the LoadTemplate the row has no children and renders blank. Container ids
+				// recovered from disasm: clue-row 0x185 (@0x61f906), task-row 0x187 (@0x61fb46); double-line
+				// variants +0x41/+0x40 (deferred with bDoubleLine=false, see the text-measure follow-on).
+				CClueLine *pClueRow = new CClueLine(
 					SWindowInfo( pObjectives, SPoint( 0, 0 ), SPoint( pObjectives->GetSize().x, 0 ), "", STYLE_ENABLED | STYLE_VISIBLE ),
-					pMission, *iGoal, false ) );
+					pMission, *iGoal, false );
+				LoadTemplate( pClueRow, NDb::GetUIContainer( 0x185 ) );
+				pObjectives->AddItem( nCount++, pClueRow );
 
 				int nTask = 1;
 				const vector< NScenario::STaskDescription > &tasks = iGoal->tasks;
 				for ( int t = 0; t < tasks.size(); ++t )
 				{
-					pObjectives->AddItem( nCount++, new CTaskLine(
+					CTaskLine *pTaskRow = new CTaskLine(
 						SWindowInfo( pObjectives, SPoint( 0, 0 ), SPoint( pObjectives->GetSize().x, 0 ), "", STYLE_ENABLED | STYLE_VISIBLE ),
-						pMission, tasks[ t ], nTask++, false ) );
+						pMission, tasks[ t ], nTask++, false );
+					LoadTemplate( pTaskRow, NDb::GetUIContainer( 0x187 ) );
+					pObjectives->AddItem( nCount++, pTaskRow );
 				}
 			}
 			break;

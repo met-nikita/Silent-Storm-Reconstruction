@@ -29,7 +29,7 @@ namespace NRPG
 {
 class CUnit;
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// Базовый интерфейс для перекладывания
+// пїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ
 class IItem: virtual public CObjectBase
 {
 public:
@@ -44,6 +44,20 @@ public:
 	virtual const CTPoint<int>& GetSize() const = 0;
 
 	virtual NDb::EWeaponType GetWeaponType() const = 0;
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail NRPG::IClueItem / NRPG::IHintItem -- empty marker interfaces (PDB: both are
+// `: virtual public IInventoryItem`, size 36 = just the virtual-base machinery, no members).
+// CMissionUI::UpdateVisibleItems @0x2130c0 RTTI-classifies every discovered ground item's inventory
+// item against them (RTDynamicCast pair @0x6137b7: IHintItem then IClueItem): an IClueItem gets a
+// CClueIcon marker (UNGATED), otherwise an IHintItem gets a CHintIcon marker gated by the
+// "ui_showhints" option -- a clue item always wins when both would match.
+class IClueItem: virtual public IInventoryItem
+{
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
+class IHintItem: virtual public IInventoryItem
+{
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class IItemContainerInfo: virtual public IInventoryItem
@@ -96,7 +110,7 @@ public:
 	virtual NDb::CRPGClip* GetDBClip() const = 0;
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// Оружие
+// пїЅпїЅпїЅпїЅпїЅпїЅ
 class CClipItem;
 class CAttackPortion;
 struct SWeaponInfo

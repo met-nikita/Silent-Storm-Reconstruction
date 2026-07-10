@@ -6,7 +6,7 @@
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // Release CAICombatLogic substrate - the new CAIAction base + SActionInfo<> cache (structural port).
 //
-// This SUPERSEDES the dev a5dll/Main/aiAction.h CAIAction (dev: `:CObjectBase` + CPtr<IAIState> pState,
+// This SUPERSEDES the dev a5dll/Main/aiAction.h CAIAction (dev: `:CObjectBase` + CPtr<SAIState> pState,
 // Do(IAILogContainer*)). The release rebases the action on the unit (IAIUnit), logs through CAILog, and
 // adds the per-action SActionInfo<> memoized result cache the CDecision engine scores against. Held in a
 // separate file so the dev build stays green; at the phase-7 swap this content folds into aiAction.h.
@@ -24,7 +24,7 @@
 namespace NAI
 {
 class IAIUnit;
-class IAIState;
+struct SAIState;
 class CAILog;
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // SPlaceWithAP - a unit pose/position paired with the AP the unit would have on arrival.
@@ -53,7 +53,7 @@ public:
 	//
 protected:
 	IAIUnit*      GetUnit() const;              // pUnit (null/weak-ref guarded)
-	IAIState*     GetAIState() const;           // @0x13ac0: pUnit's AI state (null/dead-guarded)
+	SAIState*     GetAIState() const;           // @0x13ac0: pUnit's AI state (null/dead-guarded)
 	IAIUnit*      GetEnemy() const;             // current target of pUnit's AI state
 	SPlaceWithAP  GetCurrentPlace() const;      // pUnit's present place + remaining AP
 	//

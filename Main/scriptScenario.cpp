@@ -11,8 +11,10 @@
 #include "wMain.h"        // NWorld::CWorld::GetGame (SetMaxCriticalSeverity)
 #include "RPGGame.h"      // NRPG::IGame::SetMaxCriticalSeverity
 #include "aiCommander.h"  // NAI::CAICommander (LeaveToSubZone: skip AI players)
+#include "aiMisc.h"       // NAI::IsAIPlayer (retail @0x73df0 -- the human/AI probe LeaveToSubZone uses)
 #include "wUnitServer.h"  // NWorld::CUnitServer (LeaveToSubZone)
 #include "iObjectivesMenu.h"  // NGame::CICObjectives (ShowObjectives)
+#include "iShowObjectives.h"  // NGame::CICShowObjectives -- the retail framed objectives modal
 //
 #include "scriptScenario.h"
 //
@@ -93,7 +95,10 @@ END_SCRIPT_COMMAND
 BEGIN_SCRIPT_COMMAND( ShowObjectives, "" )
 	NRPG::CGlobalGame *pGG = pScript->GetGlobalGame();
 	if ( IsValid( pGG ) )
-		NMainLoop::Command( new NGame::CICObjectives( pGG ) );
+		// retail framed objectives modal (CGlobalGame has no mission accessor -> null mission; the rows render
+		// from the goal/task strings and the backdrop is a fresh B&W capture of the current frame). Exec no-ops
+		// when pCurrentZone is null (off-zone), matching retail GetGoalsFromZone's bail on a null current zone.
+		NMainLoop::Command( new NGame::CICShowObjectives( 0, pGG->pCurrentZone ) );
 	else
 		csSystem << CC_RED << "Script warning: " << CC_GREY << "ShowObjectives: no global game" << endl;
 	return 0;
@@ -200,8 +205,10 @@ BEGIN_SCRIPT_COMMAND( LeaveToSubZone, "n" )
 		for ( NWorld::IPlayer *pIPlayer = pWorld->GetNextPlayerForScript( 0 );
 			  pIPlayer != 0; pIPlayer = pWorld->GetNextPlayerForScript( pIPlayer ) )
 		{
-			// skip AI-commanded players -- the passage is used by the human/script player (retail IsAIPlayer skip)
-			if ( CDynamicCast<NAI::CAICommander>( pIPlayer->GetCommander() ) )
+			// skip AI-commanded players -- the passage is used by the human/script player (retail
+			// luaLeaveToSubZone @0x2ed740 skips via NAI::IsAIPlayer @0x73df0; the human's retail
+			// CSequenceCommander IS a CAICommander, so the raw cast would wrongly skip him)
+			if ( NAI::IsAIPlayer( pIPlayer ) )
 				continue;
 			CDynamicCast<NWorld::CPlayer> pPlayer( pIPlayer );
 			if ( !pPlayer )

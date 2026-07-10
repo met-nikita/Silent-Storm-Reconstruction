@@ -30,7 +30,7 @@
 #include "wBullet.h"
 #include "wMisc.h"
 #include "aiCommander.h"
-#include "aiTaskCommander.h"
+#include "aiMisc.h"      // NAI::IsAIPlayer (the retail human/AI probe -- a CSequenceCommander human is NOT an AI side)
 #include "wAckBase.h"
 #include "wAck.h"
 #include "wTerrain.h"
@@ -59,6 +59,7 @@
 #include "wUICommands.h"
 #include "..\Misc\set.h"
 #include "aiRoute.h"
+#include "aiReaction.h"			// NAI::CreateUnitReaction -- the map-deploy reaction install (AI-convergence Stage 2)
 #include "aiNearestPosition.h"	// NAI::GetNearestPosition -- FetchDeployPoint's free-cell snap (retail LookWhereToMoveUnit analog)
 #include "rpgCheatConstants.h"
 #include "wUnitCommands.h"
@@ -74,8 +75,8 @@
 #include "wMain.h"
 //
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-const int N_REALTIME_TURN = 20000; // 20 � // turn, WaitForTurn, ...
-const int N_REALTIME_FAST_TURN = 6000; // 6 � // heal, unhide, ...
+const int N_REALTIME_TURN = 20000; // 20 sec // turn, WaitForTurn, ...
+const int N_REALTIME_FAST_TURN = 6000; // 6 sec // heal, unhide, ...
 externA5 vector<SSphere> sphereParticles; // for AI Sound test visualisation
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 externA5 CPtr<NScript::CScript> pScript;
@@ -127,8 +128,13 @@ void CPlayer::GetVisible( list< CPtr<CUnit> > *pRes ) const
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CPlayer::GetVisibleObjects( list< CPtr<CObjectBase> > *pRes ) const
 {
+	// retail CPlayer::GetVisibleObjects @0x387210: clear, then append visibleObjects (+0x34) AND
+	// temporaryVisibleObjects (+0x38) -- the render/UI consumers see the union of the PERSISTENT
+	// discovered set and this update's temporary-visible set.
 	pRes->clear();
 	for ( TObjectList::const_iterator i = visibleObjects.begin(); i != visibleObjects.end(); ++i )
+		pRes->push_back( i->GetPtr() );
+	for ( TObjectList::const_iterator i = temporaryVisibleObjects.begin(); i != temporaryVisibleObjects.end(); ++i )
 		pRes->push_back( i->GetPtr() );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -152,14 +158,16 @@ void CPlayer::GetTrappedObjectsList( list< CPtr<CObjectBase> > *pRes ) const
 void CPlayer::GetSounds( vector<IVisObj*> *pRes )
 {
 	typedef SAISound<CUnitServer> TPlayer;
-	// (CORRECTED vs the session-3 note: retail CPlayer::GetSounds @0x3878e0 has NO sequence gate --
-	// retail hides cutscene silhouettes via the movie-border path instead: BorderShow @0x20e210 ->
-	// SetCheatVisibility(1) -> Step showAll -> CRenderGame::UpdateVisible @0x2cee50 NO-VIEWER branch,
-	// which SUBTRACTS the world's heard markers (CBoolSyncSrc<CSubtractFunc> + GetAllSoundStuff
-	// @0x3770c0). This dev-only gate stays as defense in depth for viewer-branch frames -- e.g. the
-	// 1s letterbox fade-in window before BorderShow flips cheat visibility.)
-	if ( units.size() && IsValid( units[0] ) && units[0]->GetWorld()->IsSequence() )
-		return;
+	// LINGERING-SOUND FIX (bug 7): retail CPlayer::GetSounds @0x3878e0 has NO sequence gate. The dev-only
+	// `IsSequence() -> return` that used to sit here suppressed the ENTIRE heard-sound set (gunfire, impacts,
+	// grunts) for the whole duration of any scripted sequence -- so during the GFirst standoff sequence an
+	// enemy's shot was NOT heard until you actually SAW him (it fell back to the visibility-gated path).
+	// Retail instead hides cutscene silhouettes purely via the movie-border subtract path (BorderShow
+	// @0x20e210 -> SetCheatVisibility(1) -> CRenderGame::UpdateVisible @0x2cee50 NO-VIEWER branch SUBTRACTS
+	// the world's heard markers, CBoolSyncSrc<CSubtractFunc> + GetAllSoundStuff @0x3770c0), which the a5dll
+	// also has -- so this extra gate was redundant defense-in-depth AND wrongly silenced in-combat gunfire
+	// heard during a sequence. Removed to match retail: heard gunfire/impacts now emit immediately (the
+	// visibility gate remains only on the ack VOICE lines, see CMissionUI::PlayAckEvent).
 	list<TPlayer> sounds;
 	for ( int k = 0; k < units.size(); ++k )
 		units[k]->AddSounds( &sounds );
@@ -468,7 +476,7 @@ CWorld::CWorld():
 const int N_TEST_HIDDEN_DELTA = 10000;
 CWorld::CWorld( NRPG::CGlobalGame *_pGlobalGame ):
 	registerOnNewPlayerFastTurnOrTime( this, &CWorld::OnNewPlayerFastTurnOrTime ),
-	CDebrisController(), pGlobalGame( _pGlobalGame ), bForcedRealTime( false ), nTurnID( 0 ), bLeanAndMean( false )
+	CDebrisController(), pGlobalGame( _pGlobalGame ), nTurnID( 0 ), bLeanAndMean( false )
 { 
 	tPrev = 0; 
 	tHiddenDelta = N_TEST_HIDDEN_DELTA;
@@ -808,7 +816,7 @@ void CWorld::CheckInterrupt( SInterruptInfo *info )
 	// retail CWorld::CheckInterrupt @0x3684c0 opens with the same gate off IsSequence (IWorld
 	// vtbl+0x1a8): a running sequence swallows EVERY sighting notice -- no interrupt, no auto-TBS,
 	// no cancel tail.
-	if ( IsForcedRealTime() )
+	if ( IsSequence() )
 		return;
 	if ( info->events.empty() )
 		return;
@@ -828,10 +836,10 @@ void CWorld::CheckInterrupt( SInterruptInfo *info )
 	}
 	CPlayer *pWhoseTurn = GetTBSCurrentPlayer();
 	// determine interrupts strength
-	CPtr<IPlayer> pWhoPlayer = info->events.front().pWho->GetPlayer(); // �������� ����������
-	list< CPtr<CUnitServer> > unitsToCancelAction; // �������� ����������
+	CPtr<IPlayer> pWhoPlayer = info->events.front().pWho->GetPlayer(); // interface convenience
+	list< CPtr<CUnitServer> > unitsToCancelAction; // interface convenience
 	bool bCanCancel = ( IsRealTime() || pWhoPlayer.GetPtr() == pWhoseTurn )
-			&& !CDynamicCast<NAI::CAICommander>( pWhoPlayer->GetCommander() ); // �������� ����������
+			&& !NAI::IsAIPlayer( pWhoPlayer.GetPtr() ); // interface convenience -- retail CheckInterrupt @0x3684c0 keys on IsAIPlayer, NOT a CAICommander cast (the human's CSequenceCommander IS a CAICommander)
 	for ( list<SInterruptInfo::SNotice>::iterator i = info->events.begin(); i != info->events.end(); )
 	{
 		if ( bCanCancel && !i->bWasShot && !i->bIsMutual && i->pWho->GetPlayer() == pWhoPlayer )
@@ -855,13 +863,13 @@ void CWorld::CheckInterrupt( SInterruptInfo *info )
 	{
 		if ( !unitsToCancelAction.empty() )
 		{
-			// �������� ����������
+			// interface convenience
 			csSystem << CC_RED << "No interrupt, all commands were canceled" << endl;
 			for ( list< CPtr<CUnitServer> >::iterator i = unitsToCancelAction.begin(); i != unitsToCancelAction.end(); ++i )
 				(*i)->OnTBSEvent( TBS_CANCEL_ACTION );
 			//	(*i)->Do( new NWorld::CCmdCancel( *i ) );
 		}
-		// �������� ���������� �� ����
+		// interface convenience, re: mines
 		vector<CPtr<CPlayer> > players;
 		GetPlayersList( &players );
 		for ( int k = 0; k < players.size(); ++k )
@@ -874,10 +882,32 @@ void CWorld::CheckInterrupt( SInterruptInfo *info )
 	}
 	// sort them out
 	info->events.sort( SCompareInterruptStrength() );
+	CPlayer *pTestPlayer = info->events.back().pWho->GetTBSPlayer();
+	// BUG 2 (realtime reaction delay): in real time, an AI player that has only just SPOTTED you (a one-sided,
+	// non-mutual sighting -- you do not see it yet) must NOT seize turn-based instantly. Retail defers it:
+	// CheckInterrupt @0x3684c0 files a WillWantTBS request (a 50-segment countdown, @0x3683e0) instead of the
+	// immediate interrupt, so the enemy reacts after a short delay. A mutual sighting (you see it too) still
+	// interrupts now, and any human-side interrupt is unaffected.
+	if ( IsRealTime() && IsValid( pTestPlayer ) &&
+	     NAI::IsAIPlayer( pTestPlayer ) )   // retail CheckInterrupt @0x3684c0: the AI-spotter defer gate is IsAIPlayer
+	{
+		bool bGroupMutual = false;
+		for ( list<SInterruptInfo::SNotice>::reverse_iterator i = info->events.rbegin(); i != info->events.rend(); ++i )
+		{
+			if ( i->pWho->GetTBSPlayer() != pTestPlayer )
+				break;                 // only the strongest (last) group shares pTestPlayer
+			if ( i->bIsMutual )
+				bGroupMutual = true;
+		}
+		if ( !bGroupMutual )
+		{
+			WillWantTBS( pTestPlayer );
+			return;
+		}
+	}
 	list<CUnitServer*> res;
 	CUnitServer *pWhom = 0;
 	CUnitServer *pWho = 0;
-	CPlayer *pTestPlayer = info->events.back().pWho->GetTBSPlayer();
 	while ( !info->events.empty() )
 	{
 		const SInterruptInfo::SNotice &e = info->events.back();
@@ -906,8 +936,32 @@ void CWorld::CheckInterrupt( SInterruptInfo *info )
 	if ( IsValid( pWho ) )
 		GetGlobalAck()->OnInterrupt( pWho );
 	AddInterrupt( res );
-	if ( pWhom )
-		AddUICommand( new CUICmdUnit( pWhom ) );
+	// (retail CheckInterrupt @0x3684c0 posts NO UI camera command here -- the dev-added
+	// AddUICommand(new CUICmdUnit(pWhom)) focus hint had no retail counterpart; removed for 1:1. The
+	// auto-focus now comes from the shoot/death/grenade producers via CUICmdUnitCamera.)
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// BUG 2 (realtime reaction delay): retail CWorld::WillWantTBS @0x3683e0. A human player's turn-based wish is
+// immediate; an AI player's is DEFERRED -- filed as a dedup'd {player, nTimeLeft=0x32} countdown that
+// CWorld::Segment fires when it elapses. So an AI that spots you in real time reacts after ~50 segments, not
+// instantly.
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CWorld::WillWantTBS( CPlayer *pPlayer )
+{
+	if ( !IsValid( pPlayer ) )
+		return;
+	if ( !NAI::IsAIPlayer( pPlayer ) )   // retail WillWantTBS @0x3683e0: only an AI (IsAIPlayer) wish is deferred
+	{
+		WantTurnBased( pPlayer );   // a human's wish is not delayed
+		return;
+	}
+	for ( vector<SWillWantTBS>::iterator i = willWantTBS.begin(); i != willWantTBS.end(); ++i )
+		if ( i->pPlayer.GetPtr() == pPlayer )
+			return;                 // already pending -- do not re-arm
+	SWillWantTBS rec;
+	rec.pPlayer = pPlayer;
+	rec.nTimeLeft = 50;             // retail nTimeLeft = 0x32
+	willWantTBS.push_back( rec );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CWorld::MergeFriendlyPlayersVisibleSets()
@@ -922,8 +976,9 @@ void CWorld::MergeFriendlyPlayersVisibleSets()
 			int nKID = players[k]->GetScenarioPlayerID();
 			for ( int m = 0; m < players.size(); ++m )
 			{
-				// players[m] - target
-				if ( CDynamicCast<NAI::CAICommander>( players[m]->GetCommander() ) )
+				// players[m] - target: retail @0x3669f0 skips AI sides via IsAIPlayer (the human's
+				// CSequenceCommander must keep RECEIVING allied vision merges)
+				if ( NAI::IsAIPlayer( players[m].GetPtr() ) )
 					continue;
 				int nMID = players[m]->GetScenarioPlayerID();
 				if ( pDiplomacy->GetDiplomacyState( nKID, nMID ) == NDb::DS_ALLY )
@@ -935,8 +990,25 @@ void CWorld::MergeFriendlyPlayersVisibleSets()
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CWorld::UpdateVisible()
+// retail vision-refresh delayer statics (bare file-scope globals in wMain.obj @0x5c7b05 / @0x5c7b08): reset by
+// UpdateVisible / cleared each CWorld::Segment. They gate the action-finish vision-recompute debounce
+// (retail CWorld::TryUpdateVisible @0x361610 -- the action-edge routing through it is a later parity step).
+static bool bHasTriedUpdateVisible = false;
+static int  nFailedTryUpdateVisible = 0;
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail CWorld::UpdateVisible @0x366b60. A bForce==false call while a Segment is in progress is DEFERRED --
+// coalesced into bCallUpdateVisible and flushed once by CWorld::Segment's tail (@0x36bce0): retail's
+// per-segment vision-recompute coalescing (structural parity). bForce==true (script EndSequence /
+// path-conflict locker) sweeps immediately. (The cutscene heard-silhouette leak is fixed separately by the
+// render-source prime in CMission::Initialize @0x200690 -- see iMission.cpp -- NOT by this coalescing.)
+void CWorld::UpdateVisible( bool bForce )
 {
+	nFailedTryUpdateVisible = 0;
+	if ( bDelayUpdateVisibleCalc && !bForce )
+	{
+		bCallUpdateVisible = true;
+		return;
+	}
 	SInterruptInfo info;
 	for ( list< CObj<CUnitServer> >::iterator i = units.begin(); i != units.end(); ++i )
 		(*i)->UpdateVisible( &info );
@@ -956,12 +1028,23 @@ void CWorld::ProcessAISignals()
 		players[k]->GetCommander()->ProcessAISignals();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CWorld::OnUnitAdded( CUnitServer *pUnit ) 
+void CWorld::OnUnitAdded( CUnitServer *pUnit )
 {
+	// retail routes a new unit to its OWNING player's commander (CWorld::AddUnit @0x369580 ->
+	// CPlayerBase::AddUnit @0x374a10 -> commander vtbl AddUnit @0x351c0). The dev tree keeps its
+	// every-commander broadcast (the SAIState rosters are built from the commander lists), but the
+	// OWNER must register FIRST: CAICommander::OnUnitAdded now aliases the globally-unique wrapper
+	// via NAI::GetAIUnit (retail @0x351c0 reuse), which resolves through the owner's map -- so the
+	// owner creates the one CAIUnit and everyone else shares it (retail wrapper identity).
 	vector<CPtr<CPlayer> > players;
 	GetPlayersList( &players );
+	IPlayer *pOwner = IsValid( pUnit ) ? pUnit->GetPlayer() : 0;
 	for ( int k = 0; k < players.size(); ++k )
-		players[k]->GetCommander()->OnUnitAdded( pUnit );	
+		if ( (IPlayer*)players[k].GetPtr() == pOwner )
+			players[k]->GetCommander()->OnUnitAdded( pUnit );
+	for ( int k = 0; k < players.size(); ++k )
+		if ( (IPlayer*)players[k].GetPtr() != pOwner )
+			players[k]->GetCommander()->OnUnitAdded( pUnit );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CWorld::GetAllUnits( vector< CPtr<NWorld::CUnit> > *pUnits )
@@ -1091,7 +1174,7 @@ void CWorld::DistributeClues( const SMapInfo &mapInfo,
 	//
 	vector<SClueSlot> personSlots;
 	vector<SClueSlot> itemSlots;
-	// ��������� person clues
+	// place person clues
 	for ( vector<SClueSlot>::const_iterator slot = mapInfo.slots.begin();
 		slot != mapInfo.slots.end(); ++slot )
 		if ( slot->bPersSlot )
@@ -1110,7 +1193,7 @@ void CWorld::DistributeClues( const SMapInfo &mapInfo,
 					itemSlots.push_back( slot );
 				personSlots.erase( personSlots.begin() + n );
 			}
-	// ��������� item clues
+	// place item clues
 	for ( vector<SClueSlot>::const_iterator slot = mapInfo.slots.begin();
 		slot != mapInfo.slots.end(); ++slot )
 		if ( !slot->bPersSlot )
@@ -1142,9 +1225,9 @@ void CWorld::PlaceItemSlotsToMap( const ClueToSlot &clueToSlot )
 			CPtr<NRPG::IInventoryItem> pItem = NRPG::CreateClueItem( NDb::GetRPGItem( i->first->GetDBClue()->nItemID ) );
 			if ( IsValid( pItem ) )
 			{
-				// �������� �� �����
+				// place onto the map
 				CQuat rot( ToRadian( i->second.pos.fRotation ), CVec3(0,0,1) );
-				CDFrozenItem *pFrozenItem = AddFrozenItem( i->second.pos.ptPos, rot, pItem, i->second.pos.nFloor );
+				CDFrozenItem *pFrozenItem = AddFrozenItem( i->second.pos.ptPos, rot, pItem, false, i->second.pos.nFloor );
 				if ( IsValid( pFrozenItem ) )
 				{
 					string szUpperName;
@@ -1169,7 +1252,7 @@ void CWorld::PlaceItemSlotsToInventory( const ClueToSlot &clueToSlot )
 			CPtr<NRPG::IInventoryItem> pItem = NRPG::CreateItem( NDb::GetRPGItem( i->first->GetDBClue()->nItemID )->pSuccessor );
 			if ( IsValid( pItem ) )
 			{
-				// �������� � inventory
+				// place into inventory
 				CPtr<NWorld::CUnitServer> pUnitServer = GetUnitServerByPersID( i->second.pPers->nRPGPersID );
 				if ( IsValid( pUnitServer ) )
 				{
@@ -1189,7 +1272,7 @@ void CWorld::AddWaypoint( CMapWaypoint *pWaypoint )
 {
 	string szLowerName = pWaypoint->pName->szName;
 	NStr::ToLower( szLowerName );
-	ASSERT( !IsValid( waypoints[ szLowerName ] ) ); // ��� waypoint-� � ����� ������
+	ASSERT( !IsValid( waypoints[ szLowerName ] ) ); // two waypoints with the same name
 	if ( !IsValid( waypoints[ szLowerName ] ) )
 	{
 		waypoints[ szLowerName ] = new NAI::CAIRouteWaypoint( GetPathNetwork(), pWaypoint );
@@ -1225,7 +1308,7 @@ void CWorld::CreateAIUnits( const SMapInfo &mapInfo, const ClueToSlot &personClu
 	nAIUnitsCreated = 0;
 	//
 	vector<SMapUnit> unitsToCreate;
-	// ������� ������ unit-�� ������� ���� �������
+	// build the list of units that need to be created
 	for ( list<SMapUnit>::const_iterator i = mapInfo.units.begin(); i != mapInfo.units.end(); ++i )
 	{
 		int nPersID;
@@ -1254,7 +1337,7 @@ void CWorld::CreateAIUnits( const SMapInfo &mapInfo, const ClueToSlot &personClu
 			}
 		}
 	}
-	// ������� AI Player-��
+	// create AI Players
 	for ( vector<SMapUnit>::const_iterator i = unitsToCreate.begin(); i != unitsToCreate.end(); ++i )
 	{
 		if ( !IsValid( GetPlayerByID( i->nScenarioPlayer ) ) )
@@ -1266,7 +1349,7 @@ void CWorld::CreateAIUnits( const SMapInfo &mapInfo, const ClueToSlot &personClu
 				UpdateAICommander( pAICommander );
 		}
 	}
-	// ������� AI Unit-��
+	// create AI Units
 	for ( int nUnitToCreate = 0; nUnitToCreate < unitsToCreate.size(); ++nUnitToCreate )
 	{
 		SMapUnit *i = &unitsToCreate[ nUnitToCreate ];
@@ -1298,12 +1381,20 @@ void CWorld::CreateAIUnits( const SMapInfo &mapInfo, const ClueToSlot &personClu
 		(*pIDToUnit)[ i->nUnitID ] = pUnitServer;
 
 		ASSERT( IsValid( pUnitServer ) );
-		// ������� route-�
+		// create routes
 		if ( IsValid( pUnitServer ) && !pUnitServer->IsEmptyPK() )
 		{
-			CDynamicCast<NAI::CAICommander> pAICommander( pPlayer->GetCommander() );
-			ASSERT( IsValid( pAICommander ) );
-			pAICommander->GetAITaskCommander()->CreateRoute( pUnitServer, *i );
+			// CAITaskCommander removal: the map-deploy route glue is now the free NAI::CreateUnitRoute
+			// @0x96d20, which resolves the AI commander + unit itself and installs a per-unit CAIRouteLogic
+			// (a routeless UL_DEFAULT unit gets nothing).
+			NAI::CreateUnitRoute( pUnitServer, i );
+			// AI-convergence Stage 2 (the reaction cliff fix): install the map-prescribed per-unit reaction
+			// (NAI::CreateUnitReaction @0x919d0 -- UL_EMPTY->guard, UL_DEFAULT/UL_ROAMING->normal, UL_FEAR->
+			// fear) at deploy, exactly as retail's CreateUnitAI does next to CreateUnitRoute. This is the
+			// reaction the removed tactical commander used to install lazily via ChooseLogic; the per-segment
+			// pump (OnAISegment->CheckForUpdates->updateTracker.Update) now updates it, so an AI unit installs
+			// its combat logic when it sees an enemy independent of the (removed) tactical commander.
+			NAI::CreateUnitReaction( pUnitServer, *i );
 		}
 		++nAIUnitsCreated;
 	}
@@ -1376,7 +1467,7 @@ void CWorld::CreateObjects( const SMapInfo &mapInfo, CPostWorldCreateInfo *pPost
 			if ( i->bFromChest )
 				rot.FromEulerAngles( ToRadian( i->pos.fRotation ), i->bVertical ? -FP_PI * 0.5f : 0.0f, FP_PI * 0.5f );
 			CVec3 ptPos = i->pos.ptPos + ptDeltaPos;
-			CDFrozenItem *pFrozenItem = AddFrozenItem( ptPos, rot, NRPG::CreateItem( i->pItem->pSuccessor ), i->pos.nFloor );
+			CDFrozenItem *pFrozenItem = AddFrozenItem( ptPos, rot, NRPG::CreateItem( i->pItem->pSuccessor ), false, i->pos.nFloor );
 			if ( IsValid( pFrozenItem ) )
 			{
 				string szUpperName;
@@ -1483,7 +1574,7 @@ void CWorld::CreateRandom( int nVariantID, const vector<string> &params,
 		PlaceItemSlotsToMap( itemClueToSlot );
 		//CreateFakeTerrainInfo( &terrain );
 		//
-		// ����� ����� ������� �� ������� �������, �������� �� ������������
+		// after this point do not place objects that affect passability
 		pAIMap->Sync();
 		// deploy units
 		// put some enemies
@@ -1491,7 +1582,7 @@ void CWorld::CreateRandom( int nVariantID, const vector<string> &params,
 		vector<NAI::SPathPlace> empty;
 		pPathNetwork->UpdateColouring( empty );
 		LoadWaypoints( mapInfo.waypoints );
-		// �� ����� ������� �� ������� ������
+		// before this point do not place units
 		pDeployedDeadUnitsPlayer = new CPlayer( L"Deployed dead units fake player", pGlobalGame, 0, -1 );
 		pDeployedDeadUnitsPlayer->SetCommander( new NWorld::CCommander );
 		//
@@ -1778,7 +1869,7 @@ IPlayer* CWorld::AddPlayer( const wstring &wsName, NRPG::CGlobalPlayer *pGlobalP
 
 		if ( pGlobalPlayer->deployData.bPassage )
 		{
-			// �������
+			// passage
 			CPtr<IPassageObject> pPassageObject = 0;
 			for ( list< CPtr<IPassageObject> >::iterator j = passageObjects.begin(); j != passageObjects.end(); ++j )
 			{
@@ -1917,10 +2008,10 @@ void CWorld::MakeAISound( NDb::CAISound *pAISound, CDumbUnitServer *_pWho, int n
 		if ( pTarget != pWho )
 		{
 			float fDistance = fabs( pTarget->GetPosition().GetCP() - pWho->GetPosition().GetCP() ) / FP_GRID_STEP;
-			// � �� ����� �� ����� �� ������� ���������� ����������?
+			// has the guy left the constant-audibility area?
 			if ( fDistance > pTarget->GetUnitRPG()->GetAISoundConstants()->nExitRadius )
 				pTarget->SetAudible( pWho, false );
-			// � �� ������ �� �� ���� ����?
+			// do we hear this sound?
 			if ( pTarget->CanHearSound( pWho->GetPosition().GetCP(), pAISound, nSoundType, pWho ) )
 			{
 				pTarget->HearSound( stuff, pWho, pWho->GetPosition().pos.p );
@@ -1935,8 +2026,8 @@ void CWorld::MakeAISound( NDb::CAISound *pAISound, CDumbUnitServer *_pWho, int n
 				}
 				else if ( pAISound->fRadius > 30.0f )
 					NGlobal::ThrowEvent( NWorld::CEventOnHearAlly( pTarget, pWho ) );   // loud (>30) friendly sound -> ally-needs-help
-				if ( bDiplomacyEnemy && pTarget->GetPlayer() != pWho->GetPlayer() && 
-					pWho->GetUnitRPG()->IsHiding() && GetGame()->CheckVisibility( pTarget, pWho ) )
+				if ( bDiplomacyEnemy && pTarget->GetPlayer() != pWho->GetPlayer() &&
+					pWho->GetUnitRPG()->IsHiding() && GetGame()->CheckVisibility( pTarget, pWho, true ) )
 				{
 					pWho->Hide( false );
 					UpdateVisible();
@@ -2196,7 +2287,8 @@ CUICmd* CWorld::GetUICommand()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CWorld::CheckForAcks()
 {
-	if ( IsForcedRealTime() )
+	// retail @0x3692c0 head (disasm-proven): IWorld vtbl+0x1a8 IsSequence -- no barks mid-cutscene.
+	if ( IsSequence() )
 		return;
 	// retail CheckForAcks @0x3692c0: the speaker is the unit GetSequence hands back with the
 	// winning ack -- NOT re-derived from the ack row's pers id (the ack rows are keyed by the
@@ -2287,6 +2379,13 @@ void CWorld::CheckStability()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CWorld::Segment()
 {
+	// retail CWorld::Segment @0x36bce0 top: begin per-segment vision-refresh coalescing. Every UpdateVisible()
+	// requested during this segment (SetPosition/MakeAISound/the action-finish edge/CheckSpot/...) is deferred
+	// into bCallUpdateVisible and flushed once at the tail below -- AFTER all of this segment's marker creation.
+	// Set BEFORE TTBSWorld::Segment() so its action-finish edge (wTurnBased.h:512 UpdateVisible()) defers too.
+	bHasTriedUpdateVisible = false;
+	bDelayUpdateVisibleCalc = true;
+	bCallUpdateVisible = false;
 	TTBSWorld::Segment();
 	for ( list< CObj<CUnitServer> >::iterator i = units.begin(); i != units.end(); )
 	{
@@ -2323,7 +2422,34 @@ void CWorld::Segment()
 	NGlobal::ThrowEvent( CEventOnSegment() );   // per-segment broadcast (script-logic units count segments)
 	pAIJobManager->Segment();
 	pAISignalManager->Segment();
+	// BUG 2 (realtime reaction delay): tick the deferred realtime->TBS requests (retail CWorld::Segment
+	// @0x36bce0). Fire WantTurnBased when a countdown elapses; drop all pending requests once we are no longer
+	// real-time (turn-based already started, e.g. via a mutual sighting or a human interrupt).
+	if ( !willWantTBS.empty() )
+	{
+		if ( !IsRealTime() )
+			willWantTBS.clear();
+		else
+			for ( vector<SWillWantTBS>::iterator i = willWantTBS.begin(); i != willWantTBS.end(); ++i )
+				if ( --i->nTimeLeft < 1 )
+				{
+					CPtr<CPlayer> pPlayer = i->pPlayer;
+					willWantTBS.erase( i );          // erase invalidates the iterator -> one switch per segment
+					if ( IsValid( pPlayer ) )
+						WantTurnBased( pPlayer.GetPtr() );
+					break;
+				}
+	}
 	CheckForAcks();
+
+	// retail CWorld::Segment @0x36bce0 tail flush (positioned exactly here -- after the ack/explosion processing
+	// CheckForAcks() mirrors, before the script tick): end the per-segment coalescing and run the single deferred
+	// vision recompute (retail's per-segment FilterSounds/visibility sweep). Structural parity with retail's
+	// coalescing; the cutscene heard-silhouette leak itself is fixed by the render-source prime in
+	// CMission::Initialize (see iMission.cpp), not here.
+	bDelayUpdateVisibleCalc = false;
+	if ( bCallUpdateVisible )
+		UpdateVisible();
 
 	pScript = pOwnScript;
 	pOwnScript->ExecuteThreads();
@@ -2355,7 +2481,10 @@ void CWorld::ExecuteOwnScript()
 void CWorld::CheckRealTimeTurn()
 {
 	STime curTime = GetTime()->GetValue();
-	if ( !IsForcedRealTime() && IsRealTime() )
+	// retail CheckRealTimeTurn @0x3629b0 (disasm-proven): gated on IsRealTime (vtbl+0x1a0) ALONE --
+	// no sequence exclusion, so realtime turn/fast-turn events tick during cutscenes too (bleeding/
+	// fire periodic damage keeps running mid-sequence, as in retail).
+	if ( IsRealTime() )
 	{
 		if ( curTime - prevTurnTime > N_REALTIME_TURN )
 		{
@@ -2605,7 +2734,7 @@ bool CWorld::UsePassageObject( CUnitServer *pUS, int nPassageZoneID )
 	//
 	list< CPtr<IPassageObject> > passageObjects;
 	GetPassageObjects( nPassageZoneID, &passageObjects );
-	// ��������� ��� �� ����� ����� � ���������� ��������� ��������
+	// check that everyone is standing next to the found passage objects
 	bool bCanPass = true;
 	unordered_map< CPtr<CUnitServer>, CPtr<IPassageObject>, SPtrHash > passagesForUnits;
 	for ( list< CObj<CUnitServer> >::iterator i = units.begin(); i != units.end(); ++i )
@@ -2631,18 +2760,18 @@ bool CWorld::UsePassageObject( CUnitServer *pUS, int nPassageZoneID )
 	//
 	if ( nPassageZoneID <= 0 )
 	{
-		// ������� �� chapter map
+		// exit to the chapter map
 		AddUICommand( new NWorld::CUICmdContinueChapter() );
 		return true;
 	}
-	// ���� � ����� template ���������
+	// find which template we transition to
 	vector<int> templatesIDs;
 	pZone->GetTemplatesIDs( &templatesIDs );
 	for ( vector<int>::iterator i = templatesIDs.begin();	i != templatesIDs.end(); ++i )
 	{
 		if ( *i != GetGlobalGame()->nCurrentTemplateID )
 		{
-			// ���� passage objects
+			// search for passage objects
 			SMapInfo info;
 			vector<string> strParams;
 			int nVariantID = pZone->GetVariantIDForTemplate( *i );
@@ -2654,7 +2783,7 @@ bool CWorld::UsePassageObject( CUnitServer *pUS, int nPassageZoneID )
 			{
 				if ( IsValid( (*j).pObject->pPassage ) && (*j).nPassageZoneID == nPassageZoneID )
 				{
-					// ��������� ������ � ��������
+					// fill in the passage data
 					NRPG::SDeployData &deployData = pGlobalPlayer->deployData;
 					deployData.bPassage = true;
 					deployData.nPassageZoneID = nPassageZoneID;
@@ -2663,7 +2792,7 @@ bool CWorld::UsePassageObject( CUnitServer *pUS, int nPassageZoneID )
 					for ( u = passagesForUnits.begin(); u != passagesForUnits.end(); ++u )
 						deployData.unitsDeployData[ u->first->GetUnitRPG()->GetRPGUnit() ].nPassageObjectID =
 							u->second->GetPassageObjectID();
-					// ���������
+					// go through (transition)
 					AddUICommand( new NWorld::CUICmdLoadTemplate( pZone, *i ) );
 					return true;
 				}
@@ -2697,7 +2826,7 @@ void CWorld::CheckSpot( const vector< CPtr<CPlayer> > &players )
 				{
 					CDynamicCast<CUnitServer> pEnemyUS( e->GetPtr() );
 					if ( IsValid( pEnemyUS ) && pEnemyUS->GetDiplomacyState( (*u) ) == NDb::DS_ENEMY &&
-						pEnemyUS->CanFight() && GetGame()->CheckVisibility( pEnemyUS, *u ) )
+						pEnemyUS->CanFight() && GetGame()->CheckVisibility( pEnemyUS, *u, true ) )
 					{
 						float fDistance = fabs( pEnemyUS->GetPosition().GetCP() - (*u)->GetPosition().GetCP() ) / FP_GRID_STEP;
 						int nProbability = pEnemyUS->GetUnitRPG()->GetUnhideProbability( (*u)->GetUnitRPG(), fDistance );
@@ -2729,8 +2858,26 @@ void CWorld::OnNewPlayerTurn( CPlayer *pPlayer )
 	NGlobal::ThrowEvent( CEventOnNewPlayerTurnOrTime( pPlayer ) );
 	NGlobal::ThrowEvent( CEventOnNewPlayerFastTurnOrTime( pPlayer ) );
 	NGlobal::ThrowEvent( CEventOnNewPlayerTurn( pPlayer ) );
+	// The CEventOnPassControl throw MOVED to CWorld::OnPassControl (below): retail emits it on EVERY
+	// control hand-over (base turn / stacked interrupt / interrupt-pop resume -- CTBSWorld::OnPassControl
+	// @0x372bf0 -> STBSEvent tag9 -> ProcessTBSEvents @0x3675d0), not just at base-turn start. Throwing
+	// it here starved the interrupt turn of the begin-turn threat refresh (BeginTurnEvent -> Populate),
+	// so an interrupting enemy saw enemy=0 -> IsEndOfTurn -> instant give-back. The remaining three
+	// events above are retail's TBS_START_NEW_TURN(1) payloads and correctly fire only at base-turn start
+	// (StartPlayerTurn calls OnNewPlayerTurn then OnPassControl -- still exactly ONE pass-control throw).
 	//
 	GetGlobalAck()->OnNewTurnStarted( pPlayer );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail CTBSWorld::OnPassControl @0x372bf0 (via ProcessTBSEvents @0x3675d0, STBSEvent tag9): every
+// control hand-over throws CEventOnPassControl(current stack-top owner). Subscribers: the per-unit
+// threat tracker (OnNewTurn @0xab180 -> CAIBeginTurnEvent -> PrepareEnemies @0xb17a0 == dev Populate)
+// and, dev-side, the commanders are notified by the base body's direct OnPassControl loop. An ownerless
+// (sequence) top throws with a null player -- the tracker's own-player filter makes that a no-op,
+// matching retail.
+void CWorld::OnPassControlNotify()
+{
+	NGlobal::ThrowEvent( CEventOnPassControl( GetTBSCurrentPlayer() ) );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CWorld::OnNewPlayerFastTurnOrTime( const CEventOnNewPlayerFastTurnOrTime &event )
@@ -2775,9 +2922,16 @@ int CWorld::GetEnemyWatchers( IPlayer *pPlayer ) const
 	return nWatchers;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-bool CWorld::IsTBSRealTimeModePossible() const 
-{ 
-	if ( nPartiesAdded > 1 )
+bool CWorld::IsTBSRealTimeModePossible() const
+{
+	// retail IsRealTimePossible @0x364f10 head (disasm-proven): the BASE zone short-circuits TRUE
+	// (IWorld vtbl+0x1dc IsBase); then a frozen game start (bFreezeStart, c_DelayGameStartEx) or a
+	// multi-party map forbids real time. (Retail also ORs a bForceTurnBased debug global @0x9c7b0c --
+	// no dev counterpart, omitted.) NO sequence term: the sequence gate lives in StartNextPlayerTurn
+	// (@0x375f80 gate 2), not here.
+	if ( IsBase() )
+		return true;
+	if ( bFreezeStart || nPartiesAdded > 1 )
 		return false;
 	vector< CPtr<CPlayer> > players;
 	GetPlayersList( &players );
@@ -2841,7 +2995,7 @@ void CWorld::OnAction( bool bStartAction )
 void CWorld::GetPassageObjects( int nPassageZoneID, list< CPtr<IPassageObject> > *pPassageObjects )
 {
 	pPassageObjects->clear();
-	// ���� ������� �������� ���� ���� ��������
+	// find the passage objects of this passage zone
 	for (list< CObj<CObjectServerBase> >::iterator i = objects.begin(); i != objects.end(); ++i)
 	{
 		CDynamicCast<IPassageObject> pPassage(*i);
@@ -3082,21 +3236,9 @@ void CWorld::CreateBloodyMess( const CVec3 &_vCenter, const CVec3 &vDirection, C
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CWorld::ForceRealTime( bool _bForceRealTime )
-{
-	bool bRealTime = IsRealTime();
-	bForcedRealTime = _bForceRealTime;
-	//
-	vector<CPtr<NWorld::CPlayer> > players;
-	GetPlayersList( &players );
-	for ( vector< CPtr<NWorld::CPlayer> >::const_iterator i = players.begin(); i != players.end(); ++i )
-		(*i)->GetCommander()->Do( new NWorld::CCmdEndOfTurn() );
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-const bool CWorld::IsForcedRealTime() const
-{
-	return bForcedRealTime;
-}
+// (ForceRealTime / IsForcedRealTime REMOVED -- retail has no ForceRealTime at all: a sequence is the
+// ownerless SInterrupt pushed by CTBSWorld::StartSequence @0x375dd0 and popped by EndOfTurn @0x3776f0;
+// luac_BeginSequence @0x2f1890 / luaEndSequence @0x2f1a60 drive those edges directly.)
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 static bool GetNameFromHash( const unordered_map< string, CPtr<CObjectBase> > &hash, CObjectBase *pObject, string *pName )
 {
@@ -3218,7 +3360,7 @@ void CWorld::ChangeUnitPlayer( CUnitServer *pUnit, CPlayer *pPlayer )
 	//
 	MakeUnitInactive( pUnit );
 	RemoveUnitFromAI( pUnit );
-	// ������� ������ �����, ����� pUnit ������ �� IsValid
+	// the order must be exactly this, otherwise pUnit becomes non-IsValid
 	pPlayer->AddUnit( pUnit );
 	pOldPlayer->RemoveUnit( pUnit );
 	//

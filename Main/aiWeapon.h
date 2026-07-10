@@ -54,9 +54,9 @@ class CAIFireArmsWeapon: public IAIInventoryItem
 	OBJECT_BASIC_METHODS( CAIFireArmsWeapon );
 	ZDATA
 	CPtr<NRPG::CWeaponItem> pWeaponItem;
-	CObj<CAIFireArmsWeaponClip> pCurrentClip; // ������ ���������� � ������
-	vector< CObj<CAIFireArmsWeaponClip> > clips; // ��������� ������ ( ���������� �� ������ )
-	CPtr<IAIUnit> pOwner; // � ���� � inventory �����
+	CObj<CAIFireArmsWeaponClip> pCurrentClip; // magazine currently loaded in the weapon
+	vector< CObj<CAIFireArmsWeaponClip> > clips; // spare magazines ( the loaded one not included )
+	CPtr<IAIUnit> pOwner; // whose inventory it is stored in
 	ZEND int operator&( CStructureSaver &f ) { return 0; }
 	//
 	bool IsBurstMode( NDb::EShootMode eShotMode ) const;

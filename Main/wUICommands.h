@@ -382,6 +382,42 @@ public:
 		CUICmdCameraLocator( 6 ), transitionTime( _transitionTime ), positions( _positions ) {}
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// EPriority -- the CUICmdCameraLocator::nPriority scale (NWorld::EPriority, inventory.json). Higher wins
+// (MustReplaceCameraExecutor): a death-beauty shot (5) preempts a shot focus (1).
+////////////////////////////////////////////////////////////////////////////////////////////////////
+enum EPriority
+{
+	PR_UNIT_SOUND       = 0,
+	PR_UNIT_ACTION      = 1,
+	PR_EXPLOSION        = 2,
+	PR_OUR_UNIT_IS_HIT  = 3,
+	PR_UNIT_IS_DEAD     = 4,
+	PR_UNIT_DIED_BEAUTY = 5,
+	PR_SCRIPT           = 6,
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// CUICmdUnitCamera (wDumbUnit.obj: ctor @0x3531f0, operator& @0x353820) -- the retail arbitrated auto-focus
+// camera command. Frame the shooter (+ optional target) at a move priority (EPriority), optionally with
+// slo-mo. Replaces the dev CUICmdUnit focus hint at the event producers (shoot / grenade / death /
+// unconscious). Arbitrated via CMission::pExecLocator + MustReplaceCameraExecutor.
+////////////////////////////////////////////////////////////////////////////////////////////////////
+class CUICmdUnitCamera: public CUICmdCameraLocator
+{
+	OBJECT_BASIC_METHODS( CUICmdUnitCamera );
+	ZDATA_(CUICmdCameraLocator)
+public:
+	CPtr<CUnit> pUnit;                  // +0x14  the framed unit (shooter / dying unit)
+	CPtr<CUnit> pUnitTarget;            // +0x18  optional second framing point (shot target); null -> single point
+	bool        bUseSloMo;              // +0x1c  carried for parity; the a5dll camera has no slo-mo -> inert
+	float       fSloMoIncrProbability;  // +0x20
+	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CUICmdCameraLocator*)this); f.Add(2,&pUnit); f.Add(3,&pUnitTarget); f.Add(4,&bUseSloMo); f.Add(5,&fSloMoIncrProbability); return 0; }
+	//
+	CUICmdUnitCamera(): bUseSloMo( false ), fSloMoIncrProbability( 0 ) {}
+	CUICmdUnitCamera( CUnit *_pUnit, int _nPriority, bool _bUseSloMo, float _fProb, CUnit *_pTarget ):
+		CUICmdCameraLocator( _nPriority ), pUnit( _pUnit ), pUnitTarget( _pTarget ),
+		bUseSloMo( _bUseSloMo ), fSloMoIncrProbability( _fProb ) {}
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
 // CUICmdSetCameraClipDistance -- release-new: sets the camera near/far clip planes (CameraSetClipping binding).
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CUICmdSetCameraClipDistance: public CUICmd
@@ -419,7 +455,25 @@ public:
 
 	CUICmdUnit() {}
 	CUICmdUnit( CUnit *_pUnit ): CUICmd( UICP_UNIT ), pUnit( _pUnit ) {}
-}; 
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// CUICmdAIUnitWillMove (aiCommander.obj: ctor @0x36020, operator& @0x36d80, MakeCopy @0x361c0,
+// DestroyContents @0x36250; registered @0x392b90, save id 0x02973150). The AI posts one each time the
+// unit it is about to drive changes (CAICommander::GenerateCommand, turn-based only): a "this AI unit is
+// about to act" camera/UI hint carrying the unit. Same shape as CUICmdUnit but the ctor chains the DEFAULT
+// CUICmd() (no UICP_UNIT priority -- retail @0x36020 calls CUICmd::CUICmd()).
+////////////////////////////////////////////////////////////////////////////////////////////////////
+class CUICmdAIUnitWillMove: public CUICmd
+{
+	OBJECT_BASIC_METHODS( CUICmdAIUnitWillMove );
+public:
+	ZDATA_(CUICmd)
+	CPtr<CUnit> pUnit;
+	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CUICmd*)this); f.Add(2,&pUnit); return 0; }
+	//
+	CUICmdAIUnitWillMove() {}
+	CUICmdAIUnitWillMove( CUnit *_pUnit ): pUnit( _pUnit ) {}
+};
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // Events
 ////////////////////////////////////////////////////////////////////////////////////////////////////

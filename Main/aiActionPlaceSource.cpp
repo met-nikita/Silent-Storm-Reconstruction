@@ -140,7 +140,7 @@ public:
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CAIActionPlaceSource
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-IAIState* CAIActionPlaceSource::GetAIState() const                       // @0x0048e080
+SAIState* CAIActionPlaceSource::GetAIState() const                       // @0x0048e080
 {
 	if ( IsValid( pUnit ) )
 		return pUnit->GetAIState();
@@ -156,13 +156,22 @@ IAIUnit* CAIActionPlaceSource::GetEnemy() const                         // @0x00
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // True unless the tile is impassable or locked by a *different* unit.
 // Release used IPathNetwork::GetPlaceState (1=blocked, 3=locked-by-owner) + GetPlaceOwner; the dev
-// IPathNetwork exposes the same information as IsPassable(p) + GetWhoLocksThisPlace(p) - reconciled here.
+// IPathNetwork exposes the same information as GetPassability(p) + GetWhoLocksThisPlace(p).
+// ‼️ FIXED (2026-07-10): the old form checked the strict bool IsPassable(p) FIRST -- that is
+// GetPassability(p)==AIP_YES only, and a tile LOCKED by the unit ITSELF reports AIP_LOCKED, so the
+// unit's OWN place always failed BEFORE the own-lock exemption below could run. Result: every place
+// source rejected the unit's own tile (the shoot action could never choose "stand still" -> the
+// step-happy creep) and CAICurrentPlaceSource yielded ZERO places (reload/heal/loot/move-to-enemy/
+// snipe all permanently bCanDo=false -- the dry-clip no-reload bug: CHOOSE act=3 places=0). Retail's
+// GetPlaceState form passes owner-locked tiles (its lock verdict carries WHO, judged against self).
 bool CAIActionPlaceSource::IsPassable( IPathNetwork *pNet, const SPathPlace &p )   // @0x0048e0b0
 {
 	if ( !IsValid( pNet ) )
 		return false;
-	if ( !pNet->IsPassable( p ) )
+	EPassable e = pNet->GetPassability( p );
+	if ( e == AIP_NOT_PASSABLE || e == AIP_CANNOT_LAY )
 		return false;
+	// AIP_LOCKED/AIP_DOOR fall through to the ownership test: only a FOREIGN lock rejects.
 	CObjectBase *pLocker = pNet->GetWhoLocksThisPlace( p );
 	if ( pLocker != 0 && pLocker != (CObjectBase *)pUnit->GetUnitServer() )
 		return false;

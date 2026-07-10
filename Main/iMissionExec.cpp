@@ -171,6 +171,100 @@ void CUICmdFollowCameraExec::Finished()
 	pMission->FreezeCamera( false );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// CUICmdUnitCameraExec (release iUIExec.obj: ctor @0x24f090, Update @0x24eae0, Cancel @0x24ee60,
+// Finished @0x24ee80). The arbitrated auto-focus sink: gate (priority-keyed), frame the shooter (+ target)
+// via CCamera::ShowPlacesFromBestPoint, hold ~4 s, then finish. Scroll-locks the camera for the shot.
+////////////////////////////////////////////////////////////////////////////////////////////////////
+CUICmdUnitCameraExec::CUICmdUnitCameraExec( NWorld::CUICmdUnitCamera *_pCmd, IMission *_pMission ):
+	CUICmdLocatorExec( _pCmd ), pMission( _pMission ), pCmd( _pCmd ), bDone( false ), tStart( 0 )
+{
+	// release ctor @0x24f090 tail: grab the mission camera and scroll-lock it (Lock(1)) for the framing.
+	pLockedCamera = pMission->GetCamera();
+	if ( IsValid( pLockedCamera ) )
+		pLockedCamera->SetLock( true );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+bool CUICmdUnitCameraExec::Update( const STime &sTime )
+{
+	if ( !IsValid( pCmd ) || !IsValid( pMission ) )
+		return true;
+	NWorld::CUnit *pShooter = pCmd->pUnit.GetPtr();
+	NWorld::CUnit *pTarget  = pCmd->pUnitTarget.GetPtr();
+	if ( !IsValid( pShooter ) && !IsValid( pTarget ) )
+		return true;
+	NWorld::CUnit *pPrimary = IsValid( pTarget ) ? pTarget : pShooter;
+	const int nPri = GetPriority();
+
+	// release @0x24eae0 gating (the turn-based branch reuses the CUICmdFollowCameraExec-verified checks):
+	if ( !pMission->IsRealTime() )
+	{
+		if ( !IsVisibleByActivePlayer( pShooter, pMission ) && !IsVisibleByActivePlayer( pPrimary, pMission ) )
+			return true;                                    // frame only an action the active player can see
+		if ( nPri < NWorld::PR_UNIT_IS_DEAD )
+		{
+			if ( !pMission->IsActionExecuted() || pMission->IsReady() )
+				return true;
+			if ( pMission->GetWorld()->GetCurrentPlayer() == pMission->GetActivePlayer()->GetPlayer() )
+				return true;                                // only the OTHER player's action
+			if ( nPri == NWorld::PR_UNIT_ACTION && ( !IsValid( pShooter ) || !pShooter->IsPerformingAction() ) )
+				return true;
+			// (release @0x24eae0 also gates PR_UNIT_ACTION on mission[vtbl+0x134]->GetPlayer() != active player
+			//  -- an extra "not the shooter's own player" check; omitted pending that accessor's identification.)
+		}
+	}
+	else
+	{
+		if ( !IsVisibleByActivePlayer( pShooter, pMission ) )
+			return true;                                    // real-time: only require the shooter visible
+	}
+
+	if ( bDone )
+		return 4000 < sTime - tStart;                       // ~4 s dwell then finish
+	tStart = sTime;
+	bDone = true;
+
+	// framing: two-point best-point (CCamera::ShowPlacesFromBestPoint). dist = Max(unit bbox + 0.5, 12) -- for
+	// any unit the 12 floor dominates (bbox radius << 12), so pass 12 (retail Max clamps identically here).
+	CVec3 ptShooter( 0, 0, 0 ), ptFocus( 0, 0, 0 );
+	( IsValid( pShooter ) ? pShooter : pPrimary )->GetRealPosition( &ptShooter );
+	pPrimary->GetRealPosition( &ptFocus );
+	int nFloor = ( nPri >= NWorld::PR_UNIT_IS_DEAD ) ? pMission->GetCutFloor()
+	                                                 : pPrimary->GetPosition().pos.GetFloor();
+	int nSloMo = ( nPri >= NWorld::PR_UNIT_IS_DEAD && pCmd->bUseSloMo ) ? 3 : 1;
+	ICamera *pCamera = pMission->GetCamera();
+	if ( IsValid( pCamera ) )
+	{
+		pCamera->ShowPlacesFromBestPoint( ptShooter, ptFocus, nFloor, 12.0f, nSloMo,
+			pCmd->fSloMoIncrProbability, false, false );
+		if ( nPri >= NWorld::PR_UNIT_IS_DEAD && IsValid( pShooter ) )
+			pCamera->FollowUnit( pShooter );                // release: FollowUnit(shooter) for a death
+	}
+	return false;                                           // keep alive for the dwell
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CUICmdUnitCameraExec::Cancel()
+{
+	if ( IsValid( pLockedCamera ) )
+		pLockedCamera->SetLock( false );                    // release @0x24ee60: Lock(0)
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CUICmdUnitCameraExec::Finished()
+{
+	if ( IsValid( pLockedCamera ) )
+		pLockedCamera->SetLock( false );                    // release @0x24ee80: Lock(0)
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// CreateCameraExecutor @0x24f150 -- RTTI dispatch of a camera-locator command to its executor. The dev has
+// only the unit-camera family (the explosion CUICmdPointCamera and the script-move exec route elsewhere).
+////////////////////////////////////////////////////////////////////////////////////////////////////
+CUICmdLocatorExec* CreateCameraExecutor( NWorld::CUICmdCameraLocator *pCmd, IMission *pMission )
+{
+	CDynamicCast<NWorld::CUICmdUnitCamera> pUnitCam( pCmd );
+	if ( pUnitCam )
+		return new CUICmdUnitCameraExec( pUnitCam, pMission );
+	return 0;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 // CUICmdRestoreCameraExec
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CUICmdRestoreCameraExec::CUICmdRestoreCameraExec( NWorld::CUICmd *pCmd, IMission *pMission ):
@@ -429,6 +523,7 @@ FINISH_REGISTER
 using namespace NGame;
 //
 REGISTER_SAVELOAD_CLASS( 0x50412162, CUICmdMoveCameraExec )
+REGISTER_SAVELOAD_CLASS( 0x50412165, CUICmdUnitCameraExec )	// fresh id: retail 0x50412163 = kept CUICmdExecPlayDialog
 REGISTER_SAVELOAD_CLASS( 0x50412163, CUICmdExecPlayDialog )
 REGISTER_SAVELOAD_CLASS( 0x50412164, CUICmdExecContinueChapter )
 REGISTER_SAVELOAD_CLASS( 0x51312182, CUICmdExecLoadTemplate )

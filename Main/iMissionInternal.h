@@ -9,6 +9,7 @@
 namespace NGame
 {
 class CUICmdExec;
+class CUICmdLocatorExec;
 //////////////////////////////////////////////////////////////////////////////////////
 // CVisibleTracker
 //////////////////////////////////////////////////////////////////////////////////////
@@ -158,6 +159,10 @@ private:
 	CPtr<CObjectBase> pTraceObject;
 	//// Active interface command
 	CPtr<CUICmdExec> pCmdExec;
+	// retail CMissionBase pExecLocator: a dedicated camera-command executor slot, SEPARATE from pCmdExec, so
+	// a CUICmdCameraLocator (CUICmdUnitCamera auto-focus) does NOT stall the general UI-command drain and can
+	// be preempted by a higher-priority one (MustReplaceCameraExecutor). Driven by ExecWorldCommand @0x1a30c0.
+	CPtr<CUICmdLocatorExec> pExecLocator;
 	//// interface
 	int nPanelsState;
 	bool bWaitForPartFinished;
@@ -195,6 +200,11 @@ private:
 	int nLeaveBlockReason = -1;
 	// OnPlayerLose one-shot latch (retail @CMission bLoseSignalSended): fire the lua lose hook once per mission.
 	bool bLoseSignalSended = false;
+	// BUG 3 (delayed Lose dialog): retail defers the lose menu ~4000ms after the hero dies (until his corpse
+	// settles, capped by CCmdDelayedCallGameOver nMaxDelay=4000 @0x204b50). We approximate with the cap:
+	// tGameOverTime = the GetTime() stamp of the first loss frame; bLoseMenuShown = the menu-opened one-shot.
+	STime tGameOverTime;
+	bool bLoseMenuShown = false;
 	// BeginSequence/EndSequence nesting depth. Scripts nest sequences (e.g. Common.l DelayGameStart() opens
 	// one via BeginSequence(true) and StartGame() closes one via EndSequence(), around the script's own
 	// BeginSequence/EndSequence). Retail (@0x1fd8c0 "nSequence") stacks ONE movieUI PER begin and
@@ -216,12 +226,16 @@ private:
 	// (@0x200690) loads that file on re-entry and restores via CWorld::CreateRestored (@0x36e100: per-building
 	// Update() refresh + live-CGlobalGame rebind -- the save's weak global-game ref loads dangling).
 	bool bEnableFeatureReenter = false;
+	// retail CMission pPWLImage (CDBPtr<NDb::CUITexture>): the PreWorldLoad splash threaded from
+	// CICBeginMission::Exec -> Initialize @0x200690 (this->pPWLImage = param_6). Carries the chapter's
+	// loading background into the mission so a zone-reenter can re-show it.
+	CDBPtr<NDb::CUITexture> pPWLImage;
 public:
 	bool CanLeaveZone() const { return !bLeaveBlockedByScript; }	// honors SetLeaveZoneMode (retail @0x1fcbd0 gate)
 	int GetLeaveBlockReason() const { return nLeaveBlockReason; }
 	bool IsSpecialFirstMissionMode() const { return bSpecialFirstMissionMode; }	// retail @0x19def0
 	void OnSnapshotRestored();	// restart.sav in-place resume: rebuild building shells + camera height source
-	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&nTemplateID); f.Add(3,&nVariantID); f.Add(4,&pGlobalGame); f.Add(5,&pZone); f.Add(6,&pScene); f.Add(7,&pSoundScene); f.Add(8,&pRender); f.Add(10,&bPause); f.Add(11,&pWorld); f.Add(12,&pActivePlayer); f.Add(13,&playersSet); f.Add(14,&bHideInterface); f.Add(15,&bSpecialHideInterface); f.Add(16,&pCursor); f.Add(17,&pInterface); f.Add(18,&bUpdated); f.Add(19,&bForceUpdateNextFrame); f.Add(20,&pState); f.Add(21,&pStateTarget); f.Add(22,&updatedStatesSet); f.Add(23,&bRealTime); f.Add(24,&bHasCommands); f.Add(25,&bActionExecuted); f.Add(26,&pTrackTarget); f.Add(27,&pPlayerInHand); f.Add(28,&pTrackPlayer); f.Add(29,&selectedUnits); f.Add(30,&actionsInfoSet); f.Add(31,&fFOV); f.Add(32,&eCameraType); f.Add(33,&cameraLimits); f.Add(34,&pCamera); f.Add(35,&pCameraOwner); f.Add(36,&bFreezeCamera); f.Add(37,&sFreezePose); f.Add(38,&vCameraCP); f.Add(39,&sCameraPos); f.Add(40,&sTransform); f.Add(41,&bTraceOk); f.Add(42,&rTraceRay); f.Add(43,&sTraceTile); f.Add(44,&pTraceObject); f.Add(45,&pCmdExec); f.Add(46,&nPanelsState); f.Add(47,&bWaitForPartFinished); f.Add(48,&eActionIconsSet); f.Add(49,&pMissionUI); f.Add(50,&desktopWindowsList); f.Add(51,&nLightMode); f.Add(52,&bCheatVisibility); f.Add(53,&pLightSource); f.Add(54,&pVisibleTracker); f.Add(55,&buildingSchemas); f.Add(56,&pIntersectHolder); f.Add(57,&pIntersectLineHolder); f.Add(58,&vPrevCameraPosition); f.Add(59,&nFramesSameCameraPosition); f.Add(60,&nDeltaTime); f.Add(61,&pCombatMelody); f.Add(62,&pTestWeatherEffect); f.Add(63,&bTutorialMode); f.Add(64,&bLeaveBlockedByScript); f.Add(65,&nLeaveBlockReason); f.Add(66,&nSequenceDepth); f.Add(67,&bSpecialFirstMissionMode); f.Add(68,&bEnableFeatureReenter); f.Add(69,&sequenceCameraPoses); return 0; }
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&nTemplateID); f.Add(3,&nVariantID); f.Add(4,&pGlobalGame); f.Add(5,&pZone); f.Add(6,&pScene); f.Add(7,&pSoundScene); f.Add(8,&pRender); f.Add(10,&bPause); f.Add(11,&pWorld); f.Add(12,&pActivePlayer); f.Add(13,&playersSet); f.Add(14,&bHideInterface); f.Add(15,&bSpecialHideInterface); f.Add(16,&pCursor); f.Add(17,&pInterface); f.Add(18,&bUpdated); f.Add(19,&bForceUpdateNextFrame); f.Add(20,&pState); f.Add(21,&pStateTarget); f.Add(22,&updatedStatesSet); f.Add(23,&bRealTime); f.Add(24,&bHasCommands); f.Add(25,&bActionExecuted); f.Add(26,&pTrackTarget); f.Add(27,&pPlayerInHand); f.Add(28,&pTrackPlayer); f.Add(29,&selectedUnits); f.Add(30,&actionsInfoSet); f.Add(31,&fFOV); f.Add(32,&eCameraType); f.Add(33,&cameraLimits); f.Add(34,&pCamera); f.Add(35,&pCameraOwner); f.Add(36,&bFreezeCamera); f.Add(37,&sFreezePose); f.Add(38,&vCameraCP); f.Add(39,&sCameraPos); f.Add(40,&sTransform); f.Add(41,&bTraceOk); f.Add(42,&rTraceRay); f.Add(43,&sTraceTile); f.Add(44,&pTraceObject); f.Add(45,&pCmdExec); f.Add(46,&nPanelsState); f.Add(47,&bWaitForPartFinished); f.Add(48,&eActionIconsSet); f.Add(49,&pMissionUI); f.Add(50,&desktopWindowsList); f.Add(51,&nLightMode); f.Add(52,&bCheatVisibility); f.Add(53,&pLightSource); f.Add(54,&pVisibleTracker); f.Add(55,&buildingSchemas); f.Add(56,&pIntersectHolder); f.Add(57,&pIntersectLineHolder); f.Add(58,&vPrevCameraPosition); f.Add(59,&nFramesSameCameraPosition); f.Add(60,&nDeltaTime); f.Add(61,&pCombatMelody); f.Add(62,&pTestWeatherEffect); f.Add(63,&bTutorialMode); f.Add(64,&bLeaveBlockedByScript); f.Add(65,&nLeaveBlockReason); f.Add(66,&nSequenceDepth); f.Add(67,&bSpecialFirstMissionMode); f.Add(68,&bEnableFeatureReenter); f.Add(69,&sequenceCameraPoses); f.Add(70,&pExecLocator); f.Add(71,&pPWLImage); return 0; }
 
 private:
 	void InternalStep();
@@ -257,7 +271,7 @@ protected:
 public:
 	CMission();
 
-	bool Initialize( int nTemplateID, int nVariantID, NScenario::CScenarioZone *pZone, const vector<string> &params, NRPG::CGlobalGame *pGlobalGame );
+	bool Initialize( int nTemplateID, int nVariantID, NScenario::CScenarioZone *pZone, const vector<string> &params, NRPG::CGlobalGame *pGlobalGame, NDb::CUITexture *pPWLImage = 0 );
 	void Terminate();
 
 	void Command( NWorld::CCommand *pCmd );
@@ -303,6 +317,7 @@ public:
 	void SetCameraParams( ECameraType eType, float fFOV, const ICamera::SCameraLimits &limits );
 	void FreezeCamera( bool bState );
 	void FocusCameraOnUnit( NWorld::CUnit *pUnit );
+	void FocusCameraOnItem( NWorld::IItem *pItem );	// retail CMissionBase @0x1a1740 (vtbl+0xc4)
 	int GetCutFloor();
 	void SetCutFloor( int nFloor );
 	const CVec3& GetCameraCP() const;

@@ -94,7 +94,7 @@ class CAILogicAttack: public CAILogic
 	//
 public:
 	CAILogicAttack() {}
-	CAILogicAttack( IAIState *_pState, IAILogContainer *_pLog, CAIJob *_pParentJob );
+	CAILogicAttack( SAIState *_pState, IAILogContainer *_pLog, CAIJob *_pParentJob );
 	//
 	virtual void MakeDecision();
 	virtual bool CanSkip() const;
@@ -102,7 +102,7 @@ public:
 	virtual void OnPrepare( CAIJob *pJob );
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CAILogicAttack::CAILogicAttack( IAIState *_pState, IAILogContainer *_pLog, CAIJob *_pParentJob ): 
+CAILogicAttack::CAILogicAttack( SAIState *_pState, IAILogContainer *_pLog, CAIJob *_pParentJob ): 
 	CAILogic( _pState, _pLog, _pParentJob )
 {
 	const int N_AP_TO_MOVE = 12;
@@ -248,7 +248,7 @@ void CAILogicAttack::MakeDecision()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CAILogic* CreateAttackAILogic( IAIState *pState, IAILogContainer *pLog, CAIJob *pParentJob )
+CAILogic* CreateAttackAILogic( SAIState *pState, IAILogContainer *pLog, CAIJob *pParentJob )
 {
 	ASSERT( IsValid( pState ) );
 	ASSERT( IsValid( pLog ) );
@@ -262,7 +262,7 @@ CAILogic* CreateAttackAILogic( IAIState *pState, IAILogContainer *pLog, CAIJob *
 		return 0;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CAILogic* CreateDefendAILogic( IAIState *pState, IAILogContainer *pLog, CAIJob *pParentJob )
+CAILogic* CreateDefendAILogic( SAIState *pState, IAILogContainer *pLog, CAIJob *pParentJob )
 {
 	ASSERT( 0 );
 	return 0;

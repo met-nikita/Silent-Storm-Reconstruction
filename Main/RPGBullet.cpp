@@ -138,6 +138,7 @@ void PerformMeleeAttackPortion( NWorld::IWorld * /*pWorld*/, NAI::IAIMap *pAIMap
 	for ( vector<IAttackable*>::const_iterator it = ignores.begin(); it != ignores.end(); ++it )
 		ignore.push_back( *it );
 	CAttackPortion tmp( a );
+	tmp.rTtrajectory = ray;   // Jan03 write the combat code reads (see CGame::ProcessRangedAttackPortion note)
 	pAIMap->Trace( ray, &intersect, NWorld::TS_FRAGMENTED );
 
 	for ( vector<NAI::SInterval>::iterator i = intersect.begin(); i != intersect.end(); ++i )

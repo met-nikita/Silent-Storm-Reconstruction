@@ -36,7 +36,7 @@ namespace NAnimation
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 namespace NAI
 {
-CBasicShare<int, CLoadGeometryInfo> shareAIModel(110); // ������������ ����� � MakeBuilding ��� ����������� ����� ����� ����������� � ���������
+CBasicShare<int, CLoadGeometryInfo> shareAIModel(110); // also used in MakeBuilding to determine which chunks are present in the geometry
 CBasicShare<int, CFileSkinPointsLoad> shareSkinPoints(111);
 CBasicShare<int, NGScene::CFileAIBind> shareAIBinds(118);
 CBasicShare<int, CLoadTwoBSPTrees> shareBSPTrees(150);
@@ -299,6 +299,7 @@ public:
 	void RemoveHull( int nIndex );//CConvexHull *pHull );
 	void SetLinkedBound( int nIndex, const SBound &b );
 	CConvexHull* GetHull( CObjectBase *pSrc, SBound *pBound );
+	void AddHullBounds( CObjectBase *pSrc, SBoundCalcer *pRes, bool *pbFound );
 	void InformTrackers( const SBound &b, int nMask, bool bDoorFlipped = false );
 	void AddInform( const SBound &b, int nMask, bool bTraverseUp = true );
 	void CallCachedInforms();
@@ -348,6 +349,10 @@ class CAIMap: public IAIMap, public COrdinarySyncDst<NWorld::IVisObj,CAIMap>, pu
 	void LoadSkinGeometry( NDb::CAIGeometry *pAIGeom, NDb::CSkeleton *pSkeleton );
 	//
 	CConvexHull* GetHull( CObjectBase *pSrc, SBound *pBound );
+public:
+	// retail IAIMap vtbl+0x2c @0x465800 -- see aiMap.h.
+	virtual bool GetObjectBound( SBound *pRes, CObjectBase *pSrc );
+private:
 	template<class TTest>
 		void SelectHulls( SHullSet *pRes, const TTest &f, CVolumeNode *pNode, const SFloorsSelector &fSelect, int nMask, bool bSelect2DoorHulls = false )
 		{
@@ -665,6 +670,25 @@ CConvexHull* CVolumeNode::GetHull( CObjectBase *pSrc, SBound *pBound )
 	return 0;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// Collect the stored bound of EVERY live hull registered for pSrc into the calcer (retail
+// GetObjectBound @0x465800 unions ALL of the user's hulls, not just the first).
+void CVolumeNode::AddHullBounds( CObjectBase *pSrc, SBoundCalcer *pRes, bool *pbFound )
+{
+	if ( this == 0 )
+		return;
+	for ( int i = 0; i < hulls.size(); ++i )
+	{
+		CConvexHull *pHull = hulls[i].pHull;
+		if ( IsValid( pHull ) && pSrc == pHull->src.pUserData )
+		{
+			pRes->Add( hullBounds[i] );
+			*pbFound = true;
+		}
+	}
+	for ( int k = 0; k < 8; ++k )
+		GetNode(k)->AddHullBounds( pSrc, pRes, pbFound );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 // CAIMap
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CAIMap::CAIMap( NWorld::IWorld *_pWorld )
@@ -921,6 +945,24 @@ void CAIMap::LoadSkinGeometry( NDb::CAIGeometry *pAIGeom, NDb::CSkeleton *pSkele
 CConvexHull* CAIMap::GetHull( CObjectBase *pSrc, SBound *pBound )
 {
 	return pRoot->GetHull( pSrc, pBound );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail NAI::CAIMap::GetObjectBound @0x465800: zero the out SBound; gather the user's hulls
+// (retail CUserHullsTracker::GetHulls -- dev equivalent: the octree's per-hull src.pUserData link,
+// the same registration GetHull walks); no hulls -> false; else SBoundCalcer-union each hull's
+// stored bound and Make() the result -> true.
+bool CAIMap::GetObjectBound( SBound *pRes, CObjectBase *pSrc )
+{
+	pRes->s.ptCenter = VNULL3;
+	pRes->s.fRadius = 0;
+	pRes->ptHalfBox = VNULL3;
+	SBoundCalcer bc;
+	bool bFound = false;
+	pRoot->AddHullBounds( pSrc, &bc, &bFound );
+	if ( !bFound )
+		return false;
+	bc.Make( pRes );
+	return true;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CAIMap::Sync( ESyncType st )

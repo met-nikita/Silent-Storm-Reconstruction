@@ -88,15 +88,19 @@ void CAILostAllyEvent::Modify( SAIUnitState *pState )
 	pState->RemoveAlly( pAlly.GetPtr() );
 }
 
-// @0x3c470: a NEW corpse goes on record, and its own AI unit becomes a suspect while still valid
-// (a fresh corpse keeps its AI object briefly).
+// @0x3c470: a NEW corpse goes on record; then retail reads the corpse server's pKiller (+0x1f8) and
+// promotes THE KILLER to possibleEnemy. ⚠ pKiller is never written anywhere in retail (byte-scan
+// proven: only ctor-null + the serializer), so the promotion arm is retail-inert -- a noticed corpse
+// only lands in knownCorpses. The dev predecessor promoted the CORPSE itself (more aggressive than
+// retail) -- removed.
 void CAICorpseEvent::Modify( SAIUnitState *pState )
 {
 	IAIUnit *p = pCorpse.GetPtr();
 	if ( pState->IsKnownCorpse( p ) )
 		return;
 	pState->AddKnownCorpse( p );
-	IAIUnit *pAI = GetAIUnit( p->GetUnitServer() );
+	NWorld::CUnitServer *pUS = p->GetUnitServer();
+	IAIUnit *pAI = GetAIUnit( pUS != 0 ? pUS->pKiller.GetPtr() : 0 );
 	if ( IsValid( pAI ) )
 		pState->AddPossibleEnemy( pAI );
 }

@@ -28,6 +28,12 @@ public:
 		int nP1;
 		int nP2;
 		float fRest;
+		// retail 20-byte SStick (PDB NAnimation::CAParticle::SStick, +0xc): the stick-relaxation
+		// divisor fInvMasses[nP1]+fInvMasses[nP2], PRECOMPUTED by CParticleSkeleton::Init @0xed8c0
+		// and read (with a !=0 guard) by the Step @0xee9c0 sticks loop instead of a live sum.
+		// Also restores the retail element size for the raw-POD save stream. Aggregate (no ctor) --
+		// the addSofts[] brace initializers rely on it; missing trailing initializers zero-fill.
+		float fSumInvMasses;
 		int nMax;
 	};
 protected:
@@ -82,12 +88,17 @@ private:
 	bool bIsFalling = false;
 
 	void Step();
+	void BeStopped();   // retail @0xea4f0: resting-cloud snapshot + corpse bound + WorldInformCorpseStop
 	void Init( STime t, SSkeletonPose &pose, SSkeletonPose &nextPose, const CVec3 &impact );
 	void CalcParticles( vector<CVec3> *pParticles, SSkeletonPose &pose );
 	void CheckIfCollided( STime t, SSkeletonPose *pPose, SSkeletonPose *pNextPose );
 public:
+	// AddDynamics stores these before the lazy Init (retail CSkeletonAnimator::AddDynamics @0xdd4e0:
+	// ptWhereImpact from arg 4, bIsFalling from arg 9, pServer -> the 3-arg ctor @0xed670).
+	void SetImpactSource( const CVec3 &pt, bool bFall ) { ptWhereImpact = pt; bIsFalling = bFall; }
 	CParticleSkeleton() {}
-	CParticleSkeleton( NGScene::CCInt *_pFloor, CPtrFuncBase<CFileSkeletonInfo> *_pSkeleton );
+	CParticleSkeleton( NGScene::CCInt *_pFloor, CPtrFuncBase<CFileSkeletonInfo> *_pSkeleton,
+		NWorld::CUnitServer *_pServer = 0 );
 	virtual bool NeedUpdate( STime t );
 	virtual void GetFrame( STime t, SSkeletonPose *pPose );
 };

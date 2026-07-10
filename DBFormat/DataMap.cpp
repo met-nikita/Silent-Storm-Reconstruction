@@ -88,6 +88,7 @@ void CChapterMap::Import()
 	}
 
 	NDatabase::ImportField( "Background", &pBackground );
+	NDatabase::ImportField( "PWLImageID", &pPWLImage );		// retail CChapterMap import (s2_dbimport.h:3274): the chapter loading splash
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CTemplate

@@ -7,6 +7,7 @@
 #include "..\DBFormat\DataInterface.h"
 #include "Interface.h"
 #include "UIWrap.h"
+#include "UIML.h"     // BUG 8: NUI::IML / CreateML -- retail draws the cursor caption through the CML engine (outline + pt-size)
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 namespace NGfx
 {
@@ -36,6 +37,10 @@ protected:
 	CTimeCounter sTimer;
 	CDGPtr<CCTime> pTimer;
 	CObj<CTextDraw> pText;
+	// BUG 8: retail draws the cursor ToHit/AP caption through the CML markup engine (IML), NOT the legacy
+	// GText CTextDraw -- so it renders the DB-string markup (Courier, 16pt, colour, 1px outline) like retail.
+	// The shared CTextDraw stays GText (14 other consumers); only the cursor gets its own IML. Transient.
+	CObj<IML> pTextML;
 	CObj<CImageDraw> pImage;
 	CObj<CImageDraw> pOldImage;
 	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&bShow); f.Add(3,&fThreshold1); f.Add(4,&fThreshold2); f.Add(5,&fAcceleration); f.Add(6,&sLastUpdateTime); f.Add(7,&sTransitionTime); f.Add(8,&sInfo); f.Add(9,&sOldInfo); f.Add(10,&sTimer); f.Add(11,&pTimer); f.Add(12,&pText); f.Add(13,&pImage); f.Add(14,&pOldImage); return 0; }
@@ -74,6 +79,7 @@ CCursor::CCursor( bool _bShow ):
 	bindX( "cursor_x" ), bindY( "cursor_y" ), bShow(_bShow)
 {
 	pText = new CTextDraw();
+	pTextML = CreateML();   // BUG 8: the cursor's own CML markup text (renders the DB-string font/colour/outline)
 	pImage = new CImageDraw();
 	pOldImage = new CImageDraw();
 
@@ -115,6 +121,8 @@ void CCursor::SetCursor( const SCursorInfo &_sInfo )
 
 	sInfo = _sInfo;
 	pText->SetText( _sInfo.wsText );
+	if ( IsValid( pTextML ) )
+		pTextML->SetText( _sInfo.wsText, 0 );   // 0 = process the <font>/<color> tags from the DB strings
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 float CCursor::AccelerateAxis( float fDelta, const STime &sDelta )
@@ -173,8 +181,19 @@ void CCursor::Draw( const STime &sTime, NGScene::I2DGameView *pView )
 			pImage->SetColor( NGfx::SPixel8888( 0xFF, 0xFF, 0xFF, 0xFF * fCoeff ) );
 			pImage->Draw( 0, sTime, pView );
 
-			pText->SetPosition( SPoint( sPos.x + sInfo.pTexture->nWidth, sPos.y ) );
-			pText->Draw( 0, sTime, pView );
+			// BUG 8: draw the caption through the cursor's OWN CML markup engine (retail cursor path), so the
+			// DB-string markup renders as retail does -- Courier, 16pt, the DB colour, and the 1px black
+			// outline (which GText cannot draw). Scale the virtual (1024x768) text anchor to screen, generate
+			// the ML at full width (the short caption never wraps), and Render.
+			if ( IsValid( pTextML ) )
+			{
+				CVec2 vScr = pView->GetViewportSize();
+				SPoint sTextVirt( sPos.x + sInfo.pTexture->nWidth, sPos.y );
+				SPoint sScrPos( (int)( sTextVirt.x * vScr.x / 1024.0f ), (int)( sTextVirt.y * vScr.y / 768.0f ) );
+				pTextML->Generate( pView, (int)vScr.x );
+				SRect sScrWindow( sScrPos.x, sScrPos.y, (int)vScr.x, (int)vScr.y );
+				pTextML->Render( pView, sScrPos, sScrWindow );
+			}
 		}
 		if ( IsValid( sOldInfo.pTexture ) )
 		{

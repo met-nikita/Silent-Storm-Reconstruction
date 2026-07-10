@@ -2,9 +2,11 @@
 //
 #include "aiUnitState.h"
 #include "aiUnit.h"        // IAIUnit
-#include "aiState.h"       // IAIState
+#include "aiState.h"       // SAIState
 #include "aiPlayer.h"      // IAIPlayer::GetUnits / IsContain
 #include "wUnitServer.h"   // CanFight
+#include "..\DBFormat\DataRPG.h"  // NDb::EShootMode -- BEFORE aiInventory.h (its NDB:: fwd-decl typo)
+#include "aiInventory.h"   // CAIInventory::GetBestFireArms (the FindMostDangerousEnemy to-hit metric)
 //
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // SAIUnitState - per-unit threat tracker. See aiUnitState.h for the fidelity/scope notes (event-driven
@@ -67,7 +69,7 @@ void SAIUnitState::AddEnemy( IAIUnit *p )         { if ( IsValid( p ) ) { AddUni
 void SAIUnitState::RemoveEnemy( IAIUnit *p )      { RemoveFrom( &enemies.data.units, p ); enemies.SetModified(); }
 void SAIUnitState::AddPossibleEnemy( IAIUnit *p ) { if ( IsValid( p ) ) { AddUnique( &possibleEnemies.data.units, p ); possibleEnemies.SetModified(); } }
 void SAIUnitState::RemovePossibleEnemy( IAIUnit *p ) { RemoveFrom( &possibleEnemies.data.units, p ); possibleEnemies.SetModified(); }
-void SAIUnitState::AddAlly( IAIUnit *p )          { if ( IsValid( p ) ) { AddUnique( &allies.data.units, p ); allies.SetModified(); } }
+void SAIUnitState::AddAlly( IAIUnit *p )          { if ( IsValid( p ) && p != pUnit.GetPtr() ) { AddUnique( &allies.data.units, p ); allies.SetModified(); } }   // retail AddAlly @0xb1630: never yourself
 void SAIUnitState::RemoveAlly( IAIUnit *p )       { RemoveFrom( &allies.data.units, p ); allies.SetModified(); }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool SAIUnitState::IsKnownCorpse( IAIUnit *p ) const
@@ -92,7 +94,10 @@ void SAIUnitState::Reset()
 // is the dev equivalent of the release's event-maintained seen-set (CAIEventTracker::OnSeeEnemy/OnLostEnemy
 // -> SAIUnitState AddEnemy/RemoveEnemy); the release's transient-stimulus events (bullet/grenade/heard) have
 // no dev emitter and are not modelled. Enemies the unit no longer sees but saw last think are remembered as
-// possible enemies. Allies are full (own team shares positions).
+// possible enemies. Allies are EVENT-ONLY (retail semantics): the list is populated solely by
+// CAIAllyNeedHelpEvent (an ally who called for help) and drained by CAILostAllyEvent / OnDie -- it is
+// NOT a team roster (the dev's roster refill made pAlly "the nearest teammate" and would have sent every
+// idle unit marching at its neighbor once the ally-assist rung landed).
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void SAIUnitState::Populate()
 {
@@ -109,14 +114,12 @@ void SAIUnitState::Populate()
 	for ( int k = (int)possibleEnemies.data.units.size() - 1; k >= 0; --k )
 		if ( !IsValid( possibleEnemies.data.units[ k ] ) )
 			possibleEnemies.data.units.erase( possibleEnemies.data.units.begin() + k );
-	allies.data.units.clear();          allies.SetModified();
-	IAIState *pState = IsValid( pUnit ) ? pUnit->GetAIState() : 0;
+	SAIState *pState = IsValid( pUnit ) ? pUnit->GetAIState() : 0;
 	if ( !IsValid( pState ) )
 		return;
 	IAIPlayer *pAllyPlayer = pState->GetAllyAIPlayer();
 	IAIPlayer *pEnemyPlayer = pState->GetEnemyAIPlayer();
 	const bool bUnitInAlly = IsValid( pAllyPlayer ) && pAllyPlayer->IsContain( pUnit );
-	IAIPlayer *pMine = bUnitInAlly ? pAllyPlayer : pEnemyPlayer;
 	IAIPlayer *pFoes = bUnitInAlly ? pEnemyPlayer : pAllyPlayer;
 	// the unit's currently-visible set (fog of war)
 	vector< CPtr<NWorld::CUnit> > visible;
@@ -137,13 +140,6 @@ void SAIUnitState::Populate()
 					if ( (*j).GetPtr() == (*i).GetPtr() ) { AddPossibleEnemy( *i ); break; }   // lost from sight -> remembered
 			}
 		}
-	}
-	if ( IsValid( pMine ) )
-	{
-		vector< CPtr<IAIUnit> > *pUnits = pMine->GetUnits();
-		for ( vector< CPtr<IAIUnit> >::iterator i = pUnits->begin(); i != pUnits->end(); ++i )
-			if ( (*i).GetPtr() != pUnit.GetPtr() && IsFightable( *i ) )
-				AddAlly( *i );
 	}
 	// promote: a suspect that is now a visible/known enemy this think is no longer a mere "possible enemy"
 	// (mirrors retail's Enemy event RemovePossibleEnemy). Bounds the preserved set together with the invalid-prune
@@ -166,28 +162,61 @@ void SAIUnitState::Update()   // @0x004b1030
 	CheckScared();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// @0x004b0b10: the release scores each enemy by the best to-hit of the unit's weapons at the nearest
-// cluster; reconstructed here as the nearest live enemy (the cluster + to-hit metric is deferred).
+// @0x004b0b10 -- CONVERGED to the retail two-phase pick (was plain nearest-live-enemy, which FLIPPED
+// pEnemy between advancing player units on every step -> selfModified -> CheckForUpdates cancelled the
+// in-flight attack plan mid-approach -> the AI ran its shoot approach over and over and never fired):
+//  phase 1: the NEAREST CLUSTER -- every valid, fightable enemy whose distance is within +-1.5 units
+//           (@0xb0b10 const 0x3fc00000) of the closest one; a decisively closer enemy resets the cluster.
+//  phase 2: within the cluster, the enemy the unit's own weapons hit BEST (CAIInventory::GetBestFireArms
+//           max to-hit; the first candidate always beats the empty pick). Stable across an approach: the
+//           winner only changes when the cluster membership or the to-hit ordering genuinely changes.
 void SAIUnitState::FindMostDangerousEnemy()
 {
-	CPtr<IAIUnit> pBest = 0;
-	float fBest = float( 0xFFF );
+	vector< CPtr<IAIUnit> > cluster;
+	float fBest = 4095.0f;
 	if ( IsValid( pUnit ) )
 	{
 		CVec3 me = pUnit->GetPosition().GetCP();
 		for ( vector< CPtr<IAIUnit> >::iterator i = enemies.data.units.begin(); i != enemies.data.units.end(); ++i )
-			if ( IsAlive( *i ) )
+		{
+			if ( !IsFightable( *i ) )
+				continue;
+			float d = fabs( (*i)->GetPosition().GetCP() - me );
+			if ( fabs( d - fBest ) >= 1.5f )
 			{
-				float d = fabs( (*i)->GetPosition().GetCP() - me );
-				if ( d < fBest ) { fBest = d; pBest = *i; }
+				if ( d < fBest )
+				{
+					cluster.clear();
+					cluster.push_back( *i );
+					fBest = d;
+				}
 			}
+			else
+				cluster.push_back( *i );
+		}
+	}
+	CPtr<IAIUnit> pBest = 0;
+	int nBestHit = 0;
+	for ( int k = 0; k < (int)cluster.size(); ++k )
+	{
+		IAIUnit *e = cluster[k].GetPtr();
+		int nToHit = 0, nHitCover = 0, nQuality = 0;
+		NDb::EShootMode eMode = (NDb::EShootMode)0;
+		CAIInventory *pInv = IsValid( pUnit ) ? pUnit->GetAIInventory() : 0;
+		if ( IsValid( pInv ) && IsValid( e->GetUnitServer() ) )
+			pInv->GetBestFireArms( pUnit->GetUnitPosition(), e, pUnit->GetAP(), &nHitCover, &nQuality, &eMode, &nToHit );
+		if ( nToHit > nBestHit || !IsValid( pBest ) )
+		{
+			nBestHit = nToHit;
+			pBest = e;
+		}
 	}
 	if ( pEnemy.GetPtr() != pBest.GetPtr() )
 		selfModified.SetModified();
 	pEnemy = pBest;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void SAIUnitState::FindNearestPossibleEnemy()
+void SAIUnitState::FindNearestPossibleEnemy()   // @0x004b08d0
 {
 	CPtr<IAIUnit> pBest = 0;
 	float fBest = float( 0xFFF );
@@ -201,6 +230,11 @@ void SAIUnitState::FindNearestPossibleEnemy()
 				if ( d < fBest ) { fBest = d; pBest = *i; }
 			}
 	}
+	// retail @0x4b08d0: a CHANGED winner marks the state modified, exactly as FindMostDangerousEnemy /
+	// FindNearestAlly do -- this is what re-fires the reaction (the HUNT rung reads pPossibleEnemy) when a
+	// suspect appears, resolves, or is superseded. The dev predecessor silently updated the pointer.
+	if ( pPossibleEnemy.GetPtr() != pBest.GetPtr() )
+		selfModified.SetModified();
 	pPossibleEnemy = pBest;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -236,9 +270,21 @@ void SAIUnitState::CheckScared()
 	if ( (int)enemies.data.units.size() <= N_SCARE_ENEMIES )
 		return;
 	CVec3 me = pUnit->GetPosition().GetCP();
-	for ( vector< CPtr<IAIUnit> >::iterator i = allies.data.units.begin(); i != allies.data.units.end(); ++i )
-		if ( IsAlive( *i ) && fabs( (*i)->GetPosition().GetCP() - me ) < F_ALLY_NEAR )
-			return;   // an ally is close -> hold
+	// Retail @0xb0ea0 queries the WORLD roster for teammates in range (SAIState::GetUnitsAtRange(cp, 9.0,
+	// exclude self)) -- NOT s.allies (which is the event-only help-caller list). Walk the unit's own team.
+	SAIState *pSt = pUnit->GetAIState();
+	IAIPlayer *pAllyPlayer = IsValid( pSt ) ? pSt->GetAllyAIPlayer() : 0;
+	IAIPlayer *pEnemyPlayer = IsValid( pSt ) ? pSt->GetEnemyAIPlayer() : 0;
+	const bool bUnitInAlly = IsValid( pAllyPlayer ) && pAllyPlayer->IsContain( pUnit );
+	IAIPlayer *pMine = bUnitInAlly ? pAllyPlayer : pEnemyPlayer;
+	if ( IsValid( pMine ) )
+	{
+		vector< CPtr<IAIUnit> > *pTeam = pMine->GetUnits();
+		for ( vector< CPtr<IAIUnit> >::iterator i = pTeam->begin(); i != pTeam->end(); ++i )
+			if ( (*i).GetPtr() != pUnit.GetPtr() && IsAlive( *i )
+				&& fabs( (*i)->GetPosition().GetCP() - me ) < F_ALLY_NEAR )
+				return;   // an ally is close -> hold
+	}
 	bScared = true;
 	selfModified.SetModified();
 }

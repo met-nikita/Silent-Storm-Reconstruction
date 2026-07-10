@@ -67,7 +67,7 @@ class CBuildingGrid : public CVersioningBase
 	bool bStabilityUpdate;
 	int nBaseFloor;
 	
-	//����������� �������� /ComputeAuxValues()/
+	// computed values /ComputeAuxValues()/
 	SPlane6 box;
 	int nCutFloor; // for WYSIWYG
 	unordered_map<int, bool> visibleLayers;
@@ -108,12 +108,12 @@ public:
 	int  GetBaseFloor() const { return nBaseFloor; }
 	void SetCutFloor( int nFloor );
 	int  GetCutFloor() const { return nCutFloor; }
-	// ������������ ������ �� ����� (MapEditor)
+	// building visualization by layers (MapEditor)
 	void SetVisibleLayers( const vector<int> &layers );
 	void SetOnlyCutFloorVisible( bool bVis );
 	bool IsLayerVisible( int nLayerID ) const;
 	bool IsOnlyCutFloorVisible() const;
-	// ����� ������
+	// building parts
 	void UpdatePart( const SPoint3 &pt );
 	void GetUpdatedParts( vector<SPart> *pParts );
 	void GetBrokenSpots( vector<SPoint3> *pSpots );   // retail @0xc3170: swaps the destroyed-voxel list out to the caller

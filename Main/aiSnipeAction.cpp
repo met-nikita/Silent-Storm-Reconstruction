@@ -15,6 +15,7 @@
 #include "aiRouteMisc.h"      // NAI::GetNearestPlaces (flood the target's reachable places)
 #include "wMain.h"            // NWorld::CWorld: GetGame / GetPathNetwork
 #include "RPGGame.h"          // NRPG::IGame::CheckPositionVisibility
+#include "RPGUnit.h"          // NRPG::CUnit::GetSightFOV (@0x2ba6c0) for the retail sight cone
 #include "..\DBFormat\DataRPG.h" // NDb::SM_Snipe
 //
 #include "aiActions.h"
@@ -119,10 +120,15 @@ void CAIBeginSnipeAction::GetInfoInner( const SPlaceWithAP &, SInfo *pInfo ) con
 	IPathNetwork *pNet = pWorld->GetPathNetwork();
 	if ( !IsValid( pGame ) || !IsValid( pNet ) )
 		return;
+	// retail @0xa4810: the sniper's range/FOV hoisted once (game vtbl+0x34 + GetSightFOV @0x2ba6c0),
+	// then the 4-arg CheckPositionVisibility per flee place.
+	NRPG::CUnit *pRPG = pU->GetRPGUnit();
+	float fRange = pGame->GetUnitSightDistance( pRPG );
+	float fFOV = IsValid( pRPG ) ? pRPG->GetSightFOV() : FP_2PI;
 	vector<SPathPlace> places;
 	GetNearestPlaces( pEnemy->GetUnitServer(), pEnemy->GetPosition().p, pEnemy->GetMaxAP(), NAI::RUN, &places );
 	for ( vector<SPathPlace>::const_iterator i = places.begin(); i != places.end(); ++i )
-		if ( !pGame->CheckPositionVisibility( selfPos, SPosition( *i, pNet ) ) )
+		if ( !pGame->CheckPositionVisibility( selfPos, SPosition( *i, pNet ), fRange, fFOV ) )
 			return;                                      // a place the target could reach unseen -> cannot snipe
 	pInfo->pTarget = pEnemy;
 	pInfo->bCanDo = true;

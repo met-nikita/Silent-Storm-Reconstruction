@@ -362,14 +362,14 @@ void CAILogChangeWeapon::GetItemPosition( NRPG::IInventoryItem *pItem, CTPoint<i
 			return;
 		}
 	//
-	ASSERT( 0 ); // � inventory �� ��������� �������� item-�
+	ASSERT( 0 ); // the requested item was not found in the inventory
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CAILogChangeWeapon::GetCommands( list< CPtr<NWorld::CCommand> > *Commands )
 {
 	NWorld::CUnitServer *pUnitServer = pAIUnit->GetUnitServer();
 	NRPG::IInventory *pInventory = pUnitServer->GetUnitRPG()->GetInventory();
-	// ������� ������ � BackPack
+	// put the weapon away into the BackPack
 	if ( IsValid( pOldWeapon ) )
 	{
 		CPtr<NRPG::IInventoryItem> pOldItem = pOldWeapon->GetInventoryItem();
@@ -382,7 +382,7 @@ void CAILogChangeWeapon::GetCommands( list< CPtr<NWorld::CCommand> > *Commands )
 				new NWorld::CCmdMoveInventoryItem( From, To ) ) );
 		}
 	}
-	// ���������� ����� ������ � Slot
+	// move the new weapon into the Slot
 	if ( IsValid( pNewWeapon ) )
 	{
 		CPtr<NRPG::IInventoryItem> pNewItem = pNewWeapon->GetInventoryItem();

@@ -40,6 +40,8 @@ public:
 	virtual void RemoveDelayed( IAIJob *pAIJob );
 	virtual void WaitForJob( IAIJob *pAnticipantJob, IAIJob *pExpectedJob );
 	virtual void Resume( IAIJob *pAnticipantJob );
+	// @0x58b20: `return 0 < nHighestPriJobs;` -- any highest-priority (pass-calc / pathfinding) job pending.
+	virtual bool HasPassCalcerJobs() { return nHighestPriJobs > 0; }
 	virtual void DebugOutput();
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -90,7 +92,7 @@ void CAIJobManager::Refresh()
 		if ( !IsValid( *i ) && find( jobsToRemove.begin(), jobsToRemove.end(), *i ) == jobsToRemove.end() )
 			jobsToRemove.push_back( *i );
 	}
-	// удаляем старые задачи
+	// пїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ
 	for ( list< CPtr<IAIJob> >::iterator i = jobsToRemove.begin(); i != jobsToRemove.end(); ++i )
 	{
 		vector< CPtr<IAIJob> >::iterator t = find( jobs.begin(), jobs.end(), *i );
@@ -102,7 +104,7 @@ void CAIJobManager::Refresh()
 	}
 	// 
 	jobsToRemove.clear();
-	// обновляем
+	// пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ
 	nCurrentJob = 0;
 	//DebugOutput();
 }
@@ -134,10 +136,10 @@ void CAIJobManager::Remove( IAIJob *pAIJob )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CAIJobManager::CanSkip()
 {
-	// если нет задач
+	// пїЅпїЅпїЅпїЅ пїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅ
 	if ( jobs.empty() )
 		return true;
-	// если никто не хочет думать :)
+	// пїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅ пїЅпїЅ пїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ :)
 	for ( int k = 0; k < jobs.size(); ++k )
 	{
 		CPtr<IAIJob> &pAIJob = jobs[k];

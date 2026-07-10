@@ -52,6 +52,10 @@ void UpdateBinds();
 ////
 float GetControlCoeff( const string &szControl );
 void SetControlCoeff( const string &szControl, float fCoeff );
+// SetCommandCoeff @0x3d0880 -- set a bound COMMAND's coeff (per-command, not per-control). Scales that
+// command's fDelta (Bind.cpp: fDelta = nValue * SCommand::fCoeff / 100000). This is the hook the retail
+// camera sensitivity/invert config drives (UpdateCameraFromConfig @0xcd180, Camera.cpp).
+void SetCommandCoeff( const string &szCommand, float fCoeff );
 ////
 bool GetEvent( SEvent *sEvent );
 void PostEvent( const string &sEvent );

@@ -261,7 +261,7 @@ float CToHitCalcer::GetCA()
 	if ( pUnitMission->HasPerk( 0x48 ) )
 		fTArea = 0;
 	float fTCover = fHitCover / 100.f;
-	float fScopeFactor = sWeaponInfo.fScopeFactor; // 20 - ������� ������ // 100 - ����������� ��������
+	float fScopeFactor = sWeaponInfo.fScopeFactor; // 20 - normal weapon // 100 - sniper rifle
 	float fDistCoeff = DistanceFunc( nDistance, fScopeFactor );
 	return ( (100-fDistCoeff)*(fTCover*fTArea)+fDistCoeff ) / 100.0f;
 }
@@ -535,7 +535,7 @@ float CGrenadeToHitCalcer::GetMaxImp()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 float CGrenadeToHitCalcer::GetRelWeight()
 {
-	return float(pGrenade->GetDBGrenade()->pItem->nWeight) / 1000.f; // �.�. � ������������
+	return float(pGrenade->GetDBGrenade()->pItem->nWeight) / 1000.f; // i.e. in kilograms
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 float CGrenadeToHitCalcer::GetMaxGrenadeVelocity()

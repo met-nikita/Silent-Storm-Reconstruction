@@ -53,7 +53,7 @@ public:
 	float fMovePenalty;
 	SWeaponInfo sWeaponInfo;
 	CPtr<IUnitMission> pUnitMission;
-	int nExtraAP; // ��� careful shot
+	int nExtraAP; // for careful shot
 	int nSnipeAP;
 	float fHitCover;
 	int nDistance;
@@ -68,7 +68,7 @@ public:
 	bool bNight;
 	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&nSkill); f.Add(3,&fToHit); f.Add(4,&fMovePenalty); f.Add(5,&sWeaponInfo); f.Add(6,&pUnitMission); f.Add(7,&nExtraAP); f.Add(8,&nSnipeAP); f.Add(9,&fHitCover); f.Add(10,&nDistance); f.Add(11,&ptAttacker); f.Add(12,&bFirstRound); f.Add(13,&eCurPose); f.Add(14,&ptIllumination); f.Add(15,&nBullet); f.Add(16,&pWeaponItem); f.Add(17,&bBackStab); f.Add(18,&pUnitServer); f.Add(19,&bNight); return 0; }
 
-	// ������� ������������� �������� � xls ��������
+	// functions correspond to columns in the xls table
 	virtual float GetStance();
 	virtual float GetD1();
 	virtual float GetD2();
@@ -95,8 +95,8 @@ public:
 
 	virtual void FillWeaponInfo();
 	virtual void Prepare();
-	virtual int GetToHit(); // �������� �������� ToHit
-	virtual void Log();		// ������� Log
+	virtual int GetToHit(); // get the ToHit value
+	virtual void Log();		// output Log
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CUnitToHitCalcer

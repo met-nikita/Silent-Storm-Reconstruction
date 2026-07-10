@@ -4,23 +4,12 @@
 #include "wDebris.h"		// NWorld::CDebrisController
 #include "RPGItem.h"		// NRPG::IInventoryItem
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-namespace NRPG
-{
-////////////////////////////////////////////////////////////////////////////////////////////////////
-// CreateHintItem @0x6a21a0 -- DEFERRED STUB.
-// Retail builds an in-world hint pickup from db item 0x1b6 ( NDb::GetRPGItem(0x1b6,1) ) wrapped in
-// CSimpleItem<IHintItem>. That IHintItem interface / in-world hint-item subsystem does not exist in
-// this fork (cf. wMain.cpp CWorld::AddNextUIHint: "this predecessor fork has no in-world hint-item
-// subsystem, so there is nothing to remove"). Returning 0 keeps PlaceHintsToMap behaviour-neutral:
-// with no item created the per-slot placement branch is skipped, so no hint pickups are spawned --
-// exactly matching a fork that has none. Promote to RPGItem.h + a real CSimpleItem<IHintItem> only
-// if/when the hint-item subsystem is reconstructed.
-IInventoryItem *CreateHintItem()
-{
-	return 0;
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-} // namespace NRPG
+// NRPG::CreateHintItem @0x6a21a0 is now REAL (RPGItemSet.cpp, declared in RPGItem.h): db item 0x1b6
+// wrapped in the CSimpleItem<IHintItem> analog CHintItem. The former deferred stub here is gone --
+// the hint-item subsystem (NRPG::IHintItem + the CMissionUI CHintIcon overlay pass, retail
+// UpdateVisibleItems @0x2130c0) exists in this fork now. NOTE: PlaceHintsToMap still has no caller
+// in this fork (the retail world-side hint-slot feed is not wired yet), so no pickups spawn until
+// that lands.
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 namespace NAI
 {
@@ -71,7 +60,7 @@ void PlaceHintsToMap( CDebrisController *pDebris, NAI::IAIMap *pMap, const vecto
 			CQuat rot( ToRadian( slot->pos.fRotation ), CVec3( 0, 0, 1 ) );
 			CVec3 ptOnSurface;
 			NAI::FindClosePositionOnSurface( pMap, slot->pos.ptPos, &ptOnSurface );
-			pDebris->AddFrozenItem( ptOnSurface, rot, pItem, slot->pos.nFloor );
+			pDebris->AddFrozenItem( ptOnSurface, rot, pItem, false, slot->pos.nFloor );
 		}
 	}
 }

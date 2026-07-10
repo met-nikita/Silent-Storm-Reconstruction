@@ -22,7 +22,7 @@ namespace NAI
 {
 class IAIUnit;
 class IAILogic;
-class IAIState;
+struct SAIState;
 struct SAIUnitState;
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CAIReaction - abstract reflex behaviour. Layout: [CObjectBase][IAIUnit* pUnit @0xc] (a weak back-ref to
@@ -36,7 +36,7 @@ protected:
 	//
 	IAIUnit*             GetUnit() const { return pUnit; }
 	SAIUnitState*        GetAIUnitState() const;         // pUnit->GetAIUnitState()  (release vtbl 0x74)
-	IAIState*            GetAIState() const;             // pUnit->GetAIState()
+	SAIState*            GetAIState() const;             // pUnit->GetAIState()
 	bool                 SetLogic( IAILogic *pLogic );   // pUnit->SetLogic(); false if the unit is gone
 	NWorld::CUnitServer* GetUnitServer() const;          // pUnit->GetUnitServer()
 public:

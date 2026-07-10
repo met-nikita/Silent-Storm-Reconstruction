@@ -28,11 +28,25 @@ CAILogic::CAILogic( IAIUnit *_pUnit ): pUnit( _pUnit ), bFinished( false ), bHas
 IAIUnit*             CAILogic::GetUnit() const       { return pUnit; }
 NWorld::CUnitServer* CAILogic::GetUnitServer() const { return IsValid( pUnit ) ? pUnit->GetUnitServer() : 0; }
 NWorld::IWorld*      CAILogic::GetWorld() const      { return IsValid( GetUnitServer() ) ? GetUnitServer()->GetWorld() : 0; }
-IAIState*            CAILogic::GetAIState() const     { return IsValid( pUnit ) ? pUnit->GetAIState() : 0; }
+SAIState*            CAILogic::GetAIState() const     { return IsValid( pUnit ) ? pUnit->GetAIState() : 0; }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // state
 void CAILogic::Finish()                              { bFinished = true; }
-bool CAILogic::IsFinished()                          { return bFinished; }
+// retail @0x62460: while the unit chain is ALIVE (AI unit -> server -> the server's RPG object all
+// valid), the logic is NEVER finished -- bFinished only answers once that chain breaks (death/removal).
+// The dev's bare `return bFinished;` let CheckForFinishedLogics retire a LIVING unit's logic on every
+// self-Finish (the cycling guard, a spent route), after which nothing re-decided the unit until its
+// threat state changed -- the "shoots a bit then stands around forever" starvation.
+bool CAILogic::IsFinished()
+{
+	if ( IsValid( pUnit ) )
+	{
+		NWorld::CUnitServer *pUS = pUnit->GetUnitServer();
+		if ( IsValid( pUS ) && IsValid( pUS->GetRPG() ) )
+			return false;
+	}
+	return bFinished;
+}
 bool CAILogic::HasCommands() const                   { return !commands.empty(); }
 void CAILogic::ClearCommands()                       { commands.clear(); }
 void CAILogic::Pause()                               { ++nPause; }
@@ -74,11 +88,25 @@ NWorld::CCommand* CAILogic::GetCommand()
 	NWorld::CUnitServer *pUS = IsValid( pUnit ) ? pUnit->GetUnitServer() : 0;
 	if ( !IsValid( pUS ) )
 		return 0;
-	// build-settle @0x00462c70: the release yields an empty/keepalive command while the unit is still
-	// performing an action; that empty is a CCommand-level keepalive (not the CCmd CCmdEmpty). For now
-	// defer to the commander's own IsPerformingAction gate and yield nothing.
 	if ( pUS->IsPerformingAction() )
 		return 0;
+	// retail @0x462c70 KEEPALIVE (decomp-proven; supersedes the old "yield nothing" build-settle stub):
+	// an IDLE unit whose server still holds an installed command (pCurrentCmd alive) gets a bare RESUME --
+	// in realtime always, in turn-based only when the unit can afford it (person vtbl+0x60 HasEnoughAP).
+	// The keepalive takes PRIORITY over the queued commands (retail's else-branch pops only when this
+	// condition fails), and CheckCycling runs on it (the retail escape hatch: a genuinely wedged executor
+	// accumulates same-place pulses -> 25% CCmdCancel at 16+). This is what re-runs a command that crossed
+	// a turn boundary unaffordable (IsEndOfTurn's EOT-WITH-CMD ending): with the fresh turn's AP the resume
+	// executes it. Without it the unit DEADLOCKED its whole turn (HasCommandToExecute true -> never thinks;
+	// GetCommand null -> never acts; IsEndOfTurn false -> turn never ends -- the GFirst turn-2 stall).
+	// Retail returns a raw CCmdEmpty that the commander converts to ONE CCmdSetCommand{unit, CCmdContinue};
+	// the dev logic returns CCommand wrappers, so hand back the converted form directly (the drive detects
+	// a bare-Continue inner and skips its usual second Continue).
+	if ( pUS->HasCommand() && ( !pUS->GetWorld()->IsTurnBased() || pUS->HasEnoughAP() ) )
+	{
+		CheckCycling();
+		return new NWorld::CCmdSetCommand( pUS, new NWorld::CCmdContinue() );
+	}
 	if ( commands.empty() )
 		GenerateCommand();
 	if ( commands.empty() )
@@ -90,23 +118,46 @@ NWorld::CCommand* CAILogic::GetCommand()
 	return pCmd;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// Anti-cycling: if the unit keeps returning to the same place+AP, count it and bail after a threshold.
-// @0x00462a50 (the full version logs to the AI console). Faithful intent below.
+// Anti-cycling, converged to retail @0x62a50 (SCyclingTracker::CheckCycling @0x62a10 inlined):
+//  * the cycle key is the masked PLACE (IsSamePlace, mask 0x1feffff -- same tile ignoring the
+//    direction/pose/moving bits) AND the LIVE server AP. The dev predecessor compared ONLY the AP, so in
+//    real time (AP pinned at max) every multi-step route logic read "same" on 3 straight pops and died
+//    mid-route -- the Defence strafe never reached its cover/attack spot ("crouches and gets stuck").
+//  * escalation, not a kill switch: 16..30 repeats -> 25% chance per pop to CCmdCancel the server's
+//    running command (unwedge the executor) + re-set the AP pool to the just-read value (retail person
+//    vtbl+0x7c, the IUnitMission AP setter -- dev seam IAIUnit::SetAP, as CAIDefenceReaction uses);
+//    only at >= 31 repeats log the fatal cycle and set bFinished. (For a LIVING unit bFinished no longer
+//    retires the logic -- IsFinished @0x62460 masks it -- it only ends the TBS turn via base IsEndOfTurn.)
+//  * the LIVE-AP read (retail reads the unit's current AP skill, which decreases as an action spends AP)
+//    is kept from the earlier root-fix: a progressing shoot resets the counter instead of tripping it.
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CAILogic::CheckCycling()
 {
-	const int N_CYCLE_LIMIT = 3;
 	if ( !IsValid( pUnit ) )
 		return;
-	SPlaceWithAP cur( pUnit->GetUnitPosition(), pUnit->GetAP() );
-	// build-settle: add SPathPlace equality to the place check (release uses an inline same-place test)
-	if ( cur.nUnitAP == cyclingTracker.place.nUnitAP )
-	{
-		if ( ++cyclingTracker.nSame >= N_CYCLE_LIMIT )
-			Finish();
-	}
+	NWorld::CUnitServer *pUS = pUnit->GetUnitServer();
+	if ( !IsValid( pUS ) )
+		return;
+	int nLiveAP = pUS->GetAP();
+	SPlaceWithAP cur( pUnit->GetUnitPosition(), nLiveAP );
+	bool bSamePlace = ( ( cur.place.pos.p.GetData() ^ cyclingTracker.place.place.pos.p.GetData() ) & 0x1feffff ) == 0;
+	if ( bSamePlace && cur.nUnitAP == cyclingTracker.place.nUnitAP )
+		++cyclingTracker.nSame;
 	else
 		cyclingTracker.Init( cur );
+	if ( cyclingTracker.nSame >= 31 )        // retail: !(nSame < 0x1f)
+	{
+		DebugTrace( " AI : fatal cycling detected : logic canceled \n" );
+		bFinished = true;
+	}
+	else if ( cyclingTracker.nSame > 15 )    // retail: nSame > 0xf
+	{
+		if ( ( random.Get() & 3 ) == 0 )     // retail: raw ISAAC draw & 3 == 0 (25%)
+		{
+			pUS->Do( new NWorld::CCmdCancel( pUS ) );
+			pUnit->SetAP( nLiveAP, pUnit->GetMaxAP() );
+		}
+	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // IsEndOfTurn / GetCommand-gating are situation specific; base end-of-turn = finished or no AP. @0x00462750

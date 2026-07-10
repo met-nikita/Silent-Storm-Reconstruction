@@ -22,216 +22,17 @@
 #include "MapBuild.h"
 #include "BuildingInfo.h"
 
-#include "aiTaskCommander.h"
+#include "aiTaskCommand.h"
 
 namespace NAI
 {
-//////////////////////////////////////////////////////////////////////////////////////	
-// CAITaskCommander
-//////////////////////////////////////////////////////////////////////////////////////	
-NWorld::CWorld *CAITaskCommander::GetWorld() const
-{ 
-	return pAICommander->GetWorld(); 
-}
-//////////////////////////////////////////////////////////////////////////////////////	
-void CAITaskCommander::RemoveTask( CTask *pTask )
-{
-	ASSERT( IsValid( pTask ) );
-	//
-	TasksToAddOrRemove.push_back( pTask );
-	TasksAddFlag.push_back( false );
-}
-//////////////////////////////////////////////////////////////////////////////////////	
-void CAITaskCommander::AddTask( CTask *pTask )
-{
-	ASSERT( IsValid( pTask ) );
-	ASSERT( !pTask->IsEmpty() );
-	//
-	TasksToAddOrRemove.push_back( pTask );
-	TasksAddFlag.push_back( true );
-}
-//////////////////////////////////////////////////////////////////////////////////////	
-void CAITaskCommander::Segment()
-{
-	list< CObj<CTask> >::iterator i = TasksToAddOrRemove.begin();
-	list<bool>::iterator b = TasksAddFlag.begin();
-	for ( ; i != TasksToAddOrRemove.end(); ++i, ++b )
-	{
-		if ( *b && IsValid( *i ) )
-			Tasks.push_back( *i );
-		else
-		{
-			list< CObj<CTask> >::iterator k = find( Tasks.begin(), Tasks.end(), *i );
-			ASSERT( k !=  Tasks.end() );
-			if ( k != Tasks.end() )
-				Tasks.erase( k );
-		}
-	}
-	//
-	TasksToAddOrRemove.clear();
-	TasksAddFlag.clear();
-}
-//////////////////////////////////////////////////////////////////////////////////////	
-bool CAITaskCommander::HasActiveTasks() const
-{
-	for ( list< CObj<CTask> >::const_iterator i = Tasks.begin(); i != Tasks.end(); ++i )
-		if (  IsValid( *i ) && (*i)->IsActive() )
-			return true;
-	//
-	return false;
-}
-//////////////////////////////////////////////////////////////////////////////////////	
-bool CAITaskCommander::CanGetCommand() const
-{
-	if ( Tasks.empty() || !HasActiveTasks() )
-		return false;
-	//
-	if ( GetWorld()->IsRealTime() )
-		return true;
-	//
-	for ( list< CObj<CTask> >::const_iterator i = Tasks.begin(); i != Tasks.end(); ++i )
-		if (  IsValid( *i ) && (*i)->IsActive() && 
-			(*i)->GetUnitServer()->IsPerformingAction() )
-				return false;
-	//
-	return true;
-}
-//////////////////////////////////////////////////////////////////////////////////////	
-NWorld::CCommand* CAITaskCommander::GetCommand()
-{
-	if ( !CanGetCommand() )
-		return 0;
-	//
-	for ( list< CObj<CTask> >::iterator i = Tasks.begin(); i != Tasks.end(); ++i )
-	{
-		if ( IsValid( *i ) && (*i)->IsActive() &&
-			!(*i)->IsEndOfTask() && ( GetWorld()->IsRealTime() || !(*i)->IsEndOfTurn() ) )
-		{
-			NWorld::CCmd *pCmd = (*i)->GetCommand();
-			if ( IsValid( pCmd ) )
-			{
-				NWorld::CCommand *pRes = new NWorld::CCmdSetCommand( (*i)->GetUnitServer(), pCmd );
-				// ROUND-ROBIN (retail parity): retail serves AI units through SAIUnitsTracker with a
-				// Next() rotation after every real-time serve (CAICommander::GenerateCommand @0x353d0
-				// tail) -- no unit can monopolize its commander. The dev task list was scanned
-				// front-first every segment, so one greedy task (a unit whose kept command re-pumps
-				// CCmdContinue each segment) combined with the one-decision-per-segment latch STARVED
-				// every later task of the same player -- the GFirst safe-run freeze (RB's fresh route
-				// never pumped while RF1 spun). Rotate the served task to the back of the scan order.
-				Tasks.splice( Tasks.end(), Tasks, i );
-				return pRes;
-			}
-		}
-	}
-	//
-	return 0;
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-bool CAITaskCommander::IsUnderControl( IAIUnit *pAIUnit ) const
-{
-	ASSERT( IsValid( pAIUnit ) );
-	//
-	return IsUnderControl( pAIUnit->GetUnitServer() );
-}
-//////////////////////////////////////////////////////////////////////////////////////	
-void CAITaskCommander::OnTurnStarted()
-{
-	for ( list< CObj<CTask> >::iterator i = Tasks.begin(); i != Tasks.end(); ++i )
-		(*i)->OnNewTurn();
-}
-//////////////////////////////////////////////////////////////////////////////////////	
-bool CAITaskCommander::IsEndOfTurn() const
-{
-	for ( list< CObj<CTask> >::const_iterator i = Tasks.begin(); i != Tasks.end(); ++i )
-	{
-		if ( IsValid( *i ) && (*i)->IsActive() && !(*i)->IsEndOfTurn() )
-			return false;
-	}
-	return true;
-}
-//////////////////////////////////////////////////////////////////////////////////////	
-bool CAITaskCommander::IsUnderControl( NWorld::CUnitServer *pUnitServer ) const
-{
-	ASSERT( IsValid( pUnitServer ) );
-	//
-	for ( list< CObj<CTask> >::const_iterator i = Tasks.begin(); i != Tasks.end(); ++i )
-	{
-		if ( (*i)->GetUnitServer() == pUnitServer )
-			return true;
-	}
-	return false;
-}
-//////////////////////////////////////////////////////////////////////////////////////	
-void CAITaskCommander::CreateRoute( NWorld::CUnitServer *pUnitServer, SMapUnit sMapUnit )
-{
-	ASSERT( IsValid( pUnitServer ) );
-	//
-	vector< CPtr<CTaskSyncObject> > syncs;
-	CObj<CAIRoute> pRoute = new CAIRoute( pUnitServer->GetWorld(), sMapUnit.route );
-	CPtr<CTask> pTask = pRoute->GetTask( pUnitServer, 0, syncs, true );
-	if ( !IsValid( pTask ) || pTask->IsEmpty() )
-	{
-		pTask = new CTask( pUnitServer, true );
-		if ( sMapUnit.eLogic == NDb::UL_EMPTY )
-		{
-			// ��������� �� ����� ����� ����� ������ ������ unit ����������� �������
-			//pTask->AddCommand( new CTaskCommandGoto( pUnitServer->GetPosition().pos ) );
-			pTask->AddCommand( new CTaskCommandCustomIdleAnimation( sMapUnit.pGuardAnimation ) );
-			pTask->AddCommand( new CTaskCommandWait( 3000 ) );
-		}
-		else if ( sMapUnit.eLogic == NDb::UL_DEFAULT )
-		{
-			// Jan03 gave a routeless UL_DEFAULT unit a random look-around (AddLookAround: 3-6 x
-			// Wait(1-6s) + ChangeDirection(random)). RETAIL DELETED IT: CAITaskCommander does not
-			// exist in the release binary at all -- the retail deploy glue (NAI::CreateUnitRoute
-			// @0x96d20) does NOTHING for a routeless default-logic unit, so map units without a
-			// route stand still. The look-around also CANCELLED scripted animations (each
-			// ChangeDirection is a command -- e.g. EFirst's lying wounded commander popped back to
-			// the standing idle on his first random turn). A plain idle wait keeps the task valid.
-			pTask->AddCommand( new CTaskCommandWait( 3000 ) );
-		}
-		else if ( sMapUnit.eLogic == NDb::UL_ROAMING )
-			pTask->AddRoaming( pUnitServer->GetPosition().pos.p, sMapUnit.nRoamingRadius );
-	}
-	ASSERT( IsValid( pTask ) );
-	if ( !IsValid( pTask ) )
-		return;
-	//
-	pTask->DelayExecution( random.Get( 1, 20 ) );
-	IAIControl *pAIControl = 
-		CreateAITaskControl( pAICommander, pTask, AI_CONTROL_INTERRUPTABLE, AIM_AI );
-	pAICommander->GetAIUnit( pUnitServer )->AssignControl( pAIControl );
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-void CAITaskCommander::Synchronize()
-{
-	for ( list< CObj<CTask> >::iterator i = Tasks.begin(); i != Tasks.end(); ++i )
-	{
-		if ( !IsValid( *i ) )
-			RemoveTask( *i );
-	}
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-void CAITaskCommander::RemoveUnit( NWorld::CUnitServer *pUS )
-{
-	for ( list< CObj<CTask> >::iterator i = Tasks.begin(); i != Tasks.end(); ++i )
-	{
-		if ( IsValid( *i ) && (*i)->GetUnitServer() == pUS )
-			RemoveTask( *i );
-	}
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-void CAITaskCommander::OnUnitWasKilled( NWorld::CUnitServer *pUS )
-{
-	RemoveUnit( pUS );
-}
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CTask
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CTask::CTask( NWorld::CUnitServer *_pUnitServer, bool _bCircled ): 
-	pUnitServer(_pUnitServer),	bCircled(_bCircled), 
+CTask::CTask( NWorld::CUnitServer *_pUnitServer, bool _bCircled ):
+	pUnitServer(_pUnitServer),	bCircled(_bCircled),
 	nCurrentCommand(-1), tTime(0), bActive( true )
-{	
+{
 	ASSERT( IsValid( pUnitServer ) );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -293,7 +94,7 @@ NWorld::CCmd *CTask::GetCommand()
 		return 0;
 
 	NWorld::CCmd *pCmd = 0;
-	if ( !pUnitServer->IsPerformingAction() && !( nCurrentCommand >= ( int )Commands.size() ) ) 
+	if ( !pUnitServer->IsPerformingAction() && !( nCurrentCommand >= ( int )Commands.size() ) )
 	{
 		if ( pUnitServer->HasCommand() && pUnitServer->HasEnoughAP() )
 			return new NWorld::CCmdContinue();
@@ -306,7 +107,7 @@ NWorld::CCmd *CTask::GetCommand()
 			if ( bCircled && nCurrentCommand == (int)Commands.size() && Commands.size() > 1 )
 				nCurrentCommand = 0;
 		}
-		// ���������� ��������� ��������
+		// return the next command
 		if ( nCurrentCommand <= 0 )
 			OnTaskStarted();
 		//
@@ -347,10 +148,10 @@ bool CTask::IsEndOfTurn() const
 		return false;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// // ���������� ���������� � �����������
-void CTask::DelayExecution( int nTime ) 
-{ 
-	tTime = pUnitServer->GetWorld()->GetTime()->GetValue() + nTime*1000; 
+// // execution starts with a delay
+void CTask::DelayExecution( int nTime )
+{
+	tTime = pUnitServer->GetWorld()->GetTime()->GetValue() + nTime*1000;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CTaskCommand
@@ -367,7 +168,7 @@ NWorld::CCmd *CTaskCommand::GetCommand()
 		Commands.pop_front();
 	}
 
-	return pRes;	
+	return pRes;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CTaskCommandGoto
@@ -415,7 +216,7 @@ void CTaskCommandRoaming::Do()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CTaskCommandChangePose
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CTaskCommandChangePose::Do() 
+void CTaskCommandChangePose::Do()
 {
 	DoCommand( new NWorld::CCmdWishPose( nPose ) );
 	SUnitPosition ptPosition = pUnitServer->GetPosition(); ptPosition.SetPose( nPose );
@@ -456,14 +257,14 @@ bool CTaskCommandWait::IsEndOfUnitTurn()
 	return !bNewTurnStarted && NWorld::pCurrentWorld->GetTurnID() == nStartTurnID;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CTaskCommandWait::OnNewTurn() 
+void CTaskCommandWait::OnNewTurn()
 {
 	bNewTurnStarted = true;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CTaskCommandChangeDirection
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CTaskCommandChangeDirection::Do()	
+void CTaskCommandChangeDirection::Do()
 {
 	SUnitPosition ptPosition = pUnitServer->GetPosition();
 	ptPosition.pos.p.SetDirection( nDirection );
@@ -482,7 +283,7 @@ void CTaskCommandCustomIdleAnimation::Do()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CTaskCommandSync
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CTaskCommandSync::CTaskCommandSync( CTaskSyncObject *_pSync ): 
+CTaskCommandSync::CTaskCommandSync( CTaskSyncObject *_pSync ):
 	CTaskCommand( 0 ), pSync( _pSync ), bLocked( true )
 {
 	ASSERT( IsValid( pSync ) );
@@ -552,7 +353,7 @@ void CTaskSyncObject::Register( CTaskSyncObjectClient *pClient )
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CTaskSyncObject::UnRegister( CTaskSyncObjectClient *pClient )
-{	
+{
 	ASSERT( IsValid( pClient ) );
 	clients.erase( remove( clients.begin(), clients.end(), pClient ), clients.end() );
 }
@@ -561,7 +362,6 @@ void CTaskSyncObject::UnRegister( CTaskSyncObjectClient *pClient )
 //
 using namespace NAI;
 //
-REGISTER_SAVELOAD_CLASS( 0x51222140, CAITaskCommander )
 REGISTER_SAVELOAD_CLASS( 0x51812130, CTask )
 REGISTER_SAVELOAD_CLASS( 0x51812131, CTaskCommandGoto )
 REGISTER_SAVELOAD_CLASS( 0x51222141, CTaskCommandChangePose )

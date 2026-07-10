@@ -3,71 +3,151 @@
 #include "aiLog.h"
 #include "aiUnit.h"
 #include "aiPlayer.h"
-#include "aiTacticalCommander.h"
+#include "aiCommander.h"
+#include "aiInventory.h"     // CAIInventory::GetBestFireArms (GetDangerousAttackableEnemy)
+#include "aiWeapon.h"        // CAIFireArmsWeapon
 #include "rpgUnit.h"
 #include "wUnitServer.h"
+#include "wMain.h"           // NWorld::CWorld::GetDiplomacyState
+//
+#include "..\DBFormat\DataRPG.h"   // NDb::EShootMode
+#include "..\DBFormat\DataMap.h"   // NDb::DS_ENEMY (EDiplomacyState)
 //
 #include "aiState.h"
 //
 namespace NAI
 {
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-//	CAIState
+//	SAIState -- the flat AI-state value struct (see aiState.h). These are the dev CAIState method bodies
+//	verbatim (pAIState-> stays this->); the type is now a plain value struct embedded by value in
+//	CAICommander. No CObjectBase / no REGISTER_SAVELOAD_CLASS / no CreateAIState heap alloc.
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-class CAIState: public IAIState
+SAIState::SAIState(): nCurrentAction( 0 ), nTurnStartAllyHP( 0 ), nTurnStartEnemyHP( 0 )
 {
-	OBJECT_BASIC_METHODS(CAIState);
-	ZDATA
-	CPtr<NWorld::CWorld> pWorld;
-	CObj<IAIPlayer> pAlly;
-	CObj<IAIPlayer> pEnemy;
-	CPtr<IAIUnit> pCurrentUnit;
-	CPtr<IAIUnit> pCurrentEnemy;
-	int nCurrentAction;
-	int nTurnStartAllyHP, nTurnStartEnemyHP; // HP в начале хода
-	CPtr<CAITacticalCommander> pAITacticalCommander;
-	vector<SAIUnitGroup> enemyGroups;	
-	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&pWorld); f.Add(3,&pAlly); f.Add(4,&pEnemy); f.Add(5,&pCurrentUnit); f.Add(6,&pCurrentEnemy); f.Add(7,&nCurrentAction); f.Add(8,&nTurnStartAllyHP); f.Add(9,&nTurnStartEnemyHP); f.Add(10,&pAITacticalCommander); f.Add(11,&enemyGroups); return 0; }
-	//
-	void MakeEnemyGroups();
-	//
-public:
-	CAIState() {}
-	CAIState( NWorld::CWorld *pWorld, CAITacticalCommander *_pAITacticalCommander );
-	// IAIState
-	virtual IAIPlayer *GetAllyAIPlayer() { return pAlly; }
-	virtual IAIPlayer *GetEnemyAIPlayer() { return pEnemy; }
-	virtual NWorld::CWorld *GetWorld() { return pWorld; }
-	virtual IAIUnit *GetCurrentAIUnit() { return pCurrentUnit; }
-	virtual void SetCurrentAIUnit( IAIUnit *pAIUnit ) { pCurrentUnit = pAIUnit; }
-	virtual IAIUnit *GetCurrentAIEnemy() { return pCurrentEnemy; }
-	virtual void SetCurrentAIEnemy( IAIUnit *pAIUnit );
-	virtual bool IsPositionLocked( SPathPlace &ptPos, IAIUnit *pAIUnit );
-	virtual bool IsPerformingAction();
-	virtual bool IsSomebodyKilled();
-	virtual bool IsContain( IAIUnit *_pAIUnit );	
-	virtual void RemoveUnit( IAIUnit *_pAIUnit );
-	virtual int GetEnemyHP();
-	virtual int GetAllyHP();
-	virtual int GetTurnStartEnemyHP() { return nTurnStartEnemyHP; }
-	virtual int GetTurnStartAllyHP() { return nTurnStartAllyHP; }
-	virtual int GetCurrentAction() { return nCurrentAction; }
-	virtual void SetCurrentAction( int nAction ) { nCurrentAction = nAction; }
-	virtual CAITacticalCommander *GetAITacticalCommander() { return pAITacticalCommander; }
-	virtual void OnTurnStarted();
-	virtual bool IsAITurn() { return GetAITacticalCommander()->IsAITurn(); }
-	virtual const vector<SAIUnitGroup>& GetEnemyGroups() const { return enemyGroups; }
-};
-////////////////////////////////////////////////////////////////////////////////////////////////////
-CAIState::CAIState( NWorld::CWorld *_pWorld, CAITacticalCommander *_pAITacticalCommander ):
-	pWorld(_pWorld), pCurrentUnit(0), pAITacticalCommander( _pAITacticalCommander )
-{
-	// создаем AIUnit-ы 
-	pAlly = CreateAIPlayer( this );
-	pEnemy = CreateAIPlayer( this );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CAIState::MakeEnemyGroups()
+SAIState::SAIState( NWorld::CWorld *_pWorld, CAICommander *_pAICommander ):
+	pWorld( _pWorld ), pCurrentUnit( 0 ), nCurrentAction( 0 ), nTurnStartAllyHP( 0 ),
+	nTurnStartEnemyHP( 0 ), pAICommander( _pAICommander )
+{
+	// пїЅпїЅпїЅпїЅпїЅпїЅпїЅ AIUnit-пїЅ (the ally/enemy roster wrappers; they no longer back-reference the state)
+	pAlly = CreateAIPlayer();
+	pEnemy = CreateAIPlayer();
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+SAIState::~SAIState()
+{
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// operator& @0x38c30 analog -- serialized INLINE as CAICommander tag7 (CallObjectSerialize<SAIState>). The
+// pAICommander back-ref (tag10) resolves to the registered owning commander, so there is no save orphan.
+////////////////////////////////////////////////////////////////////////////////////////////////////
+int SAIState::operator&( CStructureSaver &f )
+{
+	f.Add( 2, &pWorld ); f.Add( 3, &pAlly ); f.Add( 4, &pEnemy ); f.Add( 5, &pCurrentUnit );
+	f.Add( 6, &pCurrentEnemy ); f.Add( 7, &nCurrentAction ); f.Add( 8, &nTurnStartAllyHP );
+	f.Add( 9, &nTurnStartEnemyHP ); f.Add( 10, &pAICommander ); f.Add( 11, &enemyGroups );
+	return 0;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void SAIState::SetCurrentAIUnit( IAIUnit *pAIUnit )
+{
+	pCurrentUnit = pAIUnit;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+bool SAIState::IsAITurn()
+{
+	return IsValid( pAICommander ) && pAICommander->IsAITurn();
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// AI-convergence Stage 2 -- rebuild the ally/enemy rosters from the owning commander's unit list (every
+// world unit is registered on every commander, so the split is by player + diplomacy), thread the AI
+// state into the own (ally) units so their poll-based SAIUnitState::Populate can reach it, then rebuild
+// the enemy clusters. Called every AI segment (was the tactical commander's AddAllyUnit/AddEnemyUnit
+// incremental build + retail SAIState::Synchronize @0xa9ff0).
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void SAIState::Synchronize()
+{
+	pAlly->GetUnits()->clear();
+	pEnemy->GetUnits()->clear();
+	if ( !IsValid( pAICommander ) )
+		return;
+	NWorld::CPlayer *pMyPlayer = pAICommander->GetPlayer();
+	const vector< CObj<IAIUnit> > &units = pAICommander->GetUnitsList();
+	for ( vector< CObj<IAIUnit> >::const_iterator i = units.begin(); i != units.end(); ++i )
+	{
+		if ( !IsValid( *i ) || !IsValid( (*i)->GetUnitServer() ) || !(*i)->GetUnitServer()->CanFight() )
+			continue;
+		NWorld::IPlayer *pUP = (*i)->GetUnitServer()->GetPlayer();
+		if ( pUP == (NWorld::IPlayer*)pMyPlayer )
+		{
+			pAlly->AddUnit( *i );
+			(*i)->SetAIState( this );   // own units read the enemy set through this state (raw, transient back-ref)
+		}
+		else if ( IsValid( pWorld ) && pWorld->GetDiplomacyState( pMyPlayer, pUP ) == NDb::DS_ENEMY )
+			pEnemy->AddUnit( *i );
+	}
+	MakeEnemyGroups();
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// GetDangerousAttackableEnemy -- re-homed verbatim from CAITacticalCommander (pAIState-> becomes this->).
+// Picks the nearest enemy (within a distance band) with the best to-hit differential.
+////////////////////////////////////////////////////////////////////////////////////////////////////
+IAIUnit* SAIState::GetDangerousAttackableEnemy( IAIUnit *pAIUnit )
+{
+	ASSERT( IsValid( pAIUnit ) );
+	if ( !IsValid( pAIUnit ) )
+		return 0;
+	//
+	const float fDeltaDistance = 1.5f;
+	float fGoodDistance = float( 0xFFF );
+	list< CPtr< IAIUnit > > goodEnemies;
+	//
+	vector< CPtr<IAIUnit> > *pEnemyUnits;
+	if ( pAlly->IsContain( pAIUnit ) )
+		pEnemyUnits = pEnemy->GetUnits();
+	else
+		pEnemyUnits = pAlly->GetUnits();
+	//
+	for ( vector< CPtr<IAIUnit> >::iterator i = pEnemyUnits->begin(); i != pEnemyUnits->end(); ++i )
+	{
+		CPtr<NWorld::CUnitServer> pUS = (*i)->GetUnitServer();
+		if ( IsValid( pUS ) && pUS->CanFight() )
+		{
+			float fDistance = fabs( (*i)->GetPosition().GetCP() - pAIUnit->GetPosition().GetCP() );
+			if ( fabs( fDistance - fGoodDistance ) < fDeltaDistance )
+			{
+				goodEnemies.push_back( *i );
+			}
+			else if ( fDistance < fGoodDistance )
+			{
+				goodEnemies.clear();
+				goodEnemies.push_back( *i );
+				fGoodDistance = fDistance;
+			}
+		}
+	}
+	//
+	int nBestD = -1;
+	CPtr<IAIUnit> pGoodEnemy;
+	for ( list< CPtr< IAIUnit > >::iterator i = goodEnemies.begin(); i != goodEnemies.end(); ++i )
+	{
+		int nD = 0, nMaxToHit, nHitCover;
+		NDb::EShootMode eTmpShootMode;
+		CPtr<CAIFireArmsWeapon> pTmpWeapon =
+			(*i)->GetAIInventory()->GetBestFireArms( (*i)->GetUnitPosition(), pAIUnit, (*i)->GetAP(), &nHitCover, &nD, &eTmpShootMode, &nMaxToHit );
+		//
+		if ( nD > nBestD || !IsValid( pGoodEnemy ) )
+		{
+			nBestD = nD;
+			pGoodEnemy = *i;
+		}
+	}
+	//
+	return pGoodEnemy;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void SAIState::MakeEnemyGroups()
 {
 	const float F_SQR_ENEMY_GROUP_DISTANCE = 2.25; // distance = 1.5 m
 	const float F_SQR_ALLY_GROUP_DISTANCE = 9; // distance = 3 m
@@ -107,7 +187,7 @@ void CAIState::MakeEnemyGroups()
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CAIState::OnTurnStarted()
+void SAIState::OnTurnStarted()
 {
 	pAlly->OnTurnStarted();
 	pEnemy->OnTurnStarted();
@@ -116,12 +196,12 @@ void CAIState::OnTurnStarted()
 	MakeEnemyGroups();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CAIState::SetCurrentAIEnemy( IAIUnit *pAIUnit )
-{ 
-	pCurrentEnemy = pAIUnit; 
+void SAIState::SetCurrentAIEnemy( IAIUnit *pAIUnit )
+{
+	pCurrentEnemy = pAIUnit;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-int CAIState::GetEnemyHP()
+int SAIState::GetEnemyHP()
 {
 	int nRes = 0;
 	vector< CPtr<IAIUnit> > *pUnits = pEnemy->GetUnits();
@@ -131,7 +211,7 @@ int CAIState::GetEnemyHP()
 	return nRes;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-int CAIState::GetAllyHP()
+int SAIState::GetAllyHP()
 {
 	int nRes = 0;
 	vector< CPtr<IAIUnit> > *pUnits = pAlly->GetUnits();
@@ -141,39 +221,30 @@ int CAIState::GetAllyHP()
 	return nRes;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-bool CAIState::IsContain( IAIUnit *_pAIUnit )
+bool SAIState::IsContain( IAIUnit *_pAIUnit )
 {
 	return ( pAlly->IsContain( _pAIUnit ) || pEnemy->IsContain( _pAIUnit ) );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-bool CAIState::IsPositionLocked( SPathPlace &ptPos, IAIUnit *pAIUnit )
+bool SAIState::IsPositionLocked( SPathPlace &ptPos, IAIUnit *pAIUnit )
 {
 	return ( pAlly->IsPositionLocked( ptPos, pAIUnit ) || pEnemy->IsPositionLocked( ptPos, pAIUnit ) );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-bool CAIState::IsPerformingAction()
+bool SAIState::IsPerformingAction()
 {
 	return ( pAlly->IsPerformingAction() || pEnemy->IsPerformingAction() );
 }
-//////////////////////////////////////////////////////////////////////////////////////	
-bool CAIState::IsSomebodyKilled()
+//////////////////////////////////////////////////////////////////////////////////////
+bool SAIState::IsSomebodyKilled()
 {
 	return ( pAlly->IsSomebodyKilled() || pEnemy->IsSomebodyKilled() );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CAIState::RemoveUnit( IAIUnit *_pAIUnit )
+void SAIState::RemoveUnit( IAIUnit *_pAIUnit )
 {
 	pAlly->RemoveUnit( _pAIUnit );
 	pEnemy->RemoveUnit( _pAIUnit );
 }
-////////////////////////////////////////////////////////////////////////////////////////////////////
-IAIState *CreateAIState( NWorld::CWorld *pWorld, CAITacticalCommander *pAITacticalCommander )
-{
-	return new CAIState( pWorld, pAITacticalCommander );
+//////////////////////////////////////////////////////////////////////////////////////
 }
-//////////////////////////////////////////////////////////////////////////////////////	
-}
-//
-using namespace NAI;
-//
-REGISTER_SAVELOAD_CLASS( 0x52822120, CAIState );

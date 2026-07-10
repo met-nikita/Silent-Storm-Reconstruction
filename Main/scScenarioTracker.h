@@ -42,9 +42,9 @@ class CScenarioTracker: public CObjectBase
 	ZDATA
 	bool bScenarioAvailable;
 	CObj<CScenarioFlowChart> pScenarioFlowChart;
-	list< CPtr<CScenarioZone> > availableZones; // ��������� ����
-	list< CPtr<CScenarioObjective> > finishedObjectives; // ����������� objectives
-	list< CPtr<CScenarioZone> > blockedZones; // ��������������� ����
+	list< CPtr<CScenarioZone> > availableZones; // available zones
+	list< CPtr<CScenarioObjective> > finishedObjectives; // completed objectives
+	list< CPtr<CScenarioZone> > blockedZones; // blocked zones
 	list< CPtr<CScenarioClue> > takenClues;
 	list< CPtr<CScenarioClue> > destroyedClues;
 	int nZonesOpenOrder;
@@ -85,7 +85,7 @@ public:
 	CScenarioZone* GetRecommendedZone( NRPG::CGlobalPlayer *pPlayer ) const;
 	void OpenZone( CScenarioZone *pZone );
 	void BlockZone( CScenarioZone *pZone );
-	void RevealZone( CScenarioZone *pZone ); // ������ OpenZone ��� ��������� ����������� ����
+	void RevealZone( CScenarioZone *pZone ); // analog of OpenZone for accidental discovery of a zone
 	void CheatOpenZone( CScenarioZone *pZone );
 	//
 	NDb::CString* GetClueDescriptionFromObjective( CScenarioClue *pClue ) const;

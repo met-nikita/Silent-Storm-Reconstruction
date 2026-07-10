@@ -719,8 +719,8 @@ void CNodesLayer::RefreshLadder( int nLadder, IAIMap *pMap )
 	CLadderCalcer calcer( this, pMap, &ladder, &ladder.pointPassable );
 	calcer.Calc();
 	ladder.bNeedRecalc = false;
-	// ��������
-	// �������� �������� �� ������� � ������ �����
+	// mark up
+	// split the ladder into an upper and a lower part
 	int nHeight = ladder.GetHeight();
 	ladder.bConsistent = true;
 	for ( int i = 0; i < nHeight - 3; ++i )
@@ -751,14 +751,14 @@ void CNodesLayer::RefreshLadder( int nLadder, IAIMap *pMap )
 		for ( int i = 0; i < nHeight; ++i )
 			ladder.pointPassable[ i ] = false;
 	}
-	if ( ladder.bConsistent ) // �������� ��������� ���������
+	if ( ladder.bConsistent ) // ladder is fully passable
 	{
 		for ( int i = 0; i < nHeight / 2; ++i )
 			ladder.pointOnUpperHalf[i] = false;
 		for ( int i = nHeight / 2 + 1; i < nHeight; ++i )
 			ladder.pointOnUpperHalf[i] = true;
 	}
-	else // �������� �������� ���������
+	else // ladder is partially broken
 	{
 		int i;
 		for ( i = 0; ladder.pointPassable[i]; ++i )
@@ -768,7 +768,7 @@ void CNodesLayer::RefreshLadder( int nLadder, IAIMap *pMap )
 			ladder.pointOnUpperHalf[ i ] = false;
 		int lastInpassable = i;
 		for ( i = firstInpassable; i < lastInpassable; ++i )
-			ladder.pointPassable[ i ] = false; // ������������ ����� ������ �������� �������� �������
+			ladder.pointPassable[ i ] = false; // impassable points now form one continuous segment
 	}
 	// create tracker
 	if ( !IsValid(ladder.pTracker) )
@@ -1090,8 +1090,8 @@ void CPathNetwork::FinishGridConstruction()
 			}
 		}
 	}
-	// ���������� ���� ���� ������, �.�. �� ������ ������� ����� ���� ������� ����� ����, �������
-	// �������������� �� �� ����� �����������. 
+	// run this loop twice: the first pass may have created new layers, which
+	// were accordingly not fully computed.
 	for ( unsigned int i = 0; i < groups.size(); ++i )
 	{
 		CLayersGroup *pGroup = groups[i];
@@ -2275,7 +2275,7 @@ void CPathNetwork::CreateLaddersInternal( CLayersGroup *pGroup )
 		CNodesLayer *pFloorLayer = pGroup->GetRootFloorLayer( ladderNYC.nFloor );
 		if ( !pFloorLayer )
 		{
-			OutputDebugString("��������� ��������!\n");
+			OutputDebugString("Stale ladder!\n");
 			continue;
 		}
 		int nLayer = pFloorLayer->nLayer;

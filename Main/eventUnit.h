@@ -48,6 +48,17 @@ public:
 		: pWatcher( _pWatcher ), pTarget( _pTarget ) {}
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail NWorld::CEventOnSpotMineOrTrap (type_info @VA 0x982408): thrown by CUnitServer::
+// UpdateVisible @0x7c4f04 when AddMedalPointsForNoticedMines reports a NEWLY noticed set mine/trap
+// (payload = the spotting unit, one AddRef'd pointer). Retail consumer: CAckDiscoveringMineNearby::
+// OnEvent (the "mine discovered" voice ack) -- not yet ported; the throw keeps producer parity.
+class CEventOnSpotMineOrTrap
+{
+public:
+	CPtr<CUnitServer> pWho;
+	CEventOnSpotMineOrTrap( CUnitServer *_pWho = 0 ): pWho( _pWho ) {}
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
 class CEventOnHearEnemy
 {
 public:

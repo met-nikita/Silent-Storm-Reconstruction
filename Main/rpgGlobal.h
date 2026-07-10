@@ -52,7 +52,7 @@ struct SUnitDeployData
 {
 	ZDATA
 	int nPassageObjectID;
-	CObj<NRPG::CUnit> pCorpse; // CObj ��� ����������� �������� AI unit-�� ����� template-��
+	CObj<NRPG::CUnit> pCorpse; // CObj for correctly transferring AI units between templates
 	bool bCorpseAlive;
 	bool bCorpseEnemy;
 	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&nPassageObjectID); f.Add(3,&pCorpse); f.Add(4,&bCorpseAlive); f.Add(5,&bCorpseEnemy); return 0; }

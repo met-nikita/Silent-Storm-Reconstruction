@@ -613,6 +613,23 @@ void CUnitFace::Draw( const STime &sTime, NGScene::I2DGameView *pView )
 		break;
 	}
 
+	// DEAD/UNCONSCIOUS PORTRAIT RED TINT (retail CUnitFace::Draw @0x254df0 tail): show a translucent red
+	// overlay over the 3D portrait iff the shown face unit CANNOT fight -- i.e. it is dead, unconscious, or
+	// dying (retail tests !CanFight(); CUnit vtbl[0]=CanFight @0x3c6840 == !IsDead() && !IsUnconscious()).
+	// This covers both reported cases: a dying unit speaking its ack (pFaceUnit = the speaker) and an
+	// unconscious party member selected (pFaceUnit = the selected unit). Retail ctor @0x256610 makes
+	// pRedImage a full-face-rect CImage with color 0x33fa3500 = SPixel8888(0xFA,0x35,0x00,0x33) (red-orange
+	// ~20% alpha) and NO texture -- the color-fill renders as a flat quad (CImageDraw fills sColor when the
+	// texture is null). Created lazily (like pAckEffect above) so pre-tint saves (serialized tag 9 = null)
+	// heal on the first Draw.
+	if ( !IsValid( pRedImage ) )
+	{
+		pRedImage = new CImage( SWindowInfo( this, SPoint( 0, 0 ), GetSize(), "redimage", STYLE_TOPMOST ) );
+		pRedImage->SetColor( NGfx::SPixel8888( 0xFA, 0x35, 0x00, 0x33 ) );
+	}
+	pRedImage->SetStyle( STYLE_VISIBLE,
+		IsValid( pFaceUnit ) && ( pFaceUnit->IsDead() || pFaceUnit->IsUnconscious() ) );
+
 	TBaseClass::Draw( sTime, pView );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////

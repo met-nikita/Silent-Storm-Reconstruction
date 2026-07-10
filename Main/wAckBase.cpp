@@ -190,7 +190,7 @@ bool CGlobalAck::IsSequenceVisible( const list< CPtr<CUnit> > &visibleUnits, NDb
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CGlobalAck::RemoveInvisibleSequences( IPlayer *pPlayer )
 {
-	// ������� ��� ���� ��������� ������ pPlayer
+	// remove all acks not visible to player pPlayer
 	if ( !sequences.empty() )
 	{
 		list< CPtr<CUnit> > visible;
@@ -241,14 +241,14 @@ static float GetAckWeight( NDb::CDBAck *pAck )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 int CGlobalAck::FetchHighestAcks()
 {
-	// ���� ������������ ��������� -- retail @0x339150: the per-entry value is GetAckPriority
+	// find the maximum priority -- retail @0x339150: the per-entry value is GetAckPriority
 	// (sequence priority with the CONDITION fallback), not the bare sequence field.
 	int nMaxPriority = 0;
 	list< SAck >::iterator i;
 	for ( i = sequences.begin(); i != sequences.end(); ++i )
 		if ( GetAckPriority( i->pAck ) > nMaxPriority )
 			nMaxPriority = GetAckPriority( i->pAck );
-	// ������� ��� ���� � ������� ����������� (ties at the max are kept)
+	// remove all acks with lower priority (ties at the max are kept)
 	for ( i = sequences.begin(); i != sequences.end(); )
 		if ( GetAckPriority( i->pAck ) < nMaxPriority )
 			i = sequences.erase( i );
@@ -268,7 +268,7 @@ NDb::CDBAckSequence *CGlobalAck::GetSequence( IPlayer *pPlayer, CUnitServer **pp
 		*pnPriority = nHighest;
 	if ( !sequences.empty() )
 	{
-		// �������� ���� �� Ack-�� -- retail weight: ack probability x condition factor
+		// Select one of the Acks -- retail weight: ack probability x condition factor
 		float fProb = 0;
 		CRoulette roulette;
 		for ( list< SAck >::iterator i = sequences.begin(); i != sequences.end(); ++i )
@@ -292,7 +292,7 @@ NDb::CDBAckSequence *CGlobalAck::GetSequence( IPlayer *pPlayer, CUnitServer **pp
 			if ( ppSpeaker )
 				*ppSpeaker = i->pUS;
 		}
-		// �������
+		// clear
 		sequences.clear();
 	}
 	return pRes;

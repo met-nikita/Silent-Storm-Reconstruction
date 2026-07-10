@@ -1,10 +1,12 @@
 #include "StdAfx.h"
 //
 #include "wUnitServer.h"     // NWorld::CUnitServer (+ CUnit base), GetWishPose/SetWishPose/SetStrafe
+#include "RPGUnitMission.h"  // NRPG::IUnitMission (GetUnitRPG()->GetRPGUnit())
+#include "RPGUnit.h"         // NRPG::CUnit::GetSightFOV (@0x2ba6c0) for the retail sight cone
 #include "wMain.h"           // NWorld::CWorld::GetPathNetwork / GetGame (GetCheckPosition)
 #include "wMainPath.h"       // NWorld::PrepareAllPaths
 #include "aiMultiMoves.h"    // NAI::CMultiMovesTable (CPathPlaceTable::GetCost)
-#include "aiTaskCommander.h" // NAI::CTaskCommand family (ChangePose / ChangeDirection / Wait / Roaming)
+#include "aiTaskCommand.h" // NAI::CTaskCommand family (ChangePose / ChangeDirection / Wait / Roaming)
 #include "wUnitCommands.h"   // NWorld::CCmd complete (CTaskCommand::operator& serializes list<CPtr<CCmd>>)
 #include "aiUnit.h"          // NAI::IAIUnit (GetUnitServer / GetUnitPosition / GetAP) -- GetCheckPosition
 #include "RPGGame.h"         // NRPG::IGame::CheckPositionVisibility (GetCheckPosition)
@@ -43,13 +45,20 @@ void GetNearestPlaces( NWorld::CUnitServer *pServer, const SPathPlace &place, in
 		IPathNetwork *pNet = pServer->GetWorld()->GetPathNetwork();
 		CMultiMovesTable *pT = pTable ? pTable : &localTable;
 		NWorld::CUnit *pU = static_cast<NWorld::CUnit*>( pServer );   // the server's unit component
-		NWorld::PrepareAllPaths( pNet, pT, &places, pU, place, nMaxCost, pU, false );
+		// retail @0xa05d0 (disasm-verified, both refinements were flagged in aiRouteMisc.h):
+		//  * bNoDynamicLocks = TRUE -- the wave IGNORES transient unit locks (dev's account-units gather
+		//    pruned places another unit stood on, shrinking the cover-wave target set that GetCoveredPosition
+		//    feeds FindPath -- a different chosen cover flips the Defence-entry verdict);
+		//  * keep a reached place unless GetPassability says AIP_NOT_PASSABLE or AIP_CANNOT_LAY (locked and
+		//    door places PASS as targets; dev's IsPassable == AIP_YES-only was stricter).
+		NWorld::PrepareAllPaths( pNet, pT, &places, pU, place, nMaxCost, pU, false, /*bNoDynamicLocks*/ true );
 		for ( list<SPathPlace>::iterator it = places.begin(); it != places.end(); ++it )
 		{
 			unsigned short nP = it->GetPose();
 			if ( nP == 3 || nP == 0 )      // drop the CM_INACTIVE(3) and CM_LAY(0) check-poses
 				continue;
-			if ( pNet->IsPassable( *it ) )
+			EPassable e = pNet->GetPassability( *it );
+			if ( e != AIP_NOT_PASSABLE && e != AIP_CANNOT_LAY )
 				pRes->push_back( *it );
 		}
 	}
@@ -133,6 +142,11 @@ bool GetCheckPosition( IAIUnit *pUnit, CUnitArea *pArea, const SPosition &pos, S
 	NRPG::IGame  *pGame = pUS->GetWorld()->GetGame();
 	if ( pNet == 0 || pGame == 0 )
 		return false;
+	// retail @0xa1000 hoists the observer's real range/FOV once before the loop (game vtbl+0x34
+	// GetUnitSightDistance + rpg GetSightFOV @0x2ba6c0) and probes with the 4-arg vtbl+0x1c.
+	NRPG::CUnit *pRPG = pUnit->GetRPGUnit();
+	float fRange = pGame->GetUnitSightDistance( pRPG );
+	float fFOV = IsValid( pRPG ) ? pRPG->GetSightFOV() : FP_2PI;
 	// flood the reachable places at RUN within the unit's current AP (NO 28 floor -- faithful to @0xa1000),
 	// keeping our own moves table to read each place's accumulated wave cost.
 	vector<SPathPlace> places;
@@ -146,7 +160,7 @@ bool GetCheckPosition( IAIUnit *pUnit, CUnitArea *pArea, const SPosition &pos, S
 			continue;
 		SUnitPosition cand = GetUnitPos( *it, pNet );
 		cand.pos.p.SetDirection( (unsigned short)( (int)pNet->GetClosestDir( cand.pos.p, pos.p ) & 7 ) );
-		if ( !pGame->CheckPositionVisibility( cand, pos ) )   // sight range/FOV internalized (elided)
+		if ( !pGame->CheckPositionVisibility( cand, pos, fRange, fFOV ) )   // retail 4-arg @0x298fa0
 			continue;
 		int nCost = (int)table.GetCost( *it );
 		if ( !bFound || nBest < nCost )      // strict-greater: ties keep the earlier place
@@ -334,11 +348,15 @@ bool GetSafePosition( NWorld::CUnitServer *pServer, const vector< CPtr<IAIUnit> 
 			continue;
 		NRPG::IGame *pGame = pSeer->GetWorld()->GetGame();
 		SUnitPosition seer = pSeer->GetPosition();
+		// retail @0xa0ca0 recomputes the seer's range/FOV per seer (game vtbl+0x34 + GetSightFOV @0x2ba6c0)
+		NRPG::CUnit *pRPG = pU->GetRPGUnit();
+		float fRange = pGame->GetUnitSightDistance( pRPG );
+		float fFOV = IsValid( pRPG ) ? pRPG->GetSightFOV() : FP_2PI;
 		for ( int j = 0; j < (int)safe.size(); )
 		{
 			SPosition cand = GetPos( safe[j], pNet );
 			seer.pos.p.SetDirection( (unsigned short)( (int)pNet->GetClosestDir( seer.pos.p, safe[j] ) & 7 ) );
-			if ( pGame->CheckPositionVisibility( seer, cand ) )   // range/FOV internalized (elided)
+			if ( pGame->CheckPositionVisibility( seer, cand, fRange, fFOV ) )   // retail 4-arg @0x298fa0
 				safe.erase( safe.begin() + j );
 			else
 				++j;
@@ -382,6 +400,10 @@ bool GetRestoreAPPoint( NWorld::CUnitServer *pServer, NWorld::CUnitServer *pEnem
 	if ( !IsValid( path ) || path->points.empty() )
 		return false;
 	NRPG::IGame *pGame = pServer->GetWorld()->GetGame();
+	// retail @0xa01e0: observer = pEnemy; his range/FOV hoisted once before the backward walk
+	NRPG::CUnit *pRPG = IsValid( pEnemy->GetUnitRPG() ) ? pEnemy->GetUnitRPG()->GetRPGUnit() : 0;
+	float fRange = pGame->GetUnitSightDistance( pRPG );
+	float fFOV = IsValid( pRPG ) ? pRPG->GetSightFOV() : FP_2PI;
 	*pnVisible = 0;
 	int nLast = (int)path->points.size() - 1;
 	for ( int i = nLast; i >= 0; --i )
@@ -390,7 +412,7 @@ bool GetRestoreAPPoint( NWorld::CUnitServer *pServer, NWorld::CUnitServer *pEnem
 		{
 			SPosition pos = GetPos( path->points[i], pNet );
 			SUnitPosition seer = GetDirectedPos( pEnemy->GetPosition().pos.p, pos.p, pNet );
-			if ( !pGame->CheckPositionVisibility( seer, pos ) )   // range/FOV internalized (elided)
+			if ( !pGame->CheckPositionVisibility( seer, pos, fRange, fFOV ) )   // retail 4-arg @0x298fa0
 			{
 				*pResult = pos;
 				return true;
@@ -458,6 +480,10 @@ bool GetRoundUpPlaces( NWorld::CUnitServer *pServer, const SUnitPosition &enemyP
 	}
 	IPathNetwork *pNet  = pServer->GetWorld()->GetPathNetwork();
 	NRPG::IGame  *pGame = pServer->GetWorld()->GetGame();
+	// retail @0xa1320: observer = pServer; range/FOV hoisted once before the candidate loop
+	NRPG::CUnit *pRPG = IsValid( pServer->GetUnitRPG() ) ? pServer->GetUnitRPG()->GetRPGUnit() : 0;
+	float fRange = pGame->GetUnitSightDistance( pRPG );
+	float fFOV = IsValid( pRPG ) ? pRPG->GetSightFOV() : FP_2PI;
 	int nBudget    = (int)( fDist * 1.6f );
 	int nBudgetMid = nBudget;
 	if ( nBudget > 20 )
@@ -476,7 +502,7 @@ bool GetRoundUpPlaces( NWorld::CUnitServer *pServer, const SUnitPosition &enemyP
 		SUnitPosition up = GetUnitPos( cand[i], pNet );
 		up.pos.p.SetDirection( (unsigned short)( (int)pNet->GetClosestDir( up.pos.p, enemyPos.pos.p ) & 7 ) );
 		if ( (int)up.pos.p.GetPose() == nCheckPose &&
-			 pGame->CheckPositionVisibility( up, enemyPos.pos ) )     // sight range/FOV internalized (elided)
+			 pGame->CheckPositionVisibility( up, enemyPos.pos, fRange, fFOV ) )   // retail 4-arg @0x298fa0
 		{
 			*pAttack = up.pos;
 			bGot = true;

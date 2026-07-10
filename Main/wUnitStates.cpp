@@ -208,9 +208,9 @@ bool CUnitStateSniping::CheckTarget()
 	bool bRes = true;
 	//
 	bRes = bRes && pTarget->CanFight();
-	// ��������� ��������� ����
-	bRes = bRes && pUS->GetWorld()->GetGame()->CheckVisibility( pUS, pTarget );
-	// ��������� ���� �� ������� ������������� ����
+	// check target visibility
+	bRes = bRes && pUS->GetWorld()->GetGame()->CheckVisibility( pUS, pTarget, true );
+	// check the angle by which the target has moved
 	CVec3 ptInitialDir = ( InitialTargetPosition.GetCenter() - pUS->GetPosition().GetCenter() );
 	CVec3 ptCurrentDir = ( pTarget->GetPosition().GetCenter() - pUS->GetPosition().GetCenter() );
 	Normalize( &ptInitialDir );
@@ -284,7 +284,7 @@ void CUnitStateSniping::ProcessCritical( NDb::ECritical eCA )
 void CUnitStateSniping::CancelSnipe()
 {
 	pUS->GetUnitRPG()->SaveAP( NRPG::SSnipeAP( 0, 0 ) );
-	// ���������� ���������
+	// reset state back to normal
 	pUS->SetState( new CUnitStateNormal( pUS ) );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -422,10 +422,10 @@ void CUnitStateCorpseCarrier::OnStateFinished()
 	CPtr<NRPG::CGlobalPlayer> pGlobalPlayer = pUS->GetPlayer()->GetGlobalPlayer();
 	if ( IsValid( pGlobalPlayer ) )
 		pGlobalPlayer->FreeUnit( pUS->GetUnitRPG()->GetRPGUnit() );
-	pDeadUnit->animator.BeDropped();
+	pDeadUnit->animator.BeDropped( pDeadUnit );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CUnitStateCorpseCarrier::ProcessCritical( NDb::ECritical eCA ) 
+void CUnitStateCorpseCarrier::ProcessCritical( NDb::ECritical eCA )
 {
 	switch ( eCA )
 	{
@@ -566,7 +566,7 @@ void CUnitStateHealer::OnStateFinished()
 		pFA->SpendPotion();
 		if ( pFA->IsEmpty() )
 		{
-			// ������� �������� � ������� �����������, ������� ����
+			// healing finished and the medkits are used up, remove the item
 			CObj<NRPG::IInventoryItem> pErase = pInventory->TakeOff( (NDb::ESlot)pInventory->GetActiveSlot() );
 			pUS->Update();
 		}
@@ -609,7 +609,7 @@ void CUnitStateHealer::ProcessCritical( NDb::ECritical eCA )
 		case NDb::C_WEAPONSKILL_REDUCTION:
 			break;
 		case NDb::C_ACCIDENTAL_SHOT:
-			// ������� ��������� ����������� ( 4 d4 )
+			// deal small damage ( 4 d4 )
 			for ( int i = 0; i < 4; ++i)
 				pTarget->GetUnitRPG()->MakeDirectDamage( random.Get( 1, 4 ) );
 			pUS->SetState( new CUnitStateNormal( pUS ) );
@@ -641,8 +641,8 @@ void CUnitStateEngineering::ProcessCritical( NDb::ECritical eCA )
 		case NDb::C_WEAPONSKILL_REDUCTION:
 			break;
 		case NDb::C_ACCIDENTAL_SHOT:
-			// �������� �������
-			// ��������� � ���������� ���������
+			// detonate the trap
+			// switch to normal state
 			pUS->SetState( new CUnitStateNormal( pUS ) );			
 			break;
 		default:
@@ -802,7 +802,7 @@ int CCriticalsBan::GetParam( CUnitServer *pUS, CCmd *pCmd )
 			CDynamicCast<CCmdMoveInventoryItem> pMII(pCmd);
 			if (pMII)
 			{
-				// ���������� �� ���� ����� � ����� ������
+				// moving an item out of the hand is always allowed
 				if (pMII->GetSource().eType != SItem::HAND)
 					return CR_DEFAULT_PARAM;
 				else

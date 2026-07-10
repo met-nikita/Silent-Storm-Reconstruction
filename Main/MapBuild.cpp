@@ -21,7 +21,7 @@
 #include "..\DBFormat\DataAI.h"
 #include "aiGrid.h"
 
-const float WALL_HEIGHT = 2.5f;  // ������ �����
+const float WALL_HEIGHT = 2.5f;  // floor height
 const int CLUE_SLOT_ID = 188;
 const int EXPLOSION_ID = 189;
 
@@ -267,11 +267,11 @@ bool CMapBuilder::CreateBuilding( SMapInfo *pDst, SMapBuilding *pRes, NBuilding:
 		return false;
 	pRes->mpos = pos;
 	pRes->ptAlignTo = ptBuildingCenter;
-	// ������� ������������� ��� ������ ��������� ����� ����� mpos
+	// the building's transform matrix is computed later via mpos
 	pRes->pGrid = new NBuilding::CBuildingGrid;
 	pRes->pSWMap = NBuilding::MakeSWMap( pRes->pVariant->GetRecordID(), pRes->pGrid->GetSeed() );
 	SRand brnd( pRes->pGrid->GetSeed() );
-	// �������� ��������, ���������� � ������ (����\�����..)
+	// creation of objects built into the building (windows/doors..)
 	pInfo->nMinFloor = 100;
 	pInfo->nMaxFloor = -100;
 	AddBuildingObjects( &pInfo->nMinFloor, &pInfo->nMaxFloor, &brnd, pDst, pInfo->solidFragments, pos, ptBuildingCenter, flags, true );
@@ -682,7 +682,7 @@ void CMapBuilder::AddSimpleElements( SMapInfo *pDst, SMapBuilding *pB, NDb::CTem
 void CMapBuilder::WriteLightRooms( SMapInfo *pInfo, NBuilding::CBuildingGrid *pGrid )
 {
 //	for ( list<SMapElement>::iterator i = pInfo->items.begin(); i != pInfo->items.end(); ++i )
-//		if ( i->bTerrAlignment ) // ��� ���� � ������ ������� �� �����������
+//		if ( i->bTerrAlignment ) // for windows and doors, rooms are not registered
 //			i->nRoomID = GetGlobalRoomID( pGrid, i->nRelFloor, i->nRoomID );		
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -835,7 +835,7 @@ void CMapBuilder::TraverseTemplateTree( NDb::CTemplate* pTemplate, SMapInfo *pFr
 	if ( !IsValid( pVar ) )
 		return;
 
-	// ��������
+	// landscape
   const int nRecW = pTemplate->nWidth;
   const int nRecH = pTemplate->nHeight;
 	
@@ -845,7 +845,7 @@ void CMapBuilder::TraverseTemplateTree( NDb::CTemplate* pTemplate, SMapInfo *pFr
 	const float fWHalf = 0.5f * FP_GRID_STEP * nRecW;
 	const float fHHalf = 0.5f * FP_GRID_STEP * nRecH;
 
-	// ���� �� ������������� ����������� �� �������� �������?
+	// is there any need to align objects to the terrain?
 	CDGPtr< CPtrFuncBase<NBuilding::CBuildInfo> > pBuildInfo = NGScene::shareBuildings.Get( pVar->GetRecordID() );
 	pBuildInfo.Refresh();
 	NBuilding::CBuildInfo *pBInfo = pBuildInfo->GetValue();
@@ -877,7 +877,7 @@ void CMapBuilder::TraverseTemplateTree( NDb::CTemplate* pTemplate, SMapInfo *pFr
 	NAI::SAlternativeGridInfo nestedAltGrids;
 	for ( int i = 0; i < nmax; ++i )
 	{
-		// �������������� ��������� ��� ���������
+		// coordinate transform for rotations
 		NDb::CRectangle *pRec = pVar->rects[i];
 		if ( !IsValid( pRec ) )
 			continue;
@@ -891,12 +891,12 @@ void CMapBuilder::TraverseTemplateTree( NDb::CTemplate* pTemplate, SMapInfo *pFr
 		ConvertFlags( &childFlags, pRec->vszParams );
 		TraverseTemplateTree( pRec->pTemplate, &nested, child, nDepth + 1, &nestedAltGrids, bTerrAlign, ptBuilding, childFlags );
 	}
-	// �������
+	// scripts
 	if ( IsValid( pVar->pScript ) )
 		nested.scripts.push_back( pVar->pScript.GetPtr() );
-	// ������
+	// buildings
 	SMapBuilding b;
-  // ������� � �����
+  // objects and units
 	SMapPosition posObjects = pos;
   AddSimpleElements( &nested, &b, pVar, posObjects, bTerrAlign, ptBuilding, flags );
 	AddWaypoints( &nested, pVar, posObjects, bTerrAlign, ptBuilding );
@@ -944,7 +944,7 @@ void CMapBuilder::TraverseTemplateTree( NDb::CTemplate* pTemplate, SMapInfo *pFr
 		}
 		for ( int nRelFloor = pBInfo->nMinFloor; nRelFloor <= pBInfo->nMaxFloor; ++nRelFloor )
 		{
-			int nZ = nRelFloor + pos.nFloor; // ���������� ����� �����
+			int nZ = nRelFloor + pos.nFloor; // absolute floor number
 			SetOnLayer( &info, &nested, nZ );	
 			//
 			b.stories.push_back( SMapBuilding::SStorey( nRelFloor, nZ ) );
@@ -961,7 +961,7 @@ void CMapBuilder::TraverseTemplateTree( NDb::CTemplate* pTemplate, SMapInfo *pFr
 				if ( lad.nID <= 0 )
 					continue;
 				//const float fLadFloors = lad.nHeight * NAI::F_LADDER_STEP / NBuilding::WALL_HEIGHT;
-				int x = lad.pos.ptMove.x + 1; // CRAP ���������� � aiGrid
+				int x = lad.pos.ptMove.x + 1; // CRAP subtracted in aiGrid
 				int y = lad.pos.ptMove.y + 1;
 				if ( nNewGroup >= 0 )
 					pNet->CreateLadder( x, y, lad.nHeight, lad.pos.nRotation, nNewGroup, lad.pos.ptMove.z + pos.nFloor );
@@ -1024,7 +1024,7 @@ void CMapBuilder::TraverseTerrainTree( NDb::CTemplate* pTemplate, float fDZ,	con
 		BlendTerrainInfo( &info.terrain, pVar->GetRecordID(), pos.ptPos, ToRadian( pos.fRotation ), &rand, flags );
 	for ( int i = 0; i < pVar->rects.size(); ++i )
 	{
-		// �������������� ��������� ��� ���������
+		// coordinate transform for rotations
 		NDb::CRectangle *pRec = pVar->rects[i];
 		if ( !IsValid( pRec ) )
 			continue;
@@ -1036,7 +1036,7 @@ void CMapBuilder::TraverseTerrainTree( NDb::CTemplate* pTemplate, float fDZ,	con
 		child.fRotation = int( pos.fRotation + pRec->fRotation + 360 * 100 ) % 360;
 		vector<int> childFlags( flags );
 		ConvertFlags( &childFlags, pRec->vszParams );
-		// ���������� ����� ����������� ������� �������������� �������� ������������, ������� ���������� � ���������
+		// the generated terrain must match the subtemplate variant that will be generated in the editor
 		if ( bResetPins || pRec->nPinID < 0 )
 		{
 			NDb::CTemplVariant *pPin = NDb::GetTemplVariant( pRec->pTemplate, childFlags, -1, &rand );
@@ -1230,7 +1230,7 @@ void CMapBuilder::AddWaypoints( SMapInfo *pDst, NDb::CTemplVariant *pVar, const 
 {
 	if ( !IsValid( pVar ) )
 		return;
-	// ��������� waypoints �� ������� �����������
+	// add waypoints from the current placement
 	for ( int i = 0; i < pVar->waypoints.size(); ++i )
 	{
 		NDb::CWaypoint *pdbW = pVar->waypoints[i];
@@ -1302,8 +1302,8 @@ void CMapBuilder::ResolveRoute( CPtrFuncBase<NAI::CUnitAIInfo> *pLoader, vector<
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CMapBuilder::ResolveRoutes( SMapInfo *pInfo )
 {
-	// ������� ���� ����������� ������ � ��������� �� ��������, ��� ������������� ������ ����������, 
-	// ���� �� ����� ��������� ����� ���������� ������ - ��������� � ������ ������� � �������
+	// iterate over all added units and check their routes; skip flags already set,
+	// if new matching flags appeared on the map, insert them into the route in the right order
 	for ( list<SMapUnit>::iterator i = pInfo->units.begin(); i != pInfo->units.end(); ++i )
 		ResolveRoute( shareUnits.Get( i->nUnitID ), &i->route );
 	for (unordered_map<int, SUnitGroup>::iterator i = pInfo->groups.begin(); i != pInfo->groups.end(); ++i )
@@ -1359,7 +1359,7 @@ bool CMapBuilder::BuildMap( int nPlacementID )
 		b.pGrid->SetPos( b.pos );
 	}
 
-	// �������� � ��������� ���������� 
+	// destructions authored in the editor
 	for ( int j = 0; j < explosions.size(); ++j )
 	{
 		const SExplosion &ex = explosions[j];

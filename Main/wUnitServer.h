@@ -133,7 +133,12 @@ class CUnitServer: public CDumbUnitServer, public CUnit, public CTBSUnit<CUnitSe
 	int nScriptToHit = -1;	// UnitSetToHit override (retail CUnitServer+0x1e8); -1 = use the computed to-hit
 	bool bForceNoChangePose = false;	// retail CUnitServer+0x1f4 (luaUnitLockPose writes it): a script "pose lock".
 										// Consumed by CannotFreelyChangePoses() -> FindPath move-only (keeps the pose).
-	ZEND int operator&( CStructureSaver &f ) { f.Add(2,(CDumbUnitServer *)this); f.Add(3,(TTBSUnit *)this); f.Add(4,(CUSSoundTracker *)this); f.Add(5,(CASet *)this); f.Add(6,(TTBSUnitVision *)this); f.Add(7,&pExec); f.Add(8,&bCallTimeLabel); f.Add(9,&pCurrentCmd); f.Add(10,&pState); f.Add(11,&criticals); f.Add(12,&bIsRunningForcedAction); f.Add(13,&pAutoRunCmd); f.Add(14,&wasInterruptedList); f.Add(15,&lostUnits); f.Add(16,&fLastHeight); f.Add(17,&plLast); f.Add(18,&pWearingPK); f.Add(19,&bIsPK); f.Add(20,&tPrev); f.Add(21,&nDialog); f.Add(22,&bCanTalk); f.Add(23,&nScriptToHit); f.Add(24,&bForceNoChangePose); return 0; }
+public:
+	CPtr<CUnitServer> pKiller;	// retail CUnitServer+0x1f8 (serialized tag 0x19): read by CAICorpseEvent::Modify
+								// @0x3c470 (killer -> possibleEnemy). ⚠ retail NEVER writes it (byte-scan proven:
+								// only ctor-null + serializer) -- the arm is retail-inert; kept 1:1.
+private:
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,(CDumbUnitServer *)this); f.Add(3,(TTBSUnit *)this); f.Add(4,(CUSSoundTracker *)this); f.Add(5,(CASet *)this); f.Add(6,(TTBSUnitVision *)this); f.Add(7,&pExec); f.Add(8,&bCallTimeLabel); f.Add(9,&pCurrentCmd); f.Add(10,&pState); f.Add(11,&criticals); f.Add(12,&bIsRunningForcedAction); f.Add(13,&pAutoRunCmd); f.Add(14,&wasInterruptedList); f.Add(15,&lostUnits); f.Add(16,&fLastHeight); f.Add(17,&plLast); f.Add(18,&pWearingPK); f.Add(19,&bIsPK); f.Add(20,&tPrev); f.Add(21,&nDialog); f.Add(22,&bCanTalk); f.Add(23,&nScriptToHit); f.Add(24,&bForceNoChangePose); f.Add(25,&pKiller); return 0; }
 	void RefreshExecutor();
 	void CheckCmdExecState();
 	void Fall();
@@ -186,6 +191,7 @@ public:
 	virtual bool IsStrafing() const { return CDumbUnitServer::IsStrafing(); }
 	virtual bool IsCarryingCorpse() const { return animator.IsCarryingCorpse(); }
 	virtual CUnit* GetCorpseCarrier() const { return animator.GetCorpseCarrier(); }
+	virtual const vector<CVec3>* GetCorpseHLs() const { return CDumbUnitServer::GetCorpseHLs(); }   // retail CUnit vtbl+0x94 @0x3c68e0
 	// retail CUnitServer::CannotFreelyChangePoses @0x37d550: the unit may not switch pose freely --
 	// carrying a corpse, wearing a live PK, or a script pose-lock (luaUnitLockPose). FindPath passes
 	// this as bMoveOnly so a locked/loaded unit keeps its current pose along the path.

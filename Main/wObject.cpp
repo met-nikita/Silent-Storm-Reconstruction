@@ -114,13 +114,13 @@ CVec3 CWindowDoor::GetChangeStateDirection( bool bOpen ) const
 int CWindowDoor::ProcessAttack( int nUserID, NRPG::CAttackPortion *pAttack, NDb::CRPGArmor *pArmor )
 {
 	int nRes = CAnimObjectServerBase::ProcessAttack( nUserID, pAttack, pArmor );
-	// ���� ����������� ����������� �� �������� ��������� � ������
+	// find the direction of movement from the current position to the other
 	if ( pAttack->atkType != NRPG::AT_CLICK_OF_DEATH && !IsBroken() )
 	{
 		CDynamicCast<NAI::CPathNetwork> pNetwork( pWorld->GetPathNetwork() );
 		NAI::CPathNetwork::SFlipper *pFlipper = pNetwork->GetFlipper( this );
 		bool bTmpOpened = pFlipper->bOpen;
-		// ���� ����������� �������, �� ������� ������
+		// if the direction is good, move the door
 		if ( GetChangeStateDirection( !bTmpOpened ) * pAttack->rTtrajectory.ptDir > 0.001f )
 		{
 			OpenClose( !bTmpOpened, true );

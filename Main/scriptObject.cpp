@@ -213,7 +213,7 @@ BEGIN_SCRIPT_COMMAND( ItemSetToWaypoint, "us" )
 	CPtr<NRPG::IInventoryItem> pHold = pItem;   // survive the remove below
 	NWorld::SObjectPlace place = pWaypoint->GetObjectPlace( 0 );
 	pScript->pWorld->RemoveFrozenItem( pItem );
-	pScript->pWorld->AddFrozenItem( place.ptPos, CQuat( place.fAngle, CVec3( 0, 0, 1 ) ), pItem, place.nFloor );
+	pScript->pWorld->AddFrozenItem( place.ptPos, CQuat( place.fAngle, CVec3( 0, 0, 1 ) ), pItem, false, place.nFloor );
 	return 0;
 END_SCRIPT_COMMAND
 ////////////////////////////////////////////////////////////////////////////////////////////////////

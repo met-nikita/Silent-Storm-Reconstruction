@@ -106,10 +106,38 @@ public:
 		NAI::ETileHitLocation eHitLocation, bool bFirstTurn ) = 0;
 	virtual int GetBazookaToHit(  NWorld::CUnit *pAttacker, CVec3 ptTilePos,
 		NAI::ETileHitLocation eHitLocation, bool bFirstTurn ) = 0;
-	virtual bool CheckVisibility( const NWorld::CUnit *pObserver, const NWorld::CUnit *pDest ) = 0;
+	// retail CGame::CheckVisibility @0x298cb0 (game vtbl+0x10) -- THE per-unit visibility probe:
+	// fFOV = bUseFOV ? observer GetSightFOV() (pi, perk 0x52) : 2pi (0x40c90fdb, full circle);
+	// fRange = GetUnitSightDistance(observer); routes to the 4-arg CheckPositionVisibility. The
+	// perception sweep (CUnitServer::UpdateVisible @0x3c4450) passes bUseFOV = TRUE (disasm-proven
+	// push ebx=1 @0x7c46fe). Other retail call sites' bools are unverified -- dev sites pass true
+	// (the pre-port legacy leaf was a 180-degree half-space == the FOV-pi default, so true preserves
+	// their effective semantics).
+	virtual bool CheckVisibility( const NWorld::CUnit *pObserver, const NWorld::CUnit *pDest, bool bUseFOV ) = 0;
 	virtual bool CanSee( const NWorld::CUnit *pObserver, const CVec3 &vPos ) = 0;
+	// LEGACY 2-arg form: retail's CGame vtable has NO 2-arg overload (every retail caller hoists the
+	// observer's real range/FOV and calls the 4-arg one -- all in-tree retail-counterpart sites converged).
+	// Kept ONLY for the dev-only aiSignal corpse probe (no retail counterpart; the signal layer is gutted).
 	virtual bool CheckPositionVisibility( const NAI::SUnitPosition observerPos, const NAI::SPosition targetPos ) = 0;
-	virtual bool CheckAIPositionVisibility( const NAI::SUnitPosition observerPos, const NAI::SPosition targetPos ) = 0;
+	// retail CGame::CheckPositionVisibility @0x298fa0 (game vtbl+0x1c) -- the 4-arg overload used by the
+	// perception probe above AND the AI cover planner (NAI::IsUnitSeePosFromPos @0x3a270): is the target
+	// visible from the observer within `fRange` and inside the cone of TOTAL angle `fFOVAngle` off the
+	// observer's facing? Per occupied cube of the target: the retail 9-ray IsCubeVisible @0x2c9160
+	// (vision vtbl+0x10, disasm-proven -- NOT the single-ray IsPointVisible); first visible cube wins.
+	virtual bool CheckPositionVisibility( const NAI::SUnitPosition observerPos, const NAI::SPosition targetPos,
+		float fRange, float fFOVAngle ) = 0;
+	// retail CGame::GetUnitSightDistance @0x2984d0 (game vtbl+0x34): the unit's sight range --
+	// CUnit::GetSightDistance (flat 20, perk 0x53), x1.5015 at night with the night-vision perk 0x51.
+	virtual float GetUnitSightDistance( CUnit *pRPGUnit ) = 0;
+	// retail CGame::GetMaxUnitSightDistance @0x298520 (game vtbl+0x38): 2x the sight range -- the
+	// perception sweep's CANDIDATE-GATHER radius (matches MakeVisionQuery's 2x cap on the
+	// height-stretched effective range).
+	virtual float GetMaxUnitSightDistance( CUnit *pRPGUnit ) = 0;
+	// retail CGame::IsCorpseVisible @0x298da0 (game vtbl+0x50): can the observer SEE the downed body?
+	// One range/FOV-gated 9-ray IsCubeVisible per corpse hit-location point (CUnit::GetCorpseHLs,
+	// vtbl+0x94); range = the 1x GetUnitSightDistance (NOT the 2x max); first visible point wins.
+	// Consumer: the AI tracker's corpse scan (retail CheckForVisibleCorpses @0xab7a0).
+	virtual bool IsCorpseVisible( const NWorld::CUnit *pObserver, const NWorld::CUnit *pCorpse ) = 0;
 	virtual void GetVisibilityArea( vector<SVisibilitySpot> *pRes, const NWorld::CUnit *pObserver ) = 0;
 	// nPoses - bit mask, 1-lay, 2-croach, 4-stand
 	virtual void GetVisibleFromArea( vector<SVisibilitySpot> *pRes, const NWorld::CUnit *pTarget, CVec3 &vNear, float fRadius, int nPoses = 7 ) = 0;
@@ -128,7 +156,7 @@ IUnitMission* CreateUnit( CUnit *pSrc );
 // pInHandItem/pBackpack = rolled chest-loot equipment (retail @0x2c4f50 params 4/5, from
 // SMapUnit); null = pers defaults
 IUnitMission* CreateUnit( NDb::CRPGPers *pSrc, NDb::CRPGItem *pInHandItem = 0, NDb::CRPGChestReal *pBackpack = 0 );
-IObject* CreateObject( int nStages, NDb::CModel *pModel, int nStartStage = 0 ); // pModel - ��� �������� hit-�� �������
+IObject* CreateObject( int nStages, NDb::CModel *pModel, int nStartStage = 0 ); // pModel - for counting the object's hits
 IObject* CreateObject( NDb::CObject *pDBObject, int nStartStage = 0 );
 CObjectBase* CreateBuilding( NBuilding::CBuildingGrid *pGrid );
 NDb::CRPGArmor* GetTerrainArmor();

@@ -52,7 +52,7 @@ public:
 	CCritical() {}
 	CCritical( const SCritical &crit );
 
-	// false, ���� ��� ����� ��������� �� ��������� ������ (�� ���� �������� ������� �������������)
+	// false if this critical needs no cancellation (no modifiers were applied)
 	virtual bool SetModifiers( CUnit *pRPGUnit, IUnitMission *pRPGMission  )
 	{
 		OutputDebugString( "Empty critical\n" );
@@ -62,10 +62,10 @@ public:
 	virtual bool CanBeSuspended() = 0;
 	virtual bool CanBeMerged() const { return true; }
 
-	enum { WEAKER, MERGED, OTHER }; // ���������� ������� Merge
+	enum { WEAKER, MERGED, OTHER }; // results of the Merge function
 	int Merge( CCritical *pCritical ) const;
 
-	bool NextTurn();		// true ���� ����� �������� ������� critical'� �� �������
+	bool NextTurn();		// true while this critical's duration has not expired
 
 	virtual int  GetRemainingTime() const;
 	virtual bool IsTemporarily() const { return critical.nDuration >= 0; }

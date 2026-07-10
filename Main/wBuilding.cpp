@@ -120,7 +120,7 @@ void CBuilding::Visit( IAIVisitor *p )
 	//ASSERT(0);
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// ��������� ������ �� ����� ������, ��� ���������� �����
+// update only the building parts where the grid changed
 void CBuilding::UpdateBuildingParts()
 {
 	vector<NBuilding::SPart> toupdate;
@@ -140,7 +140,7 @@ void CBuilding::UpdateBuildingParts()
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// ��������� ��� ����� ������
+// update all parts of the building
 void CBuilding::UpdateAllParts()
 {
 	pBInfo->UpdateInfo();
@@ -153,7 +153,7 @@ void CBuilding::UpdateAllParts()
 		{
 			CPartsHash::iterator itmp = i;
 			++itmp;
-			parts.erase( i ); // �� ����� ���������� �������� �� ���� ������� ������ �� :(
+			parts.erase( i ); // for some reason it won't return an iterator to the next element :(
 			i = itmp;
 			continue;
 		}
@@ -186,7 +186,7 @@ void CBuilding::Update()
 		{
 			CPartsHash::iterator itmp = i;
 			++itmp;
-			parts.erase( i ); // �� ����� ���������� �������� �� ���� ������� ������ �� :(
+			parts.erase( i ); // for some reason it won't return an iterator to the next element :(
 			i = itmp;
 		}
 		else
@@ -228,7 +228,7 @@ int CBuilding::ProcessAttack( int nUserID, NRPG::CAttackPortion *pAttack, NDb::C
 	int nRes = pAtk->ProcessAttack( nUserID, pAttack, pArmor );
 	if ( nRes )
 	{
-//		UpdateBuildingParts(); �������� � Segment
+//		UpdateBuildingParts(); moved out to Segment
 		ToggleUpdateFlag();
 	}
 	return nRes;

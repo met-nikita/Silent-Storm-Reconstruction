@@ -251,7 +251,7 @@ CVoxelExpl::CVoxelExpl( CVec3 _ptCenter, int _nWave, NDb::CRPGGrenade *_pGrenade
 		}
 	}
 	else
-		nMaxVolume = GetVolume( 5 ); // ��� AI Viewer
+		nMaxVolume = GetVolume( 5 ); // for the AI Viewer
 	//
 	ExplodeWave();
 }
@@ -469,7 +469,7 @@ void CVoxelExpl::ApplyWaveDamage()
 					CDynamicCast<NWorld::CUnitServer> pUS(o.pUserData);
 					if (pUS)
 					{
-						// ����������� �� Unit-��
+						// damage to Units
 						if ( fDamageMax > 0 && !pUS->GetUnitRPG()->IsDead() && IsValid( pTracker ) )
 						{
 							if ( find( pTracker->damagedUnits.begin(), pTracker->damagedUnits.end(), pUS.GetPtr() ) ==
@@ -497,7 +497,7 @@ void CVoxelExpl::ApplyWaveDamage()
 					}
 					else
 					{
-						// ����������� �� Structure
+						// damage to Structure
 						// retail @0x355ba0 scales by (nWaveNumber - nCurrentWave + 1) with a 0-BASED wave counter;
 						// the dev nWave is 1-based (the tracker pre-increments before spawning the ring), so convert
 						// nCurrentWave == nWave-1. The previous "- nWave + 1" sat one wave ahead, costing every ring

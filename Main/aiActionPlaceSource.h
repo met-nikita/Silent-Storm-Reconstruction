@@ -28,7 +28,7 @@
 namespace NWorld { class CUnitServer; }
 namespace NAI
 {
-class IAIState;
+struct SAIState;
 class IAIUnit;
 class CAIAction;
 class CAIFireArmsWeapon;
@@ -80,7 +80,7 @@ public:
 	ZEND int operator&( CStructureSaver &f );   // slot3; tag2 places (DoVector), tag3 pUnit
 	//
 protected:
-	IAIState* GetAIState() const;                       // pUnit->GetAIState()   (IAIUnit vtbl 0x78)
+	SAIState* GetAIState() const;                       // pUnit->GetAIState()   (IAIUnit vtbl 0x78)
 	IAIUnit*  GetEnemy() const;                         // pUnit->GetAIUnitState()->enemy (vtbl 0x74, +0x88)
 	IAIUnit*  GetUnit() const { return pUnit; }
 	// True if `p` is a usable destination for pUnit on `pNet` (rejects blocked / wrong-owner tiles).

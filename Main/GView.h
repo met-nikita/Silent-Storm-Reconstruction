@@ -97,7 +97,7 @@ public:
 	};
 	struct SDrawInfo
 	{
-		CTransformStack *pTS; // pTS �� ���� �����
+		CTransformStack *pTS; // pTS for the whole screen
 		CVec2 vOrigin, vSize; // in [0,1] diapason
 		CVec3 vClearColor;
 		bool bOverlay, bUseDefaultClearColor;

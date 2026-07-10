@@ -39,7 +39,7 @@ struct SMapElement
 	CPtr<NDb::CObject> pObject;
 	SMapPosition pos;
 	int nRelFloor;
-	bool bLightmap;								// ��� ��������� ����� � ����������
+	bool bLightmap;								// light-source type in the container
 	CVec2 ptAlignTo;
 	bool bOpen;
 	int nPassageZoneID;

@@ -5,7 +5,7 @@
 #endif // _MSC_VER > 1000
 //
 #include "aiLogic.h"         // NAI::CAILogic (the AI-logic base); brings SPosition/EPose via aiPosition.h
-#include "aiTaskCommander.h" // NAI::CTaskCommand (the reused route-command family base) + LookToPosition's home
+#include "aiTaskCommand.h" // NAI::CTaskCommand (the reused route-command family base) + LookToPosition's home
 //
 namespace NWorld { class CUnitServer; }
 //

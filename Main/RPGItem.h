@@ -15,7 +15,7 @@ namespace NRPG
 {
 class CUnit;
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// ������� ��������� ��� ��������������
+// Base interface for item transfer
 class IJoinSplit: virtual public CObjectBase
 {
 public:
@@ -29,7 +29,7 @@ public:
 	virtual IJoinSplit* SplitItem( int nQ ) = 0;
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// ��� �������� ���������
+// For storing items
 class IInventory: public IInventoryInfo
 {
 public:
@@ -66,6 +66,7 @@ IInventory *CreateInventory( CUnit *pOwner );
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 IInventoryItem *CreateItem( CDBRecord *pItem );
 IInventoryItem *CreateClueItem( NDb::CRPGItem *pDBItem );
+IInventoryItem *CreateHintItem();	// retail @0x2a21a0: the fixed db item 0x1b6 wrapped in CSimpleItem<IHintItem>
 IWeaponItem *CreateWeaponItem( NDb::CRPGWeapon *pDBWeapon );
 IInventoryItem *CreateMeleeWeaponItem( NDb::CRPGMeleeWeapon *pDBMeleeWeapon );
 IInventoryItem *CreateClipItem( NDb::CRPGClip *pDBClip, NDb::CRPGAmmo *pDBAmmo = 0, int nAmmoQuantity = - 1 );

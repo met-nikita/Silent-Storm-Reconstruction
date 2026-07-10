@@ -248,6 +248,17 @@ void SetControlCoeff( const string &szControl, float fCoeff )
 	sInfo.fCoeff = fCoeff;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// SetCommandCoeff @0x3d0880 -- set a bound COMMAND's coeff (retail writes SCommand::fCoeff at +0x20). The
+// camera sensitivity/invert options drive this; the coeff scales the command's fDelta in ProcessCommand
+// (fDelta = nValue * fCoeff / 100000) -> magnitude = sensitivity, negative = inverted axis.
+void SetCommandCoeff( const string &szCommand, float fCoeff )
+{
+	TCommandsMap &sCommandsMap = GetCommands();
+	TCommandsMap::iterator i = sCommandsMap.find( szCommand );
+	if ( i != sCommandsMap.end() )
+		i->second.fCoeff = fCoeff;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 bool GetEvent( SEvent *psEvent )
 {
 	NInput::SMessage msg;

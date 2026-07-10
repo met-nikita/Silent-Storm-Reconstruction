@@ -13,7 +13,7 @@
 namespace NGScene
 {
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-//! ������ TAB-�
+//! TAB size
 const int
 	N_TAB_SIZE		= 32;
 const WCHAR
@@ -562,7 +562,13 @@ void CTextFormater::TagColor( const wstring &wsTag )
 	else if ( iTemp->wsString.compare( L"lightblue" ) == 0 )
 		sState.sColor = NGfx::SPixel8888( 0, 101, 213, 0xFF );
 	else
-		swscanf( iTemp->wsString.c_str(), L"%x", &sState.sColor.color );
+	{
+		// hex ARGB; the game.db 0x-PREFIXES some ("0x.."). Strip it so swscanf %x reads the full value.
+		const wchar_t *p = iTemp->wsString.c_str();
+		if ( p[0] == L'0' && ( p[1] == L'x' || p[1] == L'X' ) )
+			p += 2;
+		swscanf( p, L"%x", &sState.sColor.color );
+	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CRectLayout* CTextFormater::GetLayout( const SFont &sFont )

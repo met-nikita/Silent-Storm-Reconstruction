@@ -46,8 +46,8 @@ public:
 	int nPKHP, nMaxPKHP;      // Panzerklein current / max HP for the PK-HP bar
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// �������� ������� ����� ��������� RPG unit
-enum EAction // �� �������� ���� enum � ���� �� ������ � ��� ������� �������, ��� ������������ � Epik-��! (��� ��������� ������ � �����)
+// Actions that an RPG unit can perform
+enum EAction // Do not change this enum or reorder its lines without agreeing with Epik! (or only add at the end)
 {
 	AC_NONE,
 	AC_MOVE_SIDE,

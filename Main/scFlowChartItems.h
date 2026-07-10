@@ -158,7 +158,7 @@ class CScenarioClue: public CObjectBase
 	int nOpenOrder;
 	int nInnerID;
 	bool bInShortestPath;
-	int nTemplateID; // �� ����� template ���� ���������
+	int nTemplateID; // which zone template it was placed on
 	vector< CPtr<CScenarioObjective> > objectives;
 	vector< CPtr<CScenarioObjective> > parentObjectives;
 	vector< CPtr<CScenarioZone> > parentZones;

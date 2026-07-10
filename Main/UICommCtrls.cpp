@@ -76,7 +76,17 @@ void CEdit::SetCursorPosition( int nPos )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CEdit::ProcessMessage( const SEvent &sEvent )
 {
+	// CEdit::ProcessMessage @0x314720. Three keyboard events drive the edit:
+	//   EVENT_CHAR   (0x2000022): the still-active DirectInput edge key -- swallowed, so
+	//                             editing does not double-fire against the WM stream.
+	//   EVENT_WINKEY (0x2000021): navigation / structural editing (WM_KEYDOWN virtual keys,
+	//                             OS auto-repeated).
+	//   EVENT_WINCHAR(0x2000020): printable-character insertion (WM_CHAR-derived, already
+	//                             codepage->unicode translated -- nVal holds the WCHAR).
 	if ( sEvent.nEvent == EVENT_CHAR )
+		return true;
+
+	if ( sEvent.nEvent == EVENT_WINKEY )
 	{
 		if ( !IsActive() )
 			return false;
@@ -118,32 +128,40 @@ bool CEdit::ProcessMessage( const SEvent &sEvent )
 		case VK_RETURN:
 			SendMessage( GetParent(), SEvent( EVENT_NOTIFY, GetWindowID() ) );
 			return true;
-
-		default:
-			{
-				WCHAR wcChar = 0;
-				if ( !NInput::GetCharForKey( sEvent.nVal, &wcChar ) )
-					break;
-				if ( ( eMode == NUMERIC ) && ( !iswdigit( wcChar ) ) )
-					break;
-				if ( ( eMode == FILENAME ) && ( ( wcChar < 40 ) || ( wcschr( L".<>\\/|\"*^:?", wcChar ) != NULL ) ) )
-					break;
-				if ( !iswprint( wcChar ) )
-					break;
-
-				if ( wsText.length() < nSize )
-				{
-					wstring wsTempString;
-					wsTempString.append( wsText.substr( 0, nCursor ) );
-					wsTempString.append( 1, wcChar );
-					wsTempString.append( wsText.substr( nCursor, wsText.length() ) );
-					wsText = wsTempString;
-					nCursor++;
-				}
-
-				return true;
-			}
 		}
+		// unknown virtual key -> base window handler (below).
+	}
+	else if ( sEvent.nEvent == EVENT_WINCHAR )
+	{
+		if ( !IsActive() )
+			return false;
+
+		// nVal already holds the translated WCHAR (the WM_CHAR run was widened upstream by
+		// SWinToInputMessageConverter), unlike Jan03's in-place NInput::GetCharForKey.
+		WCHAR wcChar = (WCHAR)sEvent.nVal;
+		do
+		{
+			if ( ( eMode == NUMERIC ) && ( !iswdigit( wcChar ) ) )
+				break;
+			if ( ( eMode == FILENAME ) && ( ( wcChar <= 0x1d ) || ( wcschr( L".<>\\/|\"*^:?", wcChar ) != NULL ) ) )
+				break;
+			if ( !iswprint( wcChar ) )
+				break;
+			if ( wcChar == L'\t' )
+				break;
+
+			if ( wsText.length() < nSize )
+			{
+				wstring wsTempString;
+				wsTempString.append( wsText.substr( 0, nCursor ) );
+				wsTempString.append( 1, wcChar );
+				wsTempString.append( wsText.substr( nCursor, wsText.length() ) );
+				wsText = wsTempString;
+				nCursor++;
+			}
+		} while ( false );
+
+		return true;
 	}
 
 	return CWindow::ProcessMessage( sEvent );

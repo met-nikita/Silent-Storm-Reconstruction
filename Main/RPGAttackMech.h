@@ -22,10 +22,10 @@ class CAttackPortion
 {
 public:
 	ZDATA
-	int nK; // "������������ �������" - ���� ����������� �����������
-	int nDmgType;			// ��� ���������� damage-�
-	int nDmgMin, nDmgMax;	// ���� �� ������
-	int nCrtical;  // ����������� ���������
+	int nK; // "kinetic energy" - measure of penetration ability
+	int nDmgType;			// type of damage dealt
+	int nDmgMin, nDmgMax;	// damage to units
+	int nCrtical;  // critical hit probability
 	int nCrticalDifficulty;
 	CRay rTtrajectory;
 	CPtr<IUnitMissionInfo> pAttacker;

@@ -214,13 +214,13 @@ void CScenarioTracker::OnObjectiveComplete( CScenarioObjective *pObjective )
 	if ( IsValid( pObjective->GetParentClue() ) && !IsClueFound( pObjective->GetParentClue() ) )
 	{
 		finishedObjectives.push_back( pObjective );
-		// ��������� ����
+		// block zones
 		for ( vector< CPtr<CScenarioZone> >::const_iterator i = pObjective->GetZonesToBlock().begin();
 			i != pObjective->GetZonesToBlock().end(); ++i )
 		{
 			BlockZone( *i );
 		}
-		// ��������� ����
+		// add zones
 		for ( vector< CPtr<CScenarioZone> >::const_iterator i = pObjective->GetZones().begin();
 			i != pObjective->GetZones().end(); ++i )
 		{
@@ -231,11 +231,11 @@ void CScenarioTracker::OnObjectiveComplete( CScenarioObjective *pObjective )
 				csSystem << "Zone " << (*i)->GetDBZone()->sSmallDescription.c_str() << " was opened" << endl;
 			}
 		}
-		// ��������� ��������� clue
+		// open compound clues
 		for ( vector< CPtr<CScenarioClue> >::const_iterator i = pObjective->GetClues().begin();
 			i != pObjective->GetClues().end(); ++i )
 		{
-			// ������� �������� �����
+			// count incoming links
 			int nCluesFound = 0;
 			vector< CPtr<CScenarioObjective> >::const_iterator p;
 			for ( p = (*i)->GetParentObjectives().begin(); p != (*i)->GetParentObjectives().end(); ++p )
@@ -243,7 +243,7 @@ void CScenarioTracker::OnObjectiveComplete( CScenarioObjective *pObjective )
 				if ( IsClueFound( (*p)->GetParentClue() ) )
 					++nCluesFound;
 			}
-			// ���� �� ���������� ��� ��������� ���������� clue, �� ��������� ��� objectives
+			// if there are enough to obtain the compound clue, execute its objectives
 			if ( nCluesFound >= pScenarioFlowChart->GetPathFinder()->GetMinParentToOpen( *i ) )
 			{
 				csSystem << "Compound clue " << (*i)->GetDBClue()->sSmallDescription.c_str() << " was given" << endl;
@@ -556,7 +556,7 @@ void CScenarioTracker::ProcessScenario( const vector< CPtr<NRPG::CUnit> > &units
 		i != units.end(); ++i )
 	{
 		CPtr<NRPG::IInventory> pInventory = (*i)->pInventory;
-		// �����
+		// slots
 		for ( int n = 0; n < NDb::N_SLOTS; ++n )
 		{
 			CPtr<NRPG::IInventoryItem> pItem = pInventory->Get( (NDb::ESlot)n );
@@ -564,7 +564,7 @@ void CScenarioTracker::ProcessScenario( const vector< CPtr<NRPG::CUnit> > &units
 				OnScenarioClueTaken( pItem->GetDBItem()->GetRecordID(), false ) )
 					pInventory->TakeOff( (NDb::ESlot)n );
 		}
-		// ������
+		// backpack
 		const vector<NRPG::SBackPackItem> &items = pInventory->GetItems();
 		vector<NRPG::SBackPackItem> itemsToRemove;
 		for ( vector<NRPG::SBackPackItem>::const_iterator b = items.begin(); b != items.end(); ++b )
@@ -582,7 +582,7 @@ void CScenarioTracker::ProcessScenario( const vector< CPtr<NRPG::CUnit> > &units
 		{
 			pInventory->Take( (*b).pItem );
 		}
-		// ����� :)
+		// mouse :)
 		CPtr<NRPG::IInventoryItem> pItem  = pInventory->GetHandItem();
 		if ( IsValid( pItem ) && IsValid( pItem->GetDBItem() ) &&
 			OnScenarioClueTaken( pItem->GetDBItem()->GetRecordID(), false ) )

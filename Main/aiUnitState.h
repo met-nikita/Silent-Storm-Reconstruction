@@ -22,7 +22,7 @@
 namespace NAI
 {
 class IAIUnit;
-class IAIState;
+struct SAIState;
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // SModifiable<T> - a value with a dirty flag + a lock that defers clearing the flag during iteration.
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -67,6 +67,12 @@ struct SAIUnitState
 	void Populate();      // refresh enemies/allies from the AI players (release: events + PrepareEnemies)
 	void Update();        // recompute pEnemy/pPossibleEnemy/pAlly when lists changed, then CheckScared
 	void Reset();
+	// AI-convergence Stage 2: the commander's reaction pump reads this dirty flag. IsModified @0xb0550
+	// reports "the derived threat changed since last processed"; the commander's GetReactionForUpdate
+	// consumes it (ClearModified) when it enqueues the unit's reaction. selfModified is SET by
+	// FindMostDangerousEnemy/FindNearestAlly (a pEnemy/pAlly change) and OnSequenceFinished.
+	bool IsModified() const { return selfModified.bModified; }   // @0xb0550 (dev: the dirty flag)
+	void ClearModified() { selfModified.bModified = false; selfModified.data = false; }
 	const vector< CPtr<IAIUnit> >& GetKnownEnemies() const { return enemies.data.units; }
 private:
 	void FindMostDangerousEnemy();         // @0x004b0b10  -> pEnemy

@@ -777,6 +777,7 @@ bool CControlsOptionsUI::ProcessMessage( const SEvent &sEvent )
 				WriteSensVar( pCameraSensivity, "game_camerasensivity" );
 				WriteSensVar( pScrollSensivity, "game_scrollsensivity" );
 				WriteSensVar( pSelectionFrameSensivity, "game_selectionsensivity" );
+				NGlobal::ProcessCommand( L"camera_update" );   // BUG 4: push new sensitivity/invert into the camera coeffs (the reset branch above already does)
 			}
 			break;
 		}

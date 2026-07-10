@@ -2,6 +2,7 @@
 //
 #include "aiUnit.h"
 #include "aiState.h"
+#include "aiUnitState.h"   // SAIUnitState (the PS_THINK state re-pin reads pEnemy)
 #include "aiGrid.h"           // IsSamePlace
 #include "AILog.h"            // dev records (CAILogPosition/CAILogSpendAP)
 #include "wMain.h"
@@ -137,6 +138,23 @@ void CAICombatLogic::DoJob()
 		prepareState = PS_THINK;
 		return;
 	case PS_THINK:
+		// Re-pin the shared tactical state to THIS unit before deciding. Retail's DoJob @0x432aa0 runs
+		// the whole 5-stage machine in ONE tick, so the state set for the unit stays valid through
+		// MakeDecision; the dev pipeline yields across segments waiting on the world job manager, and
+		// the commander round-robin repoints state.pCurrentUnit/pCurrentEnemy at OTHER units meanwhile.
+		// Every action reads the enemy through that shared state (CAIAction::GetEnemy @0x13ac0), so a
+		// decision landing after a repoint saw a foreign unit's enemy -- an IDLE unit's NULL made
+		// GetInfoInner bail out (weapon=0/toHit=0, DEF-DECIDE best=NONE forever: the GFirst car-guy
+		// standing at his attack spot doing nothing).
+		{
+			SAIState *pState = GetUnit()->GetAIState();
+			if ( pState != 0 )
+			{
+				pState->SetCurrentAIUnit( GetUnit() );
+				SAIUnitState *pUState = GetUnit()->GetAIUnitState();
+				pState->SetCurrentAIEnemy( pUState != 0 ? pUState->pEnemy.GetPtr() : 0 );
+			}
+		}
 		// the chooser has finished; decide, then the job is done this same tick
 		MakeDecision();
 		prepareState = PS_FINISHED;
@@ -319,15 +337,19 @@ CAIAttackLogic::CAIAttackLogic( IAIUnit *pUnit ):
 	pLeavePK          = AddAction( new CAILeavePKAction( u ),      currentPlaceSource );
 }
 // @0x00420ea0 - RELEASE-RECONCILED: skip the turn only when out of useful AP. A fight-capable unit with
-// >5 AP keeps acting; a unit that cannot fight (downed) never skips. Identical to the guard/retreat CanSkip
-// (disasm-confirmed @0x20ea0: GetUnitServer valid+not-destroyed, CanFight (server vtbl+0x44), then GetUnit
-// valid && AP>5 -> false; constant 5 cmp-confirmed). Was the predecessor `!IsValid(u) || u->GetAP() <= 0`.
+// >5 AP keeps acting; a unit that cannot fight (downed) never skips. Identical to the guard/retreat CanSkip.
+// ‼️ AP SOURCE (re-disasm'd @0x20ea0): retail reads the LIVE RPG ST_AP skill (GetUnit -> vtbl+8 -> +0x14 ->
+// +0x28 skill; value = min(cur,max) unless the +0x2c flag), i.e. the SERVER's current AP -- NOT
+// IAIUnit::GetAP() (the CAIUnit nAP mirror pool). The mirror is drained at PLAN time by the committed
+// CAILogSpendAP records while the plan still sits unexecuted in pLog, so gating on it guillotined the
+// turn (IsEndOfTurn -> CanSkip==true, silently) between MakeDecision and the commander's GetCommand
+// drain -- the GFirst runner's turn-1 shot was decided, logged, then discarded by FinishTurn.
 bool CAIAttackLogic::CanSkip() const
 {
 	NWorld::CUnitServer *pUS = GetUnitServer();
 	if ( !IsValid( pUS ) || !pUS->CanFight() ) return false;
 	IAIUnit *u = GetUnit();
-	if ( IsValid( u ) && u->GetAP() > 5 ) return false;
+	if ( IsValid( u ) && pUS->GetAP() > 5 ) return false;
 	return true;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -412,8 +434,12 @@ void CAIAttackLogic::MakeDecision()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CAIDefenceLogic - hold a place (1 OnePlace source + shoot/grenade/rocket/reload). ctor @0x004394b0
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail @0x394b0 (disasm 0x439517, 2026-07-10): the 3rd ctor param (nAPForTakeCover from
+// CAIDefenceReaction::Update) is FORWARDED to the chooser as its nAPToReserve -- defence candidates
+// must afford the reserve (the take-cover move back) PLUS the action. Dev hardcoded reserve 0.
+// The attack/guard/after-combat ctors pass 0 in retail too (disasm-verified) -- those stay.
 CAIDefenceLogic::CAIDefenceLogic( IAIUnit *pUnit, const SPathPlace &_attackPlace, int nArg ):
-	CAICombatLogic( pUnit, CreateAIChoosePlaceForAttackJob( 0, 0 ) ), attackPlace( _attackPlace )
+	CAICombatLogic( pUnit, CreateAIChoosePlaceForAttackJob( 0, nArg ) ), attackPlace( _attackPlace )
 {
 	IAIUnit *u = GetUnit();
 	currentPlaceSource = AddPlaceSource( CreateOnePlacePlaceSource( u, attackPlace, false ) );
@@ -589,14 +615,15 @@ void CAIGuardLogic::MakeDecision()
 }
 // @0x0044e3a0 - RELEASE-RECONCILED: skip the turn only when out of useful AP. A fight-capable unit with
 // >5 AP keeps acting; one that can't fight (downed) never skips, keeping the guard alive. Same gate as
-// CAIRetreatLogic::CanSkip (disasm-confirmed @0x4e3a0: GetUnitServer valid+not-destroyed, CanFight (server
-// vtbl+0x44), then GetUnit valid && AP>5 -> false; constant 5 cmp-confirmed). Was a `return false` stub.
+// CAIRetreatLogic::CanSkip. AP source = the LIVE server AP (retail reads the RPG ST_AP skill through
+// GetUnit -> vtbl+8 -> +0x14 -> +0x28, byte-identical to the attack CanSkip @0x20ea0 -- see the note
+// there; the IAIUnit mirror pool is plan-drained and must NOT gate the turn). Was a `return false` stub.
 bool CAIGuardLogic::CanSkip() const
 {
 	NWorld::CUnitServer *pUS = GetUnitServer();
 	if ( !IsValid( pUS ) || !pUS->CanFight() ) return false;
 	IAIUnit *u = GetUnit();
-	if ( IsValid( u ) && u->GetAP() > 5 ) return false;
+	if ( IsValid( u ) && pUS->GetAP() > 5 ) return false;
 	return true;
 }
 //
@@ -671,13 +698,14 @@ void CAIRetreatLogic::MakeDecision()
 	// no Finish() on no-best -- the release retreat logic ends ONLY by arriving (gate at top)
 }
 // @0x00494500 - skip only when low on AP: a fight-capable unit with >5 AP keeps acting; one that
-// can't fight (downed) never skips, keeping the retreat alive.
+// can't fight (downed) never skips, keeping the retreat alive. AP source = the LIVE server AP
+// (byte-identical retail body to the attack CanSkip @0x20ea0 -- see the note there).
 bool CAIRetreatLogic::CanSkip() const
 {
 	NWorld::CUnitServer *pUS = GetUnitServer();
 	if ( !IsValid( pUS ) || !pUS->CanFight() ) return false;
 	IAIUnit *u = GetUnit();
-	if ( IsValid( u ) && u->GetAP() > 5 ) return false;
+	if ( IsValid( u ) && pUS->GetAP() > 5 ) return false;
 	return true;
 }
 //

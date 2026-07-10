@@ -10,11 +10,13 @@
 #include "wUnitCommands.h"
 
 #include "aiUnit.h"
+#include "aiUnitState.h"     // SAIUnitState (AI-convergence Stage 2: mark threat state modified)
 #include "aiPosition.h"
 #include "aiCommander.h"
-#include "aiTaskCommander.h"
-#include "aiTacticalCommander.h"
+#include "aiTaskCommand.h"
 #include "aiControl.h"
+#include "aiRouteLogic.h"    // NAI::CreateAIRouteLogic (signal reactions re-homed onto per-unit route logics)
+#include "aiRouteMisc.h"     // NAI::RouteAddLookAround (the vector-based look-around builder)
 #include "aiMap.h"
 #include "aiNearestPosition.h"
 
@@ -116,8 +118,6 @@ public:
 	//
 	virtual SPosition GetNearestPosition();
 	CAICommander *GetAICommander( IAIUnit *pAIUnit );
-	CAITaskCommander *GetAITaskCommander( IAIUnit *pAIUnit );
-	CAITacticalCommander *GetAITacticalCommander( IAIUnit *pAIUnit );
 	// IAISignal
 	virtual bool IsFinished() { return bFinished; }
 	virtual bool IsActive() { return bActive; }
@@ -140,23 +140,8 @@ CAICommander *CAISignal::GetAICommander( IAIUnit *pAIUnit )
 	return pAICommander;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CAITaskCommander *CAISignal::GetAITaskCommander( IAIUnit *pAIUnit )
-{
-	CPtr<CAICommander> pAICommander = GetAICommander( pAIUnit );
-	if ( IsValid( pAICommander ) )
-		return pAICommander->GetAITaskCommander();
-	else
-		return 0;
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-CAITacticalCommander *CAISignal::GetAITacticalCommander( IAIUnit *pAIUnit )
-{
-	CPtr<CAICommander> pAICommander = GetAICommander( pAIUnit );
-	if ( IsValid( pAICommander ) )
-		return pAICommander->GetAITacticalCommander();
-	else
-		return 0;
-}
+// AI-convergence Stage 2: CAISignal::GetAITacticalCommander REMOVED (dead -- had no callers; the tactical
+// commander is gone).
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 SPosition CAISignal::GetNearestPosition()
 {
@@ -205,7 +190,7 @@ CAIGrenadeSoundSignal::CAIGrenadeSoundSignal( CVec3 _ptPos ):
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CAIGrenadeSoundSignal::CanDetect( IAIUnit *pAIUnit )
 {
-	// 50% �� 15� � 100% �� 0�, �� �� ������ 2-� unit-��
+	// 50% at 15m and 100% at 0m, but no more than 2 units
 	++nCount;
 	float fDistance = fabs( pAIUnit->GetPosition().GetCP() - ptPos );
 	return nCount < 3 && fDistance < 15 && random.Get( 1, 100 ) <= ( 30 - fDistance ) * 3.333f;
@@ -216,10 +201,14 @@ void CAIGrenadeSoundSignal::Process( IAIUnit *pAIUnit )
 	ASSERT( IsValid( pAIUnit ) );
 	ASSERT( IsValid( pAIUnit->GetUnitServer() ) );
 	//
-	CPtr<CTask> pTask = new CTask( pAIUnit->GetUnitServer(), false );
-	pTask->AddCommand( new CTaskCommandGoto( GetNearestPosition() ) );
-	pTask->AddLookAround();
-	pAIUnit->AssignControl( CreateAITaskControl( GetAICommander( pAIUnit ), pTask, AI_CONTROL_ERASABLE, AIM_AI ) );
+	// CAITaskCommander removal: the signal reaction is re-homed onto the unit's OWN route logic (SetLogic)
+	// instead of an ERASABLE CTask control in the per-player task queue. Same command list; the look-around
+	// now comes from the vector-based RouteAddLookAround builder (the route-logic idiom).
+	vector< CPtr<CTaskCommand> > cmds;
+	cmds.push_back( new CTaskCommandGoto( GetNearestPosition() ) );
+	RouteAddLookAround( true, cmds, 6 );
+	if ( IAILogic *pLogic = CreateAIRouteLogic( pAIUnit, cmds, false ) )
+		pAIUnit->SetLogic( pLogic );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CAIRevealEnemySignal
@@ -244,7 +233,12 @@ void CAIRevealEnemySignal::Process( IAIUnit *pAIUnit )
 	ASSERT( IsValid( pAIUnit ) );
 	ASSERT( IsValid( pAIUnit->GetUnitServer() ) );
 	//
-	pAIUnit->AssignControl( CreateAITacticalControl( GetAICommander( pAIUnit ), pAIUnit, AIM_AI ) );
+	// AI-convergence Stage 2: no tactical control anymore. Mark the unit's threat state modified so the
+	// commander's per-segment reaction pump (OnAISegment -> CheckForUpdates -> updateTracker.Update) re-
+	// evaluates it into combat. (This signal is currently dead -- CAIRevealEnemySignal::CanDetect returns
+	// false -- so Process is never reached; the re-home keeps it building against the new model.)
+	if ( IsValid( pAIUnit ) && pAIUnit->GetAIUnitState() )
+		pAIUnit->GetAIUnitState()->selfModified.SetModified();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CAIRevealEnemySignal::CanDetect( IAIUnit *pAIUnit )
@@ -290,11 +284,13 @@ void CAIHitSignal::Process( IAIUnit *pAIUnit )
 	CPtr<NWorld::CUnitServer> pAttackerUS = GetWorld()->GetUnitServer( pAttacker );
 	CPtr<NWorld::CUnitServer> pTargetUS = GetWorld()->GetUnitServer( pTarget );
 	//
-	CPtr<CTask> pTask = new CTask( pAIUnit->GetUnitServer(), false );
-	EDirection Dir = 
+	EDirection Dir =
 		GetWorld()->GetPathNetwork()->GetClosestDir( pTargetUS->GetPosition().pos.p, pAttackerUS->GetPosition().pos.p );
-	pTask->AddCommand( new CTaskCommandChangeDirection( Dir ) );
-	pAIUnit->AssignControl( CreateAITaskControl( GetAICommander( pAIUnit ), pTask, AI_CONTROL_ERASABLE, AIM_AI ) );
+	// re-homed onto the unit's route logic (see CAIGrenadeSoundSignal::Process)
+	vector< CPtr<CTaskCommand> > cmds;
+	cmds.push_back( new CTaskCommandChangeDirection( Dir ) );
+	if ( IAILogic *pLogic = CreateAIRouteLogic( pAIUnit, cmds, false ) )
+		pAIUnit->SetLogic( pLogic );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CAIHitSignal::CanDetect( IAIUnit *pAIUnit )
@@ -343,22 +339,24 @@ void CAIUnitSoundSignal::Process( IAIUnit *pAIUnit )
 	ASSERT( IsValid( pAIUnit->GetUnitServer() ) );
 	//
 	CPtr<NWorld::CUnitServer> pUnitServer = pAIUnit->GetUnitServer();
-	CPtr<CTask> pTask = new CTask( pUnitServer, false );
+	vector< CPtr<CTaskCommand> > cmds;
 	if ( fRadius > F_AI_LOUD_SOUND )
 	{
-		// ������ ��������
-		pTask->AddCommand( new CTaskCommandGoto( pSource->GetPosition().pos ) );
-		pTask->AddLookAround();
+		// go check it out
+		cmds.push_back( new CTaskCommandGoto( pSource->GetPosition().pos ) );
+		RouteAddLookAround( true, cmds, 6 );
 	}
 	else
 	{
-		// ����������
+		// turn to face it
 		EDirection Dir = GetWorld()->GetPathNetwork()->GetClosestDir( pTarget->GetPosition().pos.p, pSource->GetPosition().pos.p );
-		pTask->AddCommand( new CTaskCommandChangeDirection( Dir ) );
-		pTask->AddCommand( new CTaskCommandWait( 2 ) );
+		cmds.push_back( new CTaskCommandChangeDirection( Dir ) );
+		cmds.push_back( new CTaskCommandWait( 2 ) );
 	}
 	//
-	pAIUnit->AssignControl( CreateAITaskControl( GetAICommander( pAIUnit ), pTask, AI_CONTROL_ERASABLE, AIM_AI ) );
+	// re-homed onto the unit's route logic (see CAIGrenadeSoundSignal::Process)
+	if ( IAILogic *pLogic = CreateAIRouteLogic( pAIUnit, cmds, false ) )
+		pAIUnit->SetLogic( pLogic );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CAISoundSignal
@@ -392,11 +390,13 @@ void CAISoundSignal::Process( IAIUnit *pAIUnit )
 	ASSERT( IsValid( pAIUnit ) );
 	//
 	CPtr<NWorld::CUnitServer> pUnitServer = pAIUnit->GetUnitServer();
-	CPtr<CTask> pTask = new CTask( pUnitServer, false );
 	EDirection Dir = GetWorld()->GetPathNetwork()->GetClosestDir( pUnitServer->GetPosition().pos.p, GetNearestPosition().p );
-	pTask->AddCommand( new CTaskCommandChangeDirection( Dir ) );
-	pTask->AddCommand( new CTaskCommandWait( 2 ) );
-	pAIUnit->AssignControl( CreateAITaskControl( GetAICommander( pAIUnit ), pTask, AI_CONTROL_ERASABLE, AIM_AI ) );
+	// re-homed onto the unit's route logic (see CAIGrenadeSoundSignal::Process)
+	vector< CPtr<CTaskCommand> > cmds;
+	cmds.push_back( new CTaskCommandChangeDirection( Dir ) );
+	cmds.push_back( new CTaskCommandWait( 2 ) );
+	if ( IAILogic *pLogic = CreateAIRouteLogic( pAIUnit, cmds, false ) )
+		pAIUnit->SetLogic( pLogic );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CAISoundSignal::CanDetect( IAIUnit *pAIUnit )
@@ -453,19 +453,21 @@ CAICorpseSignal::CAICorpseSignal( NWorld::CUnitServer *_pCorpse ):
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CAICorpseSignal::Process( IAIUnit *pAIUnit )
 {
-	// ������ ��������
+	// go check it out
 	CalculateCorpsePosition();
-	CPtr<CTask> pTask = new CTask( pAIUnit->GetUnitServer(), false );
-	int nProb = Min( 100, ( Max( 0, 
+	vector< CPtr<CTaskCommand> > cmds;
+	int nProb = Min( 100, ( Max( 0,
 		(int)( fabs( ptCorpsePosition - pAIUnit->GetUnitServer()->GetPosition().GetCP() ) - 3 ) ) ) * 25 );
 	if ( random.Get( 1, 100 ) <= nProb )
 	{
-		pTask->AddCommand( new CTaskCommandChangePose( NAI::RUN ) );
-		pTask->AddCommand( new CTaskCommandGoto( CorpsePosition ) );
+		cmds.push_back( new CTaskCommandChangePose( NAI::RUN ) );
+		cmds.push_back( new CTaskCommandGoto( CorpsePosition ) );
 	}
-	pTask->AddCommand( new CTaskCommandChangePose( NAI::CROUCH ) );
-	pTask->AddLookAround( false );
-	pAIUnit->AssignControl( CreateAITaskControl( GetAICommander( pAIUnit ), pTask, AI_CONTROL_ERASABLE, AIM_AI ) );
+	cmds.push_back( new CTaskCommandChangePose( NAI::CROUCH ) );
+	RouteAddLookAround( false, cmds, 6 );
+	// re-homed onto the unit's route logic (see CAIGrenadeSoundSignal::Process)
+	if ( IAILogic *pLogic = CreateAIRouteLogic( pAIUnit, cmds, false ) )
+		pAIUnit->SetLogic( pLogic );
 	//
 	bActive = false;
 	bFinished = true;
@@ -524,11 +526,13 @@ void CAIShootSignal::Process( IAIUnit *pAIUnit )
 	if ( !IsValid( pAIUnit ) )
 		return;
 	//
-	CPtr<CTask> pTask = new CTask( pAIUnit->GetUnitServer(), false );
-	pTask->AddCommand( new CTaskCommandChangePose( NAI::RUN ) );
-	pTask->AddCommand( new CTaskCommandGoto( pShooter->GetPosition().pos ) );
-	pTask->AddLookAround();
-	pAIUnit->AssignControl( CreateAITaskControl( GetAICommander( pAIUnit ), pTask, AI_CONTROL_ERASABLE, AIM_AI ) );
+	// re-homed onto the unit's route logic (see CAIGrenadeSoundSignal::Process)
+	vector< CPtr<CTaskCommand> > cmds;
+	cmds.push_back( new CTaskCommandChangePose( NAI::RUN ) );
+	cmds.push_back( new CTaskCommandGoto( pShooter->GetPosition().pos ) );
+	RouteAddLookAround( true, cmds, 6 );
+	if ( IAILogic *pLogic = CreateAIRouteLogic( pAIUnit, cmds, false ) )
+		pAIUnit->SetLogic( pLogic );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CAIShootSignal::CanDetect( IAIUnit *pAIUnit )

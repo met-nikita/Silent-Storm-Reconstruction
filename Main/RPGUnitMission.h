@@ -54,8 +54,8 @@ struct SFirstAid;
 enum ECriticalState
 {
 	CS_ENABLED = 0,
-	CS_DISABLED, // ���������� ����������
-	CS_REROLL // ���� ������� ������ ��������
+	CS_DISABLED, // execution is impossible
+	CS_REROLL // must choose another critical
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 struct SSnipeAP
@@ -80,7 +80,7 @@ public:
 	virtual const SSnipeAP& GetSavedAP() const = 0;
 	virtual void SaveAP( const SSnipeAP &ap ) = 0;
 	virtual void StartNewTurn( const CVec3 &ptCP ) = 0;
-	virtual bool CheckIC() = 0;	// Return true ec�� �� ����� ����������
+	virtual bool CheckIC() = 0;	// Return true if he managed to dodge
 	virtual void Kill() = 0;
 	virtual bool IsDead() const = 0;
 	virtual IInventory* GetInventory() const = 0;
@@ -144,6 +144,14 @@ public:
 	virtual int GetGrenadeTrapDC( NDb::CRPGGrenade *pGrenade ) = 0;
 	virtual int GetMineDC( NDb::CRPGMine *pMine ) = 0;
 	virtual bool CanSeeMine( float fDistance, int nDC ) = 0;
+	// retail CUnitMission::GetMineSpotRange @0x2c0340 (release vtbl+0x168, right after CanSeeMine):
+	// the distance out to which this unit spots a mine of detection class nDC. Retail CanSeeMine
+	// @0x2bec30 is a pure delegate (fDistance <= GetMineSpotRange(nDC)), and CUnitServer::
+	// UpdateVisible @0x3c4450 gathers mines with GetMineSpotRange(0) (@0x7c4bca, arg 0) instead of a
+	// hardcoded constant. Appended NON-PURE at the interface tail (sess19 pattern -- dev<->release
+	// vtable order is name-dispatched) so non-mission implementors keep building; CUnitMission
+	// overrides with the retail formula.
+	virtual float GetMineSpotRange( int nDC ) { return 0; }
 	virtual bool CanClear( int nDC, int nSkillModif ) = 0;
 	virtual int GetUnhideProbability( IUnitMission *pTarget, float fDistance ) const = 0;
 	// release-new (RVA 0x2bff30): the percent chance this unit HEARS pSource at distance fDist for `sound` --

@@ -4,7 +4,7 @@
 namespace NAI
 {
 //////////////////////////////////////////////////////////////////////////////////////////////////////
-//class IAIState;
+//struct SAIState;
 //class IAIPlayer;
 //////////////////////////////////////////////////////////////////////////////////////////////////////
 //// IAICriterion
@@ -21,18 +21,18 @@ namespace NAI
 //{
 //	ZDATA
 //public:
-//	CPtr<IAIState> pAIState;
+//	CPtr<SAIState> pAIState;
 //	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&pAIState); return 0; }
 //	//
-//	CAICriterion( IAIState *_pAIState = 0 ): pAIState(_pAIState) {}
+//	CAICriterion( SAIState *_pAIState = 0 ): pAIState(_pAIState) {}
 //	//
 //	virtual float GetExpediency() { return 0; }
 //};
 //////////////////////////////////////////////////////////////////////////////////////////////////////
-//IAICriterion *CreateAIToHitCriterion( IAIState *pAIState );
-//IAICriterion *CreateAIHideCriterion( IAIState *pAIState );
-//IAICriterion *CreateAIDamageCriterion( IAIState *pAIState );
-//IAICriterion *CreateAICautiousToHitCriterion( IAIState *pAIState );
+//IAICriterion *CreateAIToHitCriterion( SAIState *pAIState );
+//IAICriterion *CreateAIHideCriterion( SAIState *pAIState );
+//IAICriterion *CreateAIDamageCriterion( SAIState *pAIState );
+//IAICriterion *CreateAICautiousToHitCriterion( SAIState *pAIState );
 //////////////////////////////////////////////////////////////////////////////////////////////////////
 }
 

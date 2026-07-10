@@ -18,16 +18,14 @@ class CAIPlayer: public IAIPlayer
 {
 	OBJECT_BASIC_METHODS( CAIPlayer );
 	ZDATA
-	CPtr<IAIState> pAIState;
 	vector< CPtr<IAIUnit> > playerUnits;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&pAIState); f.Add(3,&playerUnits); return 0; }
+	ZEND int operator&( CStructureSaver &f ) { f.Add(3,&playerUnits); return 0; }
 public:
-	CAIPlayer( IAIState *_pAIState = 0 ) : pAIState(_pAIState) {};
+	CAIPlayer() {};
 	// IAIPlayer
 	virtual vector< CPtr<IAIUnit> > *GetUnits() { return &playerUnits; }
 	virtual void AddUnit( IAIUnit *_pAIUnit );
-	virtual IAIUnit *GetNearestUnit( IAIUnit *pUnit, float *fDistance ); 
-	virtual IAIState *GetAIState() { return pAIState; }
+	virtual IAIUnit *GetNearestUnit( IAIUnit *pUnit, float *fDistance );
 	virtual void Synchronize();
 	virtual bool IsPositionLocked( SPathPlace &ptPos, IAIUnit *pAIUnit );
 	virtual bool IsPerformingAction();
@@ -157,11 +155,9 @@ bool CAIPlayer::IsPositionLocked( SPathPlace &ptPos, IAIUnit *pAIUnit )
 	return false;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-IAIPlayer *CreateAIPlayer( IAIState *pAIState )
+IAIPlayer *CreateAIPlayer()
 {
-	ASSERT( IsValid( pAIState ) );
-	//
-	return new CAIPlayer( pAIState );
+	return new CAIPlayer();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 }

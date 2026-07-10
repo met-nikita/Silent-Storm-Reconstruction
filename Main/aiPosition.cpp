@@ -156,12 +156,17 @@ CVec3 SUnitPosition::GetEyePosition() const
 	switch( GetPose() )
 	{
 		case CRAWL:
-			vAdd.z = 0.3f;
+		{	// retail @0x914c0 LAY arm: eye pushed forward along the facing (Jan03 had z-only 0.3)
+			float fDir = GetDirection();        // CPathNetwork::GetDirection @0x3dec0
+			vAdd.x = cos( fDir ) * 0.625f;      // 0.625f @0x8b42c4
+			vAdd.y = sin( fDir ) * 0.625f;
+			vAdd.z = 0.4f;                      // 0x3ecccccd
 			break;
-		case CROUCH:
+		}
+		case CROUCH:                            // CM_CROUCH + CM_INACTIVE both land here (retail entries 1&3)
 			vAdd.z = 1.1f;
 			break;
-		case WALK:
+		case WALK:                              // retail ignores bRun (jumptable entries 2/3 identical)
 		case RUN:
 			vAdd.z = 1.56f;
 			break;

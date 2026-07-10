@@ -1,20 +1,20 @@
 #include "StdAfx.h"
 //
 #include "aiUnit.h"
-#include "aiState.h"          // IAIState::GetCurrentAIEnemy
+#include "aiState.h"          // SAIState::GetCurrentAIEnemy
 //
 #include "aiActionBase.h"
 //
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // Release CAICombatLogic substrate - CAIAction base helpers. WIP - reconstructed; the release reads the
-// enemy from GetAIUnitState()+0x88, reconciled here to the dev IAIState::GetCurrentAIEnemy().
+// enemy from GetAIUnitState()+0x88, reconciled here to the dev SAIState::GetCurrentAIEnemy().
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 namespace NAI
 {
 IAIUnit* CAIAction::GetUnit() const { return pUnit; }
 //
 // @0x13ac0 - the acting unit's AI state, guarded on a live unit (pUnit != 0 && alive).
-IAIState* CAIAction::GetAIState() const
+SAIState* CAIAction::GetAIState() const
 {
 	if ( IsValid( pUnit ) )
 		return pUnit->GetAIState();

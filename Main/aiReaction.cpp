@@ -21,7 +21,7 @@ SAIUnitState* CAIReaction::GetAIUnitState() const
 {
 	return IsValid( pUnit ) ? pUnit->GetAIUnitState() : 0;
 }
-IAIState* CAIReaction::GetAIState() const
+SAIState* CAIReaction::GetAIState() const
 {
 	return IsValid( pUnit ) ? pUnit->GetAIState() : 0;
 }

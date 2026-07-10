@@ -280,6 +280,12 @@ static LRESULT CALLBACK WndProc( HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPa
 		case WM_KEYUP:
 			AddMsg( SWindowsMsg::KEY_UP, wParam, lParam & 0xFFFF, (lParam >> 16) & 0xFFFF );
 			break;
+		case WM_CHAR:
+			// OS-generated (TranslateMessage) translated character; OS auto-repeats the
+			// underlying WM_KEYDOWN so the coalesced repeat-count rides in lParam&0xFFFF.
+			// nKey = character code (wParam), nRep = repeat count. Mirrors WM_KEYDOWN.
+			AddMsg( SWindowsMsg::CHAR, wParam, lParam & 0xFFFF, (lParam >> 16) & 0xFFFF );
+			break;
 	}
 	return DefWindowProc( hWnd, uMsg, wParam, lParam );
 }

@@ -4,7 +4,7 @@
 #pragma once
 #endif // _MSC_VER > 1000
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-namespace NWorld { class CUICmdCameraLocator; }
+namespace NWorld { class CUICmdCameraLocator; class CUICmdUnitCamera; }
 namespace NGame
 {
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -56,8 +56,11 @@ public:
 class CUICmdLocatorExec: public CUICmdExec
 {
 protected:
+	ZDATA_(CUICmdExec)
 	CPtr<NWorld::CUICmdCameraLocator> pLocator;
 public:
+	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CUICmdExec*)this); f.Add(2,&pLocator); return 0; }
+
 	CUICmdLocatorExec() {}
 	CUICmdLocatorExec( NWorld::CUICmdCameraLocator *_pLocator );
 
@@ -117,6 +120,32 @@ public:
 	void Finished();
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// CUICmdUnitCameraExec -- sink for the arbitrated NWorld::CUICmdUnitCamera (retail @0x24eae0). Frames the
+// shooter (+ optional target) with priority-keyed gating, holds ~4 s, then self-terminates. GetPriority()
+// feeds the mission's pExecLocator arbitration (MustReplaceCameraExecutor). Derives CUICmdExec directly (a5dll
+// only routes CUICmdUnitCamera through the locator slot) and exposes GetPriority() from the wrapped command.
+////////////////////////////////////////////////////////////////////////////////////////////////////
+class CUICmdUnitCameraExec: public CUICmdLocatorExec
+{
+	OBJECT_BASIC_METHODS( CUICmdUnitCameraExec )
+private:
+	ZDATA_(CUICmdLocatorExec)
+	CPtr<IMission> pMission;              // +0x14
+	CPtr<NWorld::CUICmdUnitCamera> pCmd;  // +0x18
+	CPtr<ICamera> pLockedCamera;          // +0x1c  (ctor Lock(1) / Cancel|Finished Lock(0))
+	bool  bDone;                          // +0x20
+	STime tStart;                         // +0x24
+public:
+	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CUICmdLocatorExec*)this); f.Add(2,&pMission); f.Add(3,&pCmd); f.Add(4,&pLockedCamera); f.Add(5,&bDone); f.Add(6,&tStart); return 0; }
+
+	CUICmdUnitCameraExec(): bDone( false ), tStart( 0 ) {}
+	CUICmdUnitCameraExec( NWorld::CUICmdUnitCamera *pCmd, IMission *pMission );
+
+	bool Update( const STime &sTime );
+	void Cancel();
+	void Finished();
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
 // CUICmdRestoreCameraExec
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CUICmdRestoreCameraExec: public CUICmdMoveCameraExec
@@ -136,6 +165,9 @@ bool MustReplaceCameraExecutor( int nCur, int nNew );
 bool IsVisibleByActivePlayer( NWorld::CUnit *pUnit, IMission *pMission );
 //
 CUICmdExec* CreateExecutor( NWorld::CUICmd *pCmd, IMission *pMission );
+// release CreateCameraExecutor @0x24f150: RTTI-dispatch a camera-locator command (CUICmdUnitCamera) to its
+// executor, for the mission's dedicated pExecLocator arbitration slot.
+CUICmdLocatorExec* CreateCameraExecutor( NWorld::CUICmdCameraLocator *pCmd, IMission *pMission );
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 } // NAMESPACE
 ////////////////////////////////////////////////////////////////////////////////////////////////////

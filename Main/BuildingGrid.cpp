@@ -8,8 +8,8 @@
 
 namespace NBuilding
 {
-const float PLANE_DIST = WALL_HEIGHT / 4; // ���������� ����� �����������
-const float MIN_NODE_DIST = FP_GRID_STEP; // ���. ���������� ����� ������
+const float PLANE_DIST = WALL_HEIGHT / 4; // distance between planes
+const float MIN_NODE_DIST = FP_GRID_STEP; // min. distance between nodes
 const float MIN_ADDITIVE_DMG = 50;
 const int N_MAX_HP = 253;
 const int N_INDESTRUCTIBLE = 255;
