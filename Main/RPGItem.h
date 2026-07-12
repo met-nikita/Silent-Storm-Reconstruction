@@ -10,6 +10,7 @@ namespace NDb
 	class CRPGClip;
 	class CPanzerklein;
 	class CRPGEngGrenade;   // fwd for CGrenadeItem::pDBEngGrenade (release save-format tag 4)
+	class CRPGWeaponType;
 }
 namespace NRPG
 {
@@ -72,6 +73,16 @@ IInventoryItem *CreateMeleeWeaponItem( NDb::CRPGMeleeWeapon *pDBMeleeWeapon );
 IInventoryItem *CreateClipItem( NDb::CRPGClip *pDBClip, NDb::CRPGAmmo *pDBAmmo = 0, int nAmmoQuantity = - 1 );
 IInventoryItem *CreateGrenadeItem( NDb::CRPGGrenade *pDBGrenade );
 IInventoryItem *CreateUniformItem( NDb::CRPGUniform *pDBUniform );
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// Field accessors over WHICHEVER record a grenade item carries -- the regular CRPGGrenade or (for
+// an ENGINEER grenade, where GetDBGrenade() is null) the CRPGEngGrenade. Retail reads every such
+// field through this which-record branch (to-hit calcer Prepare @0x2b88d0 / FillWeaponInfo
+// @0x2b7ca0, throw exec @0x3a1700, item tooltip); both records expose the same
+// pWeaponType/nQuality/nMaxDelay/pItem fields.
+NDb::CRPGWeaponType *GetGrenadeRecWeaponType( IGrenadeItemInfo *pGrenade );
+int GetGrenadeRecQuality( IGrenadeItemInfo *pGrenade );
+int GetGrenadeRecMaxDelay( IGrenadeItemInfo *pGrenade );
+NDb::CRPGItem *GetGrenadeRecItem( IGrenadeItemInfo *pGrenade );
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 } // namespace
 ////////////////////////////////////////////////////////////////////////////////////////////////////

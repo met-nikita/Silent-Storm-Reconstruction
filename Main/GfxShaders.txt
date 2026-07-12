@@ -241,7 +241,10 @@ func AddNormalize3 res s1 s2
 	Normalize3 res
 
 func CalcCameraDir res
-	AddNormalize3 res, c9, -v0
+	// retail: c9 = homogeneous eye (camPos*l, l) or (viewDir, 0) for the ortho camera;
+	// eyeDir = c9.xyz - c9.w * pos handles both (old add assumed a positional camera)
+	mad res.xyz, c9.w, -v0, c9.xyzz
+	Normalize3 res
 
 proc NHCalcer
 	m4x4 oPos, v0, c10
@@ -2334,6 +2337,20 @@ mul r1.rgb, 1-r1, 1-r1
 mul r1.rgb, r1, r1
 mov r0.rgb, t1
 +mad r0.a, r1.a, r1.b, r0.a
+[PS14]
+ps.1.4
+; retail port: texld ignores D3DTSS_TEXTURETRANSFORMFLAGS, so the screen-space
+; register-map read (t1 = pos.xyww) needs the explicit _dw projective divide
+texld r0, t0
+texld r1, t1_dw.xyw
+texld r2, t2
+dp3 r3.rgb, r0_bx2, r2_bx2
++mul r4.a, c0.a, r1.a
+mul r3.rgb, 1-r3, 1-r3
++mul r3.a, c0.b, r1.a
+mul r3.rgb, r3, r3
+mov r0.rgb, r1
++mad r0.a, r3.a, r3.b, r4.a
 [RS]
 D3DRS_ALPHATESTENABLE FALSE
 

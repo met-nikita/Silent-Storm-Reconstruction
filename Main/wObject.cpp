@@ -62,15 +62,22 @@ CVec3 CWindowDoor::GetMinePos()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CWindowDoor::IsMineSet()
 {
-	return trap.pGrenade != 0;
+	// retail: EITHER grenade slot arms the trap (this+0x10 pGrenade OR this+0x30 pEngGrenade); Jan03 only knew pGrenade
+	return trap.pGrenade != 0 || trap.pEngGrenade != 0;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 NDb::CRPGItem* CWindowDoor::DisarmMine()
 {
+	// retail @0x381870: take whichever slot is armed -- the plain grenade preferred, the eng grenade as
+	// fallback -- clear it and hand back the contained item record.
 	NDb::CRPGGrenade *pRes = trap.pGrenade;
 	trap.pGrenade = 0;
 	if ( pRes )
 		return pRes->pItem;
+	NDb::CRPGEngGrenade *pEngRes = trap.pEngGrenade;
+	trap.pEngGrenade = 0;
+	if ( pEngRes )
+		return pEngRes->pItem;
 	return 0;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -111,22 +118,28 @@ CVec3 CWindowDoor::GetChangeStateDirection( bool bOpen ) const
 	return ptDir;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail @0x382050 order (disasm-decoded 2026-07-11): (1) the shove-open branch runs FIRST -- before the
+// base damage -- so it reads the PRE-damage IsBroken state, and its gate is dot(normalized attack dir,
+// GetChangeStateDirection(!bOpen)) > 0.707 (0x3f34fdf4; the old Jan03 0.001 threshold flipped doors on
+// near-perpendicular hits); a shove detonates the trap inside OpenClose. (2) base damage/destroy stages.
+// (3) IsMineSet() -> GoBoom(NULL) UNCONDITIONALLY (any hit on an armed door blows the trap -- EITHER slot).
 int CWindowDoor::ProcessAttack( int nUserID, NRPG::CAttackPortion *pAttack, NDb::CRPGArmor *pArmor )
 {
-	int nRes = CAnimObjectServerBase::ProcessAttack( nUserID, pAttack, pArmor );
-	// find the direction of movement from the current position to the other
 	if ( pAttack->atkType != NRPG::AT_CLICK_OF_DEATH && !IsBroken() )
 	{
 		CDynamicCast<NAI::CPathNetwork> pNetwork( pWorld->GetPathNetwork() );
 		NAI::CPathNetwork::SFlipper *pFlipper = pNetwork->GetFlipper( this );
 		bool bTmpOpened = pFlipper->bOpen;
+		CVec3 vDir = pAttack->rTtrajectory.ptDir;
+		Normalize( &vDir );
 		// if the direction is good, move the door
-		if ( GetChangeStateDirection( !bTmpOpened ) * pAttack->rTtrajectory.ptDir > 0.001f )
+		if ( GetChangeStateDirection( !bTmpOpened ) * vDir > 0.707f )
 		{
 			OpenClose( !bTmpOpened, true );
 		}
 	}
-	if ( trap.pGrenade )
+	int nRes = CAnimObjectServerBase::ProcessAttack( nUserID, pAttack, pArmor );
+	if ( IsMineSet() )
 		GoBoom();
 	//
 	return nRes;
@@ -146,7 +159,7 @@ void CWindowDoor::OpenClose( bool bOpen, bool bAbruptly, CUnitServer *pWho )
 		return;
 	if ( bOpen == bIsOpen )
 		return;
-	if ( trap.pGrenade )
+	if ( IsMineSet() )   // EITHER slot: opening a TNT-trapped door detonates it (plain-slot-only left eng traps inert)
 		GoBoom( pWho );
 	bIsOpen = bOpen;
 	tEnd = pTime->GetValue();
@@ -233,6 +246,10 @@ void CWindowDoor::Visit( IAIVisitor *p )
 		if ( pModel && pModel->pGeometry && pModel->pGeometry->pAIGeometry )
 		{
 			int nMask = GetMask( pModel->pGeometry->pAIGeometry, pModel->pRPGArmor ) | TS_PICK;
+			// retail CWindowDoor_Visit (s2_wobject.h:521-524): a locked door/window marks its hull
+			// so the stability catcher query never treats it as wreckage support (Jan03 only OR'd TS_PICK)
+			if ( bIsLocked )
+				nMask |= TS_LOCKED_EXTRA;
 			if ( pModel->pSkeleton == pSkeleton )
 			{
 				NAnimation::CAnimation *pAnim1, *pAnim2;
@@ -273,14 +290,23 @@ void CWindowDoor::Visit( IAIVisitor *p )
 		AddObject( p, pDbObject->pChild, rv );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail @0x381d60: the detonation gate is IsMineSet() (EITHER grenade slot live); a plain grenade goes out
+// through the regular AddGrenadeExplosion (world vtbl+0x124), an engineer grenade through the eng overload
+// (vtbl+0x120) with the stored placer eng skill; afterwards BOTH slots are released and the perk mine-modifiers
+// reset to the {1,1,false} defaults.
 void CWindowDoor::GoBoom( CUnitServer *pWho )
 {
-	ASSERT( trap.pGrenade );
+	ASSERT( IsMineSet() );
 	// whoops, stuff is pucked up
-	if ( IsValid(trap.pGrenade) )
+	if ( IsValid(trap.pGrenade) || IsValid(trap.pEngGrenade) )
 	{
-		pWorld->AddGrenadeExplosion( GetMinePos(), trap.pGrenade, 0, CastToObjectBase( this ), &trap.sMineModifiers );   // door is its own igniter -> 10x self-damage; carry the placer's perk mods (retail @0x381d60)
+		if ( IsValid(trap.pGrenade) )
+			pWorld->AddGrenadeExplosion( GetMinePos(), trap.pGrenade, 0, CastToObjectBase( this ), &trap.sMineModifiers );   // door is its own igniter -> 10x self-damage; carry the placer's perk mods (retail @0x381d60)
+		else
+			pWorld->AddGrenadeExplosion( GetMinePos(), trap.pEngGrenade, trap.nEngSkill, 0, CastToObjectBase( this ), &trap.sMineModifiers );   // retail @0x381d60: eng blast via world vtbl+0x120 with trap.nEngSkill, thrower=0
 		trap.pGrenade = 0;
+		trap.pEngGrenade = 0;
+		trap.sMineModifiers = SPerkMineModifiers();   // retail resets the carried perk mods to {1,1,false}
 		pWorld->RemoveMine( this );
 		NScript::luaCallFunction( "OnMineTriggered", "p", IsValid( pWho ) ? CastToObjectBase( pWho ) : 0 );
 	}
@@ -288,7 +314,7 @@ void CWindowDoor::GoBoom( CUnitServer *pWho )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CWindowDoor::SetTrap( NDb::CRPGGrenade *pGrenade, int nDC, const SPerkMineModifiers *pMods )
 {
-	if ( trap.pGrenade )
+	if ( IsMineSet() )
 	{
 		GoBoom();
 		return false;
@@ -297,6 +323,25 @@ bool CWindowDoor::SetTrap( NDb::CRPGGrenade *pGrenade, int nDC, const SPerkMineM
 	trap.nDC = nDC;
 	if ( pMods )
 		trap.sMineModifiers = *pMods;   // retail @0x381ee0: the trapped door carries the placer's explosive-perk mods (map traps have none -> keep the {1,1,false} default)
+	pWorld->GetAIMap()->GetUnitHLPos( &trap.vPos, pAIHull, -1 );
+	pWorld->AddMine( this );
+	return true;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail @0x381f90: the engineer-grenade overload -- identical to @0x381ee0 except the record slot and that
+// the placer's eng skill is recorded (it scales the blast at detonation: waves/radius/damage/fragments).
+bool CWindowDoor::SetTrap( NDb::CRPGEngGrenade *pEngGrenade, int nDC, const SPerkMineModifiers *pMods, int nEngSkill )
+{
+	if ( IsMineSet() )
+	{
+		GoBoom();
+		return false;
+	}
+	trap.pEngGrenade = pEngGrenade;
+	trap.nDC = nDC;
+	if ( pMods )
+		trap.sMineModifiers = *pMods;
+	trap.nEngSkill = nEngSkill;
 	pWorld->GetAIMap()->GetUnitHLPos( &trap.vPos, pAIHull, -1 );
 	pWorld->AddMine( this );
 	return true;

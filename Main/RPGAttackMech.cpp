@@ -22,6 +22,17 @@ int GetDmg2Armor( int nDmg, int nArmor )
 	return pAr->armors[nArmor];
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail @0x28f860: a sub-threshold push (fPushCoeff < 0.18) is suppressed to zero; otherwise the
+// corpse-push coefficient is fPushCoeff + 0.1, capped at 1.5. fPushCoeff itself is non-zero ONLY
+// for firearm bullets (CWeaponItem::CreateNewAttackPortion) -- every other retail attack source
+// passes 0, so only bullets fling corpses.
+float CAttackPortion::GetPushCorpseCoeff() const
+{
+	if ( fPushCoeff < 0.18f )
+		return 0;
+	return Min( fPushCoeff + 0.1f, 1.5f );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CAttackPortion::CanDealDmg( const NDb::CRPGArmor *pArmor ) const
 {
 	ASSERT( pArmor != 0 );

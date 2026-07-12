@@ -1915,6 +1915,7 @@ CPlacableObject* GetPlacableObject( int nID ) { return Get<CPlacableObject>( nID
 CSpot* GetSpot( int nID ) { return Get<CSpot>( nID ); }
 CUnit* GetUnit( int nID ) { return Get<CUnit>( nID ); }
 CRPGGrenade *GetRPGGrenade( int nID ) { return Get<CRPGGrenade>( nID ); }
+CRPGAP *GetRPGAP( int nID ) { return Get<CRPGAP>( nID ); }   // retail @0x3f9b60 (RPGAP action-cost table)
 CSkeleton *GetSkeleton( int nID ) { return Get<CSkeleton>( nID ); }
 CRPGCritical *GetDBCritical( int nID ) { return Get<CRPGCritical>( nID ); }
 CDBCamera *GetDBCamera( int nID ) { return Get<CDBCamera>( nID ); }

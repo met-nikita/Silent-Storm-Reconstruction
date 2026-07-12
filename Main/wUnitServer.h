@@ -166,6 +166,10 @@ public:
 	int nClueCount = 0;				// retail +0x1e4: number of quest clues carried
 	unsigned long GetDeathTime() const { return tDeathTime; }
 	bool IsClueUnit() const { return nClueCount > 0; }	// retail CUnitServer::IsClueUnit @0x3c6900 (setg: > 0)
+	// retail CUnitServer::CanBlowUp @0x3c0420 (unit vtbl+0x28): a unit may be gibbed unless it is
+	// a quest-clue corpse (CUnit vtbl+0x14 IsClueUnit), wears a live PK shell (vtbl+0x34
+	// GetWearingDBPK), or IS an empty PK shell (CUnit vtbl+0x10 IsEmptyPK).
+	virtual bool CanBlowUp() { return !IsClueUnit() && !IsValid( GetWearingDBPK() ) && !IsEmptyPK(); }
 	CUnitServer();
 	CUnitServer( CWorld *pWorld, NRPG::IUnitMission *_pRPG, NDb::CModel *pModel, CPlayer *pPlayer, const NAI::SUnitPosition &pos );
 	// events

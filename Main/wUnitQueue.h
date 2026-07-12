@@ -84,6 +84,7 @@ public:
 	virtual int GetStartAP() const;
 	virtual void Run();
 	virtual bool TimeLabelReached();
+	virtual NRPG::IInventoryItem* GetActive() const;   // retail-new @0x3bcdb0: the item the exec is using (the inventory's active item)
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CExecBlowTrappedDoor

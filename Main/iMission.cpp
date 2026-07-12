@@ -711,6 +711,7 @@ void CMission::CanDoCommand( NWorld::CCmd *pCmd, bool bNoTarget, SActionInfo *pI
 	case NWorld::UCR_NEED_HIGHER_SKILL:           // skill too low to use the tool -- blocked but available
 	case NWorld::UCR_NOT_ALL_UNITS_NEAR_PASSAGE:  // not every selected unit is at the passage -- blocked but available
 	case NWorld::UCR_PK_BAN:                      // crouch+look banned (CanDo @0x3c1570) -- blocked but available (retail @0x1fb680)
+	case NWorld::UCR_DOOR_LOCKED:                 // locked door, no key/picklock -- blocked but available (retail @0x1fb680 groups it here; no message)
 		pInfo->bOk = false;
 		pInfo->bEnoughAP = true;
 		pInfo->bAvailable = true;

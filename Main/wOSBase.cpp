@@ -85,22 +85,48 @@ bool CObjectServerBase::CreateTransform( SFBTransform *pRes )
 	return true;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-bool CObjectServerBase::CheckStability()
+// retail CObjectServerBase::GetCheckStabilityParams @0x383fe0: the (model, matrix) pair the
+// stability checks/registration run on. False (no params) when the current destroy stage has no
+// live model, the RPG object is dead, or no placement transform exists.
+bool CObjectServerBase::GetCheckStabilityParams( NDb::CModel **ppModel, SHMatrix *pMatrix )
 {
 	NDb::CContainerModel *pCont = pDbObject->pModels[ pRPG->GetDestroyStage() ];
 	if ( !pCont || !IsValid( pCont->pModel ) )
-		return true;
+		return false;
+	*ppModel = pCont->pModel;
 	if ( pRPG->IsDead() )
-		return true;
+		return false;
 	SFBTransform rv;
 	if ( !CreateTransform( &rv ) )
+		return false;
+	*pMatrix = rv.forward;
+	return true;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail @0x3850c0: an unstable object KILLS itself (its destruction spawns the debris); false
+// tells the stability tracker to drop it from the tracked list.
+bool CObjectServerBase::CheckStability()
+{
+	NDb::CModel *pModel;
+	SHMatrix m;
+	if ( !GetCheckStabilityParams( &pModel, &m ) )
 		return true;
-	if ( !NAI::CheckObjectStability( pCurrentWorld->GetAIMap(), pCont->pModel, rv.forward, this ) )
+	if ( !NAI::CheckObjectStability( pCurrentWorld->GetAIMap(), pModel, m, this ) )
 	{
 		Kill( VNULL3 );
 		return false;
 	}
 	return true;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail CObjectServerBase::RegisterForStability @0x384060: register this static object's resting
+// bound with the wreckage stability grid (only objects with live AI params qualify).
+void CObjectServerBase::RegisterForStability( NAI::IStabilityTrackers *pTrackers )
+{
+	NDb::CModel *pModel;
+	SHMatrix m;
+	if ( GetCheckStabilityParams( &pModel, &m ) )
+		pTrackers->AddObject( this, pModel, m );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // retail @0x384100 -- play the CURRENT destroy stage's container-model destroy sound (CContainerModel::

@@ -245,7 +245,7 @@ class CExecThrowGrenade: public CCommandExecute
 	bool bUpdateVision = false;
 
 protected:
-	void CheckToHitAndDelay( NDb::CRPGGrenade *pGrenade );
+	void CheckToHitAndDelay( NRPG::IGrenadeItem *pGrenade );   // retail @0x3a1700 takes the ITEM
 	void ThrowGrenade();
 
 public:

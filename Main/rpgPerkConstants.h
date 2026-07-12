@@ -15,6 +15,7 @@ const int N_PERK_LONG_BURST_AUTO_STOP = 18;
 const int N_PERK_CHEAP_SHOOT_PREPARE = 22;
 const int N_PERK_CHEAP_AIMED_SHOT = 31;
 const int N_PERK_CHEAP_MELEE = 32;
+const int N_PERK_BETTER_CRIT_DIFFICULTY = 44;   // "Better critical difficulty" (Param1=1.25 scales nCrticalDifficulty)
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 }
 //

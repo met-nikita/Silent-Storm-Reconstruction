@@ -136,6 +136,9 @@ protected:
 	virtual void ProcessCritical( NDb::ECritical eCA ) {}
 	virtual void TouchedMines( const vector<CPtr<CMine> > &mines ) {}
 	virtual void RemoveFromWorld() {}
+	// retail unit vtbl+0x28 (purecall in the CDumbUnitServer vftable @0x8c9f5c; implemented by
+	// CUnitServer @0x3c0420): may this unit be gibbed by a heavy hit?
+	virtual bool CanBlowUp() { return false; }
 	CObjectBase* GetAIMapUnitHull() { return pAIMapHull; }
 	NDb::CModel* GetUnitModel() const { return pModel; }
 	bool IsEmptyPK() const;

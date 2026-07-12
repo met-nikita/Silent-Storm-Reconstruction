@@ -4,6 +4,7 @@
 #include "aiPosition.h"
 #include "RPGAttackMech.h"
 #include "..\DBFormat\DataRPG.h"
+#include "..\DBFormat\DataMisc.h"   // NDb::CRPGPicklock (CPicklockItem ctor + the CreateItem cascade)
 #include "..\DBFormat\DataPerk.h"
 #include "rpgUnit.h"
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -218,9 +219,16 @@ void CWeaponItem::CreateNewAttackPortion( vector<CAttackPortion> *pRes, bool bSp
 		CObj<IJoinSplit> pSpent = pInnerClip->SplitItem( 1 );
 	}
 
-	float fUW = pInnerClip->GetDBAmmo()->fUnitWeight;
+	NDb::CRPGAmmo *pAmmo = pInnerClip->GetDBAmmo();
+	float fUW = pAmmo->fUnitWeight;
 	int nK = (int)( fUW * pDBWeapon->nInitialVelocity );
-	pRes->push_back( CAttackPortion( nK, pInnerClip->GetDBAmmo()->nBulletType, info.nDmgMin, info.nDmgMax,
+	// retail @0x2a09e0 (disasm 0x6a0add..0x6a0b12): the corpse-push coefficient is the bullet's
+	// momentum-like product calibr^2 * PI * muzzle velocity * bullet weight * 2.5e-7 (0x348637bd).
+	// Firearms are the ONLY retail attack source with a non-zero fPushCoeff -- this is what makes
+	// a sniper/MG kill fling the corpse while a pistol kill just slumps it.
+	float fPushCoeff = pAmmo->fCalibr * pAmmo->fCalibr * FP_PI *
+		( (float)pDBWeapon->nInitialVelocity * pAmmo->fWeight ) * 2.5e-7f;
+	pRes->push_back( CAttackPortion( nK, pAmmo->nBulletType, fPushCoeff, info.nDmgMin, info.nDmgMax,
 	info.nArmorPiercingAbility, 0 ) ); // ����������� � ��������� critical ����������� � RPGUnitMission
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -395,13 +403,20 @@ CGrenadeItem::CGrenadeItem( NDb::CRPGGrenade *_pDBGrenade )
 {
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail @0x2a11d0: the engineer-grenade flavour -- same CInventoryItem base off the record's
+// pItem, eMode=GM_THROW, pDBGrenade stays null, the record lands in pDBEngGrenade (tag 4).
+CGrenadeItem::CGrenadeItem( NDb::CRPGEngGrenade *_pDBEngGrenade )
+	: CInventoryItem( _pDBEngGrenade->pItem ), pDBGrenade(0), eMode( GM_THROW ), pDBEngGrenade(_pDBEngGrenade)
+{
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 // CMeleeWeaponItem
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CMeleeWeaponItem::CreateNewAttackPortion( vector<CAttackPortion> *pRes )
 {
-	pRes->push_back( CAttackPortion( 
-		110, 2, 
-		pDBMelee->nDmgMin, pDBMelee->nDmgMax, 
+	pRes->push_back( CAttackPortion(
+		110, 2, 0.0f, // retail @0x2a0850 passes fPushCoeff=0 -- melee kills never push the corpse
+		pDBMelee->nDmgMin, pDBMelee->nDmgMax,
 		0, 0 ) ); // piercing ability(+str*10), ����������� � ��������� critical ����������� � RPGUnitMission
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -414,31 +429,20 @@ NDb::EWeaponType CMeleeWeaponItem::GetWeaponType() const
 	return eType;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail @0x2a17a0: chain the container base on the shared CRPGItem, then load ONE CSimpleCharge
+// seeded with the record's full quantity (NOT a loop of N charges).
 CFirstAidItem::CFirstAidItem( NDb::CRPGFirstAid *_pDBFirstAid )
-	:CInventoryItem( _pDBFirstAid->pItem ), pDBFirstAid(_pDBFirstAid) 
+	: TChargeContainer( _pDBFirstAid->pItem ), pDBFirstAid( _pDBFirstAid )
 {
-	pClip = new CPotionContainer();
-	CPotionItem *pI = new CPotionItem();
+	CSimpleCharge *pI = new CSimpleCharge();
 	pI->nQuantity = _pDBFirstAid->nQuantity;
-	pClip->Load( pI );
+	Load( pI );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CFirstAidItem::SpendPotion()
+// retail @0x2a0740 (IItemContainerInfo slot 1): the charge capacity is the record's nQuantity
+int CFirstAidItem::GetMaxIncQuantity() const
 {
-	ASSERT( !IsEmpty() );
-	if ( !IsEmpty() )
-		return;
-	CObj<IJoinSplit> pSpent = pClip->SplitItem( 1 );
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-bool CFirstAidItem::IsEmpty()
-{
-	if ( !IsValid( pClip ) )
-	{
-		ASSERT(0);
-		return true;
-	}
-	return pClip->GetIncQuantity() <= 0;
+	return pDBFirstAid->nQuantity;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CMeleeWeaponItem
@@ -556,8 +560,32 @@ int CToolItem::GetSkillModifForMineCleaning() const
 	ASSERT( IsValid( pTool ) );
 	if ( IsValid( pTool ) && pTool->bCanUseForMineCleaning )
 		return pTool->nSkillModifForMineCleaning;
-	else 
+	else
 		return 0;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// CPicklockItem
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail @0x2a1c80: container base off the record's pItem, the record in pDBPicklock, and ONE
+// CSimpleCharge loaded with the record's nQuantity as its charge count.
+CPicklockItem::CPicklockItem( NDb::CRPGPicklock *_pDBPicklock ):
+	TChargeContainer( _pDBPicklock->pItem ), pDBPicklock( _pDBPicklock )
+{
+	CSimpleCharge *pCharge = new CSimpleCharge();
+	pCharge->nQuantity = _pDBPicklock->nQuantity;
+	Load( pCharge );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+int CPicklockItem::GetMaxIncQuantity() const   // retail @0x2a0750
+{
+	return pDBPicklock->nQuantity;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+int CPicklockItem::operator&( CStructureSaver &f )   // retail @0x2abaa0
+{
+	f.Add( 2, (TChargeContainer*)this );
+	f.Add( 3, &pDBPicklock );
+	return 0;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -600,6 +628,40 @@ static IInventoryItem *CreateGrenadeItem( NDb::CRPGGrenade *pDBGrenade )
 	return pGrenade;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail @0x2a1540: the engineer-grenade overload (CGrenadeItem with pDBEngGrenade set)
+static IInventoryItem *CreateGrenadeItem( NDb::CRPGEngGrenade *pDBEngGrenade )
+{
+	CGrenadeItem *pGrenade = new CGrenadeItem(pDBEngGrenade);
+	return pGrenade;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// Which-record grenade field accessors (see RPGItem.h): retail reads these fields through a
+// GetDBGrenade()-else-GetDBEngGrenade() branch at every consumer.
+NDb::CRPGWeaponType *GetGrenadeRecWeaponType( IGrenadeItemInfo *pGrenade )
+{
+	if ( NDb::CRPGGrenade *pDB = pGrenade->GetDBGrenade() )
+		return pDB->pWeaponType;
+	return pGrenade->GetDBEngGrenade()->pWeaponType;
+}
+int GetGrenadeRecQuality( IGrenadeItemInfo *pGrenade )
+{
+	if ( NDb::CRPGGrenade *pDB = pGrenade->GetDBGrenade() )
+		return pDB->nQuality;
+	return pGrenade->GetDBEngGrenade()->nQuality;
+}
+int GetGrenadeRecMaxDelay( IGrenadeItemInfo *pGrenade )
+{
+	if ( NDb::CRPGGrenade *pDB = pGrenade->GetDBGrenade() )
+		return pDB->nMaxDelay;
+	return pGrenade->GetDBEngGrenade()->nMaxDelay;
+}
+NDb::CRPGItem *GetGrenadeRecItem( IGrenadeItemInfo *pGrenade )
+{
+	if ( NDb::CRPGGrenade *pDB = pGrenade->GetDBGrenade() )
+		return pDB->pItem;
+	return pGrenade->GetDBEngGrenade()->pItem;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 static IInventoryItem *CreateUniformItem( NDb::CRPGUniform *pDBUniform )
 {
 	//CUniformItem *pUniform = new CUniformItem(pDBUniform);
@@ -633,6 +695,14 @@ IInventoryItem* CreateItem( CDBRecord *pItem )
 			if (pGrenade)
 				pIItem = CreateGrenadeItem(pGrenade);
 			else {
+				// retail CreateItem @0x2a25f0: the engineer-grenade branch sits right after the
+				// plain grenade one. Its absence made getitem on an EngGrenade id (e.g. 431)
+				// return NULL -> CanPlace(NULL) crash.
+				CDynamicCast<NDb::CRPGEngGrenade> pEngGrenade(pItem);
+				if (pEngGrenade) {
+					pIItem = CreateGrenadeItem(pEngGrenade);
+					return pIItem;
+				}
 				CDynamicCast<NDb::CRPGFirstAid> pFirstAid(pItem);
 				if (pFirstAid)
 					pIItem = CreateFirstAidItem(pFirstAid);
@@ -656,8 +726,16 @@ IInventoryItem* CreateItem( CDBRecord *pItem )
 									CDynamicCast<NDb::CRPGKey> pDB(pItem);
 									if (pDB)
 										pIItem = new CKeyItem(pDB);
-									else
-										ASSERT(0);
+									else {
+										// retail CreateItem @0x2a25f0: the last cascade rung is
+										// the picklock (new CPicklockItem, 0x68 bytes); anything
+										// else returns NULL in retail too.
+										CDynamicCast<NDb::CRPGPicklock> pPicklock(pItem);
+										if (pPicklock)
+											pIItem = new CPicklockItem(pPicklock);
+										else
+											ASSERT(0);
+									}
 								}
 							}
 						}
@@ -678,10 +756,11 @@ REGISTER_SAVELOAD_CLASS( 0xE10A1140, CWeaponItem )
 REGISTER_SAVELOAD_CLASS( 0xE10A1141, CClipItem )
 REGISTER_SAVELOAD_CLASS( 0xE10A1142, CAmmoItem )
 REGISTER_SAVELOAD_CLASS( 0x101B1170, CGrenadeItem )
-REGISTER_SAVELOAD_CLASS( 0xA1112153, CFirstAidItem )
+REGISTER_SAVELOAD_CLASS( 0xA1112153, CFirstAidItem )    // retail id (registrar $E35 @0x4a37a0)
 REGISTER_SAVELOAD_CLASS( 0xA1512132, CMeleeWeaponItem )
-REGISTER_SAVELOAD_CLASS( 0xA2312140, CPotionItem )
-REGISTER_SAVELOAD_CLASS( 0xA2312141, CPotionContainer )
+REGISTER_SAVELOAD_CLASS( 0xA2312140, CSimpleCharge )    // retail id (reg thunk @0x4a3870; Jan03 name CPotionItem)
+// 0xA2312141 CPotionContainer DELETED with the first-aid container refactor (dev-only id, absent in retail)
+REGISTER_SAVELOAD_CLASS( 0xA0523091, CPicklockItem )    // retail id (reg thunk @0x4a3a00)
 REGISTER_SAVELOAD_TEMPL_CLASS( 0x11462170, CMineDetectorItem, CSomeItem )
 REGISTER_SAVELOAD_CLASS( 0x51012110, CClueItem )
 REGISTER_SAVELOAD_CLASS( 0xB3212131, CHintItem )	// retail CSimpleItem<IHintItem> id (register thunk @0x8a3a70)

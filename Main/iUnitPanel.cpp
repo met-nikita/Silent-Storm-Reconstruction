@@ -996,7 +996,7 @@ void CInfoPanelSpecialSlot::Draw( const STime &sTime, NGScene::I2DGameView *pVie
 {
 	CPtr<NRPG::IWeaponItemInfo> pItem = pUnit->GetRPG()->GetCannonItemInfo();
 
-	pItemModel->Set( pItem, NDb::CAMERA_SLOT );
+	pItemModel->Set( pItem, NDb::CAMERA_SLOT, pUnit );   // the owning unit -> live "familiarity" in the tooltip
 
 	CPtr<NRPG::IClipItem> pRPGClipItem = pItem->GetInnerClip();
 	pReload->Set( pRPGClipItem->GetDBItem() );

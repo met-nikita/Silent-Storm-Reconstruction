@@ -51,6 +51,10 @@ public:
 	virtual void Import();
 	int operator&( CStructureSaver &f );
 };
+// retail NDb::GetRPGAP @0x3f9b60 -- RPGAP table record by id. Ids consumed by CUnitMission::GetActionAP
+// @0x2c0bd0: 1=TAKE_CORPSE 2=TRAP_OBJECT 3=DISARM_TRAP 4=DISARM_MINE 5=THROW_GRENADE 6=APPROACH_CANNON
+// 7=ENTER_PK 8=LEAVE_PK 9=USE_KEY 10=SWAP 11=ITEM_TAKE 12=ITEM_SLOT 13=ITEM_TRANSFER.
+CRPGAP *GetRPGAP( int nID );
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CRPGPicklock (table "RPGPicklocks")
 ////////////////////////////////////////////////////////////////////////////////////////////////////

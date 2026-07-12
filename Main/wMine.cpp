@@ -8,6 +8,8 @@
 #include "wUnitServer.h"   // complete NWorld::CUnitServer before CMinesWorld forces the CWorld TBS template instantiation
 #include "Transform.h"
 #include "wOSBase.h"
+#include "aiMap.h"
+#include "aiStability.h"
 #include "scriptCallLua.h"
 //
 namespace NWorld
@@ -25,6 +27,9 @@ CMine::CMine( CWorld *_pWorld, const CVec3 &_vPlace, NDb::CRPGMine *_pMine, int 
 	pWorld->AddMine( this );
 	pMineTracker = pWorld->GetMineTracker();
 	pMineTracker->AddMine( this, vPlace );
+	// retail CMine::CMine @0x37ead0 tail: register with the wreckage stability grid so a mine
+	// whose floor collapses under it goes boom (IStabilityTrackers::AddMine @0xa6840)
+	pWorld->GetAIMap()->GetStabilityTrackers()->AddMine( this );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CMine::~CMine()
@@ -78,6 +83,16 @@ void CMine::GoBoom( CUnitServer *pWho )
 	NScript::luaCallFunction( "OnMineTriggered", "p", IsValid( pWho ) ? CastToObjectBase( pWho ) : 0 );
 	CMObj<CMine> pHold(this);
 	pHold = 0;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail free NWorld::GoBoom @0x37e530: detonate an IMine with no attributed shooter -- dynamic-
+// cast to the concrete CMine and fire unless it is already dead/zombie. The stability trackers
+// call this when the ground under a settled mine drops away (CStabilityTracker::OnChange @0xa59a0).
+void GoBoom( IMine *pMine )
+{
+	CDynamicCast<CMine> pReal( pMine );
+	if ( pReal && IsValid( pReal.GetPtr() ) )
+		pReal->GoBoom( 0 );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CMineTracker

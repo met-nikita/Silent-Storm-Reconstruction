@@ -6,6 +6,7 @@
 #include "..\DBFormat\DataRPG.h"
 #include "..\DBFormat\DataGeometry.h"
 #include "aiMap.h"
+#include "aiStability.h"
 #include "GAnimation.h"
 #include "RPGItemInfo.h"
 #include "Transform.h"
@@ -288,7 +289,31 @@ void CDebrisController::ActivateDebris( const SSphere &sphere, NAI::IAIMap *pAIM
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CDFrozenItem* CDebrisController::AddFrozenItem( const SHMatrix &m, NRPG::IInventoryItem *pInvItem, const SItemRenderInfo &_model, int nFloor, bool bTemporaryVisible, bool bVisibleGated )
+// retail ActivateDebris @0x34a240 (IDFrozenItem overload): the stability trackers found the
+// support under this ONE settled item gone -- unlink it from the frozen list and relaunch it as
+// dynamic debris (zero velocity, orientation from the item's own matrix; the item rides as its own
+// visibility parent so the fog gate carries over, same as the sphere overload).
+void CDebrisController::ActivateDebris( CDFrozenItem *pItem, NAI::IAIMap *pAIMap, CFuncBase<STime> *pTime )
+{
+	if ( !pItem )
+		return;
+	// retail holds a ref across the unlink (RTDynamicCast ref + trailing ReleaseObj @0x34a240) --
+	// showFrozenItems is the OWNER list, so the erase below would otherwise destroy the item
+	CObj<CDFrozenItem> pHold( pItem );
+	for ( list<CObj<CDFrozenItem> >::iterator i = showFrozenItems.begin(); i != showFrozenItems.end(); ++i )
+	{
+		if ( i->GetPtr() == pItem )
+		{
+			showFrozenItems.erase( i );
+			break;
+		}
+	}
+	CQuat q;
+	q.FromEulerMatrix( pItem->GetMatrix() );
+	AddDebris( pItem->GetModel(), pAIMap, pItem->GetPos(), q, VNULL3, pTime, pItem->GetInvItem(), pItem );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+CDFrozenItem* CDebrisController::AddFrozenItem( NAI::IAIMap *pMap, const SHMatrix &m, NRPG::IInventoryItem *pInvItem, const SItemRenderInfo &_model, int nFloor, bool bTemporaryVisible, bool bVisibleGated )
 {
 	// retail @0x34b100: `(pInvItem == 0 && !bVisibleGated) ? GetShowList() : GetVisibleShowList()`,
 	// and the visibleItems (vision-candidate) publish runs when `pInvItem != 0 || bVisibleGated`.
@@ -301,14 +326,20 @@ CDFrozenItem* CDebrisController::AddFrozenItem( const SHMatrix &m, NRPG::IInvent
 		bIsVisibleItem ? GetVisibleShowList() : GetShowList(),
 		_model, m, nFloor, pInvItem, pTrash, bTemporaryVisible );
 	if ( bIsVisibleItem )
+	{
 		visibleItems.push_back( pWorldItem );
+		// retail @0x34b100 tail (same branch): register the settled item with the wreckage
+		// stability grid so collapsing support re-drops it (IStabilityTrackers::AddDebris @0xa6770)
+		if ( pMap )
+			pMap->GetStabilityTrackers()->AddDebris( pWorldItem );
+	}
 	showFrozenItems.push_back( pWorldItem );
 	return pWorldItem;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // retail public overload @0x34b340: (pMap, pos, rot, pInvItem, bool bTemporaryVisible, int nFloor);
 // @0x74b45d forwards bTemporaryVisible as the inner overload's arg 6 and hardwires bVisibleGated 0.
-CDFrozenItem* CDebrisController::AddFrozenItem( const CVec3 &pos, const CQuat &rot, NRPG::IInventoryItem *pInvItem, bool bTemporaryVisible, int nFloor )
+CDFrozenItem* CDebrisController::AddFrozenItem( NAI::IAIMap *pMap, const CVec3 &pos, const CQuat &rot, NRPG::IInventoryItem *pInvItem, bool bTemporaryVisible, int nFloor )
 {
 	CPtr<NRPG::IInventoryItem> pHold( pInvItem );
 	if ( !IsValid( pInvItem->GetDBItem()->pModel ) )
@@ -319,7 +350,7 @@ CDFrozenItem* CDebrisController::AddFrozenItem( const CVec3 &pos, const CQuat &r
 	SRand rnd;
 	SHMatrix m;
 	MakeMatrix( &m, pos, rot );
-	CDFrozenItem *pWorldItem = AddFrozenItem( m, pInvItem, pInvItem->GetDBItem()->pModel->CreateModel( &rnd ), nFloor, bTemporaryVisible );
+	CDFrozenItem *pWorldItem = AddFrozenItem( pMap, m, pInvItem, pInvItem->GetDBItem()->pModel->CreateModel( &rnd ), nFloor, bTemporaryVisible );
 	return pWorldItem;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -374,7 +405,7 @@ void CDebrisController::GetVisibleDynamicItems( const SSphere &sphere, list<IVis
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-bool CDebrisController::Segment( SSphere *pInvalidate )
+bool CDebrisController::Segment( NAI::IAIMap *pMap, SSphere *pInvalidate )
 {
 	bool bRes = false;
 	if ( HasDynamicItems() )
@@ -392,7 +423,7 @@ bool CDebrisController::Segment( SSphere *pInvalidate )
 			// retail @0x34b4b0 settle (disasm @0x74b5eb): bVisibleGated = (pI->GetVisibilityParent() != 0,
 			// read via IVisible vtbl+8) -- the launch-time fog gate carried on the flying CDItem decides
 			// the frozen item's show list + vision candidacy; bTemporaryVisible = 0 (push 0 @0x74b5f0).
-			AddFrozenItem( pos, pI->GetInvItem(), pI->GetModel(), pI->GetFloor(), false, pI->GetVisibilityParent() != 0 );
+			AddFrozenItem( pMap, pos, pI->GetInvItem(), pI->GetModel(), pI->GetFloor(), false, pI->GetVisibilityParent() != 0 );
 			showItems.remove( pI );
 			bc.Add( bone.pos, 1 );
 		}

@@ -479,7 +479,7 @@ CCommandExecute* CreateActionExecutor( CUnitServer *pUS, CCmd *pCmd, EUnitComman
 				CDynamicCast<NRPG::IGrenadeItemInfo> pGrenade(pUS->GetRPG()->GetInventoryInfo()->GetActive());
 				if (IsValid(pGrenade) && (pGrenade->GetMode() == NRPG::GM_SETTRAP))
 				{
-					*pError = UCR_GENERAL_FAILURE;
+					*pError = UCR_UNAVAILABLE;   // retail @0x39d4f0: set-trap-mode grenade on the tile path -> UCR_UNAVAILABLE(5), not GENERAL_FAILURE
 					return 0;
 				}
 

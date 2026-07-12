@@ -18,6 +18,7 @@
 #include "RPGItem.h"
 #include "GSceneUtils.h"
 #include "aiMap.h"
+#include "aiStability.h"
 #include "wDebris.h"
 #include "BuildingGrid.h"
 #include "GAnimation.h"
@@ -618,6 +619,11 @@ CObjectServerBase *CWorld::AddObject( const SObjectPlace &pos,
 		pResult = pBase;
 	}
 	//
+	// retail CWorld::AddObjectServerBase @0x3635b0: every object server filed into the world list
+	// also registers its resting bound with the wreckage stability grid (RegisterForStability gates
+	// on live AI params, so animated/dead/model-less objects self-exclude).
+	if ( IsValid( pResult ) )
+		pResult->RegisterForStability( GetAIMap()->GetStabilityTrackers() );
 	if ( IsValid( pResult ) && !mapElement.szName.empty() )
 	{
 		string szUpperName;
@@ -1227,7 +1233,7 @@ void CWorld::PlaceItemSlotsToMap( const ClueToSlot &clueToSlot )
 			{
 				// place onto the map
 				CQuat rot( ToRadian( i->second.pos.fRotation ), CVec3(0,0,1) );
-				CDFrozenItem *pFrozenItem = AddFrozenItem( i->second.pos.ptPos, rot, pItem, false, i->second.pos.nFloor );
+				CDFrozenItem *pFrozenItem = AddFrozenItem( GetAIMap(), i->second.pos.ptPos, rot, pItem, false, i->second.pos.nFloor );
 				if ( IsValid( pFrozenItem ) )
 				{
 					string szUpperName;
@@ -1467,7 +1473,7 @@ void CWorld::CreateObjects( const SMapInfo &mapInfo, CPostWorldCreateInfo *pPost
 			if ( i->bFromChest )
 				rot.FromEulerAngles( ToRadian( i->pos.fRotation ), i->bVertical ? -FP_PI * 0.5f : 0.0f, FP_PI * 0.5f );
 			CVec3 ptPos = i->pos.ptPos + ptDeltaPos;
-			CDFrozenItem *pFrozenItem = AddFrozenItem( ptPos, rot, NRPG::CreateItem( i->pItem->pSuccessor ), false, i->pos.nFloor );
+			CDFrozenItem *pFrozenItem = AddFrozenItem( GetAIMap(), ptPos, rot, NRPG::CreateItem( i->pItem->pSuccessor ), false, i->pos.nFloor );
 			if ( IsValid( pFrozenItem ) )
 			{
 				string szUpperName;
@@ -1628,6 +1634,10 @@ void CWorld::CreateRandom( int nVariantID, const vector<string> &params,
 		}
 		//
 		CheckStability();
+		// retail CreateRandom @0x36d0b0: FinishConstruction is the LAST world-build step, right
+		// after the initial stability sweep -- the grid sizes itself over the accumulated hull box
+		// and the queued object/debris/mine registrations distribute into their cells.
+		GetAIMap()->GetStabilityTrackers()->FinishConstruction();
 	}
 
 	StartGame();
@@ -2411,7 +2421,7 @@ void CWorld::Segment()
 	}
 
 	SSphere changed;
-	bool bChanged = CDebrisController::Segment( &changed );
+	bool bChanged = CDebrisController::Segment( GetAIMap(), &changed );
 
 	MarkNewDGFrame();
 	CDGPtr<CFuncBase<STime> > pRefreshTime( pTime );
@@ -2553,6 +2563,9 @@ void CWorld::RestoreObjectFromPocket( CObjectServerBase *pObject )
 	if ( !IsValid( pObject ) || !IsObjectInPocket( pObject ) )
 		return;
 	objects.push_back( pObject );
+	// retail AddObjectServerBase @0x3635b0: re-registration with the stability grid rides the
+	// world-list re-add
+	pObject->RegisterForStability( GetAIMap()->GetStabilityTrackers() );
 	pObject->BeAddedToVisitiors( true );
 	RemoveSmthFromPocket( pObject, objectPocket );
 }
@@ -2586,13 +2599,26 @@ void CWorld::PerformRangedAttack( const NRPG::CAttackPortion &ap, const CRay &ra
 	miscObjects.push_back( CreateBulletServer( this, trail, sCast, pTrailModel, fTrailSpeed ) );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CWorld::ThrowGrenade( const CVec3 &vFrom, const CVec3 &vSpeed, STime tThrow, 
-	float fTFly, NDb::CModel *pModel, NDb::CRPGGrenade *pRPGGrenade, CUnitServer *pUnitServer )
+void CWorld::ThrowGrenade( const CVec3 &vFrom, const CVec3 &vSpeed, STime tThrow,
+	float fTFly, NDb::CModel *pModel, NDb::CRPGGrenade *pRPGGrenade, CUnitServer *pUnitServer,
+	NDb::CRPGEngGrenade *pRPGEngGrenade )
 {
-	if ( !pRPGGrenade )
-		return;
-	miscObjects.push_back( CreateGrenadeServer( this, vFrom, vSpeed, tThrow, 
-		fTFly, pModel, pRPGGrenade, pUnitServer ) );
+	// retail @0x764140: a valid regular record flies as the timed grenade; otherwise a valid
+	// engineer record flies as the contact-fused eng grenade, carrying the thrower's
+	// ENGINEERING skill for the explosion (read here, at throw time).
+	if ( IsValid( pRPGGrenade ) )
+	{
+		miscObjects.push_back( CreateGrenadeServer( this, vFrom, vSpeed, tThrow,
+			fTFly, pModel, pRPGGrenade, pUnitServer ) );
+	}
+	else if ( IsValid( pRPGEngGrenade ) )
+	{
+		int nEngSkill = 0;
+		if ( IsValid( pUnitServer ) )
+			nEngSkill = pUnitServer->GetUnitRPG()->GetRPGUnit()->Skills( NDb::ST_ENGINEERING );
+		miscObjects.push_back( CreateGrenadeServer( this, vFrom, vSpeed, tThrow,
+			fTFly, pModel, pRPGEngGrenade, pUnitServer, nEngSkill ) );
+	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CWorld::ThrowKnife( const CVec3 &vFrom, const CVec3 &vSpeed, STime tThrow, float fDistance,
@@ -2681,6 +2707,32 @@ void CWorld::AddGrenadeExplosion( const CVec3 &vStartPosition, NDb::CRPGGrenade 
 	// explosive-perk modifiers: a live thrower (grenade) seeds them from its perks inside the CVoxelExplTracker
 	// ctor; a pre-placed source (mine) passes the placer's stored modifiers via pMods (thrower is null by then).
 	miscObjects.push_back( new CVoxelExplTracker( vStartPosition, pRPGGrenade, pUnitServer, this, pIgnitionObject, pMods ) );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail @0x7648c0 (world vtbl+0x120): the ENGINEER-grenade blast. Same effect/sound/AI-signal
+// preamble as the regular overload, read off the CRPGEngGrenade record's own switch arrays, then
+// the unified damage tracker (retail ctor @0x756ff0 takes the eng record + nEngSkill; the
+// wave/radius/damage/fragment math scales with the skill inside wExplTracker).
+void CWorld::AddGrenadeExplosion( const CVec3 &vStartPosition, NDb::CRPGEngGrenade *pRPGEngGrenade,
+	int nEngSkill, CUnitServer *pUnitServer, CObjectBase *pIgnitionObject, const SPerkMineModifiers *pMods )
+{
+	ASSERT( IsValid(pRPGEngGrenade) );
+	if ( !IsValid(pRPGEngGrenade) )
+		return;
+	int nEffectType = 0, nSoundType = 0;
+	NDb::CRPGArmor *pArmor = GetArmor( vStartPosition );
+	if ( pArmor )
+	{
+		nEffectType = Clamp( pArmor->nGrenadeExplostionType - 1, 0, NDb::N_MAX_GRENADE_EXPLOSION_TYPE - 1 );
+		nSoundType = Clamp( pArmor->nGrenadeSoundType - 1, 0, NDb::N_MAX_GRENADE_SOUND_TYPE - 1 );
+	}
+	SRand rnd;
+	if ( pRPGEngGrenade->pEffect.p[ nEffectType ] )
+		CreateParticle( vStartPosition, CQuat(random.GetFloat(0,10000),CVec3(0,0,1)), pRPGEngGrenade->pEffect.p[ nEffectType ]->GetEffect( &rnd ) );
+	if ( pRPGEngGrenade->pSound.p[ nSoundType ] )
+		MakeSound( vStartPosition, pRPGEngGrenade->pSound.p[ nSoundType ]->GetSound( &rnd )->pSound );
+	GetAISignalManager()->Add( NAI::CreateAIGrenadeSoundSignal( vStartPosition ) );
+	miscObjects.push_back( new CVoxelExplTracker( vStartPosition, 0, pUnitServer, this, pIgnitionObject, pMods, pRPGEngGrenade, nEngSkill ) );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CUnitServer* CWorld::GetUnitServer( string szName )

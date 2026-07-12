@@ -26,7 +26,11 @@ enum ETraceSet
 	TS_DOOR_HULL_VALID = 0x4000,
 	TS_ITEM_BLOCKER = 0x8000,
 	TS_VISION_SOLID = 0x10000,
-	TS_ALL = (0xffffffff & ~TS_FRAGMENTED & ~TS_ITEM_BLOCKER & ~TS_VIRTUAL), // все и желательно по одному разу
+	// retail-only bit (CWindowDoor Visit, s2_wobject.h:521): marks the AI hull of a LOCKED
+	// door/window. Excluded from the stability catcher query (SelectHullPointers include 0x8000 /
+	// exclude 0x20000) so resting wreckage never counts a locked door's hull as its support.
+	TS_LOCKED_EXTRA = 0x20000,
+	TS_ALL = (0xffffffff & ~TS_FRAGMENTED & ~TS_ITEM_BLOCKER & ~TS_VIRTUAL), // пїЅпїЅпїЅ пїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅ
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 }

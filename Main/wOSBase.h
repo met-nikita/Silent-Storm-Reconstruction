@@ -19,10 +19,15 @@ namespace NDb
 	class CDebrisMaterial;
 	class CContainerModel;
 	class CRPGGrenade;
+	class CModel;
 }
 namespace NRPG
 {
 	class IObject;
+}
+namespace NAI
+{
+	class IStabilityTrackers;
 }
 namespace NWorld
 {
@@ -79,7 +84,10 @@ public:
 		NDb::CObject *pO, NRPG::IObject *pRPG, const vector<int> &vCreateFlags, bool _bBorder = false );
 	
 	bool CheckStability();
-	
+	// retail @0x383fe0 / @0x384060 -- see wOSBase.cpp
+	bool GetCheckStabilityParams( NDb::CModel **ppModel, SHMatrix *pMatrix );
+	void RegisterForStability( NAI::IStabilityTrackers *pTrackers );
+
 	// NRPG::IAttackable
 	virtual int ProcessAttack( int nUserID, NRPG::CAttackPortion *pAttack, NDb::CRPGArmor *pArmor );
 	// IObject

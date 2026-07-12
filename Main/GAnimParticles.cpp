@@ -13,6 +13,7 @@
 #include "wTSFlags.h"
 #include "GSceneUtils.h"
 #include "Bound.h"          // SBoundCalcer/SBound for the BeStopped resting corpse bound (retail @0xea4f0)
+#include "aiStability.h"    // IStabilityTrackers for the BeStopped corpse registration (retail @0xea4f0)
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // wOSBase.obj @0x347bd0 -- breakable-glass collider gate (defined in wOSBase.cpp). Declared here so the
 // particle-physics step can let flying debris pass THROUGH a breakable pane (and break it) instead of
@@ -1017,12 +1018,10 @@ void CParticleSkeleton::BeStopped()
 	}
 	SBound bound;
 	bc.Make( &bound );
-	// DEFERRED (retail @0xea4f0 middle hop): pMap->GetStabilityTrackers()->AddCorpse( pUnit, &bound )
-	// (IAIMap vtbl+0x48 -> IStabilityTrackers vtbl+0x10 = CStabilityTrackers::AddCorpse @0xa5db0)
-	// registers the resting bound as a per-cell stability object so building-collapse debris interacts
-	// with the corpse. The CStabilityTracker(s) grid subsystem (retail aiStability.obj) does not exist
-	// in this tree yet; the bound above is already computed the retail way, so the hop becomes a
-	// one-liner once that subsystem is ported.
+	// retail @0xea4f0 middle hop: register the resting corpse bound with the wreckage stability
+	// grid (IAIMap vtbl+0x48 -> IStabilityTrackers vtbl+0x10 = CStabilityTrackers::AddCorpse
+	// @0xa5db0) so collapsing support under the corpse re-drops the ragdoll.
+	pMap->GetStabilityTrackers()->AddCorpse( pUnit, bound );
 	NWorld::WorldInformCorpseStop( pUnit );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////

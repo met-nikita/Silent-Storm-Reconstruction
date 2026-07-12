@@ -342,9 +342,11 @@ EUnitCommandResult CanUnitThrowGrenade( CUnitServer *pUS, const NAI::SUnitPositi
 	if ( !FindGrenadeParams( pUS->GetWorld(), from, ptTarget, pToHitCalcer->GetMaxGrenadeVelocity(), &sParams ) )
 		return UCR_TARGET_OUT_OF_RANGE;
 
-	// Engineer/PK grenades (satchel charges) gate on a required demolition perk + throwing skill (retail
-	// @0x3ac8d0). Ordinary grenades have no eng-grenade DB record -> GetDBEngGrenade() is null -> no gate,
-	// so this fires only for engineer grenades. Fields already serialized on CRPGEngGrenade (tags 5 & 16).
+	// Engineer/PK grenades (satchel charges) gate on a required demolition perk + the unit's
+	// ENGINEERING skill (retail @0x3ac8d0, disasm 0x7ac93d: GetUnit -> skills[8] -> the CDynamicSkill
+	// effective-value read -- NOT the to-hit calcer's throwing-derived nSkill, which mis-gated eng
+	// throws regardless of eng skill). Ordinary grenades have no eng-grenade DB record ->
+	// GetDBEngGrenade() is null -> no gate, so this fires only for engineer grenades.
 	CDynamicCast<NRPG::CGrenadeItem> pGrenadeConcrete( pGrenade );
 	if ( IsValid( pGrenadeConcrete ) )
 	{
@@ -353,7 +355,7 @@ EUnitCommandResult CanUnitThrowGrenade( CUnitServer *pUS, const NAI::SUnitPositi
 		{
 			if ( pEngDB->nRequiredPerkID > 0 && !pUS->GetUnitRPG()->HasPerk( pEngDB->nRequiredPerkID ) )
 				return UCR_NO_EQUIPMENT;
-			if ( pToHitCalcer->GetSkill() < pEngDB->nSkillReq )
+			if ( pUS->GetUnitRPG()->GetRPGUnit()->Skills( NDb::ST_ENGINEERING ) < pEngDB->nSkillReq )
 				return UCR_NEED_HIGHER_SKILL;
 		}
 	}
@@ -1718,7 +1720,9 @@ int CExecThrowGrenade::GetStartAP() const
 	return pUS->GetActionAP( NRPG::AC_THROW_GRENADE );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CExecThrowGrenade::CheckToHitAndDelay( NDb::CRPGGrenade *pGrenade )
+// retail @0x3a1700 takes the grenade ITEM (not the CRPGGrenade record) -- the fuse fields are
+// read through the which-record branch, so an engineer grenade works too.
+void CExecThrowGrenade::CheckToHitAndDelay( NRPG::IGrenadeItem *pGrenade )
 {
 	// check ToHit and find the point where the grenade is actually thrown
 	int nToHit = pToHitCalcer->GetToHit();
@@ -1739,15 +1743,16 @@ void CExecThrowGrenade::CheckToHitAndDelay( NDb::CRPGGrenade *pGrenade )
 	csRPG << CC_ORANGE << " \tCheck:" << nRandom;
 
 	// convert flight time into a delay
-	grenadeParams.fT = Clamp( grenadeParams.fT, 0.f, float(pGrenade->nMaxDelay) );
-	grenadeParams.fT = pGrenade->nMaxDelay - grenadeParams.fT;
+	const int nMaxDelay = NRPG::GetGrenadeRecMaxDelay( pGrenade );
+	grenadeParams.fT = Clamp( grenadeParams.fT, 0.f, float(nMaxDelay) );
+	grenadeParams.fT = nMaxDelay - grenadeParams.fT;
 	csRPG << " True delay: " << grenadeParams.fT;
 	nRandom = random.Get(100);
-	if ( nRandom >= 99 || nRandom >= pToHitCalcer->GetSkill() ) 
+	if ( nRandom >= 99 || nRandom >= pToHitCalcer->GetSkill() )
 	{
 		// change the delay time
 		grenadeParams.fT *= random.GetFloat( 0.5f, 2.f );
-		grenadeParams.fT = Clamp( grenadeParams.fT, 0.f, float(pGrenade->nMaxDelay) * 0.75f );
+		grenadeParams.fT = Clamp( grenadeParams.fT, 0.f, float(nMaxDelay) * 0.75f );
 	}
 	csRPG << " Used delay: " << grenadeParams.fT << endl;
 }
@@ -1762,7 +1767,7 @@ void CExecThrowGrenade::ThrowGrenade()
 		return;
 
 	FindGrenadeParams( pUS->GetWorld(), pUS->GetPosition(), ptTarget, pToHitCalcer->GetMaxGrenadeVelocity(), &grenadeParams );
-	CheckToHitAndDelay( pGrenade->GetDBGrenade() );
+	CheckToHitAndDelay( pGrenade );
 
 	pUS->TearOffItem( &item, (NDb::ESlot)pInventory->GetActiveSlot(), !pUS->IsAIUnit() );
 
@@ -1772,9 +1777,11 @@ void CExecThrowGrenade::ThrowGrenade()
 		pUS->animator.ActivateItem( pUS->GetPosition(), false, nPlace == -1, (NDb::EItemPlace)nPlace, pRPG->GetWeaponType() );
 	}*/
 
-	pUS->GetWorld()->ThrowGrenade( grenadeParams.ptStart, grenadeParams.vel, 
-		pUS->animator.GetTimeLabel1(), grenadeParams.fT, item.pModel, 
-		pGrenade->GetDBGrenade(), pUS ); 
+	// retail @0x764140: BOTH records go to the world -- CWorld::ThrowGrenade dispatches an
+	// engineer grenade (null regular record) to the contact-fused eng grenade server.
+	pUS->GetWorld()->ThrowGrenade( grenadeParams.ptStart, grenadeParams.vel,
+		pUS->animator.GetTimeLabel1(), grenadeParams.fT, item.pModel,
+		pGrenade->GetDBGrenade(), pUS, pGrenade->GetDBEngGrenade() );
 	pUS->Update();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -2452,17 +2459,33 @@ bool CExecSetTrap::TimeLabelReached()
 		CDynamicCast<NRPG::IGrenadeItem> pGrenade(pItem);
 		if (pGrenade)
 		{
-			NDb::CRPGGrenade *pRPGGrenade = pGrenade->GetDBGrenade();
 			// retail CExecSetTrap::TimeLabelReached @0x3a99e0: seed the placer's explosive-perk mods {1,1,0}+Fill
-			// and hand them to the trapped door. (The eng-grenade branch -- GetDBEngGrenade + 4-arg SetTrap with the
-			// panzerklein capacity -- is deferred, blocked on the absent SPanzerkleinCapacity + AddEngGrenadeExplosion.)
+			// and hand them to the trapped door; a plain grenade arms via the 3-arg SetTrap @0x381ee0, an ENGINEER
+			// grenade via the 4-arg overload @0x381f90 with the placer's effective ST_ENGINEERING value (retail
+			// inlines CDynamicSkill: bFreezedToMax ? nMaxValue : min(nMaxValue,nValue) on skills[8] -- dev's
+			// Skills() operator int) and GetGrenadeTrapDC( 0 ).
+			NDb::CRPGGrenade *pRPGGrenade = pGrenade->GetDBGrenade();
+			NDb::CRPGEngGrenade *pRPGEngGrenade = pGrenade->GetDBEngGrenade();
 			SPerkMineModifiers mods;
 			mods.Fill( pRPG->GetRPGUnit() );
-			if ( pTarget->SetTrap( pRPGGrenade, pRPG->GetGrenadeTrapDC( pRPGGrenade ), &mods ) )
+			if ( pRPGGrenade )
 			{
-				CUnitServer::SResItem item;
-				pUS->TearOffItem( &item, (NDb::ESlot)pInventory->GetActiveSlot(), true );
-				pUS->AddToVisibleTraps( pTarget );
+				if ( pTarget->SetTrap( pRPGGrenade, pRPG->GetGrenadeTrapDC( pRPGGrenade ), &mods ) )
+				{
+					CUnitServer::SResItem item;
+					pUS->TearOffItem( &item, (NDb::ESlot)pInventory->GetActiveSlot(), true );
+					pUS->AddToVisibleTraps( pTarget );
+				}
+			}
+			else if ( pRPGEngGrenade )
+			{
+				int nEngSkill = pRPG->GetRPGUnit()->Skills( NDb::ST_ENGINEERING );
+				if ( pTarget->SetTrap( pRPGEngGrenade, pRPG->GetGrenadeTrapDC( 0 ), &mods, nEngSkill ) )
+				{
+					CUnitServer::SResItem item;
+					pUS->TearOffItem( &item, (NDb::ESlot)pInventory->GetActiveSlot(), true );
+					pUS->AddToVisibleTraps( pTarget );
+				}
 			}
 		}
 		else

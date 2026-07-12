@@ -23,6 +23,8 @@ namespace NDb
 	class CRPGMine;
 	class CRPGTool;
 	class CRPGKey;
+	class CRPGPicklock;
+	class CRPGEngGrenade;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 namespace NRPG
@@ -152,6 +154,9 @@ class IGrenadeItemInfo: virtual public IInventoryItem
 public:
 	virtual EGrenadeMode GetMode() const = 0;
 	virtual NDb::CRPGGrenade *GetDBGrenade() const = 0;
+	// An ENGINEER grenade leaves GetDBGrenade() null and carries its record here instead
+	// (CGrenadeItem::GetDBEngGrenade, retail @0x2a3c70) -- consumers must check both.
+	virtual NDb::CRPGEngGrenade *GetDBEngGrenade() const = 0;
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class IFirstAidItem: virtual public IInventoryItem
@@ -191,6 +196,14 @@ class IKeyItem: virtual public IInventoryItem
 {
 public:
 	virtual NDb::CRPGKey* GetDBItemInfo() const = 0;
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail IPicklockItem (ctor @0x2a75a0): the lockpick's interface base -- charge counting comes
+// through IItemContainerInfo (a picklock IS a CItemContainer<CSimpleCharge>).
+class IPicklockItem: virtual public IItemContainerInfo
+{
+public:
+	virtual NDb::CRPGPicklock* GetDBPicklock() const = 0;
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 } // namespace

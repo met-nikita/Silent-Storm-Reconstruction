@@ -8,6 +8,10 @@
 #include "RPGMerc.h"
 #include "RPGUnit.h"
 #include "RPGItemInfo.h"
+#include "RPGItem.h"   // GetGrenadeRec* which-record accessors
+#include "RPGItemSet.h"             // CClipItem (drag-compat yellow) -- CSlot::Draw @0x1c34d0 tint pass
+#include "..\DBFormat\DataMisc.h"   // NDb::CRPGPicklock (the can't-use red predicate)
+#include "..\DBFormat\DataPerk.h"   // NDb::CDBPerk (tool/picklock pNeededPerk id)
 #include "RPGUnitInfo.h"
 #include "..\Misc\StrProc.h"
 #include "..\DBFormat\DataFormat.h"
@@ -967,9 +971,29 @@ NRPG::IInventoryItem* CShowItemModel::Get() const
 	return pItem;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CShowItemModel::Set( NRPG::IInventoryItem* _pItem, NDb::ECameraType eCameraType )
+// retail NUI::MakeGrenadeToolTip @0x1bf3b0: the shared static block for a blast record (thrown grenade,
+// explosive bullet, mine's pExplosion) -- typename + the wave/fragment numbers + a 3-way weight line.
+static void MakeGrenadeToolTip( CToolTip *pToolTip, NDb::CRPGGrenade *pG )
+{
+	pToolTip->SetVal( L"typename", GetDBString( pG->pWeaponType->pName ) );
+	pToolTip->SetVal( L"explrange", Float2Int( pG->fWaveRadius ) );        // +0x2c
+	pToolTip->SetVal( L"delay", pG->nMaxDelay );                          // +0x60
+	pToolTip->SetVal( L"fragnum", pG->nFragmentNumber );                  // +0x30
+	pToolTip->SetVal( L"fragmin", pG->nFragmentDmgMin );                  // +0x38
+	pToolTip->SetVal( L"fragmax", pG->nFragmentDmgMax );                  // +0x3c
+	pToolTip->SetVal( L"damagemin", Float2Int( pG->fWaveDmgMin ) );       // +0x18
+	pToolTip->SetVal( L"damagemax", Float2Int( pG->fWaveDmgMax ) );       // +0x1c
+	if ( IsValid( pG->pItem ) )
+	{
+		int nW = pG->pItem->nWeight;
+		pToolTip->SetVal( L"weight", GetDBString( nW < 400 ? 17134 : ( nW < 1000 ? 17135 : 17136 ) ) );
+	}
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CShowItemModel::Set( NRPG::IInventoryItem* _pItem, NDb::ECameraType eCameraType, NWorld::CUnit* _pUnit )
 {
 	pItem = _pItem;
+	pUnit = _pUnit;
 
 	CPtr<NDb::CRPGItem> pRPGItem( pItem->GetDBItem() );
 
@@ -992,8 +1016,212 @@ void CShowItemModel::Set( NRPG::IInventoryItem* _pItem, NDb::ECameraType eCamera
 
 	pToolTip = new CToolTip( SWindowInfo( GetInterface(), SPoint( 0, 0 ), SPoint( 0, 0 ), "", STYLE_ENABLED ) );
 	SetToolTip( pToolTip );
+
+	// -------- the FULL STATIC tooltip build (retail CShowItemModel::Set @0x1c0f50) --------
+	// The Jan03 build did this in Draw with a different key set; retail moved every fixed value here and
+	// left only the live ammo/quantity/familiarity numbers to Draw. Key strings + string-DB ids verified
+	// from the disasm; the game.db tooltip templates key on THESE names.
+	pToolTip->SetVal( L"name", GetDBString( pRPGItem->pName ) );
+
+	CDynamicCast<NRPG::IWeaponItemInfo> pWeapon( pItem );
+	CDynamicCast<NRPG::IGrenadeItemInfo> pGrenade( pItem );
+	CDynamicCast<NRPG::IMeleeWeaponItem> pMelee( pItem );
+	CDynamicCast<NRPG::IClipItem> pClip( pItem );
+	CDynamicCast<NRPG::IFirstAidItem> pFirstAid( pItem );
+	CDynamicCast<NRPG::IToolItem> pTool( pItem );
+	CDynamicCast<NRPG::IPicklockItem> pPicklock( pItem );
+	CDynamicCast<NRPG::IMineItem> pMine( pItem );
+	CDynamicCast<NRPG::IKeyItem> pKey( pItem );
+	CDynamicCast<NRPG::IClueItem> pClue( pItem );
+
+	if ( pWeapon && IsValid( pWeapon->GetDBWeapon()->pWeaponType ) )
+	{
+		NDb::CRPGWeapon *pW = pWeapon->GetDBWeapon();
+		NRPG::IClipItem *pInner = pWeapon->GetInnerClip();
+		pToolTip->SetText( GetDBString( 4468 ) );
+		pToolTip->SetVal( L"typename", GetDBString( pW->pWeaponType->pName ) );
+
+		NRPG::SWeaponInfo sInfo;
+		pWeapon->GetInfo( &sInfo );
+
+		// shoot-mode rows: only the AVAILABLE modes print; the first printed row has no prefix, then
+		// even printed-count -> "<br>", odd -> "<tab>" (retail @0x5c0f50 alternation).
+		struct SShootMode { int nLabelID; const WCHAR *pszKey; };
+		static const SShootMode kModes[NDb::SM_MAXVALUE] =
+		{
+			{ 6068, L"snapshot" }, { 6069, L"aimedshot" }, { 6070, L"carefulshot" },
+			{ 6071, L"shortburst" }, { 6072, L"longburst" }, { 6073, L"snipe" },
+		};
+		int nPrinted = 0;
+		for ( int i = 0; i < NDb::SM_MAXVALUE; ++i )
+		{
+			if ( !pW->shootModes[i] )
+				continue;
+			wstring wsSuffix;
+			WCHAR wsBuf[128];
+			switch ( i )
+			{
+			case NDb::SM_Snap:       swprintf( wsBuf, L"%s%d", GetDBString( 20710 ).c_str(), sInfo.nShotAP ); wsSuffix = wsBuf; break;
+			case NDb::SM_Aimed:      swprintf( wsBuf, L"%s%d", GetDBString( 20710 ).c_str(), sInfo.nShotAP + sInfo.nTargetingAP ); wsSuffix = wsBuf; break;
+			case NDb::SM_ShortBurst: swprintf( wsBuf, L"%s%d", GetDBString( 20710 ).c_str(), sInfo.nShotAP + sInfo.nRoF / 3 ); wsSuffix = wsBuf; break;
+			case NDb::SM_Careful:
+			case NDb::SM_LongBurst:  wsSuffix = GetDBString( 17856 ); break;
+			case NDb::SM_Snipe:      wsSuffix = GetDBString( 19810 ); break;
+			}
+			const WCHAR *pszPrefix = ( nPrinted == 0 ) ? L"" : ( ( nPrinted & 1 ) ? L"<tab>" : L"<br>" );
+			pToolTip->SetVal( kModes[i].pszKey, wstring( pszPrefix ) + GetDBString( kModes[i].nLabelID ) + wsSuffix + L" " );
+			++nPrinted;
+		}
+
+		if ( pW->nRoF / 6 != 0 )
+		{
+			WCHAR wsBuf[128];
+			swprintf( wsBuf, L"%s%d", GetDBString( 20711 ).c_str(), pW->nRoF / 6 );
+			pToolTip->SetVal( L"brof", wsBuf );
+		}
+		if ( IsValid( pInner ) )
+		{
+			pToolTip->SetVal( L"ammotype", GetDBString( pInner->GetDBAmmo()->pName ) );
+			pToolTip->SetVal( L"clipsize", pInner->GetMaxIncQuantity() );
+		}
+		// minrange 3-way vs the weapon type's handling ranges
+		int nMinRangeID = ( sInfo.nMinRange > pW->pWeaponType->nHandlingEasyRange ) ? 20250
+			: ( ( sInfo.nMinRange > pW->pWeaponType->nHandlingMediumRange ) ? 20251 : 20252 );
+		pToolTip->SetVal( L"minrange", GetDBString( nMinRangeID ) );
+		if ( pW->bScope )
+			pToolTip->SetVal( L"issniper", GetDBString( 17130 ) );
+		if ( pW->fSilencer < 1.0f )
+			pToolTip->SetVal( L"issilenced", GetDBString( 17131 ) );
+		if ( pW->shootModes[NDb::SM_ShortBurst] )
+			pToolTip->SetVal( L"burstinfo", sInfo.nMaxRange );
+	}
+	else if ( pGrenade )
+	{
+		NDb::CRPGGrenade *pG = pGrenade->GetDBGrenade();
+		if ( IsValid( pG ) )
+		{
+			pToolTip->SetText( GetDBString( pG->nFragmentNumber < 20 ? 17039 : 4469 ) );
+			MakeGrenadeToolTip( pToolTip, pG );
+		}
+		else
+		{
+			NDb::CRPGEngGrenade *pE = pGrenade->GetDBEngGrenade();
+			pToolTip->SetText( GetDBString( 20256 ) );
+			if ( IsValid( pE ) )
+			{
+				pToolTip->SetVal( L"typename", GetDBString( pE->pWeaponType->pName ) );
+				pToolTip->SetVal( L"engskillreq", pE->nSkillReq );
+				if ( pE->nRequiredPerkID > 0 )
+					pToolTip->SetVal( L"isengperkreq", GetDBString( 17133 ) );
+			}
+		}
+	}
+	else if ( pMelee )
+	{
+		NDb::CRPGMeleeWeapon *pM = pMelee->GetDBMeleeWeapon();
+		pToolTip->SetText( GetDBString( pM->bThrowing ? 17040 : 4512 ) );
+		pToolTip->SetVal( L"typename", GetDBString( pM->pWeaponType->pName ) );
+		pToolTip->SetVal( L"damagemin", pM->nDmgMin );
+		pToolTip->SetVal( L"damagemax", pM->nDmgMax );
+		pToolTip->SetVal( L"attbonus", pM->nToHitBonus );
+		pToolTip->SetVal( L"critbonus", pM->nCriticalBonus );
+		if ( IsValid( pM->pItem ) )
+		{
+			int nW = pM->pItem->nWeight;
+			pToolTip->SetVal( L"weight", GetDBString( nW < 400 ? 17134 : ( nW < 1000 ? 17135 : 17136 ) ) );
+		}
+	}
+	else if ( pClip )
+	{
+		NDb::CRPGAmmo *pAmmo = pClip->GetDBAmmo();
+		if ( pClip->GetDBClip()->nQuantity == 1 )
+		{
+			if ( IsValid( pAmmo->pExplosiveBullet ) )
+			{
+				pToolTip->SetText( GetDBString( pAmmo->pExplosiveBullet->nFragmentNumber < 20 ? 17430 : 17431 ) );
+				MakeGrenadeToolTip( pToolTip, pAmmo->pExplosiveBullet );
+			}
+			else
+			{
+				pToolTip->SetText( GetDBString( 16978 ) );
+				pToolTip->SetVal( L"ammotype", GetDBString( pAmmo->pName ) );
+				pToolTip->SetVal( L"damagemin", pAmmo->nDmgMin );
+				pToolTip->SetVal( L"damagemax", pAmmo->nDmgMax );
+			}
+		}
+		else
+		{
+			pToolTip->SetText( GetDBString( 4470 ) );
+			pToolTip->SetVal( L"ammotype", GetDBString( pAmmo->pName ) );
+			pToolTip->SetVal( L"damagemin", pAmmo->nDmgMin );
+			pToolTip->SetVal( L"damagemax", pAmmo->nDmgMax );
+		}
+	}
+	else if ( pFirstAid )
+	{
+		NDb::CRPGFirstAid *pFA = pFirstAid->GetDBFirstAid();
+		int nTextID = 0;
+		switch ( pFA->effect )
+		{
+		case NDb::FAE_NORMAL:                 nTextID = 17042; break;
+		case NDb::FAE_CRITICAL_ONLY:
+		case NDb::FAE_REPAIR_PK:              nTextID = 17043; break;
+		case NDb::FAE_TEMP_REMOVE_PENALTIES:  nTextID = 17127; break;
+		case NDb::FAE_BOOST_VP:               nTextID = 17126; break;
+		case NDb::FAE_TEMP_STOP_BLEEDING:     nTextID = 17128; break;
+		case NDb::FAE_REMOVE_BLEEDING:        nTextID = 17129; break;
+		}
+		if ( nTextID )
+			pToolTip->SetText( GetDBString( nTextID ) );
+		pToolTip->SetVal( L"power", Float2Int( pFA->fPower ) );
+		pToolTip->SetVal( L"duration", pFA->nDuration );
+		pToolTip->SetVal( L"medskillreq", pFA->nRequiedSkill );
+		pToolTip->SetVal( L"medskillbonus", pFA->nSkillModifier );
+		pToolTip->SetVal( L"maxhealvp", pFA->nTotalHealVP );
+		if ( pFA->nRequiredPerkID > 0 )
+			pToolTip->SetVal( L"ismedperkreq", GetDBString( pFA->effect == NDb::FAE_REPAIR_PK ? 17133 : 17132 ) );
+	}
+	else if ( pTool )
+	{
+		NDb::CRPGTool *pT = pTool->GetDBItemInfo();
+		pToolTip->SetText( GetDBString( 17038 ) );
+		pToolTip->SetVal( L"engskillreq", pT->nNeededEngSkill );
+		pToolTip->SetVal( L"engskillbonus", pT->nSkillModifForMineCleaning );
+		if ( IsValid( pT->pNeededPerk ) )
+			pToolTip->SetVal( L"isengperkreq", GetDBString( 17133 ) );
+	}
+	else if ( pPicklock )
+	{
+		NDb::CRPGPicklock *pP = pPicklock->GetDBPicklock();
+		pToolTip->SetText( GetDBString( 17038 ) );
+		pToolTip->SetVal( L"engskillreq", pP->nNeededEngSkill );
+		pToolTip->SetVal( L"engskillbonus", pP->nAddToEngSkill );
+		if ( IsValid( pP->pNeededPerk ) )
+			pToolTip->SetVal( L"isengperkreq", GetDBString( 17133 ) );
+	}
+	else if ( pMine )
+	{
+		pToolTip->SetText( GetDBString( 17414 ) );
+		if ( IsValid( pMine->GetDBItemInfo()->pExplosion ) )
+			MakeGrenadeToolTip( pToolTip, pMine->GetDBItemInfo()->pExplosion );
+	}
+	else if ( pKey )
+	{
+		pToolTip->SetText( GetDBString( 19162 ) );
+	}
+	else if ( pClue )
+	{
+		pToolTip->SetText( GetDBString( 4358 ) );
+	}
+	else
+	{
+		pToolTip->SetText( IsValid( pRPGItem->pToolTip ) ? GetDBString( pRPGItem->pToolTip ) : GetDBString( 4690 ) );
+	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail CShowItemModel::Draw @0x1c07b0: per-FRAME refresh of only the LIVE numbers -- everything else
+// was written once by Set. weapon conv/range/damage + familiarity, melee familiarity, clip ammo,
+// first-aid quantity, tool/picklock engquantity.
 void CShowItemModel::Draw( const STime &sTime, NGScene::I2DGameView *pView )
 {
 	if ( !IsValid( pItem ) )
@@ -1002,112 +1230,46 @@ void CShowItemModel::Draw( const STime &sTime, NGScene::I2DGameView *pView )
 		return;
 	}
 
-	CPtr<NDb::CRPGItem> pRPGItem( pItem->GetDBItem() );
+	CDynamicCast<NRPG::IWeaponItemInfo> pWeapon( pItem );
+	CDynamicCast<NRPG::IMeleeWeaponItem> pMelee( pItem );
+	CDynamicCast<NRPG::IClipItem> pClip( pItem );
+	CDynamicCast<NRPG::IFirstAidItem> pFirstAid( pItem );
+	CDynamicCast<NRPG::IPicklockItem> pPicklock( pItem );
 
-	pToolTip->SetVal( L"name", GetDBString( pRPGItem->pName ) );
-	pToolTip->SetVal( L"weight", pItem->GetWeight() );
-	CDynamicCast<NRPG::IWeaponItemInfo> pWeapon(pItem);
-	if (pWeapon)
+	if ( pWeapon && IsValid( pWeapon->GetDBWeapon()->pWeaponType ) )
 	{
-		pToolTip->SetText( GetDBString( 4468 ) );
-
-		CPtr<NDb::CRPGWeapon> pRPGWeapon( pWeapon->GetDBWeapon() );
-		CPtr<NRPG::IClipItem> pClipItem( pWeapon->GetInnerClip() );
-
-		pToolTip->SetVal( L"typename", GetDBString( pRPGWeapon->pWeaponType->pName ) );
-
-		struct SShootMode
-		{
-			int nStringID;
-			WCHAR* pszID;
-		};
-		SShootMode pShotModeNames[NDb::SM_MAXVALUE] =
-		{
-			6068, L"snapshot",
-			6069, L"aimedshot",
-			6070, L"carefulshot",
-			6071, L"shortburst",
-			6072, L"longburst",
-			6073, L"snipe",
-		};
-		for ( int nTemp = 0; nTemp < NDb::SM_MAXVALUE; nTemp++ )
-		{
-			if ( !pRPGWeapon->shootModes[nTemp] )
-				continue;
-
-			WCHAR wsBuffer[256];
-			swprintf( wsBuffer, L"%s: --- ", GetDBString( pShotModeNames[nTemp].nStringID ) );
-			pToolTip->SetVal( pShotModeNames[nTemp].pszID, wsBuffer );
-		}
-
 		NRPG::SWeaponInfo sInfo;
 		pWeapon->GetInfo( &sInfo );
-
-		pToolTip->SetVal( L"range", sInfo.nMaxRange );
-		pToolTip->SetVal( L"damagemin", sInfo.nDmgMin );
-		pToolTip->SetVal( L"damagemax", sInfo.nDmgMax );
-
-		pToolTip->SetVal( L"ammotype", GetDBString( pClipItem->GetDBAmmo()->pName ) );
-		pToolTip->SetVal( L"clipsize", pClipItem->GetMaxIncQuantity() );
-
 		pToolTip->SetVal( L"convamateur", sInfo.nMinRange );
 		pToolTip->SetVal( L"convprofessional", sInfo.nMaxRange );
-
-		if ( pRPGWeapon->shootModes[NDb::SM_ShortBurst] )
-		{
-			WCHAR wsBuffer[256];
-			swprintf( wsBuffer, L"<br>Short Burst: %d shots Stability: %d", sInfo.nRoF, sInfo.nRecoil );
-			pToolTip->SetVal( L"burstinfo", sInfo.nMaxRange );
-		}
+		pToolTip->SetVal( L"maxrange", sInfo.nMaxRange );
+		pToolTip->SetVal( L"damagemin", sInfo.nDmgMin );
+		pToolTip->SetVal( L"damagemax", sInfo.nDmgMax );
+		pToolTip->SetVal( L"familiarity", IsValid( pUnit ) ? Float2Int( pUnit->GetRPG()->GetRPGUnit()->GetWeaponAdaptation( pItem ) ) : 0 );
 	}
-	else {
-		CDynamicCast<NRPG::IGrenadeItemInfo> pClip(pItem);
-		if (pClip)
-		{
-			pToolTip->SetText(GetDBString(4469));
-
-			CPtr<NDb::CRPGGrenade> pRPGGrenade(pClip->GetDBGrenade());
-
-			pToolTip->SetVal(L"typename", GetDBString(pRPGGrenade->pWeaponType->pName));
-			pToolTip->SetVal(L"delay", pRPGGrenade->nMaxDelay);
-		}
-		else {
-			CDynamicCast<NRPG::IMeleeWeaponItem> pMeleeWeapon(pItem);
-			if (pMeleeWeapon)
-			{
-				pToolTip->SetText(GetDBString(4512));
-
-				CPtr<NDb::CRPGMeleeWeapon> pRPGMeleeWeapon(pMeleeWeapon->GetDBMeleeWeapon());
-
-				pToolTip->SetVal(L"typename", GetDBString(pRPGMeleeWeapon->pWeaponType->pName));
-				pToolTip->SetVal(L"damagemin", pRPGMeleeWeapon->nDmgMin);
-				pToolTip->SetVal(L"damagemax", pRPGMeleeWeapon->nDmgMax);
-				pToolTip->SetVal(L"critbonus", pRPGMeleeWeapon->nCriticalBonus);
-			}
-			else {
-				CDynamicCast<NRPG::IClipItem> pClip(pItem);
-				if (pClip)
-				{
-					pToolTip->SetText(GetDBString(4470));
-
-					CPtr<NDb::CRPGAmmo> pRPGAmmo(pClip->GetDBAmmo());
-
-					pToolTip->SetVal(L"ammotype", GetDBString(pRPGAmmo->pName));
-					pToolTip->SetVal(L"ammomax", pClip->GetMaxIncQuantity());
-					pToolTip->SetVal(L"currammo", pClip->GetIncQuantity());
-					pToolTip->SetVal(L"damagemin", pRPGAmmo->nDmgMin);
-					pToolTip->SetVal(L"damagemax", pRPGAmmo->nDmgMax);
-				}
-				else {
-					CDynamicCast<NRPG::IFirstAidItem> pFirstAid(pItem);
-					if (pFirstAid)
-						pToolTip->SetText(GetDBString(4511));
-					else
-						pToolTip->SetText(GetDBString(4690));
-				}
-			}
-		}
+	else if ( pMelee )
+	{
+		pToolTip->SetVal( L"familiarity", IsValid( pUnit ) ? Float2Int( pUnit->GetRPG()->GetRPGUnit()->GetWeaponAdaptation( pItem ) ) : 0 );
 	}
+	else if ( pClip )
+	{
+		pToolTip->SetVal( L"ammomax", pClip->GetMaxIncQuantity() );
+		pToolTip->SetVal( L"currammo", pClip->GetIncQuantity() );
+	}
+	else if ( pFirstAid )
+	{
+		// after the first-aid container refactor CFirstAidItem IS a CItemContainer<CSimpleCharge>,
+		// so its live charge count comes through the IItemContainerInfo base (GetIncQuantity).
+		CDynamicCast<NRPG::IItemContainerInfo> pCont( pItem );
+		if ( pCont )
+			pToolTip->SetVal( L"quantity", pCont->GetIncQuantity() );
+	}
+	else if ( pPicklock )
+	{
+		pToolTip->SetVal( L"engquantity", pPicklock->GetIncQuantity() );   // IPicklockItem IS IItemContainerInfo
+	}
+	// NOTE: retail tools carry CSimpleCharge charges (engquantity refresh); this fork's CToolItem is the
+	// Jan03 non-container shape, so there is no per-tool charge count to refresh -- elided.
 
 	CModel::Draw( sTime, pView );
 }
@@ -1198,6 +1360,21 @@ bool CSlot::ProcessMessage( const SEvent &sEvent )
 	return CWindow::ProcessMessage( sEvent );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail NUI::IsCompatibleItems @0x1c0e00: the "weapon x clip" pairing test behind the drag-compat
+// YELLOW tint -- the weapon side's LOADED clip is ammo-group-compatible (color ignored) with the
+// clip side. CSlot::Draw probes both argument orders, so the direction here is fixed.
+static bool IsCompatibleItems( NRPG::IInventoryItem *pWeaponSide, NRPG::IInventoryItem *pClipSide )
+{
+	CDynamicCast<NRPG::IWeaponItem> pWeapon( pWeaponSide );
+	CDynamicCast<NRPG::CClipItem> pClip( pClipSide );
+	if ( !IsValid( pWeapon ) || !IsValid( pClip ) )
+		return false;
+	CDynamicCast<NRPG::CClipItem> pInner( pWeapon->GetInnerClip() );
+	if ( !IsValid( pInner ) )
+		return false;
+	return pInner->IsCompatible( pClip.GetPtr(), false );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 void CSlot::Draw( const STime &sTime, NGScene::I2DGameView *pView )
 {
 	const SPoint &sSize = pSlotView->GetSize();
@@ -1255,21 +1432,102 @@ void CSlot::Draw( const STime &sTime, NGScene::I2DGameView *pView )
 		}
 	}
 
-	for ( int nTemp = 0; nTemp < itemsSet.size(); nTemp++ )
+	// retail CSlot::Draw @0x1c34d0 (disasm; Jan03 painted plain blue unconditionally): the per-item
+	// tint pass runs ONLY with exactly ONE selected unit. Base = transparent BLUE on occupied cells
+	// (visible only when bAlwaysHilight); YELLOW (forced visible) when the cell's item pairs
+	// ammo-compatibly with the dragged item; transparent RED (forced visible) when the unit CANNOT
+	// USE the item -- a downed unit reddens everything, else the skill/perk gate of a first-aid kit
+	// (repair kits gate on ENGINEERING, FAE_REPAIR_PK), tool, picklock, or engineer grenade fails.
+	// Weapons/clips/keys/regular grenades are never reddened. Recomputed every frame, as in retail.
+	vector< CPtr<NGame::IUnitTracker> > selUnits;
+	pMission->GetSelectedUnits( &selUnits );
+	if ( selUnits.size() == 1 )
 	{
-		const SItem &sItem = itemsSet[nTemp];
-		const SPoint &sPos = sItem.sPos;
-		SPoint sSize = sItem.pItem->GetSize();
-		sSize = SPoint( min( nWidth, sPos.x + sSize.x ) - sPos.x, min( nHeight, sPos.y + sSize.y ) - sPos.y );
+		NWorld::CUnit *pUnit = selUnits[0]->GetUnit();
+		const bool bCanFight = IsValid( pUnit ) && pUnit->CanFight();
+		NRPG::IUnitMissionInfo *pRPG = IsValid( pUnit ) ? pUnit->GetRPG() : 0;
 
-		for ( int nTempY = 0; nTempY < sSize.y; nTempY++ )
+		NWorld::IPlayer::SItemInfo sDragInfo;
+		NRPG::IInventoryItem *pDragItem = GetDragItem( &sDragInfo ) ? sDragInfo.pItem.GetPtr() : 0;
+
+		for ( int nTemp = 0; nTemp < itemsSet.size(); nTemp++ )
 		{
-			for ( int nTempX = 0; nTempX < sSize.x; nTempX++ )
+			const SItem &sItem = itemsSet[nTemp];
+			const SPoint &sPos = sItem.sPos;
+			SPoint sSize = sItem.pItem->GetSize();
+			sSize = SPoint( min( nWidth, sPos.x + sSize.x ) - sPos.x, min( nHeight, sPos.y + sSize.y ) - sPos.y );
+
+			NGfx::SPixel8888 color( 0x1F, 0x1F, 0xFF, 0x2F );   // base: the Jan03 occupied-cell blue
+			bool bVisible = bAlwaysHilight;
+
+			// (a) retail addition: ammo-compat YELLOW while dragging (either pairing direction)
+			if ( pDragItem && ( IsCompatibleItems( sItem.pItem, pDragItem ) || IsCompatibleItems( pDragItem, sItem.pItem ) ) )
 			{
-				SHilight &sHilight = hilights[sPos.y + nTempY][sPos.x + nTempX];
-				sHilight.nID = nTemp;
-				sHilight.pImage->SetColor( NGfx::SPixel8888( 0x1F, 0x1F, 0xFF, 0x2F ) );
-				sHilight.pImage->SetStyle( STYLE_VISIBLE, bAlwaysHilight );
+				color = NGfx::SPixel8888( 0xFF, 0xFF, 0x00, 0x2F );
+				bVisible = true;
+			}
+
+			// (b) the can't-use predicate -> transparent RED (retail VA 0x5c3c5d..0x5c3e9e)
+			bool bCantUse = !bCanFight;
+			if ( !bCantUse && pRPG )
+			{
+				CDynamicCast<NRPG::IFirstAidItem> pFA( sItem.pItem );
+				CDynamicCast<NRPG::IToolItem> pTool( sItem.pItem );
+				CDynamicCast<NRPG::IPicklockItem> pPick( sItem.pItem );
+				CDynamicCast<NRPG::IGrenadeItemInfo> pGren( sItem.pItem );
+				if ( pFA )
+				{
+					NDb::CRPGFirstAid *pRec = pFA->GetDBFirstAid();
+					// PK repair kits (FAE_REPAIR_PK) gate on ENGINEERING, everything else on MEDICINE
+					NDb::ESkillType eSkill = ( pRec->effect == NDb::FAE_REPAIR_PK ) ? NDb::ST_ENGINEERING : NDb::ST_MEDICINE;
+					if ( pRPG->GetSkillValue( eSkill ) < pRec->nRequiedSkill )
+						bCantUse = true;
+					else if ( pRec->nRequiredPerkID > 0 && !pRPG->GetRPGUnit()->HasPerk( pRec->nRequiredPerkID ) )
+						bCantUse = true;
+				}
+				else if ( pTool )
+				{
+					NDb::CRPGTool *pRec = pTool->GetDBItemInfo();
+					if ( pRPG->GetSkillValue( NDb::ST_ENGINEERING ) < pRec->nNeededEngSkill )
+						bCantUse = true;
+					else if ( IsValid( pRec->pNeededPerk ) && !pRPG->GetRPGUnit()->HasPerk( pRec->pNeededPerk->GetRecordID() ) )
+						bCantUse = true;
+				}
+				else if ( pPick )
+				{
+					NDb::CRPGPicklock *pRec = pPick->GetDBPicklock();
+					if ( pRPG->GetSkillValue( NDb::ST_ENGINEERING ) < pRec->nNeededEngSkill )
+						bCantUse = true;
+					else if ( IsValid( pRec->pNeededPerk ) && !pRPG->GetRPGUnit()->HasPerk( pRec->pNeededPerk->GetRecordID() ) )
+						bCantUse = true;
+				}
+				else if ( pGren )
+				{
+					NDb::CRPGEngGrenade *pRec = pGren->GetDBEngGrenade();
+					if ( IsValid( pRec ) )   // NULL for regular grenades -> never red
+					{
+						if ( pRPG->GetSkillValue( NDb::ST_ENGINEERING ) < pRec->nSkillReq )
+							bCantUse = true;
+						else if ( pRec->nRequiredPerkID > 0 && !pRPG->GetRPGUnit()->HasPerk( pRec->nRequiredPerkID ) )
+							bCantUse = true;
+					}
+				}
+			}
+			if ( bCantUse )
+			{
+				color = NGfx::SPixel8888( 0xFF, 0x00, 0x00, 0x2F );
+				bVisible = true;
+			}
+
+			for ( int nTempY = 0; nTempY < sSize.y; nTempY++ )
+			{
+				for ( int nTempX = 0; nTempX < sSize.x; nTempX++ )
+				{
+					SHilight &sHilight = hilights[sPos.y + nTempY][sPos.x + nTempX];
+					sHilight.nID = nTemp;
+					sHilight.pImage->SetColor( color );
+					sHilight.pImage->SetStyle( STYLE_VISIBLE, bVisible );
+				}
 			}
 		}
 	}

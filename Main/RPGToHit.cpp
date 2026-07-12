@@ -499,7 +499,9 @@ void CGrenadeToHitCalcer::Prepare()
 	float fVPPenalty = GetVPPenalty( pUnitMission->GetRPGUnit()->Skills( NDb::ST_VP ),
 		pUnitMission->GetHealedVP(), pUnitMission->GetRPGUnit()->Skills(NDb::ST_VP).GetMaxValue() );
 	nSkill *= fVPPenalty;
-	fMovePenalty = pGrenade->GetDBGrenade()->pWeaponType->fMovePenalty;
+	// retail @0x2b88d0 reads the weapon type off whichever record the item carries (regular
+	// grenade OR engineer grenade) -- the bare GetDBGrenade() deref crashed on equipping TNT.
+	fMovePenalty = GetGrenadeRecWeaponType( pGrenade )->fMovePenalty;
 	FillWeaponInfo();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -507,16 +509,16 @@ float CGrenadeToHitCalcer::GetStance()
 {
 	int nStance = 0;
 	if ( eCurPose == NAI::CROUCH  )
-		nStance = int( pGrenade->GetDBGrenade()->pWeaponType->fCrouchBonus );
+		nStance = int( GetGrenadeRecWeaponType( pGrenade )->fCrouchBonus );
 	else if ( eCurPose == NAI::CRAWL )
-		nStance = int( pGrenade->GetDBGrenade()->pWeaponType->fCrawlBonus );
+		nStance = int( GetGrenadeRecWeaponType( pGrenade )->fCrawlBonus );
 	return nStance;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CGrenadeToHitCalcer::FillWeaponInfo()
 {
 	CToHitCalcer::FillWeaponInfo();
-	sWeaponInfo.nQuality = pGrenade->GetDBGrenade()->nQuality;
+	sWeaponInfo.nQuality = GetGrenadeRecQuality( pGrenade );
 	sWeaponInfo.nMinRange = GetGrenadeMaxDistance();
 	sWeaponInfo.nMaxRange = sWeaponInfo.nMinRange;
 }
@@ -529,13 +531,13 @@ float CGrenadeToHitCalcer::GetMaxImp()
 	float fStr = fBaseStr + float(nSkill) / 18.f;
 	float fRes = pUnitMission->GetToHitConstants()->fGrenadeBaseCoeff;
 	fRes += pUnitMission->GetToHitConstants()->fGrenadeSTRCoeff * fStr;
-	fRes *= pow( float(pGrenade->GetDBGrenade()->pItem->nWeight), 0.74f );
+	fRes *= pow( float(GetGrenadeRecItem( pGrenade )->nWeight), 0.74f );
 	return fRes;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 float CGrenadeToHitCalcer::GetRelWeight()
 {
-	return float(pGrenade->GetDBGrenade()->pItem->nWeight) / 1000.f; // i.e. in kilograms
+	return float(GetGrenadeRecItem( pGrenade )->nWeight) / 1000.f; // i.e. in kilograms
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 float CGrenadeToHitCalcer::GetMaxGrenadeVelocity()

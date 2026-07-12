@@ -22,6 +22,7 @@
 #include "BSPTree.h"
 #include "aiVoxelRender.h"
 #include "aiMap.h"
+#include "aiStability.h"
 #include "Sync.h"
 #include "wInterface.h" // for IWorld & ts flags
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -318,7 +319,10 @@ class CAIMap: public IAIMap, public COrdinarySyncDst<NWorld::IVisObj,CAIMap>, pu
 	list<CPtr<CDynamicConvexHull> > dynamicHulls;
 	int nAllTrackersMask; // for fast checks
 	int nMaxFloor;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(TParent*)this); f.Add(2,&pRoot); f.Add(3,&dynamicHulls); f.Add(4,&nAllTrackersMask); f.Add(5,&nMaxFloor); return 0; }
+	// retail CAIMap +0x40 (s2_aimap.h:1132), serialized as chunk 6 (retail operator& @0x738f0).
+	// Retail's PDB type is CPtr; dev uses the owner ref (CObj) since the map is the sole holder.
+	CObj<IStabilityTrackers> pStability;
+	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(TParent*)this); f.Add(2,&pRoot); f.Add(3,&dynamicHulls); f.Add(4,&nAllTrackersMask); f.Add(5,&nMaxFloor); f.Add(6,&pStability); return 0; }
 	//
 	CVolumeNode* GetNode( const CVec3 &ptCenter, float fRadius );
 	CVolumeNode* GetNode( CConvexHull *pHull, SBound *pBound );
@@ -413,6 +417,15 @@ public:
 		const int nMask, bool bSelect2DoorHulls = false  );
 	virtual void AddTracker( IAIMapTracker *pTracker, const SBound &b, int nMask, bool bInformOnDoorFlip = false );
 	virtual void FlipDoorWindow( CObjectBase *pWhat, bool bOpen ) { FlipDoorWindow( pWhat, bOpen, pRoot ); }
+	// retail IAIMap vtbl+0x48 (s2_aimap.h:1873): the wreckage stability grid.
+	virtual IStabilityTrackers* GetStabilityTrackers() { return pStability; }
+	// retail IAIMap vtbl+0x4c @0x67840 (recursive body @0x673b0, s2_aimap.h:1225-1253)
+	virtual void SelectHullPointers( vector< CPtr<CObjectBase> > *pRes, const SBound &b, int nIncludeMask, int nExcludeMask )
+	{
+		SelectHullPointers( pRes, b, nIncludeMask, nExcludeMask, pRoot );
+	}
+private:
+	void SelectHullPointers( vector< CPtr<CObjectBase> > *pRes, const SBound &b, int nIncludeMask, int nExcludeMask, CVolumeNode *pNode );
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CConvexHull
@@ -692,10 +705,12 @@ void CVolumeNode::AddHullBounds( CObjectBase *pSrc, SBoundCalcer *pRes, bool *pb
 // CAIMap
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CAIMap::CAIMap( NWorld::IWorld *_pWorld )
-: COrdinarySyncDst<NWorld::IVisObj,CAIMap>( 
+: COrdinarySyncDst<NWorld::IVisObj,CAIMap>(
 	new CBoolSyncSrc<NWorld::IVisObj, CUnionFunc>( _pWorld->GetActive(), _pWorld->GetUnits() ) ),
 	nMaxFloor(0), nAllTrackersMask(0)
 {
+	// retail ctor @0x67940: the wreckage stability grid is created up front (s2_aimap.h:1173)
+	pStability = NAI::CreateStabilityTrackers( _pWorld );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CVolumeNode* CAIMap::GetNode( const CVec3 &ptCenter, float fRadius )
@@ -721,6 +736,10 @@ void CAIMap::InsertHull( CConvexHull *pHull )
 	SBound bTest;
 	CVolumeNode *pNode = GetNode( pHull, &bTest );
 	pHull->SetNode( pNode, bTest );
+	// retail InsertHull @0x675d0 (s2_aimap.h:1199-1214): grow the stability-tracker world box by
+	// the estimated bound's corners so FinishConstruction can size the grid over the whole map.
+	if ( IsValid( pStability ) )
+		pStability->EnlargeMap( bTest.s.ptCenter - bTest.ptHalfBox, bTest.s.ptCenter + bTest.ptHalfBox );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CAIMap::RegisterFloor( int nFloor )
@@ -1015,6 +1034,37 @@ void CAIMap::AddTracker( IAIMapTracker *pTracker, const SBound &b, int nMask, bo
 	CVolumeNode *pNode = GetNode( b.s.ptCenter, b.s.fRadius );
 	pNode->AddTracker( pTracker, b, nMask, bInformOnDoorFlip );
 	nAllTrackersMask |= nMask;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail NAI::CAIMap::SelectHullPointers recursive body @0x673b0 (s2_aimap.h:1231-1249): the same
+// door-state visibility gate as SelectHulls (any 0x3000 alt-state bit drops the slot unless 0x4000
+// is set), the include/exclude mask pair, and the per-slot cached bound test. No floor filter.
+void CAIMap::SelectHullPointers( vector< CPtr<CObjectBase> > *pRes, const SBound &b, int nIncludeMask, int nExcludeMask, CVolumeNode *pNode )
+{
+	if ( pNode == 0 )
+		return;
+	SSphere t;
+	pNode->GetBound( &t );
+	SBound bNode;
+	bNode.SphereInit( t.ptCenter, t.fRadius );
+	if ( !DoesIntersect( b, bNode ) )
+		return;
+	for ( CVolumeNode::CElemList::iterator i = pNode->hulls.begin(); i != pNode->hulls.end(); ++i )
+	{
+		CConvexHull *pHull = i->pHull;
+		if ( !pHull )
+			continue;
+		int nFlags = i->nFlags;
+		if ( ( nFlags & ( NWorld::TS_STATE_OPEN | NWorld::TS_STATE_CLOSED ) ) != 0 &&
+			 ( nFlags & NWorld::TS_DOOR_HULL_VALID ) == 0 )
+			continue;
+		if ( ( nIncludeMask & nFlags ) == 0 || ( nExcludeMask & nFlags ) != 0 )
+			continue;
+		if ( DoesIntersect( pNode->hullBounds[ i - pNode->hulls.begin() ], b ) )
+			pRes->push_back( CPtr<CObjectBase>( pHull ) );
+	}
+	for ( int i = 0; i < 8; ++i )
+		SelectHullPointers( pRes, b, nIncludeMask, nExcludeMask, pNode->GetNode( i ) );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 template<class T>

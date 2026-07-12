@@ -346,6 +346,7 @@ public:
 	CPerksTree* GetPerksTree() const { return pPerksTree; }
 	NDb::CString* GetBiography() const { return pBiography; }
 	bool HasPerk( int nPerkID, float *pParam1 = 0, float *pParam2 = 0, float *pParam3 = 0 ) const;
+	float GetWeaponAdaptation( IInventoryItem *pItem ) const;   // retail @0x2bb4a0: live familiarity of pItem (0 unless adapted to it)
 	bool IsHero() const { return bHero; }
 	// retail CUnit::GetSightDistance @0x2ba680: a FLAT 20.0 world units, scaled by perk 0x53's param when
 	// present. (The per-pose CUnitMission::GetSightDistance table is a different, older surface -- retail's

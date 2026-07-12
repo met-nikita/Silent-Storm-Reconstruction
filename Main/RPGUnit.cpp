@@ -666,6 +666,16 @@ bool CUnit::HasPerk( int nPerkID, float *pParam1, float *pParam2, float *pParam3
 	return GetPerksTree()->HasPerk( nPerkID, pParam1, pParam2, pParam3 );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail CUnit::GetWeaponAdaptation @0x2bb4a0: the live weapon-familiarity bonus -- returns the
+// current adaptation ONLY while pItem is the very weapon the unit is adapted to (pAdaptatedWeapon),
+// else 0. The value is maintained by UseWeapon; this is a pure read for the tooltip's "familiarity".
+float CUnit::GetWeaponAdaptation( IInventoryItem *pItem ) const
+{
+	if ( IsValid( pItem ) && pItem == pAdaptatedWeapon )
+		return fCurrentAdaptation;
+	return 0.f;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 } // namespace
 using namespace NRPG;
 REGISTER_SAVELOAD_CLASS( 0x24051150, CUnit );

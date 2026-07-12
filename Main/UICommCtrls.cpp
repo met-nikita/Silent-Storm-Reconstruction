@@ -128,6 +128,52 @@ bool CEdit::ProcessMessage( const SEvent &sEvent )
 		case VK_RETURN:
 			SendMessage( GetParent(), SEvent( EVENT_NOTIFY, GetWindowID() ) );
 			return true;
+		case 'V':
+			// dev QoL (not retail): Ctrl+V pastes the clipboard text at the cursor. The chord's
+			// WM_CHAR control char (0x16) is dropped by the iswprint filter below, so only this
+			// handler acts. Pasted chars pass the SAME per-char filters as typing; line breaks and
+			// tabs become spaces; the nSize cap is honored.
+			if ( GetKeyState( VK_CONTROL ) & 0x8000 )
+			{
+				if ( OpenClipboard( 0 ) )
+				{
+					HANDLE hData = GetClipboardData( CF_UNICODETEXT );
+					if ( hData )
+					{
+						const WCHAR *pwcData = (const WCHAR*)GlobalLock( hData );
+						if ( pwcData )
+						{
+							wstring wsPaste;
+							for ( const WCHAR *pwc = pwcData; *pwc; ++pwc )
+							{
+								WCHAR wcChar = ( *pwc == L'\r' || *pwc == L'\n' || *pwc == L'\t' ) ? L' ' : *pwc;
+								if ( ( eMode == NUMERIC ) && ( !iswdigit( wcChar ) ) )
+									continue;
+								if ( ( eMode == FILENAME ) && ( ( wcChar <= 0x1d ) || ( wcschr( L".<>\\/|\"*^:?", wcChar ) != NULL ) ) )
+									continue;
+								if ( !iswprint( wcChar ) )
+									continue;
+								wsPaste.append( 1, wcChar );
+							}
+							GlobalUnlock( hData );
+							if ( !wsPaste.empty() && wsText.length() < nSize )
+							{
+								if ( wsText.length() + wsPaste.length() > nSize )
+									wsPaste.resize( nSize - wsText.length() );
+								wstring wsTempString;
+								wsTempString.append( wsText.substr( 0, nCursor ) );
+								wsTempString.append( wsPaste );
+								wsTempString.append( wsText.substr( nCursor, wsText.length() ) );
+								wsText = wsTempString;
+								nCursor += wsPaste.length();
+							}
+						}
+					}
+					CloseClipboard();
+				}
+				return true;
+			}
+			break;   // plain V: the character arrives via EVENT_WINCHAR as usual
 		}
 		// unknown virtual key -> base window handler (below).
 	}

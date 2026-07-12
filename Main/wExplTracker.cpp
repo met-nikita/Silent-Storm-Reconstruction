@@ -43,6 +43,21 @@ void ResetBreakExplCalcs()
 	nBreakCalcs = 0;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// Engineer-grenade blast scaling -- everything derives from d = nEngSkill - nSkillReq (retail
+// CVoxelExpl ctor @0x3562c0 / tracker MakeDamage @0x3566d0; raw idiv, the DB guarantees nDeltaWave != 0):
+//   rings  = d / nDeltaWave + nStartNWave
+//   radius = d * fDeltaRadius * 0.025 + fWaveRadius
+static int GetEngGrenadeWaves( NDb::CRPGEngGrenade *pEngGrenade, int nEngSkill )
+{
+	int nD = nEngSkill - pEngGrenade->nSkillReq;
+	return nD / pEngGrenade->nDeltaWave + pEngGrenade->nStartNWave;
+}
+static float GetEngGrenadeRadius( NDb::CRPGEngGrenade *pEngGrenade, int nEngSkill )
+{
+	int nD = nEngSkill - pEngGrenade->nSkillReq;
+	return nD * pEngGrenade->fDeltaRadius * 0.025f + pEngGrenade->fWaveRadius;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 // CExplCube
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 const unsigned short N_INDEX_OBJECT = 0xFFFF;
@@ -223,11 +238,13 @@ void CExplCube::MakeStep()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CVoxelExpl
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CVoxelExpl::CVoxelExpl( CVec3 _ptCenter, int _nWave, NDb::CRPGGrenade *_pGrenade, 
-	CUnitServer *_pThrower, NAI::IAIMap *_pAIMap, CVoxelExplTracker* _pTracker, CObjectBase *_pIgnitionObject ):
+CVoxelExpl::CVoxelExpl( CVec3 _ptCenter, int _nWave, NDb::CRPGGrenade *_pGrenade,
+	CUnitServer *_pThrower, NAI::IAIMap *_pAIMap, CVoxelExplTracker* _pTracker, CObjectBase *_pIgnitionObject,
+	NDb::CRPGEngGrenade *_pEngGrenade, int _nEngSkill ):
 	ptCenter( _ptCenter ), pAIMap( _pAIMap ), pGrenade( _pGrenade ), pThrower( _pThrower ),
 	pTracker( _pTracker ), nObjectsDestroyed( 0 ), nWave( _nWave ), nObjectsEnd( 0 ),
-	tOverrun( 0 ), nCurrentCube( 0 ), bFinished( false ), nEnemyUnitsKilled( 0 ), pIgnitionObject( _pIgnitionObject )
+	tOverrun( 0 ), nCurrentCube( 0 ), bFinished( false ), nEnemyUnitsKilled( 0 ), pIgnitionObject( _pIgnitionObject ),
+	pEngGrenade( _pEngGrenade ), nEngSkill( _nEngSkill )
 {
 	ASSERT( IsValid( pAIMap ) );
 	//
@@ -250,8 +267,23 @@ CVoxelExpl::CVoxelExpl( CVec3 _ptCenter, int _nWave, NDb::CRPGGrenade *_pGrenade
 			nMaxVolume = GetVolume( pGrenade->fWaveRadius * ( fA * nWave + fB ) );
 		}
 	}
+	else if ( IsValid( pEngGrenade ) )
+	{
+		// retail @0x3562c0 eng branch: skill-scaled radius/ring count, then the same 0.33 + 0.66/(waves-1)
+		// per-ring radius ramp as the regular record (single-ring blasts take the radius directly).
+		float fRadius = GetEngGrenadeRadius( pEngGrenade, nEngSkill );
+		int nWaves = GetEngGrenadeWaves( pEngGrenade, nEngSkill );
+		if ( nWaves == 1 )
+			nMaxVolume = GetVolume( fRadius );
+		else
+		{
+			float fA = 0.66 / ( nWaves - 1 );
+			float fB = 0.33 - fA;
+			nMaxVolume = GetVolume( fRadius * ( fA * nWave + fB ) );
+		}
+	}
 	else
-		nMaxVolume = GetVolume( 5 ); // for the AI Viewer
+		nMaxVolume = GetVolume( 5 ); // for the AI Viewer (== the retail literal 0x3e6a fallback)
 	//
 	ExplodeWave();
 }
@@ -305,7 +337,8 @@ void CVoxelExpl::Segment()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CVoxelExpl::MakeDamage()
 {
-	if ( bFinished && IsValid( pGrenade ) )
+	// retail @0x356580: the gate accepts EITHER live record (regular or engineer grenade)
+	if ( bFinished && ( IsValid( pGrenade ) || IsValid( pEngGrenade ) ) )
 	{
 		ApplyWaveDamage();
 		CheckWaveResults();
@@ -424,6 +457,34 @@ void CVoxelExpl::ExplodeWave()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CVoxelExpl::ApplyWaveDamage()
 {
+	// retail @0x355ba0 record branch: every record-sourced input of the wave attack comes off whichever
+	// record is live. The eng blast scales with d = nEngSkill - nSkillReq: damage d*fDamageModifier +
+	// fStartWaveDamage (min == max), nK (d/30+1)*nAPAModifier (same /30 as ExplodeFragments), ring count
+	// d/nDeltaWave + nStartNWave; crits/structure-coeff are the raw eng record fields.
+	const bool bGrenadeRec = IsValid( pGrenade );
+	float fWaveDmgMin, fWaveDmgMax;
+	int nAPA, nCritProb, nCritDiff, nWavesTotal;
+	float fStructDamageCoeff;
+	if ( bGrenadeRec )
+	{
+		fWaveDmgMin = pGrenade->fWaveDmgMin;
+		fWaveDmgMax = pGrenade->fWaveDmgMax;
+		nAPA = pGrenade->nFragmentAPA;
+		nCritProb = pGrenade->nCriticalProbability;
+		nCritDiff = pGrenade->nCriticalDifficulty;
+		nWavesTotal = pGrenade->nWaveNumber;
+		fStructDamageCoeff = pGrenade->fStructureDamageCoeff;
+	}
+	else
+	{
+		int nD = nEngSkill - pEngGrenade->nSkillReq;
+		fWaveDmgMin = fWaveDmgMax = nD * pEngGrenade->fDamageModifier + pEngGrenade->fStartWaveDamage;
+		nAPA = ( nD / 30 + 1 ) * pEngGrenade->nAPAModifier;
+		nCritProb = pEngGrenade->nCriticalProbability;
+		nCritDiff = pEngGrenade->nCriticalDifficulty;
+		nWavesTotal = GetEngGrenadeWaves( pEngGrenade, nEngSkill );
+		fStructDamageCoeff = pEngGrenade->fStructureDamageCoeff;
+	}
 	for ( NAI::CExplVoxelRenderer::CObjectsHash::const_iterator i = objects.begin(); i != objects.end(); ++i )
 	{
 		const NAI::CExplVoxelRenderer::SExplObject &o = i->second;
@@ -450,8 +511,8 @@ void CVoxelExpl::ApplyWaveDamage()
 			if (pAtt)
 			{
 				float fCoeff = ( F_WAVE_ATTENUATION_COEFF - 1 ) / float( nMaxVolume ) * float( di.nVolume ) + 1;
-				float fDamageMin = pGrenade->fWaveDmgMin;// * fCoeff;
-				float fDamageMax = pGrenade->fWaveDmgMax;// * fCoeff;
+				float fDamageMin = fWaveDmgMin;// * fCoeff;
+				float fDamageMax = fWaveDmgMax;// * fCoeff;
 				// retail @0x355ba0: the igniting object (a trapped barrel/door that set off THIS blast) takes 10x wave
 				// damage to itself, so it is reliably consumed by its own explosion (o.nObjectID==nIgnitionObjectIdx ==
 				// pointer identity here -- CWindowDoor's voxel pUserData IS its own CObjectBase, not a building proxy).
@@ -479,8 +540,9 @@ void CVoxelExpl::ApplyWaveDamage()
 								NRPG::IUnitMission* pRPG = 0;
 								if ( IsValid( pThrower ) )
 									pRPG = pThrower->GetUnitRPG();
-								NRPG::CAttackPortion att( pGrenade->nFragmentAPA, 0, fDamageMin, fDamageMax,
-									pGrenade->nCriticalProbability * fCoeff, pGrenade->nCriticalDifficulty * fCoeff, pRPG, 0, fCoeff );
+								NRPG::CAttackPortion att( nAPA, 0, 0.0f, fDamageMin, fDamageMax,
+									nCritProb * fCoeff, nCritDiff * fCoeff, pRPG, 0, fCoeff );   // retail @0x355ba0: fPushCoeff=0 (blast push = AddImpulse only)
+								att.bNoBlowUp = false;   // retail @0x355ba0: the blast-wave unit portion CAN gib (byte store portion+0x39 = 0)
 								if ( IsValid( pTracker ) )
 									FillAttackModifiers( &att, pTracker->sMineModifiers );
 								pAtt->ProcessAttack( o.nUserID, &att, o.pArmor );
@@ -502,11 +564,11 @@ void CVoxelExpl::ApplyWaveDamage()
 						// the dev nWave is 1-based (the tracker pre-increments before spawning the ring), so convert
 						// nCurrentWave == nWave-1. The previous "- nWave + 1" sat one wave ahead, costing every ring
 						// one step of the structure multiplier (first ring N instead of N+1).
-						fCoeff *= ( pGrenade->nWaveNumber - ( nWave - 1 ) + 1 ) * pGrenade->fStructureDamageCoeff;
+						fCoeff *= ( nWavesTotal - ( nWave - 1 ) + 1 ) * fStructDamageCoeff;
 						NRPG::IUnitMission* pRPG = 0;
 						if ( IsValid( pThrower ) )
 							pRPG = pThrower->GetUnitRPG();
-						NRPG::CAttackPortion att( pGrenade->nFragmentAPA, 0, fDamageMin, fDamageMax, 0, 0, pRPG, 0, fCoeff );
+						NRPG::CAttackPortion att( nAPA, 0, 0.0f, fDamageMin, fDamageMax, 0, 0, pRPG, 0, fCoeff );   // retail ApplyWaveDamage @0x355ba0: fPushCoeff=0; bNoBlowUp stays TRUE on the structure portion
 						att.rTtrajectory.ptDir = di.rDir.ptDir;
 						att.rTtrajectory.ptOrigin = di.rDir.ptOrigin;
 						att.atkType = NRPG::AT_BLAST_WAVE;
@@ -561,13 +623,15 @@ int CVoxelExpl::GetVolume( float fRadius )
 // CVoxelExplTracker
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CVoxelExplTracker::CVoxelExplTracker( CVec3 _ptCenter,
-	NDb::CRPGGrenade *_pGrenade, CUnitServer *_pThrower, CWorld *_pWorld, CObjectBase *_pIgnitionObject, const SPerkMineModifiers *_pMods ):
+	NDb::CRPGGrenade *_pGrenade, CUnitServer *_pThrower, CWorld *_pWorld, CObjectBase *_pIgnitionObject, const SPerkMineModifiers *_pMods,
+	NDb::CRPGEngGrenade *_pEngGrenade, int _nEngSkill ):
 	ptCenter( _ptCenter ), pGrenade( _pGrenade ), pThrower( _pThrower ),
 	pWorld( _pWorld ), nWave( 0 ), nEnemyUnitsKilled( 0 ), nObjectsDestroyed( 0 ), pIgnitionObject( _pIgnitionObject ),
+	pEngGrenade( _pEngGrenade ), nEngSkill( _nEngSkill ),
 	nLag( 2 )   // release @0x3571d0: after enqueuing a blast the master parks in S_WAIT (nLag=2) before the first ring spawns
 {
-	// A pre-placed source (a mine) supplies the PLACER's perk modifiers explicitly -- the placer may be gone by
-	// detonation, so they are stored on the mine (CMine::sPerkModifiers) and passed in here, not re-derived.
+	// A pre-placed source (a mine / trapped door) supplies the PLACER's perk modifiers explicitly -- the placer may be
+	// gone by detonation, so they are stored on the mine (CMine::sPerkModifiers) and passed in here, not re-derived.
 	if ( _pMods )
 		sMineModifiers = *_pMods;
 	// The a5dll derives a LIVE thrower's (thrown-grenade) modifiers HERE in the ctor rather than at the call site
@@ -576,7 +640,7 @@ CVoxelExplTracker::CVoxelExplTracker( CVec3 _ptCenter,
 	// burst gets the perk bonus too. No a5dll caller passes BOTH a live thrower and explicit mods, so no double-apply.
 	if ( IsValid( pThrower ) )
 		sMineModifiers.Fill( pThrower->GetRPG()->GetRPGUnit() );
-	if ( IsValid( pGrenade ) )
+	if ( IsValid( pGrenade ) || IsValid( pEngGrenade ) )   // retail @0x356ff0: EITHER live record sprays fragments
 		ExplodeFragments();
 	//
 	pAction = pWorld->GetActiveCounter( 30 );
@@ -604,12 +668,17 @@ bool CVoxelExplTracker::Segment()
 	if ( nBreakCalcs > 1 )
 		return false;
 	//
+	// total ring count per record (release CVoxelExplTracker::MakeDamage @0x3566d0): regular = nWaveNumber,
+	// engineer = (nEngSkill - nSkillReq) / nDeltaWave + nStartNWave; neither record -> nothing to spawn.
+	const int nWavesTotal = IsValid( pGrenade ) ? pGrenade->nWaveNumber
+		: ( IsValid( pEngGrenade ) ? GetEngGrenadeWaves( pEngGrenade, nEngSkill ) : 0 );
+	//
 	// ---- step pass: (re)spawn the next ring, then drain it (release MakeSingleStep @0x3565c0 spawns a
 	// fresh CVoxelExpl whenever the previous one was dropped, iterating it in the same pass) ----
-	if ( !IsValid( pExpl ) && nWave < pGrenade->nWaveNumber )
+	if ( !IsValid( pExpl ) && nWave < nWavesTotal )
 	{
 		++nWave;
-		pExpl = new CVoxelExpl( ptCenter, nWave, pGrenade, pThrower, pWorld->GetAIMap(), this, pIgnitionObject.GetPtr() );
+		pExpl = new CVoxelExpl( ptCenter, nWave, pGrenade, pThrower, pWorld->GetAIMap(), this, pIgnitionObject.GetPtr(), pEngGrenade, nEngSkill );
 	}
 	if ( IsValid( pExpl ) && !pExpl->IsFinished() )
 		pExpl->Segment();
@@ -627,18 +696,25 @@ bool CVoxelExplTracker::Segment()
 		nObjectsDestroyed += pExpl->nObjectsDestroyed;
 		nEnemyUnitsKilled += pExpl->nEnemyUnitsKilled;
 		pExpl = 0;
-		if ( nWave < pGrenade->nWaveNumber )
+		if ( nWave < nWavesTotal )
 			nLag = 2;   // release @0x3571d0: state=S_WAIT; nLag=2
 	}
 	//
-	bool bDone = !IsValid( pExpl ) && nWave >= pGrenade->nWaveNumber;
+	bool bDone = !IsValid( pExpl ) && nWave >= nWavesTotal;
 	if ( bDone )
 	{
 		vector<CObjectBase*> targets;
 		for ( CDecalsHash::iterator i = drawDecals.begin(); i != drawDecals.end(); ++i )
 			targets.push_back( i->first );
+		// release MakeDamage @0x3566d0: the scorch-decal base radius comes off whichever record is live
+		// (regular fDecalRadius @+0x70, engineer fDecalRadius @+0x74); neither record -> radius 0.
+		float fDecalRadius = 0;
+		if ( IsValid( pGrenade ) )
+			fDecalRadius = pGrenade->fDecalRadius;
+		else if ( IsValid( pEngGrenade ) )
+			fDecalRadius = pEngGrenade->fDecalRadius;
 		if ( !targets.empty() && IsValid(pWorld) )
-			new CDecal( pWorld, ptCenter + CVec3(0,0,0.3f), pGrenade->fDecalRadius * random.GetFloat( 0.8f, 1.2f), NDb::GetMaterial( 3264 ), targets );
+			new CDecal( pWorld, ptCenter + CVec3(0,0,0.3f), fDecalRadius * random.GetFloat( 0.8f, 1.2f), NDb::GetMaterial( 3264 ), targets );
 	}
 	if ( bDone && pThrower )
 	{
@@ -652,25 +728,97 @@ bool CVoxelExplTracker::Segment()
 	return bDone;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail @0x356a80 (disasm-decoded 2026-07-11): ONE portion off whichever record is live, stamped
+// atkType=AT_FRAGMENT + bNoBlowUp=false (fragment kills CAN gib), fPushCoeff=0. Up to (count-20)
+// fragments are AIMED -- each at a random hit location (0..5) of a random unit within the fragment
+// range (GetUnitsNear; the picked unit is then removed so nobody soaks two aimed splinters) -- and
+// the remainder (~20) fly in rejection-sampled uniform sphere directions (GetRandomSphereVector
+// @0x354b60). The eng record scales with d = nEngSkill - nSkillReq: count = nEngSkill/5,
+// nK = (d/30+1)*nAPAModifier, dmg = ROUND(fFragDmgModifier*10)..ROUND(fFragDmgModifier*40).
+// No lower clamp on the aimed count (retail 0x756cd1..): a record with count<20 goes negative and
+// the random loop fires (count - nTargeted) rays -- benign for the 0-damage records that hit it.
+// KNOWN DIVERGENCE: retail caps every splinter at fFragmentRange*FP_GRID_STEP inside its bullet
+// tracer (SAttackRayInfo.fMaxRange); this build's ProcessRangedAttackPortion has no per-attack
+// range cap, so splinters fly to the first obstacle (docs/NEXT_SESSION_ITEMS_FOLLOWUPS.md #14).
 void CVoxelExplTracker::ExplodeFragments()
 {
-	CRay ray;
-	CVec3 &v = ray.ptDir;
-	ray.ptOrigin = ptCenter;
-
 	NRPG::IUnitMission* pRPG = 0;
 	if ( pThrower )
 		pRPG = pThrower->GetUnitRPG();
-	NRPG::CAttackPortion att( pGrenade->nFragmentAPA, 1, pGrenade->nFragmentDmgMin, pGrenade->nFragmentDmgMax, pGrenade->nCriticalProbability, pGrenade->nCriticalDifficulty, pRPG );
-	FillAttackModifiers( &att, sMineModifiers );   // CVoxelExplTracker holds the modifiers directly
-	for ( int i = 0; i < pGrenade->nFragmentNumber; ++i )
+
+	int nAPA, nDmgMin, nDmgMax, nCritProb, nCritDiff, nFragments;
+	float fRange;
+	if ( IsValid( pGrenade ) )
 	{
-		v.x = random.GetFloat( -1, 1 );
-		v.y = random.GetFloat( -1, 1 );
-		v.z = random.GetFloat( -1, 1 );
-		Normalize(&v);
-		vector< NRPG::IAttackable * > tmp;
-		pWorld->PerformRangedAttack( att, ray, tmp, pWorld->GetTime()->GetValue(), 0, 0 );
+		nAPA = pGrenade->nFragmentAPA;
+		nDmgMin = pGrenade->nFragmentDmgMin;
+		nDmgMax = pGrenade->nFragmentDmgMax;
+		nCritProb = pGrenade->nCriticalProbability;
+		nCritDiff = pGrenade->nCriticalDifficulty;
+		nFragments = pGrenade->nFragmentNumber;
+		fRange = pGrenade->fFragmentRange * FP_GRID_STEP;
+	}
+	else if ( IsValid( pEngGrenade ) )
+	{
+		int nD = nEngSkill - pEngGrenade->nSkillReq;
+		nAPA = ( nD / 30 + 1 ) * pEngGrenade->nAPAModifier;
+		nDmgMin = Float2Int( pEngGrenade->fFragDmgModifier * 10.0f );
+		nDmgMax = Float2Int( pEngGrenade->fFragDmgModifier * 40.0f );
+		nCritProb = pEngGrenade->nCriticalProbability;
+		nCritDiff = pEngGrenade->nCriticalDifficulty;
+		nFragments = nEngSkill / 5;
+		fRange = pEngGrenade->fFragmentRange * FP_GRID_STEP;
+	}
+	else
+		return;
+
+	NRPG::CAttackPortion att( nAPA, 1, 0.0f, nDmgMin, nDmgMax, nCritProb, nCritDiff, pRPG );   // fPushCoeff=0 (retail 3rd arg)
+	att.atkType = NRPG::AT_FRAGMENT;   // retail 0x756bf3: mov ebx,3 -> portion+0x24
+	att.bNoBlowUp = false;             // retail 0x756bfc: byte portion+0x39 = 0
+	FillAttackModifiers( &att, sMineModifiers );   // CVoxelExplTracker holds the modifiers directly
+
+	CRay ray;
+	CVec3 &v = ray.ptDir;
+	ray.ptOrigin = ptCenter;
+	vector< NRPG::IAttackable * > ignores;
+	CDynamicCast<NRPG::IAttackable> pIgnore( pIgnitionObject.GetPtr() );
+	if ( pIgnore )
+		ignores.push_back( pIgnore.GetPtr() );   // retail rayInfo.pIgnore = pIgnitionObject: the trapped source doesn't soak its own splinters
+
+	// aimed fragments: min(units-in-range, count-20), one random hit location per picked unit
+	list< CPtr<CUnitServer> > units;
+	pWorld->GetUnitsNear( ptCenter, &units, fRange );
+	int nTargeted = Min( (int)units.size(), nFragments - 20 );
+	for ( int i = 0; i < nTargeted; ++i )
+	{
+		int nIdx = units.empty() ? 0 : (int)random.Get( (unsigned int)units.size() );   // retail: raw isaac % size
+		list< CPtr<CUnitServer> >::iterator it = units.begin();
+		for ( int k = 0; k < nIdx; ++k )
+			++it;
+		if ( IsValid( *it ) )
+		{
+			CVec3 pt;
+			pWorld->GetAIMap()->GetUnitHLPos( &pt, CastToObjectBase( it->GetPtr() ), (int)random.Get( 6 ) );   // retail: isaac % 6
+			v = pt - ptCenter;
+			Normalize( &v );   // self-guarded against a zero delta, matching the retail fabs2 != 0 gate
+			pWorld->PerformRangedAttack( att, ray, ignores, pWorld->GetTime()->GetValue(), 0, 0 );
+		}
+		units.erase( it );
+	}
+	// the rest fly in uniformly random directions (retail GetRandomSphereVector @0x354b60:
+	// rejection-sample the unit ball, reject near-zero, then normalize)
+	for ( int nRandom = nFragments - nTargeted; nRandom > 0; --nRandom )
+	{
+		float fN2;
+		do
+		{
+			v.x = random.GetFloat( -1, 1 );
+			v.y = random.GetFloat( -1, 1 );
+			v.z = random.GetFloat( -1, 1 );
+			fN2 = fabs2( v );
+		} while ( fN2 > 1.0f || fN2 <= 0.001f );
+		Normalize( &v );
+		pWorld->PerformRangedAttack( att, ray, ignores, pWorld->GetTime()->GetValue(), 0, 0 );
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////

@@ -53,8 +53,10 @@ enum EUnitCommandResult
 	UCR_NOT_ALL_UNITS_NEAR_PASSAGE,   // unit not in the passage zone (CExecUsePassage::CanDoIt)
 	UCR_PK_BAN,                       // crouching, fight-capable unit may not look-and-move -- CanDo @0x3c1570
 	                                  // (retail ordinal 0x13; here appended -> 16)
-	UCR_CANT_HEAL                     // heal target's CanHeal() failed -- CanDoFirstAid @0x3a2d40
+	UCR_CANT_HEAL,                    // heal target's CanHeal() failed -- CanDoFirstAid @0x3a2d40
 	                                  // (retail ordinal 16; here appended -> 17)
+	UCR_DOOR_LOCKED                   // locked door, no key and no charged picklock in hand --
+	                                  // CExecOpenClose::CanDoIt @0x3bd290 (retail ordinal 17; here appended -> 18)
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CCmd: public CObjectBase

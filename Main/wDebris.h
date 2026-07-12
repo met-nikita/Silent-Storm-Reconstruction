@@ -161,11 +161,12 @@ private:
 	// GetShowList : GetVisibleShowList, the item is published into visibleItems (the LOS/vision
 	// candidate list) when (pInvItem!=0 || bVisibleGated) -- so a fog-gated capless item stays hidden
 	// until a unit gains LOS on it -- and bTemporaryVisible feeds the CDFrozenItem ctor's trailing
-	// flag (@0x74b15b, ctor arg 7 -> +0x88). (dev has no pMap param: the AI-hull registration runs in
-	// CDFrozenItem::Visit instead of retail's pMap->...->VisitObject tail.)
-	CDFrozenItem* AddFrozenItem( const SHMatrix &m, NRPG::IInventoryItem *pInvItem, const SItemRenderInfo &_model, int nFloor, bool bTemporaryVisible = false, bool bVisibleGated = false );
+	// flag (@0x74b15b, ctor arg 7 -> +0x88). (dev keeps the AI-hull registration in
+	// CDFrozenItem::Visit; pMap feeds the STABILITY registration -- the same branch registers the
+	// frozen item with pMap->GetStabilityTrackers()->AddDebris @0x74b1xx.)
+	CDFrozenItem* AddFrozenItem( NAI::IAIMap *pMap, const SHMatrix &m, NRPG::IInventoryItem *pInvItem, const SItemRenderInfo &_model, int nFloor, bool bTemporaryVisible = false, bool bVisibleGated = false );
 protected:
-	bool Segment( SSphere *pInvalidate );
+	bool Segment( NAI::IAIMap *pMap, SSphere *pInvalidate );
 	bool HasDynamicItems() { return !items.empty(); }
 	virtual CActionCounter* CreateActionCounter() = 0;
 	virtual CSyncSrc<IVisObj>* GetShowList() = 0;
@@ -185,10 +186,15 @@ public:
 		CFuncBase<STime> *pTime, NRPG::IInventoryItem *pItem = 0, CObjectBase *pVisibilityParent = 0 );
 	//! turn in radius frozen items into alive ones
 	void ActivateDebris( const SSphere &b, NAI::IAIMap *pAIMap, CFuncBase<STime> *pTime );
+	//! turn ONE frozen item into an alive one (retail @0x34a240, ctrl vtbl+4): the stability
+	//! trackers call this when the support under a settled debris piece disappears -- unlink it
+	//! from the frozen list and relaunch it as dynamic debris with zero velocity, orientation
+	//! taken from the item's own matrix.
+	void ActivateDebris( CDFrozenItem *pItem, NAI::IAIMap *pAIMap, CFuncBase<STime> *pTime );
 	//! put RPG item into fixed position. retail public overload @0x34b340:
 	//! (pMap, pos, rot, pInvItem, bool bTemporaryVisible, int nFloor) -- the bool threads to the inner
 	//! overload's bTemporaryVisible (@0x74b45d passes it as arg 6, bVisibleGated hardwired 0).
-	CDFrozenItem* AddFrozenItem( const CVec3 &pos, const CQuat &rot, NRPG::IInventoryItem *pInvItem, bool bTemporaryVisible = false, int nFloor = 0 );
+	CDFrozenItem* AddFrozenItem( NAI::IAIMap *pMap, const CVec3 &pos, const CQuat &rot, NRPG::IInventoryItem *pInvItem, bool bTemporaryVisible = false, int nFloor = 0 );
 	//! remove frozen item by RPG pointer
 	void RemoveFrozenItem( NRPG::IInventoryItem *pInvItem );
 	//! get frozen (on-ground) items that can be seen in some area (retail @0x34a400, ctrl vtbl+0x1c)

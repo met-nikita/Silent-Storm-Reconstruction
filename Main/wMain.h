@@ -51,6 +51,7 @@ namespace NDb
 	class CObject;
 	class CDebrisMaterial;
 	class CRPGGrenade;
+	class CRPGEngGrenade;
 	class CRPGMeleeWeapon;
 	class CAISound;
 	class CDBAckSequence;
@@ -371,6 +372,8 @@ public:
 	virtual CCTime* GetAimTime() const { return pAimTime; }
 	virtual NRPG::IGame* GetGame() { return pRPGGame; }
 	virtual NAI::IAIMap* GetAIMap() { return pAIMap; }
+	// retail IWorld vtbl+0xe4 @0x376de0: the CDebrisController base (CWorld+0x28)
+	virtual CDebrisController* GetDebris() { return this; }
 	virtual NAI::IPathNetwork* GetPathNetwork() { return pPathNetwork; }
 	virtual CFuncBase<STerrainInfo>* GetTerrainInfo() const { return pTerrainInfo; }
 //	virtual NTerrain::CTerrain* GetTerrain() const { return pTerrain; }
@@ -449,8 +452,11 @@ public:
 	ETimeOfDay GetTimeOfDay();                // retail @0x361bb0 -- read the TOD sentinel from createFlags
 	void SetTimeOfDay( ETimeOfDay tod );      // retail @0x362b90 -- rewrite the TOD sentinel + re-light every object
 	void AddHitLocator( CHitLocator* pLocator );
-	void ThrowGrenade( const CVec3 &vFrom, const CVec3 &vSpeed, STime tThrow, float fTFly, 
-		NDb::CModel *pModel, NDb::CRPGGrenade *pRPGGrenade, CUnitServer *pUnitServer );
+	// retail @0x764140 takes BOTH grenade records: an engineer grenade arrives with a null
+	// pRPGGrenade and a live pRPGEngGrenade (contact-fused eng server, thrower's ENG skill).
+	void ThrowGrenade( const CVec3 &vFrom, const CVec3 &vSpeed, STime tThrow, float fTFly,
+		NDb::CModel *pModel, NDb::CRPGGrenade *pRPGGrenade, CUnitServer *pUnitServer,
+		NDb::CRPGEngGrenade *pRPGEngGrenade = 0 );
 	void ThrowKnife( const CVec3 &vFrom, const CVec3 &vSpeed, STime tThrow, float fDistance,
 		NDb::CModel *pModel, NRPG::CAttackPortion &attack, NRPG::IInventoryItem *pIItem, CUnitServer *pUnitServer );
 	void LaunchRocket( const CVec3 &vFrom, const CVec3 &vSpeed,
@@ -459,6 +465,12 @@ public:
 	virtual void AddGrenadeExplosion( const CVec3 &vStartPosition,
 		NDb::CRPGGrenade *pRPGGrenade, CUnitServer *pUnitServer = 0, CObjectBase *pIgnitionObject = 0,
 		const SPerkMineModifiers *pMods = 0 );
+	// retail @0x7648c0 (world vtbl+0x120): the ENGINEER-grenade blast, scaled by the
+	// placer/thrower's ENGINEERING skill. The damage tracker's eng mode is still unported --
+	// see docs/NEXT_SESSION_ITEMS_FOLLOWUPS.md.
+	virtual void AddGrenadeExplosion( const CVec3 &vStartPosition,
+		NDb::CRPGEngGrenade *pRPGEngGrenade, int nEngSkill, CUnitServer *pUnitServer = 0,
+		CObjectBase *pIgnitionObject = 0, const SPerkMineModifiers *pMods = 0 );
 	void KillObject( CObjectServerBase *pOS );
 	// retail object pocket (luaObjectPlaceInPocket @0x2e9000 / luaObjectRestoreFromPocket @0x2e9130):
 	// pocket = hold alive + KillObject + unbind from the vis sync; restore = re-list + rebind + unpocket.

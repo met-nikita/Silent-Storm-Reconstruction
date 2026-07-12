@@ -579,7 +579,7 @@ int CAIUnit::GetCoverForFixedUnit( const NAI::SUnitPosition &pos,
 	if ( IsValid( pWeaponItem ) )
 		pWeaponItem->CreateNewAttackPortion( &atts, false );
 	if ( atts.empty() )
-		atts.push_back( NRPG::CAttackPortion( 1, 0, 0, 0, 0 ) );
+		atts.push_back( NRPG::CAttackPortion( 1, 0, 0.0f, 0, 0, 0 ) );   // retail GetCover @0xae290 probe: fPushCoeff=0
 	//
 	ASSERT( !atts.empty() );
 	if ( !atts.empty() )

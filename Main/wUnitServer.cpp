@@ -158,6 +158,9 @@ CUnitServer::CUnitServer( CWorld *pWorld, NRPG::IUnitMission *_pRPG, NDb::CModel
 	// recruits via CCmdAddUnit) keeps the all-enemy default and paints ALLIES red / triggers combat.
 	if ( IsValid( pPlayer ) && pPlayer->GetScenarioPlayerID() >= 0 )
 		_pRPG->SetDiplomacy( pWorld->GetDiplomacy()->GetPlayerDiplomacy( pPlayer->GetScenarioPlayerID() ) );
+	// bind the campaign game onto the mission (retail threads it through CreateUnit @0x2c4f50; this fork
+	// binds it here) so CreateAttack's backstab-damage multipliers can read pGlobalGame->pDifficulty.
+	_pRPG->SetGlobalGame( pWorld->GetGlobalGame() );
 	tPrev = GetWorld()->GetTime()->GetValue();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -671,7 +674,7 @@ void CUnitServer::FallFromHigh( float fHeightDiff )
 	if ( fHeightDiff <= 2.8f /* F_MAX_CLIMB_HEIGHT */ )
 		return;
 	int nDamage = GetUnitRPG()->GetFallDamage( fHeightDiff );
-	NRPG::CAttackPortion att( 1, 0, nDamage, -1, 0 );
+	NRPG::CAttackPortion att( 1, 0, 0.0f, nDamage, -1, 0 );   // retail FallFromHigh @0x3c0570: fPushCoeff=0
 	ProcessAttack( NAI::HL_BODY, &att, GetUnitRPG()->GetRPGArmor() );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1682,7 +1685,7 @@ void CUnitServer::FlipPanzerklein( CUnitServer *pPK, bool bUnloadWeapons )
 					shift.x = random.GetFloat( - FP_GRID_STEP * 0.5f, FP_GRID_STEP * 0.5f );
 					shift.y = random.GetFloat( - FP_GRID_STEP * 0.5f, FP_GRID_STEP * 0.5f );
 					shift.z = 0.1f;
-					GetWorld()->AddFrozenItem( GetPosition().GetCP() + shift, QNULL, pItem );
+					GetWorld()->AddFrozenItem( GetWorld()->GetAIMap(), GetPosition().GetCP() + shift, QNULL, pItem );
 				}
 			}
 		}
@@ -1773,7 +1776,7 @@ void CUnitServer::OnNewPlayerTurnOrTime( const CEventOnNewPlayerTurnOrTime &even
 		if ( GetUnitRPG()->HasCritical( NDb::C_BLEEDING, &pCritical ) )
 		{
 			int nDamage = pCritical->GetCritical().fValue;
-			NRPG::CAttackPortion att( 1, 0, nDamage, -1, 0 );
+			NRPG::CAttackPortion att( 1, 0, 0.0f, nDamage, -1, 0 );   // retail ProcessCriticalsAndRegenerations @0x3c2770: fPushCoeff=0
 			ProcessAttack( NAI::HL_BODY, &att, GetUnitRPG()->GetRPGArmor() );
 		}
 	}

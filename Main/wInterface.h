@@ -231,6 +231,10 @@ public:
 	virtual bool IsHiddenObject() const { return false; }
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail free NWorld::GoBoom @0x37e530 (wMine.obj): detonate an IMine (dynamic-cast to CMine, no
+// attributed shooter). Fired by the stability trackers when the ground under a mine drops away.
+void GoBoom( IMine *pMine );
+////////////////////////////////////////////////////////////////////////////////////////////////////
 class CUnit;
 class ICannon
 {
@@ -300,6 +304,9 @@ public:
 	virtual bool IsMoving() const = 0;
 	virtual bool IsDead() const = 0;
 	virtual bool IsUnconscious() const = 0;
+	// retail exposes CanFight on the world-unit interface (CUnitServer::CanFight body); the
+	// inventory can't-use tint (CSlot::Draw @0x1c34d0) reddens EVERYTHING for a downed unit.
+	virtual bool CanFight() const { return !IsDead() && !IsUnconscious(); }
 	virtual bool IsHiding() const = 0;
 	virtual bool IsEmptyPK() const = 0;
 	virtual bool IsStrafing() const = 0;
@@ -538,6 +545,7 @@ public:
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CUICmd;
 class CPostWorldCreateInfo;
+class CDebrisController;
 class IWorld: public CObjectBase
 {
 public:
@@ -619,6 +627,10 @@ public:
 	// every real unit is already shown. Default: leave the (caller-supplied, empty) vector untouched
 	// -- IVisObj is incomplete here, so the body must not instantiate CPtr<IVisObj> destruction.
 	virtual void GetAllSoundStuff( vector< CPtr<IVisObj> > *pRes ) {}
+	// retail IWorld vtbl+0xe4 (body @0x376de0: the CDebrisController base at CWorld+0x28) -- the
+	// debris manager the stability trackers hand unsupported frozen items to
+	// (CStabilityTracker::OnChange @0xa59a0 debris branch). Tail-appended, dispatch by name.
+	virtual CDebrisController* GetDebris() { return 0; }
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CWorldSyncSrc: public CSyncSrc<IVisObj>

@@ -41,9 +41,15 @@ public:
 	CGrenadeServer( CWorld *pWorld, const CVec3 &vFrom, const CVec3 &vSpeed,
 		STime tThrow, float fTFly, NDb::CModel *pModel, NDb::CRPGGrenade *_pRPGGrenade,
 		CUnitServer *_pUnitServer = 0 );
+	// retail @0x75cc50: the engineer-grenade flavour (pRPGGrenade stays null, thrower's ENG skill)
+	CGrenadeServer( CWorld *pWorld, const CVec3 &vFrom, const CVec3 &vSpeed,
+		STime tThrow, float fTFly, NDb::CModel *pModel, NDb::CRPGEngGrenade *_pRPGEngGrenade,
+		CUnitServer *_pUnitServer, int _nThrowerEngSkill );
 	//
 	bool Segment();
 	virtual void Visit( IRenderVisitor *p );
+private:
+	void InitGrenade( const CVec3 &vFrom, const CVec3 &vSpeed, STime tThrow, float fTDelay );   // retail @0x75c8f0 shared init
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CClickOfDeath : public IDynamicObject
@@ -65,28 +71,33 @@ public:
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CGrenadeServer
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CGrenadeServer::CGrenadeServer( CWorld *_pWorld, const CVec3 &vFrom, 
-	const CVec3 &vSpeed, STime tThrow, float fTDelay, NDb::CModel *_pModel, 
+CGrenadeServer::CGrenadeServer( CWorld *_pWorld, const CVec3 &vFrom,
+	const CVec3 &vSpeed, STime tThrow, float fTDelay, NDb::CModel *_pModel,
 	NDb::CRPGGrenade *_pRPGGrenade, CUnitServer *_pUnitServer )
 : pWorld(_pWorld), pModel(_pModel), pRPGGrenade(_pRPGGrenade), pUnitServer(_pUnitServer)//tExplode(_tExplode)//, pItem(_pItem)
 {
-/*	float tFly = fTGrenade;
-	
-	STime tThrow = animator.GetTimeLabel1();
-	SUnitItem sItem;
-	GetItem( UIT_HAND, &sItem );
-	ASSERT( sItem.pItem );
-	tExplode = tThrow + (STime)Float2Int(tFly * 1000) + 100;
-	//CGrenadeServer *pGrenade = new CGrenadeServer( , sItem.pItem );
-	//pWorld->AddGrenade( pGrenade );
-	DetachItem( UIT_HAND );
-	bindGlobal.Update();*/
-
+	InitGrenade( vFrom, vSpeed, tThrow, fTDelay );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail @0x75cc50: the engineer-grenade server -- no regular record, the eng record + the
+// thrower's ENGINEERING skill (feeds the eng explosion), same shared InitGrenade.
+CGrenadeServer::CGrenadeServer( CWorld *_pWorld, const CVec3 &vFrom,
+	const CVec3 &vSpeed, STime tThrow, float fTDelay, NDb::CModel *_pModel,
+	NDb::CRPGEngGrenade *_pRPGEngGrenade, CUnitServer *_pUnitServer, int _nThrowerEngSkill )
+: pWorld(_pWorld), pModel(_pModel), pRPGEngGrenade(_pRPGEngGrenade), pUnitServer(_pUnitServer)
+{
+	nThrowerEngSkill = _nThrowerEngSkill;
+	InitGrenade( vFrom, vSpeed, tThrow, fTDelay );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail NWorld::InitGrenade @0x75c8f0 -- the shared launch body of both ctors.
+void CGrenadeServer::InitGrenade( const CVec3 &vFrom, const CVec3 &vSpeed, STime tThrow, float fTDelay )
+{
 	// launch actual item
 	vector<SMassSphere> spheres;
 	CVec3 massCenter;
 	NAI::GetSpheres( pModel, &spheres, &massCenter );
-	
+
 	NAnimation::CASphereSet *pSphereSet = new NAnimation::CASphereSet( -100 );
 	pSphereSet->pTime = pWorld->GetTime();
 	pSphereSet->pMap = pWorld->GetAIMap();
@@ -109,10 +120,20 @@ CGrenadeServer::CGrenadeServer( CWorld *_pWorld, const CVec3 &vFrom,
 	pAnimator->AddAnimator( pWorld->GetTime()->GetValue(), pSphereSet );
 	//sItem.pAnimItem->AddTransit( tThrow, tThrow + 200, pSphereSet );
 	bindGlobal.Link( pWorld->GetActive(), this );
-	tExplode = tThrow + (STime)int( (float(pRPGGrenade->nMaxDelay) - fTDelay) * 1000 );
-	tErase = tExplode + (STime)( 10 * 1000 ); //  10-    
+	// retail InitGrenade @0x75c8f0 fuse branch: an ENGINEER grenade (no regular record) is
+	// contact-fused -- bTimeDelayGrenade=false, tExplode=tThrow (explodes where it lands).
+	if ( !IsValid( pRPGGrenade ) )
+	{
+		bTimeDelayGrenade = false;
+		tExplode = tThrow;
+	}
+	else
+	{
+		tExplode = tThrow + (STime)int( (float(pRPGGrenade->nMaxDelay) - fTDelay) * 1000 );
+		bTimeDelayGrenade = ( pRPGGrenade->nMaxDelay != 0 );
+	}
+	tErase = tExplode + (STime)( 10 * 1000 ); //  10-
 	pAction = pWorld->GetActiveCounter();
-	bTimeDelayGrenade = ( pRPGGrenade->nMaxDelay != 0 );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 const CVec3 CGrenadeServer::GetPosition()
@@ -142,7 +163,12 @@ bool CGrenadeServer::Segment()
 	bool bIsTimeToExplode = bTimeDelayGrenade && IsTimeToExplode( pWorld->GetTime()->GetValue() );
 	if ( bIsTimeToExplode || bCollisionExplode )
 	{
-		pWorld->AddGrenadeExplosion( GetPosition(), pRPGGrenade, pUnitServer );
+		// retail Segment @0x75c5e0 explosion dispatch: a live regular record -> world vtbl+0x124
+		// (regular blast); else the engineer record + thrower's ENG skill -> vtbl+0x120.
+		if ( IsValid( pRPGGrenade ) )
+			pWorld->AddGrenadeExplosion( GetPosition(), pRPGGrenade, pUnitServer );
+		else
+			pWorld->AddGrenadeExplosion( GetPosition(), pRPGEngGrenade, nThrowerEngSkill, pUnitServer );
 		return true; // = erase
 	}
 	return false;
@@ -174,6 +200,14 @@ IDynamicObject *CreateGrenadeServer( CWorld *pWorld, const CVec3 &vFrom, const C
 		CUnitServer *_pUnitServer )
 {
 	return new CGrenadeServer( pWorld, vFrom, vSpeed, tThrow, fTFly, pModel, _pRPGGrenade, _pUnitServer );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// engineer-grenade flavour (retail eng server ctor @0x75cc50)
+IDynamicObject *CreateGrenadeServer( CWorld *pWorld, const CVec3 &vFrom, const CVec3 &vSpeed,
+		STime tThrow, float fTFly, NDb::CModel *pModel, NDb::CRPGEngGrenade *_pRPGEngGrenade,
+		CUnitServer *_pUnitServer, int _nThrowerEngSkill )
+{
+	return new CGrenadeServer( pWorld, vFrom, vSpeed, tThrow, fTFly, pModel, _pRPGEngGrenade, _pUnitServer, _nThrowerEngSkill );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 IDynamicObject *CreateClickOfDeath( CActionCounter *pC, CObjectBase *pTarget, int _nUserID, const CRay &ray )

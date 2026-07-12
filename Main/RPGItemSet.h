@@ -99,6 +99,14 @@ public:
 		pItem->nQuantity -= nQ;
 		return pNewCont;
 	}
+	// retail CItemContainer<CSimpleCharge>::SpendCharge @0x2a6fa0: unless the container is
+	// already empty, split one charge off and discard it.
+	void SpendCharge()
+	{
+		if ( GetIncQuantity() <= 0 )
+			return;
+		CObj<IJoinSplit> pSpent = SplitItem( 1 );
+	}
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // -----------------------------   ----------------------------------
@@ -209,6 +217,7 @@ public:
 public:
 	CGrenadeItem() {}
 	CGrenadeItem( NDb::CRPGGrenade *_pDBGrenade );
+	CGrenadeItem( NDb::CRPGEngGrenade *_pDBEngGrenade );   // retail @0x2a11d0: engineer-grenade flavour
 
 	EGrenadeMode GetMode() const { return eMode; }
 	void SetMode( EGrenadeMode _eMode ) { eMode = _eMode; }
@@ -219,41 +228,42 @@ public:
 	NDb::CRPGEngGrenade *GetDBEngGrenade() const { return pDBEngGrenade; }
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// Potion
-class CPotionItem: public CItem
+// retail CSimpleCharge (@0x2a2a40 ctor, @0x2a2f30 operator&, save id 0xA2312140): a bare countable
+// CItem -- the generic "charges" inside first-aid kits and picklocks. This IS the Jan03
+// CPotionItem renamed (retail reuses the 0xA2312140 registration id for it).
+class CSimpleCharge: public CItem
 {
-	OBJECT_BASIC_METHODS(CPotionItem)
+	OBJECT_BASIC_METHODS(CSimpleCharge)
 	ZDATA_(CItem)
 public:
 	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CItem*)this); return 0; }
 	virtual int GetWeight() const { return /*CRAP*/ 1; }
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-class CPotionContainer: public CItemContainer<CPotionItem>
-{
-	OBJECT_BASIC_METHODS(CPotionContainer)
-	typedef CItemContainer<CPotionItem> TPotionContainer;
-	ZDATA_(TPotionContainer)
-public:
-	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(TPotionContainer*)this); return 0; }
-	virtual int GetMaxIncQuantity() const { return /*CRAP*/ 1; }
-};
-////////////////////////////////////////////////////////////////////////////////////////////////////
-class CFirstAidItem: public CInventoryItem, public IFirstAidItem
+// retail CFirstAidItem (ctor @0x2a17a0, operator& @0x2ac050, save id 0xA1112153 -- dev already used
+// the retail id): the medkit carries its charges as ONE CSimpleCharge (seeded with the record's
+// nQuantity) in the CItemContainer base -- the exact CPicklockItem/CToolItem shape. Replaces the
+// Jan03 CInventoryItem + CObj<CPotionContainer> pClip model (dev-only save id 0xA2312141, class
+// deleted -- absent in retail; old dev saves' medkits will not round-trip).
+class CFirstAidItem: public CItemContainer<CSimpleCharge>, public IFirstAidItem
 {
 	OBJECT_BASIC_METHODS(CFirstAidItem);
-	ZDATA_(CInventoryItem)
+	typedef CItemContainer<CSimpleCharge> TChargeContainer;
+	ZDATA_(TChargeContainer)
 	CDBPtr<NDb::CRPGFirstAid> pDBFirstAid;
-	CObj<CPotionContainer> pClip;
 public:
-	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CInventoryItem*)this); f.Add(2,&pDBFirstAid); f.Add(3,&pClip); return 0; }
+	// retail @0x2ac050: tag 2 = the container base (which serializes the charge), tag 3 = the DB record
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,(TChargeContainer*)this); f.Add(3,&pDBFirstAid); return 0; }
 
 public:
 	CFirstAidItem() {}
 	CFirstAidItem( NDb::CRPGFirstAid *_pDBFirstAid );
 
-	void SpendPotion();
-	virtual bool IsEmpty();
+	// retail spend = the container's SpendCharge @0x2a6fa0 (the old dev SpendPotion had an INVERTED
+	// empty-guard and never actually consumed a charge -- infinite medkits)
+	void SpendPotion() { SpendCharge(); }
+	virtual bool IsEmpty() { return GetIncQuantity() < 1; }   // retail @0x2a4780 (IItemContainerInfo slot 2)
+	virtual int GetMaxIncQuantity() const;                    // retail @0x2a0740: pDBFirstAid->nQuantity
 	NDb::CRPGFirstAid *GetDBFirstAid() const { return pDBFirstAid; }
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -309,6 +319,26 @@ public:
 	virtual bool CanBeUsed( NRPG::CUnit *pUnit ) const;
 	virtual int GetSkillModifForMineCleaning() const;
 	NDb::CRPGTool* GetDBItemInfo() const { return pDBTool; }
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail CPicklockItem (ctor @0x2a1c80, operator& @0x2abaa0, save id 0xA0523091): a lockpick with
+// its uses stored as CSimpleCharge charges in the CItemContainer base (the record's nQuantity).
+////////////////////////////////////////////////////////////////////////////////////////////////////
+class CPicklockItem: public CItemContainer<CSimpleCharge>, public IPicklockItem
+{
+	OBJECT_BASIC_METHODS( CPicklockItem )
+	typedef CItemContainer<CSimpleCharge> TChargeContainer;
+	ZDATA_(TChargeContainer)
+	CDBPtr<NDb::CRPGPicklock> pDBPicklock;
+public:
+	// retail @0x2abaa0 (out-of-line there too): tag 2 = the container base, tag 3 = the DB record
+	ZEND int operator&( CStructureSaver &f );
+
+	CPicklockItem() {}
+	CPicklockItem( NDb::CRPGPicklock *_pDBPicklock );
+	//
+	virtual NDb::CRPGPicklock* GetDBPicklock() const { return pDBPicklock; }
+	virtual int GetMaxIncQuantity() const;   // retail @0x2a0750: pDBPicklock->nQuantity
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 } // namespace

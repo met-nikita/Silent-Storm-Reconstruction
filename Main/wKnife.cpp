@@ -144,7 +144,7 @@ bool CKnifeServer::Segment()
 	switch ( res )
 	{
 		case NRPG::AR_STUCK:
-			pWorld->AddFrozenItem( ray.ptOrigin + ray.ptDir * fCollDist, nextRot, pIItem );
+			pWorld->AddFrozenItem( pWorld->GetAIMap(), ray.ptOrigin + ray.ptDir * fCollDist, nextRot, pIItem );
 			return true;
 		case NRPG::AR_BOUNCE:
 			pWorld->AddDebris( pModel.GetPtr(), pWorld->GetAIMap(), ray.ptOrigin + ray.ptDir * (fCollDist - 0.1f),

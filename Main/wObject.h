@@ -55,10 +55,8 @@ class CWindowDoor: public CAnimObjectServerBase, public IWindowDoor, public IMin
 		CVec3 vPos;
 		// retail SAttachedGrenade::operator& @0x383880 grew past the Jan03 form with tags 5/6/7: the placer's
 		// explosive-perk damage modifiers (applied at door-trap detonation in GoBoom), plus the engineer-grenade
-		// descriptor + its panzerklein-capacity value for the eng-grenade door trap. sMineModifiers is populated
-		// (SetTrap) and applied (GoBoom) now; pEngGrenade/nEngSkill serialize for retail save-format parity but are
-		// populated only once the eng-grenade trap runtime lands (deferred -- blocked on the absent
-		// SPanzerkleinCapacity accessor + the world AddEngGrenadeExplosion path @0x381d60/world-vtbl+0x120).
+		// descriptor + the placer's eng skill for the eng-grenade door trap (populated by the eng SetTrap overload
+		// @0x381f90, dispatched by GoBoom @0x381d60 via the eng AddGrenadeExplosion / world vtbl+0x120).
 		SPerkMineModifiers sMineModifiers;
 		CDBPtr<NDb::CRPGEngGrenade> pEngGrenade;
 		int nEngSkill;
@@ -95,11 +93,14 @@ public:
 	virtual CVec3 GetChangeStateDirection( bool bOpen ) const;
 	virtual void LockDoor( bool bLock, int nKeyID, int nLockHardness );
 	virtual bool IsLockedDoor() const { return bIsLocked; };
+	int GetKeyID() const { return nKeyID; }                 // retail reads door+0xdc directly (same-module); accessor for the exec flow
+	int GetLockHardness() const { return nLockHardness; }   // retail door+0xe0
 	// IDynamicObject
 	virtual bool Segment();
 	virtual void Visit( IAIVisitor *p );
 	//
 	bool SetTrap( NDb::CRPGGrenade *pGrenade, int nDC, const SPerkMineModifiers *pMods = 0 );   // @0x381ee0 (pMods=0 for map-authored traps: no placer perks)
+	bool SetTrap( NDb::CRPGEngGrenade *pEngGrenade, int nDC, const SPerkMineModifiers *pMods, int nEngSkill );   // @0x381f90: the engineer-grenade trap also records the placer's eng skill
 	// 
 	int ProcessAttack( int nUserID, NRPG::CAttackPortion *pAttack, NDb::CRPGArmor *pArmor );
 };

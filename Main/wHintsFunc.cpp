@@ -60,7 +60,7 @@ void PlaceHintsToMap( CDebrisController *pDebris, NAI::IAIMap *pMap, const vecto
 			CQuat rot( ToRadian( slot->pos.fRotation ), CVec3( 0, 0, 1 ) );
 			CVec3 ptOnSurface;
 			NAI::FindClosePositionOnSurface( pMap, slot->pos.ptPos, &ptOnSurface );
-			pDebris->AddFrozenItem( ptOnSurface, rot, pItem, false, slot->pos.nFloor );
+			pDebris->AddFrozenItem( pMap, ptOnSurface, rot, pItem, false, slot->pos.nFloor );
 		}
 	}
 }

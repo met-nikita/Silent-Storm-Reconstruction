@@ -272,13 +272,22 @@ static void Apply( const SFBTransform &trans )
 		return;
 	}
 	SetVSConst( 10, (CVec4*)&trans.forward, 4 );
-	// calculate world space camera pos and store it to c6
+	// calculate the world-space homogeneous eye point and store it to c9 (retail @0x11b070):
+	// inverse-transform the clip-space +Z direction (0,0,1,0). For a perspective camera this
+	// yields (camPos*l, l) with l != 0; for the orthogonal tactical camera it yields the view
+	// direction with w == 0. The shaders compute eyeDir = c9.xyz - c9.w*pos (CalcCameraDir),
+	// which handles both. The old unproject-of-(0,0,0,1) gave a bogus near-plane point for the
+	// ortho camera and corrupted every reflection/specular that needs the eye vector.
 	CVec4 ptRes;
-	trans.backward.RotateHVector( &ptRes, CVec4(0,0,0,1) );
-	ptRes.x /= ptRes.w;
-	ptRes.y /= ptRes.w;
-	ptRes.z /= ptRes.w;
-	ptRes.w = 1;
+	trans.backward.RotateHVector( &ptRes, CVec4(0,0,1,0) );
+	if ( ptRes.w <= 0 )
+	{
+		// orient the homogeneous eye toward the viewer (retail negates all four components)
+		ptRes.x = -ptRes.x;
+		ptRes.y = -ptRes.y;
+		ptRes.z = -ptRes.z;
+		ptRes.w = -ptRes.w;
+	}
 	SetVSConst( 9, &ptRes, 1 );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1163,7 +1172,7 @@ bool InitZBuffer( D3DFORMAT format )
 	ASSERT( D3D_OK == hr );
 	hr = pDevice->GetDepthStencilSurface( pScreenDepth.GetAddr() );
 	ASSERT( D3D_OK == hr );
-	// обрядовый ритуал, без которого nVidia не работает
+	// ritual nVidia doesn't work without
 	for ( int k = 0; k < nScreenRegisters; ++ k )
 	{
 		NWin32Helper::com_ptr<IDirect3DSurface9> pTB;

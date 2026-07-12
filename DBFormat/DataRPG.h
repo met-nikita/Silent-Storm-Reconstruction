@@ -43,28 +43,28 @@ enum EAmmoColor
 const int N_DEFAULT_ARMOR = 4;
 const int N_HUMAN_BODY_ARMOR = 1;
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// SKILLS �������� ������ RPG ������������� 
+// SKILLS common set of RPG skills 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 enum ESkillType
 {
-	// ��������� �����
+	// weapons skills
 	ST_MELEE = 0,
 	ST_SHOOTING,
 	ST_THROWING,
 	ST_BURST,
 	ST_SNIPE,
-	// �� ������ �����
+	// non-combat skills
 	ST_STEALTH,
 	ST_SPOT,
 	ST_MEDICINE,
 	ST_ENGINEERING,
-	// ��������� �����
+	// passive skills
 	ST_VP,
 	ST_AP,
 	ST_IC,
 	ST_INTERRUPT,
 	ST_LEVEL,
-	// �����
+	// stats
 	ST_STR,
 	ST_DEX,
 	ST_INT,
@@ -72,7 +72,6 @@ enum ESkillType
 	SKILL_TYPE_NUMBERS
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// � �������� �� �������������� �������
 struct SRPGSkills
 {
 	int skills[SKILL_TYPE_NUMBERS];
@@ -89,10 +88,11 @@ enum EFirstAidEffect
 	FAE_TEMP_REMOVE_PENALTIES,
 	FAE_BOOST_VP,
 	FAE_TEMP_STOP_BLEEDING,
-	FAE_REMOVE_BLEEDING
+	FAE_REMOVE_BLEEDING,
+	FAE_REPAIR_PK   // retail =6: panzerklein repair kit -- gates on ST_ENGINEERING, not ST_MEDICINE (CSlot::Draw @0x1c34d0, healer @0x3ca340)
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// ������� RPG ������ 
+// RPG data tables
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CRPGDmgToArmor: public CDBRecord
 {
@@ -108,7 +108,7 @@ class CRPGMaterial: public CDBRecord
 {
 	OBJECT_BASIC_METHODS(CRPGMaterial);
 public:
-	// ���������
+	// materials
 	enum
 	{
 		HUMAN_BODY = 1,	// �������
@@ -298,6 +298,11 @@ public:
 	int nAmmoGroup;
 	EAmmoColor color;
 	int nUnconsciousProbability;
+	// retail CRPGAmmo @+0x38/+0x3c (Import @0x428900 columns "Calibr"/"Weight", serialize tags
+	// 12/13 @0x429ad0): bullet caliber and bullet weight; they feed the corpse-push impulse
+	// coefficient in CWeaponItem::CreateNewAttackPortion (retail @0x2a09e0).
+	float fCalibr;
+	float fWeight;
 
 	virtual void Import();
 	int operator&( CStructureSaver &f );
@@ -469,7 +474,10 @@ public:
 	CPtr<CRPGWeaponType> pWeaponType;
 	int nPanzerkleinWeapon;
 	float fDecalRadius;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CDBRecord*)this); f.Add(2,&pItem); f.Add(3,&nWaveNumber); f.Add(4,&fWaveDmgMin); f.Add(5,&fWaveDmgMax); f.Add(6,&nCriticalProbability); f.Add(7,&nCriticalDifficulty); f.Add(8,&fStructureDamageCoeff); f.Add(9,&fWaveRadius); f.Add(10,&nFragmentNumber); f.Add(11,&nFragmentAPA); f.Add(12,&nFragmentDmgMin); f.Add(13,&nFragmentDmgMax); f.Add(14,&pEffect); f.Add(15,&pSound); f.Add(16,&nMaxDelay); f.Add(17,&nQuality); f.Add(18,&pWeaponType); f.Add(19,&nPanzerkleinWeapon); f.Add(20,&fDecalRadius); return 0; }
+	// retail CRPGGrenade @+0x74 (operator& @0x41adb0 tag 0x15, Import column "FragmentRange" @0x8d38d8):
+	// splinter max flight range in grid units (ExplodeFragments uses fFragmentRange * FP_GRID_STEP)
+	float fFragmentRange;
+	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CDBRecord*)this); f.Add(2,&pItem); f.Add(3,&nWaveNumber); f.Add(4,&fWaveDmgMin); f.Add(5,&fWaveDmgMax); f.Add(6,&nCriticalProbability); f.Add(7,&nCriticalDifficulty); f.Add(8,&fStructureDamageCoeff); f.Add(9,&fWaveRadius); f.Add(10,&nFragmentNumber); f.Add(11,&nFragmentAPA); f.Add(12,&nFragmentDmgMin); f.Add(13,&nFragmentDmgMax); f.Add(14,&pEffect); f.Add(15,&pSound); f.Add(16,&nMaxDelay); f.Add(17,&nQuality); f.Add(18,&pWeaponType); f.Add(19,&nPanzerkleinWeapon); f.Add(20,&fDecalRadius); f.Add(21,&fFragmentRange); return 0; }
 
 	virtual void Import();
 };

@@ -286,6 +286,8 @@ void CRPGAmmo::Import()
 	NDatabase::ImportField( "AmmoColor", &nColor );
 	color = ( EAmmoColor ) nColor;
 	NDatabase::ImportField( "UnconsciousProbability", &nUnconsciousProbability );
+	NDatabase::ImportField( "Calibr", &fCalibr );   // retail Import @0x428900
+	NDatabase::ImportField( "Weight", &fWeight );   // retail Import @0x428900
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 int CRPGAmmo::operator&( CStructureSaver &f )
@@ -301,6 +303,8 @@ int CRPGAmmo::operator&( CStructureSaver &f )
 	f.Add( 9, &nAmmoGroup );
 	f.Add( 10, &color );
 	f.Add( 11, &nUnconsciousProbability );
+	f.Add( 12, &fCalibr );   // retail operator& @0x429ad0 tag 12
+	f.Add( 13, &fWeight );   // retail operator& @0x429ad0 tag 13
 	return 0;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -543,6 +547,7 @@ void CRPGGrenade::Import()
 	NDatabase::ImportField( "Effect3ID", &pEffect.p[2] );
 	NDatabase::ImportField( "Effect4ID", &pEffect.p[3] );
 	NDatabase::ImportField( "DecalRadius", &fDecalRadius );
+	NDatabase::ImportField( "FragmentRange", &fFragmentRange );   // retail column @0x8d38d8
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CRPGEngGrenade

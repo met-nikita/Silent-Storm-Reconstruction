@@ -5,7 +5,15 @@
 #include "wOSBase.h"
 #include "wObject.h"
 #include "..\DBFormat\DataAI.h"
+#include "..\DBFormat\DataRPG.h"    // NDb::CRPGKey (HasKey @0x3bcfb0 key-number match)
+#include "..\DBFormat\DataMisc.h"   // NDb::CRPGPicklock (the pick attempt @0x3bdb70)
+#include "..\Misc\RandomGen.h"      // SRand (the tick-seeded local pick roll)
+#include "..\MiscDll\LogStream.h"   // csSystem pick-attempt log lines (retail verbatim)
 #include "RPGUnitInfo.h"
+#include "RPGUnitMission.h"         // NRPG::IUnitMission (GetInventory/GetSkillValue/HasPerk)
+#include "RPGItemSet.h"             // NRPG::CPicklockItem (WorkingPicklock @0x3bcd60)
+#include "RPGMedals.h"              // NRPG::MPC_PICK_LOCK
+#include "RPGUnit.h"                // NRPG::CUnit::AddMedalPoints
 
 namespace NWorld
 {
@@ -431,11 +439,51 @@ void CExecQueue::CheckOpenCloseOnce()
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// CExecOpenClose
+// CExecOpenClose -- retail grew the locked-door key/picklock flow on top of the Jan03 open/close:
+// CanDoIt @0x3bd290, GetStartAP @0x3bd340, Run @0x3bd3f0, TimeLabelReached @0x3bdb70, helpers
+// HasKey @0x3bcfb0 / WorkingPicklock @0x3bcd60, GetActive @0x3bcdb0. (Retail also registers a
+// vestigial CCmdPickLock class NOTHING ever creates -- the whole flow lives here; not ported.)
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail NWorld::HasKey @0x3bcfb0: does the inventory hold the key matching the door's key number?
+// Searches the BACKPACK items then the TWO equip slots ONLY (belts / the drag holder are not
+// searched); the match is CRPGKey::nKeyID (the Key table's "KeyID" column) == the door's nKeyID.
+static bool HasKey( int nKeyID, NRPG::IInventory *pInventory )
+{
+	const vector<NRPG::SBackPackItem> &items = pInventory->GetItems();
+	for ( int nTemp = 0; nTemp < (int)items.size(); ++nTemp )
+	{
+		CDynamicCast<NRPG::IKeyItem> pKey( items[nTemp].pItem );
+		if ( IsValid( pKey ) && pKey->GetDBItemInfo()->nKeyID == nKeyID )
+			return true;
+	}
+	for ( int nSlot = 0; nSlot <= 1; ++nSlot )   // retail: SLOT_1 / SLOT_2
+	{
+		CDynamicCast<NRPG::IKeyItem> pKey( pInventory->Get( (NDb::ESlot)nSlot ) );
+		if ( IsValid( pKey ) && pKey->GetDBItemInfo()->nKeyID == nKeyID )
+			return true;
+	}
+	return false;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail NWorld::WorkingPicklock @0x3bcd60: the given item is a picklock with charges left.
+// Always probed on the ACTIVE item -- a picklock in the backpack does not count.
+static NRPG::CPicklockItem* WorkingPicklock( NRPG::IInventoryItem *pItem )
+{
+	CDynamicCast<NRPG::CPicklockItem> pPick( pItem );
+	if ( IsValid( pPick ) && pPick->GetIncQuantity() >= 1 )
+		return pPick.GetPtr();
+	return 0;
+}
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CExecOpenClose::CExecOpenClose( CUnitServer *_pUS, CCmdOpenClose *_pCmd )
 : CCommandExecute(_pUS), pCmd(_pCmd)
 {
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail @0x3bcdb0 (retail-new virtual): the item the executor works with = the inventory's active item
+NRPG::IInventoryItem* CExecOpenClose::GetActive() const
+{
+	return pUS->GetUnitRPG()->GetInventory()->GetActive();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 EUnitCommandResult CExecOpenClose::CanDoIt( const NAI::SUnitPosition &from, bool bIgnoreTarget ) const
@@ -445,11 +493,31 @@ EUnitCommandResult CExecOpenClose::CanDoIt( const NAI::SUnitPosition &from, bool
 	ASSERT( pOS );
 	if ( !pOS )
 		return UCR_GENERAL_FAILURE;
-	return UCR_OK; 
+	// retail @0x3bd290: the locked-door probe -- key in inventory or a charged picklock in the
+	// ACTIVE hand allows the command; otherwise UCR_DOOR_LOCKED (blocked-but-available in the UI).
+	if ( !pOS->IsLockedDoor() )
+		return UCR_OK;
+	NRPG::IInventory *pInventory = pUS->GetUnitRPG()->GetInventory();
+	if ( HasKey( pOS->GetKeyID(), pInventory ) )
+		return UCR_OK;
+	if ( WorkingPicklock( pInventory->GetActive() ) )
+		return UCR_OK;
+	return UCR_DOOR_LOCKED;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 int CExecOpenClose::GetStartAP() const
 {
+	// retail @0x3bd340: key -> AC_USE_KEY (RPGAP record 9), picklock -> AC_PICK_LOCK (the picklock
+	// record's nAPToUse), plain -> AC_OPEN_CLOSE.
+	CDynamicCast<CWindowDoor> pOS( pCmd->pObject );
+	if ( IsValid( pOS ) && pOS->IsLockedDoor() )
+	{
+		NRPG::IInventory *pInventory = pUS->GetUnitRPG()->GetInventory();
+		if ( HasKey( pOS->GetKeyID(), pInventory ) )
+			return pUS->GetActionAP( NRPG::AC_USE_KEY );
+		if ( WorkingPicklock( pInventory->GetActive() ) )
+			return pUS->GetActionAP( NRPG::AC_PICK_LOCK );
+	}
 	return pUS->GetActionAP( NRPG::AC_OPEN_CLOSE );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -457,16 +525,77 @@ void CExecOpenClose::Run()
 {
 	ASSERT( CanDoIt( pUS->GetPosition() ) == UCR_OK );
 
-	pUS->DoAction( NRPG::AC_OPEN_CLOSE );
+	CDynamicCast<CWindowDoor> pOS( pCmd->pObject );
+	// retail @0x3bd3f0: per-case AP spend
+	if ( !IsValid( pOS ) || !pOS->IsLockedDoor() )
+		pUS->DoAction( NRPG::AC_OPEN_CLOSE );
+	else
+	{
+		NRPG::IInventory *pInventory = pUS->GetUnitRPG()->GetInventory();
+		// ORIGINAL QUIRK (retail, no else between the two): key in inventory AND a working
+		// picklock in hand runs BOTH DoActions -- a double AP spend. Reproduced 1:1.
+		if ( HasKey( pOS->GetKeyID(), pInventory ) )
+			pUS->DoAction( NRPG::AC_USE_KEY );
+		if ( WorkingPicklock( pInventory->GetActive() ) )
+			pUS->DoAction( NRPG::AC_PICK_LOCK );
+	}
+	// retail: door already in the requested state -> finish without the animation
+	if ( IsValid( pOS ) && pCmd->bOpen == pOS->IsOpen() )
+	{
+		Finished();
+		return;
+	}
 	pUS->animator.OpenWindowDoor( pUS->GetPosition() );
 	StartAction( pUS->GetWorld(), SKIPPABLE );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail @0x3bdb70 -- the time label: the key silently unlocks (nothing consumed); a picklock runs
+// the pick attempt (charge spent BEFORE the roll, tick-seeded local SRand, skill formula, burglar
+// perk 52 bonus, MPC_PICK_LOCK medal on success); the plain/unlocked tail opens the door + AI sound.
 bool CExecOpenClose::TimeLabelReached()
 {
 	CDynamicCast<CWindowDoor> pOS( pCmd->pObject );
 	ASSERT( pOS );
-	pOS->OpenClose( pCmd->bOpen, false, pUS );
+	NRPG::IUnitMission *pRPG = pUS->GetUnitRPG();
+	if ( pOS->IsLockedDoor() )
+	{
+		NRPG::IInventory *pInventory = pRPG->GetInventory();
+		if ( HasKey( pOS->GetKeyID(), pInventory ) )
+		{
+			pOS->LockDoor( false, 0, 1 );   // unlock; the key stays in the inventory
+		}
+		else
+		{
+			NRPG::CPicklockItem *pPick = WorkingPicklock( pInventory->GetActive() );
+			if ( !pPick )
+				return false;               // retail: nothing happens -- no sound, door stays locked
+			pPick->SpendCharge();           // retail: the charge is spent BEFORE the roll
+			int nSkill = pRPG->GetSkillValue( NDb::ST_ENGINEERING );
+			SRand rnd;                      // retail: a fresh tick-seeded LOCAL rng, not the synced game rng
+			int nTry = ( rnd.Get( 100 ) * nSkill ) / 100 + pPick->GetDBPicklock()->nAddToEngSkill + nSkill / 2;
+			csSystem << CC_GREEN << L"Picklock used: skill " << nSkill << L", item bonus " << pPick->GetDBPicklock()->nAddToEngSkill << endl;
+			if ( pPick->GetIncQuantity() < 1 )
+			{
+				// the drained picklock is ripped out of the hand and destroyed (retail: TakeOff + ReleaseObj
+				// + animator active-item clear; dev's Update() refreshes the same visuals)
+				CObj<NRPG::IInventoryItem> pErase = pInventory->TakeOff( (NDb::ESlot)pInventory->GetActiveSlot() );
+				pUS->Update();
+			}
+			float fBonus = 0;
+			if ( pRPG->HasPerk( 52, &fBonus ) )   // the burglar perk (DB id 52)
+			{
+				csSystem << CC_GREEN << L"Unit has perk burglar, added " << fBonus << L" to try number" << endl;
+				nTry = (int)( nTry + fBonus );    // retail truncates (fldcw RC=CHOP)
+			}
+			csSystem << CC_WHITE << L"Total try number " << nTry << endl;
+			csSystem << CC_GREEN << L"Lock hardness " << pOS->GetLockHardness() << endl;
+			if ( nTry < pOS->GetLockHardness() )
+				return false;                     // FAIL: charge lost, door stays locked and closed
+			pRPG->GetRPGUnit()->AddMedalPoints( pUS->GetWorld()->GetGlobalGame(), NRPG::MPC_PICK_LOCK, (float)pOS->GetLockHardness() );
+			pOS->LockDoor( false, 0, 1 );
+		}
+	}
+	pOS->OpenClose( pCmd->bOpen, false, pUS );   // unlocking does NOT auto-open -- the exec opens it
 	//
 	NDb::CAISound *pAISound;
 	if ( pCmd->bOpen )

@@ -25,6 +25,7 @@ class CExplVoxelRenderer;
 class CVisionVoxelRenderer;
 class CFastRenderer;
 class IPrepareCollider;
+class IStabilityTrackers;   // aiStability.h
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CFloorsSet
 {
@@ -95,6 +96,14 @@ public:
 		const int nMask, bool bSelect2DoorHulls = false ) = 0;
 	virtual void AddTracker( IAIMapTracker *pTracker, const SBound &b, int nMask, bool bInformOnDoorFlip = false ) = 0;
 	virtual void FlipDoorWindow( CObjectBase *pWhat, bool bOpen ) = 0;
+	// retail IAIMap vtbl+0x48: the wreckage stability grid owned by this map (see aiStability.h).
+	virtual IStabilityTrackers* GetStabilityTrackers() = 0;
+	// retail IAIMap vtbl+0x4c (NAI::CAIMap::SelectHullPointers @0x67840/@0x673b0): collect every
+	// hull whose cached node bound intersects b -- the same door-state visibility gate as the other
+	// hull queries, an include mask (must overlap) and an exclude mask (must not), NO floor filter.
+	// Pushes the CConvexHull objects themselves (pointer identity is what the stability trackers
+	// diff); the output vector is NOT cleared first.
+	virtual void SelectHullPointers( vector< CPtr<CObjectBase> > *pRes, const SBound &b, int nIncludeMask, int nExcludeMask ) = 0;
 };
 void GetGeometry( list<SObjectInfo> *pRes, vector<SMassSphere> *pSpheres, int nAIGeometryID, bool *pbClosed = 0 );
 void GetSpheres( NDb::CModel *pModel, vector<SMassSphere> *pRes, CVec3 *pMassCenter );

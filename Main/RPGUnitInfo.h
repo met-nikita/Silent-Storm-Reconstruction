@@ -87,11 +87,11 @@ enum EAction // Do not change this enum or reorder its lines without agreeing wi
 	AC_DISARM_TRAP,
 	AC_SET_MINE,
 	AC_DISARM_MINE,               // = 37 (0x25) last Jan03/dev code
-	// Retail (Game.exe) appends the inventory-move reach actions at 42..44. Codes 38..41 are a
-	// retail-only gap (AC_SWAP + unnamed, see NRPG::CUnitMission::GetActionAP @0x2c0bd0) so the AC_ITEM_*
-	// codes land on their exact decoded ordinals: GetActionType @0x3a7990 returns these;
-	// CExecMoveInventoryItem::GetStartAP feeds them to GetActionAP. Append-only with an EXPLICIT 42 =>
-	// existing serialized action ordinals are unchanged (save-format safe).
+	// Retail (Game.exe) fills 38/39 with the locked-door actions and appends the inventory-move reach
+	// actions at 42..44 (see NRPG::CUnitMission::GetActionAP @0x2c0bd0; 41 stays a retail AC_SWAP-family
+	// gap). Explicit ordinals keep every serialized action code on its exact decoded value.
+	AC_USE_KEY = 38,              // 0x26  open a locked door with its key (AP = RPGAP table record 9; CExecOpenClose::GetStartAP @0x3bd340)
+	AC_PICK_LOCK,                 // 0x27 (39)  pick a locked door (AP = the active picklock record's nAPToUse)
 	AC_REPAIR_PK = 0x28,          // 0x28 (40) CExecHeal power-armour REPAIR branch
 	AC_ITEM_TAKE = 42,            // 0x2a  ground/other -> hand pickup
 	AC_ITEM_SLOT,                 // 0x2b  slot (re)placement

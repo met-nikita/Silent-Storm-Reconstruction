@@ -46,6 +46,7 @@ class IClipItem;
 class IWeaponItem;
 class CUnit;
 class IGame;
+class CGlobalGame;
 class CCritical;
 struct SCritical;
 struct SDiplomacy;
@@ -162,6 +163,10 @@ public:
 	// @0x34edb0 (DoAction) relocates the move-in-last-turn accounting here out of RegisterAction; default no-op
 	// so non-tracking impls (CFakeRPGUnit) need not override.
 	virtual void AddMoveInLastTurn( int n ) {}
+	// retail CUnitMission carries the campaign CGlobalGame (for pDifficulty); this fork binds it in the
+	// CUnitServer ctor. Appended NON-PURE at the vtable tail (dev<->release order is name-dispatched) so
+	// other IUnitMission implementors keep building; CUnitMission overrides it.
+	virtual void SetGlobalGame( CGlobalGame *p ) {}
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 float GetCubesArea( const CVec3 &ptPos, vector<CVec3> *pCubes );

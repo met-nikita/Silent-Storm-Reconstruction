@@ -533,7 +533,9 @@ public:
 	CShowItemModel( const SWindowInfo &sInfo );
 
 	NRPG::IInventoryItem* Get() const;
-	void Set( NRPG::IInventoryItem* pItem, NDb::ECameraType eCameraType );
+	// retail Set @0x1c0f50 builds the WHOLE static tooltip (all per-type text); the owning unit (may be
+	// null) is cached for Draw's per-frame "familiarity" refresh.
+	void Set( NRPG::IInventoryItem* pItem, NDb::ECameraType eCameraType, NWorld::CUnit* pUnit = 0 );
 
 	void Draw( const STime &sTime, NGScene::I2DGameView *pView );
 };

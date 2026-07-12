@@ -15,6 +15,7 @@ class CEnemyIcon;
 class CSoundIcon;	// the heard-not-seen "ear" marker (retail NUI::CSoundIcon)
 class CClueIcon;	// the discovered CLUE-item marker (retail NUI::CClueIcon, item flavor @0x211410)
 class CHintIcon;	// the discovered HINT-item marker (retail NUI::CHintIcon @0x2114a0)
+class CTrapIcon;	// the known trap/mine marker (retail NUI::CTrapIcon @0x211530, texture 940)
 class CHitTracker;
 class CTopBar;
 class CLogPanel;
@@ -52,6 +53,10 @@ private:
 	// (gated by "ui_showhints"), CClueIcon over every discovered NRPG::IClueItem (ungated).
 	list<CObj<CHintIcon> > hintIconsList;
 	list<CObj<CClueIcon> > clueItemIconsList;
+	// retail CMissionUI::UpdateTrappedObjects @0x214990 (serialized as tag 10 in retail operator&
+	// @0x218dc0; dev tag 23): one CTrapIcon per entry of the active player's trapped-objects list
+	// (own armed traps + spotted enemy mines), fixed texture 940, anchored at the trap pos z+0.6.
+	list<CObj<CTrapIcon> > trapIconsList;
 	////
 	STime sCameraScrollUpdate;
 	////
@@ -74,13 +79,14 @@ private:
 	CObj<CMedalsPanel> pMedalsPanel;
 	CObj<CBiographyPanel> pBiographyPanel;
 	list<CObj<CHitTracker> > hitsList;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CDesktopWindow*)this); f.Add(2,&pMission); f.Add(3,&itemTextsList); f.Add(4,&enemyIconsList); f.Add(5,&sCameraScrollUpdate); f.Add(6,&pPause); f.Add(7,&pTopBar); f.Add(8,&pAck); f.Add(9,&pLogPanel); f.Add(10,&pUnitPanel); f.Add(11,&pPerksPanel); f.Add(12,&pStorePanel); f.Add(13,&pInventory); f.Add(14,&pCharacter); f.Add(15,&pInventoryPanel); f.Add(16,&pCharacterPanel); f.Add(17,&hitsList); f.Add(18,&clueIconsList); f.Add(19,&pMedalsPanel); f.Add(20,&pBiographyPanel); f.Add(21,&hintIconsList); f.Add(22,&clueItemIconsList); return 0; }
+	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CDesktopWindow*)this); f.Add(2,&pMission); f.Add(3,&itemTextsList); f.Add(4,&enemyIconsList); f.Add(5,&sCameraScrollUpdate); f.Add(6,&pPause); f.Add(7,&pTopBar); f.Add(8,&pAck); f.Add(9,&pLogPanel); f.Add(10,&pUnitPanel); f.Add(11,&pPerksPanel); f.Add(12,&pStorePanel); f.Add(13,&pInventory); f.Add(14,&pCharacter); f.Add(15,&pInventoryPanel); f.Add(16,&pCharacterPanel); f.Add(17,&hitsList); f.Add(18,&clueIconsList); f.Add(19,&pMedalsPanel); f.Add(20,&pBiographyPanel); f.Add(21,&hintIconsList); f.Add(22,&clueItemIconsList); f.Add(23,&trapIconsList); return 0; }
 
 protected:
 	void UpdateHits( const STime &sTime );
 	void UpdateItems( NGScene::I2DGameView *pView );
 	void UpdateEnemies();
 	void UpdateClues();
+	void UpdateTraps();		// retail CMissionUI::UpdateTrappedObjects @0x214990
 	void UpdateCameraScroll( const STime &sTime );
 	CAckEvent* PlayAckEvent( const STime &sTime, NWorld::CAckEvent *pEvent );
 

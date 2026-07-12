@@ -22,6 +22,7 @@
 #include "rpgCheatConstants.h"
 #include "rpgPerkConstants.h"
 #include "..\DBFormat\DataRpgConstants.h"
+#include "..\DBFormat\DataMisc.h"   // NDb::CRPGAP (GetActionAP RPGAP-table costs) + CRPGPicklock (AC_PICK_LOCK nAPToUse)
 
 #include "RPGUnitMission.h"
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -135,13 +136,19 @@ private:
 	CDBPtr<NDb::CDBMinesConstants> pMinesConstants;
 	list<SCriticalsHolder> suspendedCriticals;
 public:
-	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&nMoveInLastTurn); f.Add(3,&eLastAction); f.Add(4,&nLastActionTimes); f.Add(5,&criticals); f.Add(6,&_nShameOnEpik); f.Add(7,&bLogActive); f.Add(8,&bSitting); f.Add(9,&nBullet); f.Add(10,&savedSnipeAP); f.Add(11,&fLastToHit); f.Add(12,&lastCriticals); f.Add(13,&bUseTwoHanded); f.Add(14,&fLightPerception); f.Add(15,&fSoundPerception); f.Add(16,&tohit); f.Add(17,&sAISoundConstants); f.Add(18,&SInterruptsConstants); f.Add(19,&ptLastCP); f.Add(20,&criticalsState); f.Add(21,&pModel); f.Add(22,&pRPGUnit); f.Add(23,&sID); f.Add(24,&nBulletHitThisTurn); f.Add(25,&AckAttackers); f.Add(26,&AckIDs); f.Add(27,&diplomacy); f.Add(28,&bUnconscious); f.Add(29,&pPanzerklein); f.Add(30,&pPanzerkleinVP); f.Add(31,&bHiding); f.Add(32,&pMinesConstants); f.Add(33,&suspendedCriticals); return 0; }
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&nMoveInLastTurn); f.Add(3,&eLastAction); f.Add(4,&nLastActionTimes); f.Add(5,&criticals); f.Add(6,&_nShameOnEpik); f.Add(7,&bLogActive); f.Add(8,&bSitting); f.Add(9,&nBullet); f.Add(10,&savedSnipeAP); f.Add(11,&fLastToHit); f.Add(12,&lastCriticals); f.Add(13,&bUseTwoHanded); f.Add(14,&fLightPerception); f.Add(15,&fSoundPerception); f.Add(16,&tohit); f.Add(17,&sAISoundConstants); f.Add(18,&SInterruptsConstants); f.Add(19,&ptLastCP); f.Add(20,&criticalsState); f.Add(21,&pModel); f.Add(22,&pRPGUnit); f.Add(23,&sID); f.Add(24,&nBulletHitThisTurn); f.Add(25,&AckAttackers); f.Add(26,&AckIDs); f.Add(27,&diplomacy); f.Add(28,&bUnconscious); f.Add(29,&pPanzerklein); f.Add(30,&pPanzerkleinVP); f.Add(31,&bHiding); f.Add(32,&pMinesConstants); f.Add(33,&suspendedCriticals); f.Add(34,&pGlobalGame); return 0; }
 
 	// transient (NOT serialized): the per-mission RPG game, pushed in by the owning unit-server before each
 	// attack so the combat critical clamp can honor CGame::nMaxCriticalSeverity (retail cached this game on
 	// the mission via its ctor; this dev fork dropped that ctor arg).
 	CPtr<IGame> pGame;
 	virtual void SetGame( IGame *p ) { pGame = p; }
+	// retail CUnitMission+0x1dc pGlobalGame (serialize tag 0x2c @0x2c6b10): the campaign game -- carries
+	// pDifficulty, read by CreateAttack's backstab-damage multipliers. Retail threads it through the ctor
+	// (CreateUnit @0x2c4f50); this fork binds it in the CUnitServer ctor (SetGlobalGame). Serialized at
+	// dev tag 34 so a mid-mission load restores it even for units built before the bind.
+	CPtr<CGlobalGame> pGlobalGame;
+	virtual void SetGlobalGame( CGlobalGame *p ) { pGlobalGame = p; }
 	//
 	CUnitMission();
 	//
@@ -603,14 +610,36 @@ int CUnitMission::GetActionAP( NAI::EPose curPose, EAction action ) const
 				else
 					return curPose == NAI::CRAWL? 4 : 2;
 			}
-		// @0x2c0bd0 -- retail sources the inventory-move AP from NDb::GetRPGAP()->nAP (a DB
-		// table with no accessor in this tree). Return 0 (== the pre-existing default path for
-		// these codes) so GetActionAP stays switch-total and never ASSERT(0)s / OOBs on the
-		// new AC_ITEM_* action codes. NOTE: retail charges a non-zero DB AP here.
+		// @0x2c0bd0 -- retail sources these from the RPGAP DB table (NDb::GetRPGAP, ids 11/12/13)
 		case AC_ITEM_TAKE:
+		{
+			NDb::CRPGAP *pAP = NDb::GetRPGAP( 11 );
+			return pAP ? pAP->nAP : 0;
+		}
 		case AC_ITEM_SLOT:
+		{
+			NDb::CRPGAP *pAP = NDb::GetRPGAP( 12 );
+			return pAP ? pAP->nAP : 0;
+		}
 		case AC_ITEM_TRANSFER:
+		{
+			NDb::CRPGAP *pAP = NDb::GetRPGAP( 13 );
+			return pAP ? pAP->nAP : 0;
+		}
+		// @0x2c0bd0 -- the locked-door actions (CExecOpenClose::GetStartAP @0x3bd340)
+		case AC_USE_KEY:
+		{
+			NDb::CRPGAP *pAP = NDb::GetRPGAP( 9 );        // RPGAP record 9 = USE_KEY
+			return pAP ? pAP->nAP : 0;
+		}
+		case AC_PICK_LOCK:
+		{
+			// retail: the cost comes off the ACTIVE picklock's own record (nAPToUse), 0 when none held
+			CDynamicCast<IPicklockItem> pPick( GetInventory()->GetActive() );
+			if ( IsValid( pPick ) )
+				return pPick->GetDBPicklock()->nAPToUse;
 			return 0;
+		}
 	}
 
 	// actions whose cost depends on the pose
@@ -700,6 +729,10 @@ bool CUnitMission::CreateAttack( vector<CAttackPortion> *pRes, bool bSpendAmmo,
 	bool bRet = true;
 	CWeaponItem *pWeapon  = pRPGUnit->GetWeaponItem();
 	CMeleeWeaponItem *pMW = pRPGUnit->GetMeleeWeaponItem();
+	// retail @0x6c216a (function head): the "Better critical difficulty" perk (id 44) scales EVERY
+	// portion's nCrticalDifficulty (both ranged and melee) by its Param1 (=1.25). Fetched once here.
+	float fCritDiffCoeff = 1.f;
+	HasPerk( N_PERK_BETTER_CRIT_DIFFICULTY, &fCritDiffCoeff );
 	//
 	if ( IsValid( pWeapon ) )
 	{
@@ -749,23 +782,44 @@ bool CUnitMission::CreateAttack( vector<CAttackPortion> *pRes, bool bSpendAmmo,
 				// ordinary shot
 				a.nCrtical += nSnipeSkill / 10;
 			}
+			// retail @0x6c2566: the same "Better critical difficulty" perk factor scales the ranged
+			// portion's nCrticalDifficulty as the last step (dev dropped it here too).
+			a.nCrticalDifficulty *= fCritDiffCoeff;
 		}
 	}
 	else if ( pMW )
 	{
 		NDb::CRPGMeleeWeapon *pW = pMW->GetDBMeleeWeapon();
-				pRes->push_back( CAttackPortion( 110, 2, 0, 0, 0, 0 ) ); // constants given by Epik
+		// retail @0x6c25f3..0x6c2616: all-zero ctor (the Jan03 "Epik 110" is gone; nK and the
+		// damage bounds are rebuilt below); fPushCoeff=0 -- melee kills never push the corpse.
+		pRes->push_back( CAttackPortion( 0, 2, 0.0f, 0, 0, 0, 0 ) );
 		CAttackPortion &a = pRes->front();
+		// retail @0x6c264c: melee gib enable -- ONLY a Panzerklein pilot's strike may gib
+		// (every other attack source keeps the ctor's bNoBlowUp=true).
+		a.bNoBlowUp = pPanzerklein == 0;
 		const int nStr = pRPGUnit->Skills( NDb::ST_STR );
 		int nMelee = pRPGUnit->Skills( NDb::ST_MELEE );
-		if ( bBackStab )
-			nMelee *= F_BACKSTAB_MELEE_COEFF;
+		// retail @0x6c26c2: backstab multiplies the melee skill by the DIFFICULTY record's
+		// fBackstabMeleeMultiplier (pGlobalGame->pDifficulty), not the old F_BACKSTAB_MELEE_COEFF
+		// constant -- so backstab strength is difficulty-tunable. Truncating (int) matches the fistp.
+		if ( bBackStab && IsValid( pGlobalGame ) && IsValid( pGlobalGame->pDifficulty ) )
+			nMelee = (int)( nMelee * pGlobalGame->pDifficulty->fBackstabMeleeMultiplier );
 		//
 		a.nDmgMin = pW->nDmgMin + nStr + nMelee * (pW->nDmgMax - pW->nDmgMin) / (N_MAX_SKILL * 2);
 		a.nDmgMax = pW->nDmgMax + nStr;
+		// retail nK ladder @0x6c2802..0x6c2858: bare fists (melee record id 1) hit at
+		// 160 + 10*STR; a real melee weapon doubles that; a Panzerklein pilot's strike is a
+		// flat 1600 (0x640); a throwing knife swung in melee is a flat 40 (0x28).
 		a.nK = 160 + 10 * nStr;
+		if ( pW->GetRecordID() != 1 )
+			a.nK *= 2;
+		if ( pPanzerklein )
+			a.nK = 1600;
+		if ( IsValid( pW ) && pW->bThrowing )
+			a.nK = 40;
 		a.nCrtical = Max( 0.f, 10 + 0.4f * (nMelee - 25) + pMW->GetDBMeleeWeapon()->nCriticalBonus );
-		a.nCrticalDifficulty = 0.5f * a.nCrtical;
+		// retail @0x6c28bf: nCrticalDifficulty = nCrtical * fCritDiffCoeff * 0.5 (dev dropped the perk factor)
+		a.nCrticalDifficulty = a.nCrtical * fCritDiffCoeff * 0.5f;
 		a.pAttacker = pAttacker;
 		a.pTarget = pTarget;
 		a.nUnconsciousProbability = GetUnconsciousProbability( pAttacker, 

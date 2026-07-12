@@ -614,8 +614,15 @@ int CDumbUnitServer::ProcessAttack( int nUserID, NRPG::CAttackPortion *pAttack, 
 	// this dev fork dropped that ctor arg, so we (re)bind it here at the attack entry.
 	pRPG->SetGame( pWorld->GetGame() );
 	int nRes = pRPG->ProcessAttack( nUserID, pAttack, pArmor );
-	if ( bShowBlood && nRes > 120 )
+	// retail gib gate @0x750ef1..0x750f4c: bShowBlood && nRes > 120 && CanBlowUp() (unit
+	// vtbl+0x28, @0x3c0420) && !pAttack->bNoBlowUp -- and a still-living unit DIES first
+	// (Die(1,0) @0x750f25, the remove-flavoured kill: no death state/camera) before the gib.
+	// Only a Panzerklein pilot's melee portion carries bNoBlowUp=false (CreateAttack
+	// @0x6c264c), so bullets/explosion portions never gib a unit through this path.
+	if ( bShowBlood && nRes > 120 && CanBlowUp() && !pAttack->bNoBlowUp )
 	{
+		if ( !IsDead() )
+			Die( true );
 		BlowUp();
 		return 0;
 	}
@@ -647,7 +654,9 @@ int CDumbUnitServer::ProcessAttack( int nUserID, NRPG::CAttackPortion *pAttack, 
 	vector<NDb::ECritical> criticals;
 	pRPG->GetLastCriticals( &criticals );
 
-	if ( bShowBlood && !IsDead() && nUserID == NAI::HL_HEAD && !criticals.empty() && !bHeadless && nCurrentVP <= 0 )
+	// retail @0x7511dc: the whole behead section is additionally gated on CanBlowUp() (unit
+	// vtbl+0x28) -- a quest-clue corpse or a PK (worn/empty) never loses its head.
+	if ( bShowBlood && CanBlowUp() && !IsDead() && nUserID == NAI::HL_HEAD && !criticals.empty() && !bHeadless && nCurrentVP <= 0 )
 	{
 		CVec3 vVel = pAttack->rTtrajectory.ptDir;
 		if ( fabs2( vVel ) > 0 )
@@ -700,20 +709,22 @@ int CDumbUnitServer::ProcessAttack( int nUserID, NRPG::CAttackPortion *pAttack, 
 	// push a fresh corpse gets on top of its death clip. Skipping it left KO'd units FROZEN standing
 	// in their last pose -- and a later KillUnit on an unconscious unit takes the DropItems-only
 	// branch, freezing the corpse for good (the reported frozen-corpse-at-old-place bug).
-	// Gates (disasm 0x751313..0x751359): persona !IsAlive; direction (or cheat_football); not a worn
-	// PK shell; persona not a panzerklein; not being carried (animator.bIsCarried @+103).
-	// (retail calls NRPG::CAttackPortion::GetPushCorpseCoeff here for its return value only --
-	//  dev's equivalent is the plain fPushCoeff member read below; no side effects to preserve)
+	// Gates (disasm 0x75138c..0x7513fa): persona !IsAlive; GetPushCorpseCoeff(pAttack) > 0 (or
+	// cheat_football) -- NOT fabs2(dir) > 0; not a worn PK shell; persona not a panzerklein; not
+	// being carried (animator.bIsCarried @+103).
+	// ‼️ retail @0x75138c stores the GetPushCorpseCoeff return (fstp [esp+0x10], dropped by Ghidra)
+	// and, non-football, multiplies the normalized direction by IT (0x75144f..0x751458) -- the
+	// weapon-scaled fling. The previous flat fCoeff = 1.0f was the "same force for every weapon" bug.
 	{
-		CVec3 vPush = pAttack->rTtrajectory.ptDir;
+		float fCoeff = pAttack->GetPushCorpseCoeff();   // retail @0x28f860 over the bullet's fPushCoeff
 		bool bDown = IsDead() || IsUnconscious();
-		if ( bDown && ( bFootball || fabs2( vPush ) > 0 ) && !IsWearingPK() &&
+		if ( bDown && ( bFootball || fCoeff > 0 ) && !IsWearingPK() &&
 		     pRPG->GetRPGPers()->pPanzerklein == 0 && !animator.bIsCarried )
 		{
+			CVec3 vPush = pAttack->rTtrajectory.ptDir;
 			Normalize( &vPush );
-			float fCoeff = 1.0f;
 			if ( bFootball )
-				fCoeff = pAttack->fPushCoeff <= 0 ? 0.33f : 1.0f;   // retail GetPushCorpseCoeff(pAttack)
+				fCoeff = pAttack->GetPushCorpseCoeff() <= 0 ? 0.33f : 1.0f;   // retail 0x75141d..0x75144f
 			vPush *= fCoeff;
 			// BUG 5 (auto-focus): retail ProcessAttack @0x350e20 posts CUICmdUnitCamera(dyingUnit,
 			// PR_UNIT_DIED_BEAUTY, useSloMo=true, prob=(coeff<=0.5?1:2*coeff+0.5), null) for a killed/KO'd

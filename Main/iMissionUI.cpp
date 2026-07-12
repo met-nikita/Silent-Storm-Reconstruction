@@ -827,6 +827,119 @@ void CHintIcon::Draw( const STime &sTime, NGScene::I2DGameView *pView )
 
 	TBaseClass::Draw( sTime, pView );
 }
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// CTrapIcon -- retail NUI::CTrapIcon (ctor @0x211530, ProcessMessage @0x210700, Draw @0x210790,
+// GetTarget @0x216510, saveload id 0xB3618130, operator& @0x21a430 [base + pItem]): the marker over
+// a KNOWN armed trap/mine -- the active player's trapped-objects set (own set traps + spotted enemy
+// mines). CMissionUI::UpdateTrappedObjects @0x214990 rebuilds one per GetTrappedObjectsList entry.
+// Draw @0x210790 (disasm): SINGLE fixed texture 940 (0x3ac, mov ecx,0x3ac); anchor = the trap
+// object's position, z += 0.6 (fadd [0x8b1fe8]); drawn ONLY while on-screen -- unlike the clue/hint
+// icons there is NO off-screen arrow set. ProcessMessage @0x210700: 0x6000034 (dev EVENT_RBUTTONUP)
+// -> focus the camera on the trap position; 0x6000035 (RBUTTONDOWN) swallowed; else base decorator.
+class CTrapIcon: public CActionDecorator<CImage>
+{
+	OBJECT_BASIC_METHODS(CTrapIcon)
+private:
+	ZDATA_(TBaseClass)
+	CPtr<NGame::IMission> pMission;
+	CPtr<CObjectBase> pItem;				// retail +0x90 -- the trapped object (door / mine); the UpdateHash reuse key
+	CDBPtr<NDb::CUITexture> pTexture;
+	CPtr<CMissionUI> pMissionUI;			// dev icon pattern: client-rect clamp in Draw
+	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(TBaseClass*)this); f.Add(2,&pMission); f.Add(3,&pItem); f.Add(4,&pTexture); f.Add(5,&pMissionUI); return 0; }
+	bool bOnScreen;							// transient draw gate (retail folds GetPositionInfo into Draw; not serialized)
+
+public:
+	CTrapIcon(): bOnScreen( false ) {}
+	CTrapIcon( const SWindowInfo &sInfo, NGame::IMission *pMission, CObjectBase *pItem, CMissionUI *pMissionUI );
+
+	bool CanHandleState( NGame::IState *pState ) const;		// retail @0x2162e0 (folded): true
+	CObjectBase* GetTarget();								// retail @0x216510: pItem
+
+	CObjectBase* GetItem() const { return pItem; }
+	void Set( bool bOnScreen );
+	void SetPosition( const SPoint &sPosition );
+
+	bool ProcessMessage( const SEvent &sEvent );
+	void Draw( const STime &sTime, NGScene::I2DGameView *pView );
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
+CTrapIcon::CTrapIcon( const SWindowInfo &sInfo, NGame::IMission *_pMission, CObjectBase *_pItem, CMissionUI *_pMissionUI ):
+	TBaseClass( sInfo, _pMission ), pMission( _pMission ), pItem( _pItem ), pMissionUI( _pMissionUI ), bOnScreen( false )
+{
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+bool CTrapIcon::CanHandleState( NGame::IState *pState ) const
+{
+	return true;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+CObjectBase* CTrapIcon::GetTarget()
+{	// retail @0x216510: the bare +0x90 CPtr -- the trapped world object (so the disarm state can
+	// target the door/mine through its icon)
+	return pItem;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CTrapIcon::Set( bool _bOnScreen )
+{
+	// retail CTrapIcon::Draw @0x210790 texture pick: the single marker texture 940 (0x3ac) --
+	// no directional arrow variants; an off-screen trap simply doesn't draw.
+	bOnScreen = _bOnScreen;
+	pTexture = NDb::GetUITexture( 940 );
+	SetImage( pTexture );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CTrapIcon::SetPosition( const SPoint &_sPosition )
+{
+	TBaseClass::SetSize( SPoint( 0, 0 ) );
+	TBaseClass::SetPosition( _sPosition );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+bool CTrapIcon::ProcessMessage( const SEvent &sEvent )
+{
+	// retail @0x210700: 0x6000034 (dev EVENT_RBUTTONUP) -> focus the camera on the trap position;
+	// 0x6000035 (dev EVENT_RBUTTONDOWN) swallowed; else base decorator.
+	switch ( sEvent.nEvent )
+	{
+	case EVENT_RBUTTONDOWN:
+		return true;
+	case EVENT_RBUTTONUP:
+	{
+		CDynamicCast<NWorld::IMine> pMine( pItem.GetPtr() );
+		if ( pMine && IsValid( pMission->GetCamera() ) )
+		{
+			ICamera::SCameraPos sPos;
+			pMission->GetCamera()->GetPlacement( &sPos );
+			sPos.ptAnchor = pMine->GetMinePos();
+			pMission->GetCamera()->SetPlacement( sPos );
+		}
+		return true;
+	}
+	}
+
+	return TBaseClass::ProcessMessage( sEvent );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CTrapIcon::Draw( const STime &sTime, NGScene::I2DGameView *pView )
+{
+	// retail @0x210790: draw ONLY when the projected anchor is on-screen and the texture is valid
+	if ( !bOnScreen || !IsValid( pTexture ) )
+		return;
+
+	SPoint sNewSize( pTexture->nWidth, pTexture->nHeight );
+	SPoint sSize = GetSize();
+	SPoint sPosition = GetPosition();
+
+	// position/clamp are CLIENT-window-local (icons are view children, like the ear/enemy icons)
+	const SPoint &sParentSize = pMissionUI->GetClientWindow()->GetSize();
+	SRect sViewRect( 0, 0, sParentSize.x, sParentSize.y );
+	sPosition.x = min( max( sViewRect.x1 + sNewSize.x / 2, sPosition.x ), sViewRect.x2 - sNewSize.x / 2 );
+	sPosition.y = min( max( sViewRect.y1 + sNewSize.y / 2, sPosition.y ), sViewRect.y2 - sNewSize.y / 2 );
+
+	TBaseClass::SetSize( sNewSize );
+	TBaseClass::SetPosition( SPoint( sPosition.x + sSize.x / 2 - sNewSize.x / 2, sPosition.y + sSize.y / 2 - sNewSize.y / 2 ) );
+
+	TBaseClass::Draw( sTime, pView );
+}
 //////////////////////////////////////////////////////////////////////////////////////
 class CHitTracker: public CText
 {
@@ -1148,6 +1261,7 @@ void CMissionUI::Draw( const STime &sTime, NGScene::I2DGameView *pView )
 	UpdateItems( pView );
 	UpdateEnemies();
 	UpdateClues();	// retail @0x213e70: the clue ("ear") markers rebuild together with the unit icons
+	UpdateTraps();	// retail Draw @0x215b20 order: ... UpdateAudibleSounds, UpdateTrappedObjects @0x214990, UpdateCameraScroll
 	UpdateCameraScroll( sTime );
 
 	CDesktopWindow::Draw( sTime, pView );
@@ -1660,6 +1774,71 @@ void CMissionUI::UpdateClues()
 	clueIconsList = newClueIconsList;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+void CMissionUI::UpdateTraps()
+{
+	// retail CMissionUI::UpdateTrappedObjects @0x214990 (there gated on the bShowIcons global; this
+	// fork's overlay-icon passes are ungated, matching UpdateEnemies/UpdateClues): one CTrapIcon per
+	// entry of the ACTIVE player's GetTrappedObjectsList (@0x387330: live + IMine + IsMineSet -- own
+	// armed traps and spotted enemy mines), keyed-reuse by the trapped object (retail
+	// UpdateHash<CObjectBase,CTrapIcon> @0x2173b0), anchored at the trap position z+0.6
+	// (CTrapIcon::Draw @0x210790), drawn only while on-screen.
+	CVec2 vScreenRect = pMission->GetScene()->GetScreenRect();
+	CTransformStack sTS = pMission->GetCameraTransform();
+
+	SRect sViewRect;
+	SPoint sViewPosition;
+	GetClientWindow()->ClientToScreen( &sViewPosition, &sViewRect );
+
+	NWorld::IPlayer *pPlayer = 0;
+	if ( pMission->GetActivePlayer() )
+		pPlayer = pMission->GetActivePlayer()->GetPlayer();
+
+	if ( ( sViewRect.Width() == 0 ) || ( pPlayer == 0 ) )
+	{
+		trapIconsList.clear();
+		return;
+	}
+
+	list< CPtr<CObjectBase> > traps;
+	pPlayer->GetTrappedObjectsList( &traps );
+
+	// keyed reuse: index the existing icons by their trapped object (retail UpdateHash @0x2173b0)
+	unordered_map<CPtr<CObjectBase>, CPtr<CTrapIcon>, SPtrHash> knownIcons;
+	for ( list<CObj<CTrapIcon> >::const_iterator iIcon = trapIconsList.begin(); iIcon != trapIconsList.end(); ++iIcon )
+		knownIcons[ (*iIcon)->GetItem() ] = *iIcon;
+
+	list<CObj<CTrapIcon> > newTrapIconsList;
+	for ( list< CPtr<CObjectBase> >::iterator iObj = traps.begin(); iObj != traps.end(); ++iObj )
+	{
+		CObjectBase *pObj = iObj->GetPtr();
+		CDynamicCast<NWorld::IMine> pMine( pObj );
+		if ( !pMine )
+			continue;   // GetTrappedObjectsList already filters, but the cast also yields GetMinePos
+
+		CTrapIcon *pIcon;
+		unordered_map<CPtr<CObjectBase>, CPtr<CTrapIcon>, SPtrHash>::iterator iKnown = knownIcons.find( pObj );
+		if ( iKnown != knownIcons.end() )
+			pIcon = iKnown->second;
+		else
+			pIcon = new CTrapIcon( SWindowInfo( GetClientWindow(), SPoint( 0, 0 ), SPoint( 0, 0 ), "", STYLE_ENABLED | STYLE_VISIBLE ), pMission, pObj, this );
+
+		// anchor: the armed trap's position, +0.6 up (retail CTrapIcon::Draw @0x210790)
+		CVec3 vIconPos = pMine->GetMinePos();
+		vIconPos.z += 0.6f;
+
+		CVec2 vScreenPos;
+		float fAngle = ProjectOverlayIconPos( vIconPos, sTS, vScreenRect, sViewRect, &vScreenPos );
+
+		pIcon->Set( fAngle == -1 );   // on-screen only -- retail draws no off-screen arrows for traps
+		SPoint sIconPos;
+		GetClientWindow()->ScreenToClient( SPoint( vScreenPos.x, vScreenPos.y ), &sIconPos );
+		pIcon->SetPosition( sIconPos );
+		newTrapIconsList.push_back( pIcon );
+	}
+
+	trapIconsList = newTrapIconsList;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 void CMissionUI::UpdateCameraScroll( const STime &sTime )
 {
 	STime sDelta = sTime - sCameraScrollUpdate;
@@ -1753,3 +1932,4 @@ REGISTER_SAVELOAD_CLASS( 0xB0241949, CHitTracker );
 REGISTER_SAVELOAD_CLASS( 0xB024194A, CSoundIcon );	// dev-established id (class formerly named CClueIcon here)
 REGISTER_SAVELOAD_CLASS( 0xB3123180, CClueIcon );	// retail NUI::CClueIcon id (gen/classreg.json)
 REGISTER_SAVELOAD_CLASS( 0xB3212140, CHintIcon );	// retail NUI::CHintIcon id (gen/classreg.json)
+REGISTER_SAVELOAD_CLASS( 0xB3618130, CTrapIcon );	// retail NUI::CTrapIcon id (register thunk @0x4a07b0)
