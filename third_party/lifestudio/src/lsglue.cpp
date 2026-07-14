@@ -1,6 +1,5 @@
 // ============================================================================
 //  LifeStudio:Head - host-side init glue (reconstructed)
-//
 // ============================================================================
 
 #include "LifeStudioHeadAPIInit.h"
@@ -47,6 +46,14 @@ float __stdcall Compute(void *ctrl, float x)
 
 // Scratch slot the DLL stores for its own use (its meaning is internal to the DLL).
 static unsigned int tmp = 0;
+// Second Init-lib static; retail Init calls TemporarySignFunction() and discards
+// the result (@0x3cc940 just returns this slot).
+static unsigned int sign = 0;
+
+unsigned int __stdcall TemporarySignFunction()
+{
+  return sign;
+}
 
 void __stdcall Init()
 {
@@ -57,6 +64,7 @@ void __stdcall Init()
   IOptions::Create(&tmp,
                    static_cast<unsigned int>(addr) & 0x1EF4FFFFu,
                    (static_cast<unsigned int>(addr) >> 16) + 0x33E50000u);
+  TemporarySignFunction();
 }
 
 };

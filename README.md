@@ -59,8 +59,7 @@ CMake попытается подсунуть вашу папку с игрой 
 
 ### Запуск игры
 Поместите Game.exe в папку с игрой (пример: `E:/SteamLibrary/steamapps/common/Silent Storm`). 
-Замените (с бэкапом) `LifeStudioHeadAPI.dll` и `GDPFile.dll` на их более новые версии из 
-Silent Storm Sentinels (2.6.0.0). Запустите Game.exe.
+Запустите Game.exe.
 
 ### Примечания
 - импортируемые проприетарные библиотеки fmod / Bink / LifeStudio **генерируются во время сборки** из

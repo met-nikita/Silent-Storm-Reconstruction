@@ -19,51 +19,53 @@ namespace LifeStudioHeadAPI
 struct ObjectMaterial
 {
   char         name[32];
-  char         _unused1[16];
-  float        ambient[4]; 
-  char         _unused2[48];
+  float        diffuse[4];
+  float        ambient[4];
+  float        specular[4];
+  float        emission[4];
+  float        shininess;
   unsigned int flags;
-  char         textureName[128];
+  char         textureName[32];
 };
 
 struct IGDPObject : public ITransformerInput
 {
-  virtual int LIFESTUDIOHEADAPICALL MaterialsCount() const = 0;
-  virtual bool LIFESTUDIOHEADAPICALL Material(int materialNumber, ObjectMaterial &material) const = 0;
-  virtual int LIFESTUDIOHEADAPICALL TrianglesCount(int materialNumber) const = 0;
-  virtual const unsigned short *LIFESTUDIOHEADAPICALL Triangulation(int materialNumber) const = 0;
-  virtual int LIFESTUDIOHEADAPICALL VerticesCount() const = 0;
-  virtual const float *LIFESTUDIOHEADAPICALL UV() const = 0;
-  virtual const float *LIFESTUDIOHEADAPICALL UVNoChg() const = 0;
-  virtual bool LIFESTUDIOHEADAPICALL HasExtenedUVInfo() const = 0;
-  virtual int LIFESTUDIOHEADAPICALL UVCount() const = 0;
-  virtual int LIFESTUDIOHEADAPICALL BaseTrianglesCount() const = 0;
-  virtual const unsigned short *LIFESTUDIOHEADAPICALL BaseTriangulation() const = 0;
-  virtual const unsigned short *LIFESTUDIOHEADAPICALL UV2VMap() const = 0;
-  virtual int LIFESTUDIOHEADAPICALL AdditionalNormalsDataSize() const = 0;
-  virtual bool LIFESTUDIOHEADAPICALL AdditionalNormalsData(char *buffer) = 0;
-  virtual int LIFESTUDIOHEADAPICALL PNGTextureSize(const char *textureName) const = 0;
-  virtual bool LIFESTUDIOHEADAPICALL PNGTexture(const char *textureName, char *buffer) = 0;
-  virtual bool LIFESTUDIOHEADAPICALL IsTransformable() const = 0;
-  virtual int LIFESTUDIOHEADAPICALL DataListSize() const = 0;
-  virtual const char *LIFESTUDIOHEADAPICALL DataListItem(int itemNumber) const = 0;
-  virtual int LIFESTUDIOHEADAPICALL DefaultAnimatorDataSize() const = 0;
-  virtual bool LIFESTUDIOHEADAPICALL DefaultAnimatorData(char *buffer) = 0;
-  virtual int LIFESTUDIOHEADAPICALL SubObjectsCount() const = 0;
-  virtual const char *LIFESTUDIOHEADAPICALL SubObjectName(int number) const = 0;
-  virtual const char *LIFESTUDIOHEADAPICALL SubObjectType(int number) const = 0;
-  virtual IGDPObject *LIFESTUDIOHEADAPICALL SubObject(int number) = 0;
-  virtual void LIFESTUDIOHEADAPICALL Destroy() = 0;
+  virtual int MaterialsCount() const = 0;
+  virtual bool Material(int materialNumber, ObjectMaterial &material) const = 0;
+  virtual int TrianglesCount(int materialNumber) const = 0;
+  virtual const unsigned short *Triangulation(int materialNumber) const = 0;
+  virtual int VerticesCount() const = 0;
+  virtual const float *UV() const = 0;
+  virtual const float *UVNoChg() const = 0;
+  virtual bool HasExtenedUVInfo() const = 0;
+  virtual int UVCount() const = 0;
+  virtual int BaseTrianglesCount() const = 0;
+  virtual const unsigned short *BaseTriangulation() const = 0;
+  virtual const unsigned short *UV2VMap() const = 0;
+  virtual int AdditionalNormalsDataSize() const = 0;
+  virtual bool AdditionalNormalsData(char *buffer) = 0;
+  virtual int PNGTextureSize(const char *textureName) const = 0;
+  virtual bool PNGTexture(const char *textureName, char *buffer) = 0;
+  virtual bool IsTransformable() const = 0;
+  virtual int DataListSize() const = 0;
+  virtual const char *DataListItem(int itemNumber) const = 0;
+  virtual int DefaultAnimatorDataSize() const = 0;
+  virtual bool DefaultAnimatorData(char *buffer) = 0;
+  virtual int SubObjectsCount() const = 0;
+  virtual const char *SubObjectName(int number) const = 0;
+  virtual const char *SubObjectType(int number) const = 0;
+  virtual IGDPObject *SubObject(int number) = 0;
+  virtual void Destroy() = 0;
 };
 
 struct IGDPFile
 {
-  virtual int LIFESTUDIOHEADAPICALL ObjectsCount() const = 0;
-  virtual const char *LIFESTUDIOHEADAPICALL ObjectName(int number) const = 0;
-  virtual IGDPObject *LIFESTUDIOHEADAPICALL Object(int number) = 0;
-  virtual void LIFESTUDIOHEADAPICALL Destroy() = 0;
+  virtual int ObjectsCount() const = 0;
+  virtual const char *ObjectName(int number) const = 0;
+  virtual IGDPObject *Object(int number) = 0;
+  virtual void Destroy() = 0;
 
-  static LIFESTUDIOHEADAPI_API IGDPFile *LIFESTUDIOHEADAPICALL Create(const char *filename);
+  static LIFESTUDIOHEADAPI_API IGDPFile *__stdcall Create(const char *filename);
 };
 
 };

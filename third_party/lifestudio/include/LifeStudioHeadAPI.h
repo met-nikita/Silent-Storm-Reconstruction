@@ -15,10 +15,6 @@
 #endif
 #endif
 
-#ifndef LIFESTUDIOHEADAPICALL
-#define LIFESTUDIOHEADAPICALL __stdcall
-#endif
-
 namespace LifeStudioHeadAPI
 {
 
@@ -30,43 +26,41 @@ struct IMacroMuscle;
 
 struct IAnimator
 {
-  virtual bool LIFESTUDIOHEADAPICALL Load(const char *buffer, int sizeOfBuffer) = 0;
-  virtual bool LIFESTUDIOHEADAPICALL Load(const char *buffer, int sizeOfBuffer, float threshold, unsigned int maxNMuscles) = 0;
-  virtual int LIFESTUDIOHEADAPICALL SaveBufferSize() = 0;
-  virtual bool LIFESTUDIOHEADAPICALL Save(char *buffer) = 0;
-  virtual IMuscle *LIFESTUDIOHEADAPICALL MuscleByName(const char *name) = 0;
-  virtual IMuscle *LIFESTUDIOHEADAPICALL Muscle(int number) = 0;
-  virtual int LIFESTUDIOHEADAPICALL MusclesCount() const = 0;
-  virtual IBone *LIFESTUDIOHEADAPICALL BoneByName(const char *name) = 0;
-  virtual IBone *LIFESTUDIOHEADAPICALL Bone(int number) = 0;
-  virtual IBone *LIFESTUDIOHEADAPICALL BoneByType(unsigned long type, IBone *prev = 0) = 0;
-  virtual int LIFESTUDIOHEADAPICALL BonesCount() const = 0;
-  virtual void LIFESTUDIOHEADAPICALL FillUnused(bool fill) = 0;
-  virtual bool LIFESTUDIOHEADAPICALL FillUnused() const = 0;
-  virtual bool LIFESTUDIOHEADAPICALL Process(float *vertexArray, int step) = 0;
-  virtual int LIFESTUDIOHEADAPICALL VerticesCount() const = 0;
-  virtual void LIFESTUDIOHEADAPICALL ClearAllMacroMuscles() = 0;
-  virtual void LIFESTUDIOHEADAPICALL AddMacroMuscle(IMacroMuscle *muscle, float expression) = 0;
-  virtual void LIFESTUDIOHEADAPICALL MultMacroMuscle(IMacroMuscle *muscle, float expression) = 0;
-  virtual void LIFESTUDIOHEADAPICALL ComputePhysics() = 0;
-  virtual void LIFESTUDIOHEADAPICALL RegisterMacroMuscle(IMacroMuscle *muscle) = 0;
-  virtual void LIFESTUDIOHEADAPICALL UnregisterMacroMuscle(IMacroMuscle *muscle) = 0;
-  virtual void LIFESTUDIOHEADAPICALL ClearAllRegistration() = 0;
-  virtual void LIFESTUDIOHEADAPICALL CollectUserItems(bool use) = 0;
-  virtual bool LIFESTUDIOHEADAPICALL CollectUserItems() const = 0;
-  virtual UserID LIFESTUDIOHEADAPICALL UserItem(const char *itemName) = 0;
-  virtual int LIFESTUDIOHEADAPICALL UserValuesCount(UserID id) = 0;
-  virtual float LIFESTUDIOHEADAPICALL UserValue(UserID id, int number) = 0;
-  virtual void LIFESTUDIOHEADAPICALL ClearUserItems() = 0;
-  virtual void LIFESTUDIOHEADAPICALL ComputeBonesHierarchy() = 0;
-  virtual bool LIFESTUDIOHEADAPICALL HasNeck() const = 0;
-  virtual void LIFESTUDIOHEADAPICALL Multiplier(float value) = 0;
-  virtual float LIFESTUDIOHEADAPICALL Multiplier() const = 0;
-  virtual unsigned int LIFESTUDIOHEADAPICALL Flags() const = 0;
-  virtual void LIFESTUDIOHEADAPICALL Destroy() = 0;
+  virtual bool Load(const char *buffer, int sizeOfBuffer) = 0;
+  virtual int SaveBufferSize() = 0;
+  virtual bool Save(char *buffer) = 0;
+  virtual IMuscle *MuscleByName(const char *name) = 0;
+  virtual IMuscle *Muscle(int number) = 0;
+  virtual int MusclesCount() const = 0;
+  virtual IBone *BoneByName(const char *name) = 0;
+  virtual IBone *Bone(int number) = 0;
+  virtual IBone *BoneByType(unsigned long type, IBone *prev = 0) = 0;
+  virtual int BonesCount() const = 0;
+  virtual void FillUnused(bool fill) = 0;
+  virtual bool FillUnused() const = 0;
+  virtual bool Process(float *vertexArray, int step) = 0;
+  virtual int VerticesCount() const = 0;
+  virtual void ClearAllMacroMuscles() = 0;
+  virtual void AddMacroMuscle(IMacroMuscle *muscle, float expression) = 0;
+  virtual void MultMacroMuscle(IMacroMuscle *muscle, float expression) = 0;
+  virtual void ComputePhysics() = 0;
+  virtual void RegisterMacroMuscle(IMacroMuscle *muscle) = 0;
+  virtual void UnregisterMacroMuscle(IMacroMuscle *muscle) = 0;
+  virtual void ClearAllRegistration() = 0;
+  virtual void CollectUserItems(bool use) = 0;
+  virtual bool CollectUserItems() const = 0;
+  virtual UserID UserItem(const char *itemName) = 0;
+  virtual int UserValuesCount(UserID id) = 0;
+  virtual float UserValue(UserID id, int number) = 0;
+  virtual void ClearUserItems() = 0;
+  virtual void ComputeBonesHierarchy() = 0;
+  virtual bool HasNeck() const = 0;
+  virtual void NeckProcessing2(bool use) = 0;
+  virtual bool NeckProcessing2() const = 0;
+  virtual IAnimator *Clone() = 0;
+  virtual void Destroy() = 0;
 
-  static LIFESTUDIOHEADAPI_API IAnimator *LIFESTUDIOHEADAPICALL Create();
-  static LIFESTUDIOHEADAPI_API IAnimator *LIFESTUDIOHEADAPICALL CreateBlending();
+  static LIFESTUDIOHEADAPI_API IAnimator *__stdcall Create();
 };
 
 };

@@ -1,7 +1,6 @@
 LIBRARY LifeStudioHeadAPI.dll
 EXPORTS
     ?Create@IAnimator@LifeStudioHeadAPI@@SGPAU12@XZ
-    ?CreateBlending@IAnimator@LifeStudioHeadAPI@@SGPAU12@XZ
     ?Create@IEyeTracking@LifeStudioHeadAPI@@SGPAU12@XZ
     ?Create@IMMTree@LifeStudioHeadAPI@@SGPAU12@XZ
     ?Create@IOptions@LifeStudioHeadAPI@@SGPAU12@PAXII@Z

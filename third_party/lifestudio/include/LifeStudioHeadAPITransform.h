@@ -11,18 +11,18 @@ namespace LifeStudioHeadAPI
 
 struct ITransformerInput
 {
-  virtual int LIFESTUDIOHEADAPICALL Size(const char *name) = 0;
-  virtual bool LIFESTUDIOHEADAPICALL Get(const char *name, char *buffer) = 0;
+  virtual int Size(const char *name) = 0;
+  virtual bool Get(const char *name, char *buffer) = 0;
 };
 
 struct ITransformer : public IAnimator
 {
-  virtual bool LIFESTUDIOHEADAPICALL Load(ITransformerInput *input) = 0;
-  virtual void LIFESTUDIOHEADAPICALL OutputAnimator(IAnimator *animator) = 0;
-  virtual IAnimator *LIFESTUDIOHEADAPICALL OutputAnimator() const = 0;
-  virtual void LIFESTUDIOHEADAPICALL Generate() = 0;
+  virtual bool Load(ITransformerInput *input) = 0;
+  virtual void OutputAnimator(IAnimator *animator) = 0;
+  virtual IAnimator *OutputAnimator() const = 0;
+  virtual void Generate() = 0;
 
-  static LIFESTUDIOHEADAPI_API ITransformer *LIFESTUDIOHEADAPICALL Create();
+  static LIFESTUDIOHEADAPI_API ITransformer *__stdcall Create();
 };
 
 };
