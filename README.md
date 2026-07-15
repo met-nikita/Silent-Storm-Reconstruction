@@ -1,5 +1,7 @@
 # Silent Storm
 
+*Русский | [English](README.en.md)*
+
 Исходники Silent Storm принадлежат Nival, оригинальный репозиторий: 
 https://github.com/nival/Silent-Storm
 
