@@ -121,8 +121,10 @@ public:
 	virtual void SetCannonItem( IWeaponItem *pItem ) = 0;
 	virtual IWeaponItem* GetCannonItem() const = 0;
 	virtual IWeaponItem* GetWeaponItem() const = 0;
+	// retail @0x2c2ee0 signature: the SAISound descriptor (record + tile type + silencer) replaced
+	// the old (CAISound*, nAISoundType) pair.
 	virtual bool CanHearSound( const CVec3 &ptSoundPosition, const CVec3 &ptListenerPosition,
-		NDb::CAISound *pSound, int nAISoundType, IUnitMission *pSource ) = 0;
+		const NDb::SAISound &sound, IUnitMission *pSource ) = 0;
 	virtual NDb::SToHitConstants *GetToHitConstants() = 0;
 	virtual NDb::SAISoundConstants *GetAISoundConstants() = 0;
 	virtual NDb::SInterruptsConstants *GetInterruptsConstants() = 0;
@@ -171,7 +173,8 @@ public:
 	// release-new (RVA 0x2bff30): the percent chance this unit HEARS pSource at distance fDist for `sound` --
 	// the probability-returning sibling of CanHearSound. Appended NON-PURE at the END of the vtable (the sess19
 	// IAIUnit::GetHideProbability pattern) so the dev<->release vtable order is irrelevant and other IUnitMission
-	// implementors keep building; CUnitMission overrides it. Dead until the AI hearing query / assassin reaction.
+	// implementors keep building; CUnitMission overrides it. Consumed by CanHearSound (@0x2c2ee0) and the
+	// assassin reaction.
 	virtual int GetHearingProbability( IUnitMission *pSource, float fDist, const NDb::SAISound &sound, bool *pAudible ) { return 0; }
 	// @0x34edb0 (DoAction) relocates the move-in-last-turn accounting here out of RegisterAction; default no-op
 	// so non-tracking impls (CFakeRPGUnit) need not override.

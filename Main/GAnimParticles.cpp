@@ -1072,8 +1072,22 @@ void CASphereSet::Init( STime t, const CVec3 &position, const CQuat &rotation, c
 	// calc center of mass
 	fMass = 0;
 	massCenter = VNULL3;
+	// retail @0x4ebe60 pre-pass: for each adjacent pair with a wide gap
+	// (dist - r[i-1] - r[i] > r[i-1], fcomp @0x4ebe96) append an averaged midpoint
+	// sphere; count captured once, appended spheres are not re-scanned
+	const int nOrigSpheres = spheres.size();
+	for ( int i=1; i<nOrigSpheres; ++i )
+	{
+		const SMassSphere &a = spheres[i-1], &b = spheres[i];
+		float fDist = fabs( a.ptCenter - b.ptCenter );
+		if ( fDist - a.fRadius - b.fRadius > a.fRadius )
+			AddSphere( SSphere( (b.ptCenter + a.ptCenter) * 0.5f, (b.fRadius + a.fRadius) * 0.5f ),
+				(b.fMass + a.fMass) * 0.5f );
+	}
 	for ( int i=0; i<spheres.size(); ++i )
 	{
+		if ( spheres[i].fRadius < 0.05f ) // retail @0x4ebf4b: min sphere radius
+			spheres[i].fRadius = 0.05f;
 		massCenter += spheres[i].ptCenter * spheres[i].fMass;
 		fMass += spheres[i].fMass;
 	}

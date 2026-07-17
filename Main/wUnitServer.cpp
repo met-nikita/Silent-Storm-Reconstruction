@@ -192,6 +192,12 @@ void CUnitServer::OnUnitMadeUnconscious( bool bFromScript )
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+void CUnitServer::OnLifeLost()
+{
+	// retail @0x3c3cb0: a downed unit forgets every sound it had heard
+	GetSounds()->clear();
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 void CUnitServer::OnUnitDied( CUnitServer *pUS )
 {
 	// @0x3bf470 -- retail DROPPED the Jan03 GetWorld()->AddUICommand( new CUICmdUnit( this ) )
@@ -1096,23 +1102,38 @@ void CUnitServer::UpdateVisible( SInterruptInfo *pRes )
 			GetWorld()->GetGame()->GetMaxUnitSightDistance( GetUnitRPG()->GetRPGUnit() ) );
 		
 		visible.clear();
+		list<CPtr<CUnitServer> > carriedBodies;   // retail @0x7c460f: carried non-fighting bodies, adopted after the loop
 		for ( list<CPtr<CUnitServer> >::iterator i = res.begin(); i != res.end(); ++i )
 		{
 			CUnitServer *pEnemy = *i;
-			if ( pEnemy->pPlayer == pPlayer )
-				continue;
-			//
-			if ( GetDiplomacyState( pEnemy ) == NDb::DS_ALLY )
+			// retail @0x7c4655: the candidate loop dispatches on CanFight() FIRST -- only a FIGHTING
+			// candidate takes the same-player skip (@0x7c4823) and the DS_ALLY leg (@0x7c483d). A
+			// non-fighting body (corpse, unconscious, empty-PK shell) bypasses both: carried -> the
+			// carrier-adoption pass below (@0x7c466c); already-seen -> dropped here (@0x7c46e5, the
+			// player-side addToVisible corpse persistence keeps it); new -> straight to the
+			// CheckVisibility probe. The old unconditional same-player skip swallowed a console-summoned
+			// empty PK (its owner IS the summoning player) forever.
+			if ( !pEnemy->CanFight() )
 			{
-				visible.push_back( pEnemy );
-				continue;
+				if ( pEnemy->GetCorpseCarrier() )
+				{
+					carriedBodies.push_back( pEnemy );
+					continue;
+				}
+				if ( find( oldVisible.begin(), oldVisible.end(), pEnemy ) != oldVisible.end() )
+					continue;
 			}
-/*			if ( !pEnemy->CanFight() && find( oldVisible.begin(), oldVisible.end(), pEnemy ) != oldVisible.end() )
+			else
 			{
-				// keep seeing all corpses
-				visible.push_back( pEnemy );
-				continue;
-			}*/
+				if ( pEnemy->pPlayer == pPlayer )
+					continue;
+				//
+				if ( GetDiplomacyState( pEnemy ) == NDb::DS_ALLY )
+				{
+					visible.push_back( pEnemy );
+					continue;
+				}
+			}
 			//
 			// retail perception probe: CheckVisibility(observer, candidate, bUseFOV=TRUE) -- disasm-proven
 			// push 1 @0x7c46fe (the observer's real FOV cone applies; facing matters).
@@ -1149,9 +1170,8 @@ void CUnitServer::UpdateVisible( SInterruptInfo *pRes )
 				else
 					pEnemy->Hide( false );
 			}
-			// tell the commander we saw the Unit
-			if ( pEnemy->CanFight() )
-				GetPlayer()->GetCommander()->OnSeeUnit( this, pEnemy );
+			// (no commander notify here: retail UpdateVisible @0x3c4450 has no OnSeeUnit vcall -- the
+			// realtime->TBS arm is ONLY the transition-gated AddEvent below)
 			//
 			//if ( !IsAudible( pEnemy ) || pEnemy->IsJustUnhided() )
 			//{
@@ -1171,6 +1191,17 @@ void CUnitServer::UpdateVisible( SInterruptInfo *pRes )
 			if ( pEnemy->CanFight() && find( oldVisible.begin(), oldVisible.end(), pEnemy ) == oldVisible.end() )
 				NGlobal::ThrowEvent( NWorld::CEventOnSeeNewEnemy( this, pEnemy, GetWorld()->IsRealTime() ) );
 			visible.push_back( pEnemy );
+		}
+		// retail @0x7c4abe..0x7c4b5b: adopt carried bodies -- a carried corpse is never probed; it is
+		// visible iff its carrier is ME or a unit I now see.
+		for ( list<CPtr<CUnitServer> >::iterator i = carriedBodies.begin(); i != carriedBodies.end(); ++i )
+		{
+			CUnit *pCarrier = (*i)->GetCorpseCarrier();
+			bool bSeeCarrier = ( pCarrier == static_cast<CUnit*>( this ) );
+			for ( list<CPtr<CUnitServer> >::iterator v = visible.begin(); !bSeeCarrier && v != visible.end(); ++v )
+				bSeeCarrier = ( static_cast<CUnit*>( v->GetPtr() ) == pCarrier );
+			if ( bSeeCarrier )
+				visible.push_back( *i );
 		}
 		// look at mines -- retail @0x7c4b74..0x7c4f2b:
 		list<CPtr<IMine> > traps;
@@ -1343,13 +1374,16 @@ bool CUnitServer::GetCurrentCommandName( string *pName ) const
 	return true;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-bool CUnitServer::CanHearSound( const CVec3 &ptFrom, NDb::CAISound *pSound, int nSoundType, CUnitServer *pWho )
+// retail @0x3c32e0. (Retail additionally short-circuits on a second, known-audible set (unit+0x168,
+// rebuilt by UpdateVisible @0x3c4450) and clears the current set when the RPG awareness predicate asks --
+// neither exists in this tree yet.)
+bool CUnitServer::CanHearSound( const CVec3 &ptFrom, const NDb::SAISound &sound, CUnitServer *pWho )
 {
 	if ( !CanFight() )
 		return false;
 	if ( IsAudible( pWho ) )
 		return true;
-	return GetUnitRPG()->CanHearSound( ptFrom, GetPosition().GetCP(), pSound, nSoundType, pWho->GetUnitRPG() );
+	return GetUnitRPG()->CanHearSound( ptFrom, GetPosition().GetCP(), sound, pWho->GetUnitRPG() );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CVec3 CUnitServer::GetAttackOrigin() const

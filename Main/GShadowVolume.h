@@ -29,8 +29,12 @@ void MakeShadowVolumes( IRender *pRender, CTransformStack *pTS, const CVec3 &vCe
 	CFilterPartsHash *pIgnore = 0 );
 
 typedef unordered_map<CPtr<CObjectBase>,CPartFlags,SPtrHash> CIgnorePartsHash;
-void MakeInvisibleElementsList( IRender *pRender, CTransformStack *pTS, 
-	const SGroupSelect &mask, const CVec2 &screenSize, CIgnorePartsHash *pIgnore, 
+void MakeInvisibleElementsList( IRender *pRender, CTransformStack *pTS,
+	const SGroupSelect &mask, const CVec2 &screenSize, CIgnorePartsHash *pIgnore,
+	CObj<IHZBuffer> *pHZBuffer );
+// retail @0x1770f0: HSR_DYNAMIC recalc during camera movement (reused fixed-size rasterizer)
+void MakeInvisibleElementsListFast( IRender *pRender, CTransformStack *pTS,
+	const SGroupSelect &mask, const CVec2 &screenSize, CIgnorePartsHash *pIgnore,
 	CObj<IHZBuffer> *pHZBuffer );
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 } // namespace

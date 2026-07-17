@@ -112,12 +112,8 @@ class CAICommander: public NWorld::CCommander
 	list< CPtr<NWorld::CObjectServerBase> > LockedObjects;                              // dev-only -> tag16
 	CPtr<NWorld::CWorld> pWorld;
 	bool bAITurn;
-	bool bWantTurnBased;
-	// BUG 2 (realtime reaction delay): countdown for the delayed real-time -> turn-based switch. -1 = idle;
-	// armed to 50 (retail willWantTBS nTimeLeft = 0x32) when bWantTurnBased first appears in real time, then
-	// decremented each CAICommander::Segment (per world tick) until it fires WantTurnBased. Transient runtime
-	// state -- deliberately NOT in operator& (a save mid-countdown just re-arms from the saved bWantTurnBased).
-	int nWantTBSDelay = -1;
+	// (the dev-only bWantTurnBased/nWantTBSDelay TBS latch is GONE -- retail's realtime->TBS arm is the
+	// transition-gated notice path: AddEvent -> CWorld::CheckInterrupt @0x3684c0 -> WillWantTBS @0x3683e0)
 	// AI-convergence Stage 2 members (see the tracker structs above). The tactical commander is GONE; its
 	// per-unit-logic install (now the map-deploy CreateUnitReaction) + pump loop lives here.
 	SAIState             state;            // tag7 -- embedded by value (retail CallObjectSerialize<SAIState>)
@@ -134,9 +130,9 @@ class CAICommander: public NWorld::CCommander
 	// Save-format (AI-convergence): tags now match retail (operator& @0x374d0) exactly where the dev shares the
 	// member -- units 4, worldToAIUnit 5, pWorld 6, state 7 (embedded SAIState, CallObjectSerialize<SAIState>),
 	// nAILag 8, commandTracker 9, eotLogics 10, updateTracker 11, unitsTracker 12, pLastReportedUnit 13.
-	// Retail ENDS at tag 13 -- the dev-only members (bAITurn/bWantTurnBased/LockedObjects) are TRANSIENT:
+	// Retail ENDS at tag 13 -- the dev-only members (bAITurn/LockedObjects) are TRANSIENT:
 	// serializing them at 14/15/16 made dev-written saves diverge from retail's writer (wire-audit MISS
-	// 2.14-2.16); the deserialize ctor re-arms them (bAITurn/bWantTurnBased=false, LockedObjects empty).
+	// 2.14-2.16); the deserialize ctor re-arms them (bAITurn=false, LockedObjects empty).
 public:	// operator& must be reachable from CSequenceCommander's base-as-chunk Add (retail @0x393f0)
 	ZEND int operator&( CStructureSaver &f ) { f.Add(2,(NWorld::CCommander*)this); f.Add(3,&pPlayer); f.Add(4,&units); f.Add(5,&worldToAIUnit); f.Add(6,&pWorld); f.Add(7,&state); f.Add(8,&nAILag); f.Add(9,&commandTracker); f.Add(10,&eotLogics); f.Add(11,&updateTracker); f.Add(12,&unitsTracker); f.Add(13,&pLastReportedUnit); return 0; }
 	//
@@ -172,10 +168,10 @@ private:
 	void FinishTurn();                                    // @0x34790
 	//
 public:
-	// Wire-convergence note: bAITurn/bWantTurnBased are dev-only members (retail's 160-byte CAICommander has
-	// no such fields and its operator& @0x374d0 ends at tag 13), so a RETAIL save never carries tags 14/15 --
-	// the deserialize ctor (this one) must leave them in the retail-equivalent idle state, not uninitialized.
-	CAICommander() : nAILag( 0 ), bAITurn( false ), bWantTurnBased( false ) {}
+	// Wire-convergence note: bAITurn is a dev-only member (retail's 160-byte CAICommander has
+	// no such field and its operator& @0x374d0 ends at tag 13), so a RETAIL save never carries tag 14 --
+	// the deserialize ctor (this one) must leave it in the retail-equivalent idle state, not uninitialized.
+	CAICommander() : nAILag( 0 ), bAITurn( false ) {}
 	CAICommander( NWorld::CWorld *_pWorld, NWorld::CPlayer *_pPlayer );
 	// retail CAICommander::SetPlayer @0x33e60: bind the commander to its player AFTER construction --
 	// sets pPlayer and re-seeds unitsTracker.pPlayer (nothing else). Used by the human player's
@@ -186,7 +182,6 @@ public:
 	virtual void OnPassControl( NWorld::CPlayer *_pPlayer );
 	virtual void OnUnitDied( NWorld::CUnitServer *pUnit );
 	void RemoveUnit( NWorld::CUnitServer *pUS );
-	virtual void OnSeeUnit( NWorld::CUnitServer *pWatcher, NWorld::CUnitServer *pTarget );
 	virtual bool IsEndOfTurn();
 	virtual bool IsRequestInterrupt() const { return false; }
 	virtual void Segment();

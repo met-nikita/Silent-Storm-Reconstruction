@@ -585,6 +585,7 @@ CGScene::CGScene( int ) : holdMask(0,0), nFrameCounter(100), lastMask(0,0)
 	//pAmbient->AddLight( new CAmbientLight( pAmbientColor, 0 ) );
 	//AddLightGroup( pAmbient );
 	nCurrentIgnoreMark = 1;
+	nReuseIgnoreList = 0;   // retail @0x161e70
 	pIgnoreStaticTrack = trackers.pTracker;
 	lightGroups.push_back( 0 );
 	pTransparentMaterial = CreateMaterial( CVec3(1,1,1), new CGetTranspCache, 0, 0, CVec3(0,0,0), 0, 0, 0, 0, 0, MA_OPAQUE|MA_ALPHA_TEST );
@@ -1502,17 +1503,18 @@ static bool operator!=( const SHMatrix &a, const SHMatrix &b )
 {
 	return memcmp( &a, &b, sizeof(a) ) != 0;
 }
-void CGScene::UpdateIgnoreMark( IRender *pRender, CTransformStack *pTS, const SGroupSelect &mask )
+// retail @0x160780
+void CGScene::UpdateIgnoreMark( IRender *pRender, CTransformStack *pTS, const SGroupSelect &mask, EHSRMode hsrMode )
 {
 	bool bStaticUpdated = pIgnoreStaticTrack.Refresh();
-	if ( bStaticUpdated || pTS->Get().forward != mHoldTransform || holdMask != mask )
+	const SHMatrix &m = pTS->Get().forward;
+	// big change: static geometry changed, camera translation moved > 1, or mask changed
+	bool bChanged = bStaticUpdated
+		|| sqr( m.xw - mHoldTransform.xw ) + sqr( m.yw - mHoldTransform.yw ) + sqr( m.zw - mHoldTransform.zw ) > 1.0f
+		|| holdMask != mask;
+	if ( !bChanged && !( m != mHoldTransform ) )
 	{
-		++nCurrentIgnoreMark;  
-		nIgnoreListWasCalced = 0;//false;
-		pHZBuffer = 0;
-	}
-	else
-	{
+		// camera exactly still: full-quality list once on the 3rd still frame
 		if ( nIgnoreListWasCalced == 2 )
 		{
 			++nCurrentIgnoreMark;
@@ -1526,7 +1528,33 @@ void CGScene::UpdateIgnoreMark( IRender *pRender, CTransformStack *pTS, const SG
 		}
 		++nIgnoreListWasCalced;
 	}
-	mHoldTransform = pTS->Get().forward;
+	else if ( hsrMode == HSR_FAST )
+	{
+		++nCurrentIgnoreMark;
+		nIgnoreListWasCalced = 0;
+		pHZBuffer = 0;
+	}
+	else
+	{
+		// HSR_DYNAMIC: keep culling while the camera moves -- fast recalc every 2nd frame,
+		// immediately on a big change; otherwise reuse the current mark
+		++nReuseIgnoreList;
+		nIgnoreListWasCalced = 0;
+		if ( nReuseIgnoreList == 2 || bChanged )
+		{
+			++nCurrentIgnoreMark;
+			nReuseIgnoreList = 0;
+			pHZBuffer = 0;
+			CIgnorePartsHash res;
+			MakeInvisibleElementsListFast( pRender, pTS, mask, GetScreenRect(), &res, &pHZBuffer );
+			for ( CIgnorePartsHash::iterator i = res.begin(); i != res.end(); ++i )
+			{
+				CDynamicCast<CCombinedPart> pC( i->first );
+				pC->SetIgnored( nCurrentIgnoreMark, i->second );
+			}
+		}
+	}
+	mHoldTransform = m;
 	holdMask = mask;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1934,7 +1962,7 @@ void CGScene::Draw( CTransformStack *pTS, CTransformStack *pClipTS, NGfx::CRende
 	int nUseIgnoreMark = N_SKIP_IGNORED_TEST;
 	if ( hsrMode != HSR_NONE )
 	{
-		UpdateIgnoreMark( &renderWrapper, pClipTS, mask );
+		UpdateIgnoreMark( &renderWrapper, pClipTS, mask, hsrMode );
 		nUseIgnoreMark = nCurrentIgnoreMark;
 	}
 	ERLRequest rlReq = RN_ALL;

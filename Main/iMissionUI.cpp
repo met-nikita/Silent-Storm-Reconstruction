@@ -1063,9 +1063,10 @@ bool CMissionUI::ProcessEvent( const NInput::SEvent &sEvent )
 			pMission->SetActionIconsSet( NGame::AIS_MAIN );
 			return true;
 		}
-		else if ( pMission->GetPanelState( NGame::PANEL_STORE | NGame::PANEL_PERKS | NGame::PANEL_INVENTORY | NGame::PANEL_CHARACTER | NGame::PANEL_MEDALS | NGame::PANEL_BIOGRAPHY ) != 0 )
+		// retail @0x60f807/@0x60f81d: cancel probes and closes with mask -1 (every panel bit), not a named-bit union
+		else if ( pMission->GetPanelState( -1 ) != 0 )
 		{
-			pMission->SetPanelState( NGame::PANEL_STORE | NGame::PANEL_PERKS | NGame::PANEL_INVENTORY | NGame::PANEL_CHARACTER | NGame::PANEL_MEDALS | NGame::PANEL_BIOGRAPHY, false );
+			pMission->SetPanelState( -1, false );
 			return true;
 		}
 	}

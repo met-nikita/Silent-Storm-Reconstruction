@@ -178,14 +178,15 @@ void CObjectServerBase::SetDestroyStage( int nStage )
 	{
 		MakeDestroySound();
 		tStageChange = GetWorld()->GetAimTime()->GetValue();
-		// retail @0x384d40 (disasm-verified): the bumped action counter is held in a SCOPED AddRef/Release
-		// pair (nObjData+1 ... CObjectBase::ReleaseObj on function exit) -- the lasting effect is only the
-		// 10-segment action LAG; an otherwise-unowned counter DIES at scope end. The previous bare call
-		// leaked an unowned CActionCounter (refcount never reaches zero) that pinned the world's weak
-		// pActiveCount forever -> IsAction() stuck true with no performing unit -> the TBS pump never
-		// fetched another command (the GFirst first-enemy-turn hang; the safe's scripted
-		// ObjectSetDestroyStage runs exactly this line).
-		CObj<CActionCounter> pStageAction = GetWorld()->GetActiveCounter( 10 );
+		// retail @0x384d40 (disasm 0x784d86: push 0 -- lag 0, NOT 10): the bumped action counter is held in
+		// a SCOPED AddRef/Release pair (nObjData+1 ... CObjectBase::ReleaseObj on function exit) and DIES at
+		// scope end; with lag 0 the lasting effect is only the bWasAction latch touch -> one action-finish
+		// edge (vision recompute + TBS pump recalc) at the next tracker tick. The previous bare call leaked
+		// an unowned CActionCounter (refcount never reaches zero) that pinned the world's weak pActiveCount
+		// forever -> IsAction() stuck true with no performing unit -> the TBS pump never fetched another
+		// command (the GFirst first-enemy-turn hang; the safe's scripted ObjectSetDestroyStage runs exactly
+		// this line).
+		CObj<CActionCounter> pStageAction = GetWorld()->GetActiveCounter( 0 );
 		bindGlobal.Update();
 	}
 }
@@ -266,6 +267,9 @@ void CObjectServerBase::Kill( const CVec3 &ptDir )
 	if ( nPrevStage != pRPG->GetDestroyStage() )
 	{
 		tStageChange = pCurrentWorld->GetAimTime()->GetValue();
+		// retail Kill @0x384de0 (disasm 0x784e19: push 0): scoped lag-0 counter touch, same shape as
+		// SetDestroyStage @0x384d40 -- fires one action-finish edge (vision recompute + pump recalc).
+		CObj<CActionCounter> pStageAction = pCurrentWorld->GetActiveCounter( 0 );
 		bindGlobal.Update();
 	}
 }
@@ -312,8 +316,9 @@ int CObjectServerBase::ProcessAttack( NWorld::IWorld *_pWorld, int nUserID, NRPG
 		}
 		*/
 		tStageChange = pCurrentWorld->GetAimTime()->GetValue();
-		// retail stage-change block: scoped counter hold, same as SetDestroyStage @0x384d40 -- see the
-		// comment there (a bare GetActiveCounter leaks an unowned counter and pins IsAction() forever).
+		// retail stage-change block @0x385130 (disasm 0x7851f7: push 0xa -- lag 10, unlike SetDestroyStage's
+		// lag 0): scoped counter hold -- see the SetDestroyStage comment (a bare GetActiveCounter leaks an
+		// unowned counter and pins IsAction() forever). Lag 10 = 2.5 segments at four tracker ticks/segment.
 		CObj<CActionCounter> pStageAction = pCurrentWorld->GetActiveCounter( 10 );
 		bindGlobal.Update();
 	}

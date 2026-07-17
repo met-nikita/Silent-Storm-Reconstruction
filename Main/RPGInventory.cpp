@@ -180,15 +180,17 @@ void CInventory::ArrangeItems()
 bool CInventory::CanEquip( NDb::ESlot where, const IInventoryItem *pWhat ) const
 {
 	int nPKType = 0;
+	// retail @0x29d660: a clip is never directly equippable
+	if ( CDynamicCast<IClipItem>( pWhat ) )
+		return false;
 	// retail @0x29d660 early-out: the inert CreateDummyItem wrapper can never be equipped
 	if ( CDynamicCast<IDummyItem>( pWhat ) )
 		return false;
-	CDynamicCast<IToolItem> pTool(pWhat);
-	if (pTool)
-	{
-		if ( !pTool->CanBeUsed( pOwner ) )
-			return false;
-	}
+	// retail @0x29d660: a live single-slot Panzerklein blocks every equip
+	if ( IsValid( pPK ) && pPK->bSingleSlot )
+		return false;
+	// (Jan03's IToolItem CanBeUsed gate is absent in retail @0x29d660 -- retail gates tool
+	// usability at USE time instead, e.g. CExecDisarmTrap::CanDoIt @0x3a6e50)
 	CDynamicCast<IMeleeWeaponItem> pMeleeWeapon(pWhat);
 	if (pMeleeWeapon)
 	{

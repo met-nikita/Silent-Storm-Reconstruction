@@ -1313,10 +1313,10 @@ void CExecShoot::CreateFlash( bool bFirstBullet )
 		pSnd->EndSound();                       // slot full: end the one-shot, do not retain
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// @0x3a40d0 -- retail reveals a concealed shooter before firing (weapon reveal-coeff >= 1.0 gated by a
-// hidden-state predicate). STUBBED: the reveal-coefficient field (CRPGWeapon+0xa4) and the posProvider
-// hidden-predicate (vtbl[0xc]) have no counterpart in the dev DB schema / interface, and the dev has no
-// conceal-on-shoot flow -> safe no-op until that subsystem lands.
+// @0x3a40d0 -- retail reveals a concealed shooter before firing (weapon fSilencer >= 1.0 gated by a
+// hidden-state predicate). STUBBED: CRPGWeapon::fSilencer now exists (it feeds the shot's SAISound), but
+// the posProvider hidden-predicate (vtbl[0xc]) has no counterpart and the dev has no conceal-on-shoot
+// flow -> safe no-op until that subsystem lands.
 void CExecShoot::CheckUnhide()
 {
 }
@@ -1619,7 +1619,10 @@ void CExecMelee::PerformAttack( const vector<NRPG::CAttackPortion> &attack, cons
 	}
 
 	if ( !attack.empty() )
-		pUS->GetWorld()->MakeAISound( NDb::GetAISound( 19 ), pUS, 0, 0 );
+	{
+		NDb::SAISound sound = { NDb::GetAISound( 19 ), 0, 1.0f };   // retail @0x3a4ed0: no silencer on melee
+		pUS->GetWorld()->MakeAISound( sound, pUS, 0 );
+	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CExecMeleeTile
@@ -2298,8 +2301,8 @@ void CExecCorpse::Run()
 	else
 	{
 		pUS->animator.DropCorpse( pUS->GetPosition() );
-		NDb::CAISound *pAISound = NDb::GetAISound( 27 );
-		pUS->GetWorld()->MakeAISound( pAISound, pUS, 0, 0 );
+		NDb::SAISound sound = { NDb::GetAISound( 27 ), 0, 1.0f };   // retail @0x3a62e0: no silencer on corpse drop
+		pUS->GetWorld()->MakeAISound( sound, pUS, 0 );
 	}
 	StartAction( pUS->GetWorld(), SKIPPABLE );		// ALL branches reach this
 }
@@ -2474,8 +2477,8 @@ void CExecHeal::Run()
 	StartAction( pUS->GetWorld(), SKIPPABLE );
 	pUS->DoAction( bTargetIsPK ? NRPG::AC_REPAIR_PK : NRPG::AC_FIRSTAID );
 
-	NDb::CAISound *pAISound = NDb::GetAISound( 20 );
-	pUS->GetWorld()->MakeAISound( pAISound, pUS, 0, 0 );
+	NDb::SAISound sound = { NDb::GetAISound( 20 ), 0, 1.0f };   // retail @0x3a68b0: no silencer on first aid
+	pUS->GetWorld()->MakeAISound( sound, pUS, 0 );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CExecHeal::AnimationFinished()

@@ -109,6 +109,9 @@ public:
 	{
 		for ( int k = 0; k < units.size(); ++k )
 		{
+			// retail @0x36f780: skip null/stale (IsRefInvalid 0x80) refs before CanFight
+			if ( !IsValid( units[k] ) )
+				continue;
 			if ( units[k]->CanFight() )
 				return true;
 		}
@@ -509,8 +512,8 @@ public:
 	CActionCounter* GetSkippableCounter() { bWasAction = true; return RenewActionCounter( &pSkippableCount ); }
 	CActionCounter* GetActiveCounter( int _nLag = 0 ) { nActionLag = Max( _nLag, nActionLag ); bWasAction = true; return RenewActionCounter( &pActiveCount ); }
 	// retail IsAction @0x370030 also ORs bWasAction -- there bWasAction is re-latched BEFORE the read
-	// (SyncAction @0x36f660), so the term equals the current state; here bWasAction is the previous-segment
-	// edge latch (bWasAction && !IsAction() below), so adding it would make the falling edge never fire.
+	// (SyncAction @0x36f660), so the term equals the current state; here bWasAction is the previous-tick
+	// edge latch (ProcessActionTracker below), so adding it would make the falling edge never fire.
 	bool IsAction() const { return IsValid( pSkippableCount ) || IsValid( pActiveCount ) || nActionLag > 0; }
 	bool IsSkippableAction() const { return IsValid( pSkippableCount ) && nActionLag == 0; }
 	bool IsFirstTurn() const { return bFirstTurn || IsRealTime(); }
@@ -599,6 +602,42 @@ public:
 			nTemp++;
 		}
 	}
+	// retail CWorld::ProcessTBSEvents @0x3675d0 tail (the STBSEvent queue itself is applied synchronously
+	// in this fork -- see the tag-7 note above -- so only the tail survives): one nActionLag tick
+	// (@0x7677da) + the action-window edge machine (state latch @0x767816). CWorld::Segment @0x36bce0
+	// calls ProcessTBSEvents FOUR times per segment -- 0x76bd13 (before commander segments), 0x76bd39
+	// (after them), 0x76bd4a (after CheckCancelAndInterruptRequests @0x377830), 0x76bd68 (after
+	// FetchNewCommands @0x372950) -- so a lag of N spans N/4 segments of wall clock; the consumer args
+	// (10/30 in wBuilding/wObject/wOSBase/wExplTracker) are calibrated to that rate.
+	void ProcessActionTracker()
+	{
+		if ( nActionLag > 0 )   // retail @0x7677da
+			--nActionLag;
+
+		if ( bWasAction && !IsAction() )
+		{
+			// retail falling edge: the finish is DEFERRED while the incremental vision recalc is behind
+			// (TryUpdateVisible @0x361610; its UpdateVision probe fires at most once per segment).
+			if ( !TryUpdateVisible() )
+			{
+				// re-arm @0x7678fa: renew-and-kill the active counter so ONLY nActionLag holds the window
+				// open -- retail GetActiveCounter(2) = half a segment at four ticks per segment.
+				{
+					CObj<CActionCounter> pTemp = GetActiveCounter( 2 );
+				}
+				OnAction( true );   // retail's only live OnAction(true): idle-ban + PathNetwork freeze held
+			}
+			else
+			{
+				OnAction( false );
+				UpdateVisible();
+				for ( TPlayerList::const_iterator k = players.begin(); k != players.end(); ++k )
+					(*k)->OnTBSEvent( TBS_ACTION_FINISH );//OnActionFinish();
+				RecalcCurrentPlayerCommands();
+			}
+		}
+		bWasAction = IsAction();   // per-tick latch re-arm, retail @0x767819
+	}
 	void Segment()
 	{
 		// The OWNERLESS-INTERRUPT sequence model (retail 1:1): StartSequence @0x375dd0 pushes an
@@ -612,34 +651,13 @@ public:
 		// nothing can push onto the stack (AddInterrupt / WantTurnBased / StartPlayerTurn /
 		// GivePlayerTurn all bail on IsSequence, all retail-gated).
 
+		ProcessActionTracker();   // retail @0x76bd13: ProcessTBSEvents #1, before the commander segments
+
 		for ( TPlayerList::iterator i = players.begin(); i != players.end(); ++i )
 			(*i)->GetCommander()->Segment();
 
-		if ( nActionLag > 0 )
-			--nActionLag;
+		ProcessActionTracker();   // retail @0x76bd39: ProcessTBSEvents #2, after the commander segments
 
-		if ( bWasAction && !IsAction() )
-		{
-			// retail ProcessTBSEvents @0x3675d0 falling edge: the finish is DEFERRED while the incremental
-			// vision recalc is behind (TryUpdateVisible @0x361610 == false, once per segment).
-			if ( !TryUpdateVisible() )
-			{
-				// re-arm: renew-and-kill the active counter so ONLY nActionLag holds the window open
-				// (retail GetActiveCounter(2)+SyncAction with two lag ticks per segment == 1 lag here).
-				{
-					CObj<CActionCounter> pTemp = GetActiveCounter( 1 );
-				}
-				OnAction( true );   // retail's only live OnAction(true): idle-ban + PathNetwork freeze held
-			}
-			else
-			{
-				OnAction( false );
-				UpdateVisible();
-				for ( TPlayerList::const_iterator k = players.begin(); k != players.end(); ++k )
-					(*k)->OnTBSEvent( TBS_ACTION_FINISH );//OnActionFinish();
-				RecalcCurrentPlayerCommands();
-			}
-		}
 		if ( !addInterrupts.empty() )
 		{
 			ASSERT( addInterrupts.size() == 1 );
@@ -707,6 +725,9 @@ public:
 		}
 		for ( TPlayerList::iterator i = players.begin(); i != players.end(); ++i )
 			(*i)->GetCommander()->ClearRequests();
+
+		ProcessActionTracker();   // retail @0x76bd4a: ProcessTBSEvents #3, after CheckCancelAndInterruptRequests @0x377830
+
 		// decide on commands for next segment. Keyed on IsRealTime() (empty stack OR ownerless top):
 		// retail FetchNewCommands @0x372950 fetches from EVERY player both in real time (arg false)
 		// and during a sequence (arg true, fetched even mid-action); an owned top fetches only the
@@ -736,7 +757,8 @@ public:
 			// here banned E_NO_IDLE_ON_ACTION on every unit for the whole action = all bystanders frozen
 			// mid-pose during any TB move/shot (runtime-proven vs retail via d_idle_animation).
 		}
-		bWasAction = IsAction();
+
+		ProcessActionTracker();   // retail @0x76bd68: ProcessTBSEvents #4, after FetchNewCommands (latch = retail end-of-pump state)
 	}
 	// retail GetTBSCurrentPlayer @0x375ab0: the stack top's owner -- NULL during a sequence (ownerless
 	// top) and in real time (empty stack). THE key consumer fix: CWorld::GetCurrentPlayer and the

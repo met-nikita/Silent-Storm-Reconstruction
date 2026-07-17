@@ -129,9 +129,15 @@ public:
 		DESTRUCT_4,
 		// release EType (gen/include/s2_types.h NDb::CAnimation::EType) also carries DEATH_FRONT..DEATH_LEFT
 		// (33-36), JUMP_BACK_HIGH/LOW (65/66), MINE_TILE/MINE_OBJECT (67/68), END_HEAL (74) and MOVE_ONE_STEP
-		// (75); inserting those would renumber the dev values already serialized in game.db, so only the value
-		// the interface face needs is APPENDED, pinned to its retail number (safe: no existing value shifts).
+		// (75); inserting those would renumber the dev values already serialized in game.db, so the release-only
+		// values are APPENDED, each pinned to its retail number (safe: no existing value shifts).
+		JUMP_BACK_HIGH = 65,	// retail 0x41; import string "JumpBackHigh" (@0x3f81e0 table)
+		JUMP_BACK_LOW  = 66,	// retail 0x42; import string "JumpBackLow" (table lists Low before High)
+		MINE_TILE      = 67,	// retail 0x43; "MineTile"
+		MINE_OBJECT    = 68,	// retail 0x44; "MineObject"
 		INTERFACE_IDLE = 73,	// release @0x2cbe30 CFakeWorldUnit::CreateAnimation: bPlayIdle ? INTERFACE_IDLE : POSE
+		END_HEAL       = 74,	// retail 0x4a; "EndHeal"
+		MOVE_ONE_STEP  = 75,	// retail 0x4b; "MoveOneStep" (played by CUnitAnimator::MoveOneStep @0x3409d0)
 		// retail directional death clips (retail ids 33-36, INSERTED there after DEATH -- see note above;
 		// appended here at fresh ids to keep the dev-serialized values stable). Import strings are retail's
 		// "DeathFront"/"DeathBack"/"DeathRight"/"DeathLeft" (Game.exe @0x4cfb58..7c); the direction is picked

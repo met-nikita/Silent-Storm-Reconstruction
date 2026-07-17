@@ -602,7 +602,8 @@ bool CExecOpenClose::TimeLabelReached()
 		pAISound = NDb::GetAISound( 23 );
 	else
 		pAISound = NDb::GetAISound( 25 );
-	pUS->GetWorld()->MakeAISound( pAISound, pUS, 0, 0 );
+	NDb::SAISound sound = { pAISound, 0, 1.0f };   // retail @0x3bdb70: no silencer on open/close
+	pUS->GetWorld()->MakeAISound( sound, pUS, 0 );
 	//
 	return false;
 }

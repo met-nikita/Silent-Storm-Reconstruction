@@ -3174,7 +3174,16 @@ static void CommandSummonUnit( const string &szID, const vector<wstring> &params
 	CObjectBase *pObject = (CObjectBase *)pContext;
 	CDynamicCast<CMission> pMission(pObject);
 	if (pMission)
-		pMission->GetActivePlayer()->AddUnit( NRPG::CreateMerc( NDb::GetPers( _wtol( paramsSet[0].c_str() ) ) ) );
+	{
+		// retail @0x20b5f0: bad/unknown pers ID -> console error, no spawn (unguarded CreateMerc(0) crashed)
+		CPtr<NDb::CRPGPers> pPers = NDb::GetPers( _wtol( paramsSet[0].c_str() ) );
+		if ( !IsValid( pPers ) )
+		{
+			csSystem << CC_RED << "ERROR: Invalid ID" << endl;
+			return;
+		}
+		pMission->GetActivePlayer()->AddUnit( NRPG::CreateMerc( pPers ) );
+	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 static void CommandUnsummonUnit( const string &szID, const vector<wstring> &paramsSet, void *pContext )

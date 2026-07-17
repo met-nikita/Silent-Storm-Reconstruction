@@ -51,6 +51,7 @@ enum EHSRMode
 {
 	HSR_NONE,
 	HSR_FAST,
+	HSR_DYNAMIC,   // retail: keeps occlusion culling during camera movement (gfx_hsr 2 = default)
 	HSR_LAST
 };
 enum ETransparentMode

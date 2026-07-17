@@ -261,7 +261,7 @@ public:
 	virtual IWeaponItem* GetWeaponItem() const { return pRPGUnit->GetWeaponItem(); }
 	virtual IWeaponItemInfo* GetCannonItemInfo() const { return pRPGUnit->GetCannonItem(); }
 	virtual bool CanHearSound( const CVec3 &ptSoundPosition, const CVec3 &ptListenerPosition,
-		NDb::CAISound *pSound, int nAISoundType, IUnitMission *pSource );
+		const NDb::SAISound &sound, IUnitMission *pSource );
 	virtual int GetHearingProbability( IUnitMission *pSource, float fDist, const NDb::SAISound &sound, bool *pAudible );
 	virtual CVec3 GetTurnStartCP() const { return ptLastCP; }
 	virtual NDb::CRPGPers* GetRPGPers() const;
@@ -1907,55 +1907,24 @@ void CUnitMission::SetCannonItem( IWeaponItem *pItem )
 	pRPGUnit->SetCannonItem( dynamic_cast<CWeaponItem*>(pItem) );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-bool CUnitMission::CanHearSound( const CVec3 &ptSoundPosition, const CVec3 &ptListenerPosition, 
-		NDb::CAISound *pSound, int nAISoundType, IUnitMission *pSource )
+// retail @0x2c2ee0 -- the Jan03 in-place hearing model was replaced by a roll of the hearing chance
+// (GetHearingProbability @0x2bff30, which owns the deaf/silencer/perk handling) at the 1.6x-scaled 3D
+// distance (0x3fcccccd), against a d99 (Isaac % 99); a heard sound trains the SPOT skill.
+bool CUnitMission::CanHearSound( const CVec3 &ptSoundPosition, const CVec3 &ptListenerPosition,
+		const NDb::SAISound &sound, IUnitMission *pSource )
 {
-	if ( HasCritical( NDb::C_DEAF ) )
+	float fDistance = fabs( ptSoundPosition - ptListenerPosition ) * 1.6f;
+	if ( GetHearingProbability( pSource, fDistance, sound, 0 ) <= (int)random.Get( 99 ) )
 		return false;
-	//
-	float fRadius = pSound->GetRadiusFromAISoundType( nAISoundType );
-	NDb::SAISoundConstants *c = GetAISoundConstants();
-
-	float fHearingDistance = c->nPrecisePositionRadius + 
-		( fRadius - c->nPrecisePositionRadius ) * 
-		GetRPGUnit()->Skills(NDb::ST_SPOT) / NRPG::N_MAX_SKILL;
-
-	if ( pPanzerklein && pPanzerklein->fSensorRange )
-	{
-		fHearingDistance *= pPanzerklein->fSensorRange;
-	}
-
-	float fDistance = fabs( ptSoundPosition - ptListenerPosition ) / FP_GRID_STEP;
-
-	if ( !pSource || fRadius >= c->nLoudSound )
-	{
-		if ( fHearingDistance >= fDistance )
-			return true;
-		else
-			return false;
-	}
-	else
-	{	
-		float fHearingProbability = c->nBaseProbability + ( GetRPGUnit()->Skills(NDb::ST_SPOT) +
-			( c->nPrecisePositionRadius - fDistance ) * c->nDistanceCoeff -
-			pSource->GetRPGUnit()->Skills( NDb::ST_STEALTH ) ) * 100 / NRPG::N_MAX_SKILL;
-		if ( pSource->IsHiding() )
-			fHearingProbability *= c->fHideCoeff;
-		int nHearingProbability = Clamp( fHearingProbability, 0.0f, 95.0f );		
-
-		if ( random.Get( 1, 100) <= nHearingProbability )
-			return true;
-		else
-			return false;
-	}
+	UseSkill( NDb::ST_SPOT );
+	return true;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// CUnitMission::GetHearingProbability @0x2bff30 -- the probability-returning sibling of CanHearSound above: it
-// reports HOW LIKELY this unit is to hear `sound` coming from pSource at grid distance fDist (instead of rolling
-// it). `this` is the LISTENER; pSource is the unit being heard. Reconstructed from the release decomp + this
-// CanHearSound body; the answer-key's pfnHearChance gate (s2_aiassassinreaction.h:54-57,183) reads it as
-// `>= 15`. Two release refinements over CanHearSound: the silencer scales the sound radius, and two data-driven
-// perks modulate the spot skill (id 0x14) and the loud-sound hearing distance (id 0x4c). Dead until consumed.
+// CUnitMission::GetHearingProbability @0x2bff30 -- the probability side of CanHearSound above: it reports HOW
+// LIKELY this unit is to hear `sound` coming from pSource at scaled distance fDist (CanHearSound rolls it, the
+// assassin reaction thresholds it `>= 15`). `this` is the LISTENER; pSource is the unit being heard. The
+// silencer scales the sound radius; two data-driven perks modulate the spot skill (id 0x14) and the loud-sound
+// hearing distance (id 0x4c).
 //
 // (Workflow corrections to the answer-key/decomp labels, resolved from the raw vtable: there is NO difficulty
 // global -- the "_DAT" chain is an inlined Skills(ST_SPOT/ST_STEALTH) CDynamicSkill read; the "ptLastCP" loud-

@@ -139,6 +139,9 @@ protected:
 	virtual void ProcessCritical( NDb::ECritical eCA ) {}
 	virtual void TouchedMines( const vector<CPtr<CMine> > &mines ) {}
 	virtual void RemoveFromWorld() {}
+	// retail unit vtbl+0x24, tail of every KillUnit/MakeUnconscious branch; CUnitServer @0x3c3cb0
+	// flushes the heard-sounds list (a downed unit stops reacting to queued noise).
+	virtual void OnLifeLost() {}
 	// retail unit vtbl+0x28 (purecall in the CDumbUnitServer vftable @0x8c9f5c; implemented by
 	// CUnitServer @0x3c0420): may this unit be gibbed by a heavy hit?
 	virtual bool CanBlowUp() { return false; }
@@ -158,7 +161,9 @@ public:
 	CDumbUnitServer() {}
 	CDumbUnitServer( CWorld *pWorld, NRPG::IUnitMission *_pRPG, NDb::CModel *pModel, const NAI::SUnitPosition &pos );
 	void KillUnit( const CVec3 &ptDir );
-	void MakeUnconscious( const CVec3 &ptDir, bool bFromScript = false );
+	// retail @0x350dc0 3-arg: the 3rd arg is FallAsIfDead's bPlayDeathAnim -- a combat knock-out
+	// (ProcessAttack @0x75130e pushes 1) DOES play the death clip; lua passes its optional 2nd param.
+	void MakeUnconscious( const CVec3 &ptDir, bool bFromScript = false, bool bPlayDeathAnim = true );
 	void SetPosition( const NAI::SUnitPosition &dst );
 	void SetTemporaryPosition( const NAI::SUnitPosition &dst ) // to be used only in CExecQueue; in all other cases use SetPosition
 	{	position = dst;	}

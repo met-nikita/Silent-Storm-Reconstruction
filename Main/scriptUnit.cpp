@@ -590,10 +590,10 @@ BEGIN_SCRIPT_COMMAND( UnitDropCorpse, "u" )
 	return 0;
 END_SCRIPT_COMMAND
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-BEGIN_SCRIPT_COMMAND( UnitMakeUnconscious, "u" )
+BEGIN_SCRIPT_COMMAND( UnitMakeUnconscious, "ub[true]" )   // retail @0x2f92a0: optional bPlayDeathAnim
 	CDynamicCast<NWorld::CUnitServer> pUS(luaParams[0].p);
 	if (pUS)
-		pUS->MakeUnconscious( VNULL3, true );
+		pUS->MakeUnconscious( VNULL3, true, luaParams[ 1 ].b );
 	return 0;
 END_SCRIPT_COMMAND
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1098,10 +1098,10 @@ BEGIN_SCRIPT_COMMAND( UnitSwitchToGrenade, "u" )
 	return 0;
 END_SCRIPT_COMMAND
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// retail @0x2fa400 ("un"): create an item from a DB record id and slot it into the unit's active hand.
-// When the active hand already holds an item, retail queues a stash move first (bNeedMove=true,
-// moveSource = the occupied hand slot, moveTarget = backpack auto-place); the executor queue
-// (CreateExecutor @0x3b37b0) prepends the CExecMoveInventoryItem before the create+activate.
+// retail @0x2fa400 ("un"): create an item from a DB record id into hand slot 1 UNCONDITIONALLY
+// (ctor slot arg = push 0 @0x6fa673), NOT the active slot. When slot 1 already holds an item,
+// a stash move is queued first (bNeedMove=true): source = SLOT_1's item, target type =
+// FindPlace(item)+3 @0x6fa625-0x6fa636 (BACKPACK when the backpack has room, else GROUND), pos (-1,-1).
 BEGIN_SCRIPT_COMMAND( CreateAndActivateItem, "un" )
 	CDynamicCast<NWorld::CUnitServer> pUS( luaParams[ 0 ].p );
 	if ( IsValid( pUS ) )
@@ -1110,17 +1110,17 @@ BEGIN_SCRIPT_COMMAND( CreateAndActivateItem, "un" )
 		if ( IsValid( pItem ) )
 		{
 			NRPG::IInventoryInfo *pInfo = pUS->GetRPG()->GetInventoryInfo();
-			int nSlot = pInfo->GetActiveSlot();
 			bool bNeedMove = false;
 			NWorld::SItem sMoveSource, sMoveTarget;
-			NRPG::IInventoryItem *pActive = pInfo->Get( (NDb::ESlot)nSlot );
-			if ( IsValid( pActive ) )
+			NRPG::IInventoryItem *pOld = pInfo->Get( NDb::SLOT_1 );
+			if ( IsValid( pOld ) )
 			{
 				bNeedMove = true;
-				sMoveSource = NWorld::SItem( pUS, NWorld::SItem::SLOT, nSlot, pActive );
-				sMoveTarget = NWorld::SItem( pUS, NWorld::SItem::BACKPACK, CTPoint<int>( -1, -1 ) );
+				sMoveSource = NWorld::SItem( pUS, NWorld::SItem::SLOT, NDb::SLOT_1, pOld );
+				CTPoint<int> sPlace;
+				sMoveTarget = NWorld::SItem( pUS, pInfo->FindPlace( pOld, &sPlace ) ? NWorld::SItem::BACKPACK : NWorld::SItem::GROUND, CTPoint<int>( -1, -1 ) );
 			}
-			pUS->Do( new NWorld::CCmdSetCommand( pUS, new NWorld::CCmdCreateAndActivateInventoryItem( pItem, nSlot, bNeedMove, sMoveSource, sMoveTarget ) ) );
+			pUS->Do( new NWorld::CCmdSetCommand( pUS, new NWorld::CCmdCreateAndActivateInventoryItem( pItem, NDb::SLOT_1, bNeedMove, sMoveSource, sMoveTarget ) ) );
 			pUS->Do( new NWorld::CCmdSetCommand( pUS, new NWorld::CCmdContinue() ) );
 		}
 		else

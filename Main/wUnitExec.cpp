@@ -88,8 +88,8 @@ public:
 		if (pW)
 		{
 			NDb::CSound *pSound = pW->GetDBWeapon()->pSoundReload;
-			NDb::CAISound *pAISound = NDb::GetAISound( 26 );
-			pUS->GetWorld()->MakeAISound( pAISound, pUS, 0, pSound );
+			NDb::SAISound sound = { NDb::GetAISound( 26 ), 0, 1.0f };   // retail @0x394b70: no silencer on reload
+			pUS->GetWorld()->MakeAISound( sound, pUS, pSound );
 		}
 		pUS->Update();
 		return false;
@@ -544,8 +544,8 @@ public:
 		}
 
 		NDb::CSound *pSound = pWeapon->GetDBWeapon()->pSoundReload;
-		NDb::CAISound *pAISound = NDb::GetAISound( 26 );
-		pUS->GetWorld()->MakeAISound( pAISound, pUS, 0, pSound );
+		NDb::SAISound sound = { NDb::GetAISound( 26 ), 0, 1.0f };   // retail @0x394df0: no silencer on load
+		pUS->GetWorld()->MakeAISound( sound, pUS, pSound );
 
 		pUS->Update();
 		return false;

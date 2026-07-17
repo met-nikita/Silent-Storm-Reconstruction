@@ -185,7 +185,7 @@ void SAIUnitsTracker::SetPlayer( NWorld::IPlayer *p )
 // CAICommander
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CAICommander::CAICommander( NWorld::CWorld *_pWorld, NWorld::CPlayer *_pPlayer ):
-	pPlayer(_pPlayer), pWorld( _pWorld ), bAITurn( false ), bWantTurnBased( false ),
+	pPlayer(_pPlayer), pWorld( _pWorld ), bAITurn( false ),
 	state( _pWorld, this ), nAILag( 0 )
 {
 	// AI-convergence: the commander OWNS the embedded SAIState by value (tag7) -- constructed above with a
@@ -668,41 +668,11 @@ void CAICommander::Segment()
 	// re-arm the one-decision-per-segment latch every world tick (SAICommandTracker::OnSegment @0x338b0).
 	commandTracker.OnSegment();
 	//
-	// bWantTurnBased latch (dev TBS-switch request). BUG 2 (realtime reaction delay): retail does NOT switch
-	// to turn-based the instant an AI spots the player in real time. CWorld::WillWantTBS @0x3683e0 arms a
-	// 50-segment countdown (nTimeLeft = 0x32) and CWorld::Segment @0x36bce0 fires WantTurnBased only once it
-	// reaches 0 -- so the enemy reacts with a short delay, not instantly. The a5dll routes the AI's realtime
-	// TBS request through this bWantTurnBased latch, so reproduce the delay here: arm a 50-world-tick
-	// countdown when the request first appears, decrement it each Segment, and fire at 0. In a cinematic
-	// sequence or when already turn-based, drop the request immediately (no realtime delay applies), matching
-	// the old behaviour. (NOTE: the interrupt/overwatch path CWorld::CheckInterrupt @0x3684c0 also enters TBS
-	// on a qualifying sighting; retail delays its AI-spotter case via the same WillWantTBS -- a fuller port
-	// would route CheckInterrupt's realtime one-sided AI notices through a CWorld-side countdown too.)
-	if ( bWantTurnBased )
-	{
-		if ( !pWorld->IsRealTime() || pWorld->IsSequence() )
-		{
-			bWantTurnBased = false;
-			nWantTBSDelay = -1;
-		}
-		else if ( !NAI::IsAIPlayer( pPlayer.GetPtr() ) )
-		{
-			// retail WillWantTBS @0x3683e0: only an AI player's wish is deferred -- a HUMAN player's
-			// (the CSequenceCommander, whose own units' sightings also raise OnSeeUnit) switches
-			// immediately.
-			bWantTurnBased = false;
-			nWantTBSDelay = -1;
-			pWorld->WantTurnBased( pPlayer );
-		}
-		else if ( nWantTBSDelay < 0 )
-			nWantTBSDelay = 50;                        // retail WillWantTBS nTimeLeft = 0x32
-		else if ( --nWantTBSDelay <= 0 )
-		{
-			bWantTurnBased = false;
-			nWantTBSDelay = -1;
-			pWorld->WantTurnBased( pPlayer );          // the delayed real-time -> turn-based switch
-		}
-	}
+	// (The old dev-only bWantTurnBased latch is GONE: it re-armed on EVERY vision recompute, so the
+	// game re-entered turn-based whenever an enemy stayed visible. Retail's ONLY realtime->TBS arm is
+	// the transition-gated notice path -- SInterruptInfo::AddEvent on a NEW sighting (UpdateVisible
+	// @0x3c4450) -> CWorld::CheckInterrupt @0x3684c0 -> WillWantTBS @0x3683e0 -- which this fork
+	// already ports world-side; retail CAICommander has no TBS latch at all.)
 	//
 	// Segment @0x347e0: the AI thinks (OnAISegment) every 3rd world segment (the nAILag throttle -- this
 	// is also GenerateCommand's `nAILag < 1` gate, so the round-robin only fires on the reset tick).
@@ -763,41 +733,12 @@ void CAICommander::OnTBSEvent( NWorld::ETBSEvent event )
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CAICommander::OnSeeUnit( NWorld::CUnitServer *pWatcher, NWorld::CUnitServer *pTarget )
-{
-	if ( bForbidAI )
-		return;
-	//
-	// retail swallows every sighting during a sequence (CWorld::CheckInterrupt @0x3684c0 IsSequence gate);
-	// the per-watcher CHEAT_SCRIPTSEQUENCE is the analog.
-	if ( pWatcher->IsCheatEnabled( NRPG::CHEAT_SCRIPTSEQUENCE ) )
-		return;
-	//
-	if ( GetWorld()->GetDiplomacyState( pWatcher, pTarget->GetPlayer() ) != NDb::DS_ENEMY )
-		return;
-	//
-	// AI sides only: the human's CSequenceCommander also receives OnSeeUnit now (CCommander base virtual,
-	// dispatched by UpdateVisible to the watcher's commander), but retail CAICommander has no OnSeeUnit
-	// override at all -- the human-side TBS entry is CWorld::CheckInterrupt's own IsAIPlayer-keyed logic
-	// (@0x3684c0). This latch replicates only retail's DEFERRED AI wish (WillWantTBS @0x3683e0).
-	if ( pTarget->CanFight() && pWatcher->CanFight() && NAI::IsAIPlayer( pPlayer.GetPtr() ) )
-		bWantTurnBased = true;
-	//
-	// AI-convergence Stage 2: no tactical AssignControl/Think. The watcher already carries a map-deploy
-	// reaction (NAI::CreateUnitReaction) that the per-segment pump updates; combat entry flows through the
-	// event-driven threat state (CEventOnSeeNewEnemy -> tracker -> AddEnemy -> enemies.bModified ->
-	// SAIUnitState::Update()::FindMostDangerousEnemy, which sets selfModified ONLY when pEnemy actually changes).
-	//
-	// ROOT-FIX ("enemies never shoot", GFirst diag 2026-07-07): do NOT mark the threat state modified here.
-	// UpdateVisible (wUnitServer.cpp:1081) calls OnSeeUnit for EVERY visible enemy on EVERY visibility recompute
-	// -- NOT just a genuinely new sighting -- so an unconditional selfModified here re-fired every few segments for
-	// a unit already locked on its enemy. CheckForUpdates cancels a unit's in-flight world command whenever its
-	// state is modified (commandTracker.Clear + CancelCommand), so this repeatedly ABORTED the AI's shoot mid-
-	// execution (before the weapon was even equipped) and re-installed the logic -- an infinite
-	// decide->issue->cancel loop (DebugView: DoCommand(ISSUE) -> modified=1 -> pump+CANCEL, forever). The genuine
-	// new/changed-enemy modification is already event-driven (see above), so this line was redundant AND harmful.
-	// bWantTurnBased above still flips combat -> turn-based on the sighting.
-}
+// (CAICommander::OnSeeUnit is GONE -- retail has NO OnSeeUnit anywhere (no PDB symbol, no commander
+// vcall in UpdateVisible @0x3c4450). Its dev-only bWantTurnBased latch re-armed on every vision
+// recompute; retail's realtime->TBS arm is the transition-gated SNotice path (AddEvent ->
+// CheckInterrupt @0x3684c0 -> WillWantTBS @0x3683e0), fully ported world-side. Combat entry stays
+// event-driven: CEventOnSeeNewEnemy -> tracker -> AddEnemy -> FindMostDangerousEnemy; see the
+// GFirst 2026-07-07 root-fix note in git history for why no state-modified mark belongs here.)
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CAICommander::LockObject( NWorld::CObjectServerBase *pObject )
 {

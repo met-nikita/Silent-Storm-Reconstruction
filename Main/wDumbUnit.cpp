@@ -531,8 +531,8 @@ void CDumbUnitServer::FallAsIfDead( const CVec3 &ptDir, bool bDropItemsFromBackP
 	//
 	if ( !IsWearingPK() )
 	{
-		// retail @0x350770 gates the death animation on the 3rd arg -- a combat (non-script) knock-out
-		// plays NOTHING here; its ragdoll fall arrives from the ProcessAttack corpse-push (@0x350e20).
+		// retail @0x350770 gates the death animation on the 3rd arg (all knock-out entry points --
+		// combat @0x75130e, SyncConscious @0x3515a0 -- pass TRUE; only lua can pass false).
 		// Retail passes a VNULL3 direction (disasm 0x7507ff..0x750818: the CRay is filled from ::VNULL3);
 		// the push direction only ever enters via the bPlayDeath=false entries.
 		if ( bPlayDeathAnim )
@@ -565,18 +565,23 @@ void CDumbUnitServer::KillUnit( const CVec3 &ptDir )
 	}
 	else
 		DropItems( false, false, true );     // retail @0x350cd0: unconscious->killed drops only the backpack
+	OnLifeLost();   // retail @0x350cd0: every kill branch tails vtbl+0x24
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CDumbUnitServer::MakeUnconscious( const CVec3 &ptDir, bool bFromScript )
+void CDumbUnitServer::MakeUnconscious( const CVec3 &ptDir, bool bFromScript, bool bPlayDeathAnim )
 {
 	if ( !CanFight() )
 		return;
 	//
 	OnUnitMadeUnconscious( bFromScript ); // UnitServer callback
 	//
-	FallAsIfDead( ptDir, false, bFromScript );   // retail @0x350dc0: play the death anim only for a scripted knock-out
+	// retail @0x350dc0 (disasm 0x750dd9..0x750de7): FallAsIfDead's 3rd arg is the caller's
+	// bPlayDeathAnim, NOT bFromScript -- a combat knock-out plays the death clip. The old 2-arg
+	// shape hardwired false here, freezing shot-KO'd units standing in their last pose.
+	FallAsIfDead( ptDir, false, bPlayDeathAnim );
 	if ( !bFromScript )
 		PlaySound( pRPG->GetRPGPers()->pSoundDeath );
+	OnLifeLost();   // retail tail: vtbl+0x24
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CDumbUnitServer::BlowUp()
@@ -719,12 +724,9 @@ int CDumbUnitServer::ProcessAttack( NWorld::IWorld *_pWorld, int nUserID, NRPG::
 		OnSuffersDamage( float(sInfo.nHP) / sInfo.nMaxHP );
 	}
 
-	// retail @0x350e20 step 8 (the CORPSE PUSH -- was missing here entirely): push the downed body
-	// with the shot direction via the clipless animator Die (bPlayDeath=false). This is the ONLY
-	// ragdoll fall a combat knock-out ever gets (MakeUnconscious/FallAsIfDead play nothing), and the
-	// push a fresh corpse gets on top of its death clip. Skipping it left KO'd units FROZEN standing
-	// in their last pose -- and a later KillUnit on an unconscious unit takes the DropItems-only
-	// branch, freezing the corpse for good (the reported frozen-corpse-at-old-place bug).
+	// retail @0x350e20 step 8 (the CORPSE PUSH): push the downed body with the shot direction via
+	// the clipless animator Die (bPlayDeath=false) -- on top of the death clip both a kill AND a
+	// combat knock-out already played (MakeUnconscious @0x75130e passes bPlayDeathAnim=true).
 	// Gates (disasm 0x75138c..0x7513fa): persona !IsAlive; GetPushCorpseCoeff(pAttack) > 0 (or
 	// cheat_football) -- NOT fabs2(dir) > 0; not a worn PK shell; persona not a panzerklein; not
 	// being carried (animator.bIsCarried @+103).
@@ -994,7 +996,10 @@ C3DSound* CDumbUnitServer::CreateFlash( bool bLeft, bool bFirstBullet )
 			pAISound = pRPGWeapon->GetDBWeapon()->pWeaponType->pBurstAISound;
 			break;
 	}
-	return pWorld->MakeAISound( pAISound, this, 0, pSound );
+	// retail @0x351630: the weapon's silencer coefficient ("Silencer" column, CRPGWeapon+0xa4) rides
+	// the SAISound -- GetHearingProbability scales the audible radius by it
+	NDb::SAISound sound = { pAISound, 0, pWeapon->fSilencer };
+	return pWorld->MakeAISound( sound, this, pSound );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 int CDumbUnitServer::GetActionAP( NRPG::EAction action ) const
@@ -1099,7 +1104,15 @@ void CDumbUnitServer::MakeStepSound( bool bSound )
 	if ( pArmor )
 		nAISoundType = pArmor->nAISoundType;
 
-	pWorld->MakeAISound( pAISound, this, nAISoundType, pSound );
+	// retail @0x34fbe0: the quiet-step perk (data-driven id 0x4d) attenuates the step like a
+	// silencer -- fSilencer = 1/coeff when the coeff exceeds 1
+	float fSilencer = 1.0f;
+	float fPerk = 0;
+	if ( IsValid( pRPG->GetRPGUnit() ) && pRPG->HasPerk( 0x4d, &fPerk ) && fPerk > 1.0f )
+		fSilencer = 1.0f / fPerk;
+
+	NDb::SAISound sound = { pAISound, nAISoundType, fSilencer };
+	pWorld->MakeAISound( sound, this, pSound );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CDumbUnitServer::ProcessSteps( const STime tCurrent )

@@ -754,6 +754,9 @@ CUnitServer* CWorld::AddUnitInGame( const NAI::SPathPlace &aiPos, NRPG::IUnitMis
 {
 	CUnitServer *pUS = AddUnit( aiPos, _pRPG, pPlayer, szName );
 	pUS->PlaceOnPassablePlace();
+	// retail @0x366990: unconditional SetPosition(GetPosition()) after the placement probe -- commits
+	// the (possibly relocated) spot: path-network lock, mine touch, vision refresh.
+	pUS->SetPosition( pUS->GetPosition() );
 	UpdateVisible();
 	return pUS;
 }
@@ -1351,6 +1354,7 @@ void CWorld::PlaceItemSlotsToMap( const ClueToSlot &clueToSlot )
 		if ( !i->second.bInventorySlot )
 		{
 			CPtr<NRPG::IInventoryItem> pItem = NRPG::CreateClueItem( NDb::GetRPGItem( i->first->GetDBClue()->nItemID ) );
+			CDFrozenItem *pFrozenItem = 0;
 			if ( IsValid( pItem ) )
 			{
 				// place onto the map
@@ -1358,15 +1362,19 @@ void CWorld::PlaceItemSlotsToMap( const ClueToSlot &clueToSlot )
 				// retail @0x748ba0: snap the slot position onto the surface below (no hit -> raw slot pos)
 				CVec3 ptOnSurface;
 				NAI::FindClosePositionOnSurface( GetAIMap(), i->second.pos.ptPos, &ptOnSurface );
-				CDFrozenItem *pFrozenItem = AddFrozenItem( GetAIMap(), ptOnSurface, rot, pItem, false, i->second.pos.nFloor );
-				if ( IsValid( pFrozenItem ) )
-				{
-					string szUpperName;
-					MakeUpperName( i->first->GetDBClue()->sSmallDescription, &szUpperName );
-					nameToObj[szUpperName] = CastToObjectBase( pFrozenItem );
-					DebugTrace( "[SCENARIO TRACKER] item %d was placed on the map\n", i->first->GetDBClue()->nItemID );
-				}
+				pFrozenItem = AddFrozenItem( GetAIMap(), ptOnSurface, rot, pItem, false, i->second.pos.nFloor );
 			}
+			if ( IsValid( pFrozenItem ) )
+			{
+				string szUpperName;
+				MakeUpperName( i->first->GetDBClue()->sSmallDescription, &szUpperName );
+				nameToObj[szUpperName] = CastToObjectBase( pFrozenItem );
+				// retail @0x748b64: red console success line (color literal 1 = CC_RED, sic)
+				csSystem << CC_RED << "Item clue " << i->first->GetDBClue()->sSmallDescription << " was placed on the map" << endl;
+			}
+			else
+				// retail @0x748bc1: ONE shared failure log -- item couldn't be created OR the placed frozen item came back dead
+				csSystem << CC_RED << "error: can't create item for clue " << CC_YELLOW << i->first->GetDBClue()->sSmallDescription << endl;
 		}
 	}
 }
@@ -1590,7 +1598,9 @@ void CWorld::CreateObjects( const SMapInfo &mapInfo, CPostWorldCreateInfo *pPost
 		{
 			if ( i->bArmed )
 			{
-				CPtr<CMine> pMine = new CMine( this, i->pos.ptPos, pM, i->nDC, i->pos.nFloor );
+				// retail @0x767155: trailing args (0, (int)fRotation) -- null master + map angle in degrees,
+				// TRUNCATED (fistp with RC=0b11 @0x76712a), so the placed mine keeps its map facing
+				CPtr<CMine> pMine = new CMine( this, i->pos.ptPos, pM, i->nDC, i->pos.nFloor, 0, (int)i->pos.fRotation );
 				continue;
 			}
 		}
@@ -2151,8 +2161,11 @@ void CWorld::CreateSoundStuff( CUnitServer *pWho, vector<CObj<CTimedObject> > *s
 	allSoundStuff.push_back( pMarker );   // weak ref (owning CObj lives in *stuff)
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-C3DSound* CWorld::MakeAISound( NDb::CAISound *pAISound, CDumbUnitServer *_pWho, int nSoundType, NDb::CSound *pSound )
+C3DSound* CWorld::MakeAISound( const NDb::SAISound &sound, CDumbUnitServer *_pWho, NDb::CSound *pSound )
 {
+	// retail @0x36aaf0: a null AI-sound record emits nothing
+	if ( sound.pAISound.GetPtr() == 0 )
+		return 0;
 	CDynamicCast<CUnitServer> pWho( _pWho );
 	if ( !IsValid( pWho ) )
 		return 0;
@@ -2165,9 +2178,12 @@ C3DSound* CWorld::MakeAISound( NDb::CAISound *pAISound, CDumbUnitServer *_pWho, 
 	vector<CObj<CTimedObject> > stuff;
 	//CTimedObject *pSound = _pSound;
 	if ( pSound == 0 )
-		pSound = pAISound->pSound;
+		pSound = sound.pAISound->pSound;
 	if ( pSound )
 	{
+		// retail @0x36aaf0: a looped sample fired as an AI one-shot must be able to terminate
+		if ( pSound->bLoop && pSound->nEndingSamples < 1 )
+			pSound->nEndingSamples = 1;
 		C3DSound *p = Create3DSound( ptFrom, pSound );
 		p->Attach( pShowUnits, this );
 		stuff.push_back( p );
@@ -2187,14 +2203,18 @@ C3DSound* CWorld::MakeAISound( NDb::CAISound *pAISound, CDumbUnitServer *_pWho, 
 			continue;
 		if ( pTarget != pWho )
 		{
-			float fDistance = fabs( pTarget->GetPosition().GetCP() - pWho->GetPosition().GetCP() ) / FP_GRID_STEP;
+			// retail @0x36aaf0: CP distance scaled by 1.6 (0x3fcccccd == 1/FP_GRID_STEP)
+			float fDistance = fabs( pTarget->GetPosition().GetCP() - pWho->GetPosition().GetCP() ) * 1.6f;
 			// has the guy left the constant-audibility area?
 			if ( fDistance > pTarget->GetUnitRPG()->GetAISoundConstants()->nExitRadius )
 				pTarget->SetAudible( pWho, false );
 			// do we hear this sound?
-			if ( pTarget->CanHearSound( pWho->GetPosition().GetCP(), pAISound, nSoundType, pWho ) )
+			if ( pTarget->CanHearSound( pWho->GetPosition().GetCP(), sound, pWho ) )
 			{
 				pTarget->HearSound( stuff, pWho, pWho->GetPosition().pos.p );
+				// NOTE: retail @0x36aaf0 also queues a CUICmdPointCamera here when, in turn-based, a
+				// human unit hears an AI unit absent from the known-audible set (unit+0x168) -- that
+				// second set (rebuilt by UpdateVisible @0x3c4450) is not ported yet.
 				pTarget->SetAudible( pWho, true );
 				//
 				bool bDiplomacyEnemy = pTarget->GetDiplomacyState( pWho ) == NDb::DS_ENEMY;
@@ -2203,7 +2223,7 @@ C3DSound* CWorld::MakeAISound( NDb::CAISound *pAISound, CDumbUnitServer *_pWho, 
 					// retail CWorld::MakeAISound: the hearer learns of the heard hostile (OnHearEnemy -> possibleEnemy).
 					NGlobal::ThrowEvent( NWorld::CEventOnHearEnemy( pTarget, pWho ) );
 				}
-				else if ( pAISound->fRadius > 30.0f )
+				else if ( sound.pAISound->fRadius > 30.0f )
 					NGlobal::ThrowEvent( NWorld::CEventOnHearAlly( pTarget, pWho ) );   // loud (>30) friendly sound -> ally-needs-help
 				if ( bDiplomacyEnemy && pTarget->GetPlayer() != pWho->GetPlayer() &&
 					pWho->GetUnitRPG()->IsHiding() && GetGame()->CheckVisibility( pTarget, pWho, true ) )
@@ -2308,9 +2328,10 @@ void CWorld::SetTimeOfDay( ETimeOfDay tod )
 	UpdateVisible();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// retail @0x361c00: a script asks for turn-based mode. Record the wish (saved state), then -- only while
-// the world is currently real-time and at least one player exists -- request a switch to turn-based for
-// the LAST player in the list (the CTBSWorld base queues an interrupt for it).
+// retail @0x361c00: a script asks for turn-based mode. Record the wish (saved state; read back by
+// IsTBSRealTimeModePossible @0x364f10, which forbids real time while it is set -- the pin), then --
+// only while the world is currently real-time and at least one player exists -- request a switch to
+// turn-based for the LAST player in the list (the CTBSWorld base queues an interrupt for it).
 void CWorld::ScriptWantTurnBased( bool bWant )
 {
 	bScriptWantTurnBased = bWant;
@@ -3213,14 +3234,18 @@ int CWorld::GetEnemyWatchers( IPlayer *pPlayer ) const
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CWorld::IsTBSRealTimeModePossible() const
 {
-	// retail IsRealTimePossible @0x364f10 head (disasm-proven): the BASE zone short-circuits TRUE
-	// (IWorld vtbl+0x1dc IsBase); then a frozen game start (bFreezeStart, c_DelayGameStartEx) or a
-	// multi-party map forbids real time. (Retail also ORs a bForceTurnBased debug global @0x9c7b0c --
-	// no dev counterpart, omitted.) NO sequence term: the sequence gate lives in StartNextPlayerTurn
-	// (@0x375f80 gate 2), not here.
+	// retail IsRealTimePossible @0x364f10 head (raw disasm; NB: its `this` is the CTBSWorld base at
+	// CWorld+8 -- the IsBase vcall goes through [this-8], so raw member offsets are shifted by -8):
+	// the BASE zone short-circuits TRUE (IWorld vtbl+0x1dc IsBase); then the script's turn-based wish
+	// ([this+0x1b8] = CWorld+0x1c0 bScriptWantTurnBased -- THE WantTurnBased(true) consumer: while it
+	// is set, real time is never possible, pinning turn-based) or a multi-party map ([this+0x130] =
+	// CWorld+0x138 nPartiesAdded) forbids real time. The old bFreezeStart term here was a misdecode of
+	// the unshifted +0x1b8; bFreezeStart's real retail consumer is the StartFirstSegments warm-up loop
+	// @0x36c4c0. (Retail also ORs a bForceTurnBased debug global @0x9c7b0c -- no dev counterpart,
+	// omitted.) NO sequence term: the sequence gate lives in StartNextPlayerTurn (@0x375f80 gate 2).
 	if ( IsBase() )
 		return true;
-	if ( bFreezeStart || nPartiesAdded > 1 )
+	if ( bScriptWantTurnBased || nPartiesAdded > 1 )
 		return false;
 	vector< CPtr<CPlayer> > players;
 	GetPlayersList( &players );
@@ -3241,27 +3266,39 @@ bool CWorld::IsTBSRealTimeModePossible() const
 			return false;
 		}
 	}
+	// retail @0x364f10 second pass -- PER-UNIT, not the player-level merged set: for every fighting
+	// unit of every live player, walk THAT unit's own visible list (CTBSUnitVision::visible,
+	// unit+0x168) and test unit-to-unit diplomacy (CUnitServer::GetDiplomacyState @0x3bf730). The
+	// player-level GetTBSVisible merge also holds the player's OWN units and ally-contributed
+	// sightings, so it over-reported; retail asks "does one of MY units itself see an enemy".
 	for ( int k = 0; k < players.size(); ++k )
 	{
 		CPlayer *pPlayer = players[k];
 		if ( !pPlayer->HasAlivePeople() )
 			continue;
+		vector< CPtr<CUnitServer> > units;
+		pPlayer->GetUnits( &units );   // retail: vision-base virtual (player+0x28 slot 0)
 		int nKID = pPlayer->GetScenarioPlayerID();
-		const list<CPtr<CUnitServer> > &visible = pPlayer->GetTBSVisible();
-		for ( list<CPtr<CUnitServer> >::const_iterator i = visible.begin(); i != visible.end(); ++i )
+		for ( int u = 0; u < units.size(); ++u )
 		{
-			CUnitServer *pUnit = *i;
-			if ( !IsValid(pUnit) || !IsValid( pUnit->GetPlayer() ) )
+			CUnitServer *pWatcher = units[u];
+			if ( !IsValid( pWatcher ) || !pWatcher->CanFight() )
 				continue;
-			if ( !pUnit->CanFight() )
-				continue;
-			int nUnitPlayerID = pUnit->GetPlayer()->GetScenarioPlayerID();
-			if ( pDiplomacy->GetDiplomacyState( nKID, nUnitPlayerID ) == NDb::DS_ENEMY )
+			const list<CPtr<CUnitServer> > &seen = pWatcher->GetTBSVisible();
+			for ( list<CPtr<CUnitServer> >::const_iterator i = seen.begin(); i != seen.end(); ++i )
 			{
-				string szUnitName("?");
-				GetUnitName( pUnit, &szUnitName );
-				csSystem << CC_GREEN << "Real time is impossible, player " << nKID << " sees not ally unit " << szUnitName << " of player " << nUnitPlayerID << endl;
-				return false;
+				CUnitServer *pUnit = *i;
+				if ( !IsValid( pUnit ) || !pUnit->CanFight() )
+					continue;
+				if ( pWatcher->GetDiplomacyState( pUnit ) == NDb::DS_ENEMY )
+				{
+					string szWatcherName, szUnitName( "?" );
+					GetUnitName( pWatcher, &szWatcherName );
+					GetUnitName( pUnit, &szUnitName );
+					int nUnitPlayerID = pUnit->GetPlayer()->GetScenarioPlayerID();
+					csSystem << CC_GREEN << "Real time is impossible, unit " << szWatcherName << " of player " << nKID << " sees not ally unit " << szUnitName << " of player " << nUnitPlayerID << endl;
+					return false;
+				}
 			}
 		}
 	}

@@ -202,7 +202,6 @@ public:
 	virtual void OnTBSEvent( ETBSEvent event ) {}
 	virtual void OnPassControl( CPlayer *pPlayer ) {}
 	virtual void OnUnitDied( CUnitServer *pUnit ) {}
-	virtual void OnSeeUnit( CUnitServer *pWatcher, CUnitServer *pTarget ) {}
 	virtual void Segment() {}
 	virtual void OnUnitAdded( CUnitServer *pUnit ) {}
 };

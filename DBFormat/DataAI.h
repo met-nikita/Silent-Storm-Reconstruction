@@ -24,10 +24,11 @@ public:
 	virtual int GetRadiusFromAISoundType( int nAISoundType );
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// NDb::SAISound (release-new, UDT size 12) -- a sound descriptor passed to CUnitMission::GetHearingProbability:
-// the AI sound record + its type + a silencer attenuation. Built transiently (e.g. from NDb::GetAISound(n)) and
-// NOT serialized; pAISound is a non-owning DB reference (CDBPtr, matching the binary). Dead until the AI hearing
-// query / assassin reaction consumes it.
+// NDb::SAISound (release-new, UDT size 12) -- the sound descriptor carried through the whole AI-noise chain
+// (CWorld::MakeAISound @0x36aaf0 -> CUnitServer::CanHearSound @0x3c32e0 -> CUnitMission::CanHearSound @0x2c2ee0
+// -> GetHearingProbability @0x2bff30): the AI sound record + its tile type + a silencer attenuation (weapon
+// "Silencer" coeff on shots, 1/quiet-step-perk on steps, 1.0 elsewhere). Built transiently (e.g. from
+// NDb::GetAISound(n)) and NOT serialized; pAISound is a non-owning DB reference (CDBPtr, matching the binary).
 struct SAISound
 {
 	CDBPtr<CAISound> pAISound;

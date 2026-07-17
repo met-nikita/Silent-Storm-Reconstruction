@@ -17,6 +17,7 @@
 namespace NDb
 {
 	class CAISound;
+	struct SAISound;
 	enum ECritical;
 	enum EDiplomacyState;
 }
@@ -171,6 +172,7 @@ private:
 	void ForcedMove();
 	// CDumbUnit callbacks
 	virtual void OnUnitMadeUnconscious( bool bFromScript = false );
+	virtual void OnLifeLost();   // retail @0x3c3cb0
 	virtual void OnSuffersDamage( float fAP );
 	virtual void ProcessCritical( NDb::ECritical eCA );
 	virtual void TouchedMines( const vector<CPtr<CMine> > &mines );
@@ -266,7 +268,8 @@ public:
 	// The path-conflict remover of this unit's current executor (pExec -> IExecMove), or null.
 	// Used by CPathConflictsRemover::CheckLockerState to walk the who-locks-whom chain.
 	CPathConflictsRemover* GetPathConflictsRemover();
-	bool CanHearSound( const CVec3 &ptFrom, NDb::CAISound *pSound, int nSoundType, CUnitServer *pWho );
+	// retail @0x3c32e0: takes the SAISound descriptor (record + tile type + silencer)
+	bool CanHearSound( const CVec3 &ptFrom, const NDb::SAISound &sound, CUnitServer *pWho );
 	void CallTimeLabel() { bCallTimeLabel = true; }
 	void RunCriticalExecutor( CCommandExecute *p );
 	void PostponeCritical( NDb::ECritical critical ) { criticals.push_front( critical ); }

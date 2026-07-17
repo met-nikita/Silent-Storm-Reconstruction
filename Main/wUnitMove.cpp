@@ -595,17 +595,28 @@ void CExecMove::DoCommand()
 			CDynamicCast<CCmdClimb> pClimb(pCmd);
 			if (pClimb)
 			{
+				// retail @0x3b86e0 travel arm: doors on both ends before the test; push the command back on failure
+				CheckDoors( pUS->GetPosition() );
+				CheckDoors( pClimb->pos );
 				if (TestSingleGameMove(pClimb))
 				{
 					animator.Climb(position, pClimb->pos, pClimb->bRealClimb);
 					pCurCmd = pCmd;
 					DoGameMove(pClimb->pos);
 				}
+				else
+				{
+					commandsQueue.push_front(pCmd);
+					return;
+				}
 			}
 			else {
 				CDynamicCast<CCmdJump> pJump(pCmd);
 				if (pJump)
 				{
+					// retail @0x3b86e0 travel arm: doors on both ends before the test; push the command back on failure
+					CheckDoors( pUS->GetPosition() );
+					CheckDoors( pJump->pos );
 					if (TestSingleGameMove(pJump))
 					{
 						animator.Jump(position, pJump->pos, pJump->bRealJump);
@@ -616,6 +627,11 @@ void CExecMove::DoCommand()
 						float fCurrH = pJump->pos.GetCP().z;
 						DoGameMove(pJump->pos);
 						pUS->FallFromHigh(fLastH - fCurrH);
+					}
+					else
+					{
+						commandsQueue.push_front(pCmd);
+						return;
 					}
 				}
 				else {
@@ -650,11 +666,19 @@ void CExecMove::DoCommand()
 						CDynamicCast<CCmdChangePose> pChangePose(pCmd);
 						if (pChangePose)
 						{
+							// retail @0x3b86e0 travel arm: doors on both ends before the test; push the command back on failure
+							CheckDoors( pUS->GetPosition() );
+							CheckDoors( pChangePose->pos );
 							if (TestSingleGameMove(pChangePose))
 							{
 								animator.ChangePose(position, pChangePose->pos);
 								pCurCmd = pCmd;
 								DoGameMove(pChangePose->pos);
+							}
+							else
+							{
+								commandsQueue.push_front(pCmd);
+								return;
 							}
 						}
 						else {
@@ -707,6 +731,9 @@ void CExecMove::DoCommand()
 									CDynamicCast<CCmdMoveLadder> pMoveLadder(pCmd);
 									if (pMoveLadder)
 									{
+										// retail @0x3b86e0 travel arm: doors on both ends before the test
+										CheckDoors( pUS->GetPosition() );
+										CheckDoors( pMoveLadder->pos );
 										if (TestSingleGameMove(pMoveLadder))
 										{
 											animator.MoveLadder(position, pMoveLadder->pos);
@@ -723,22 +750,40 @@ void CExecMove::DoCommand()
 										CDynamicCast<CCmdEnterLadder> pEnterLadder(pCmd);
 										if (pEnterLadder)
 										{
+											// retail @0x3b86e0 travel arm (generic over CCmdTravel, incl. ladders):
+											// doors on both ends before the test; push the command back on failure
+											CheckDoors( pUS->GetPosition() );
+											CheckDoors( pEnterLadder->pos );
 											if (TestSingleGameMove(pEnterLadder))
 											{
 												animator.EnterLadder(position, pEnterLadder->pos, pEnterLadder->bUp);
 												pCurCmd = pCmd;
 												DoGameMove(pEnterLadder->pos);
 											}
+											else
+											{
+												commandsQueue.push_front(pCmd);
+												return;
+											}
 										}
 										else {
 											CDynamicCast<CCmdLeaveLadder> pLeaveLadder(pCmd);
 											if (pLeaveLadder)
 											{
+												// retail @0x3b86e0 travel arm (generic over CCmdTravel, incl. ladders):
+												// doors on both ends before the test; push the command back on failure
+												CheckDoors( pUS->GetPosition() );
+												CheckDoors( pLeaveLadder->pos );
 												if (TestSingleGameMove(pLeaveLadder))
 												{
 													animator.LeaveLadder(position, pLeaveLadder->pos, pLeaveLadder->bUp);
 													pCurCmd = pCmd;
 													DoGameMove(pLeaveLadder->pos);
+												}
+												else
+												{
+													commandsQueue.push_front(pCmd);
+													return;
 												}
 											}
 										}

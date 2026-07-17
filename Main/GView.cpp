@@ -1333,11 +1333,14 @@ IGameView* CreateNewFastInterfaceView()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // Commands/Vars
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail @0x186230: 1 -> HSR_FAST, >1 -> HSR_DYNAMIC (gfx_hsr default 2 => DYNAMIC)
 static void VarSetHSR( const string &szID, const NGlobal::CValue &sValue, void *pContext )
 {
 	defaultHSRMode = HSR_NONE;
-	if ( sValue.GetFloat() != 0 )
+	if ( sValue.GetFloat() == 1 )
 		defaultHSRMode = HSR_FAST;
+	if ( sValue.GetFloat() > 1 )
+		defaultHSRMode = HSR_DYNAMIC;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 static void VarSetFog( const string &szID, const NGlobal::CValue &sValue, void *pContext )

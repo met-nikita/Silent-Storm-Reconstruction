@@ -79,11 +79,15 @@ bool CUnitArea::Prepare()                                                    // 
 	IPathNetwork *pNet = pUS->GetWorld()->GetPathNetwork();
 	if ( !IsValid( pNet ) )   // @0x74880 -- release tests the dead-bit (+4 & 0x80000000) too, not just null
 		return false;
-	// @0x74880 -- bail before flooding if the centre place is CM_INACTIVE or is itself unpassable
-	// (release: place pose == 3, or GetPassability(place) in {1,2}).
+	// @0x74880 -- bail before flooding if the centre place is CM_INACTIVE or hard-unpassable.
+	// Release rejects ONLY GetPassability in {1,2} (NOT_PASSABLE/CANNOT_LAY); AIP_LOCKED(3)/AIP_DOOR(4)
+	// PASS -- the guard's own post is locked by the unit ITSELF, so the strict IsPassable (==AIP_YES)
+	// failed here every time and Prepare returned false -> a permanently inert guard reaction (the
+	// EFirst Logic='Guard' enemies skipping every TB turn).
 	if ( place.GetPose() == CM_INACTIVE )
 		return false;
-	if ( !pNet->IsPassable( place ) )
+	EPassable ePassCentre = pNet->GetPassability( place );
+	if ( ePassCentre == AIP_NOT_PASSABLE || ePassCentre == AIP_CANNOT_LAY )
 		return false;
 	// @0x74880 -- flood with the unit temporarily forced into wishPose; the release writes the server's
 	// path-pose scratch (+0x28) and, for CRAWL, clears the run byte (+0x24). SetWishPose carries both in-tree
@@ -94,13 +98,17 @@ bool CUnitArea::Prepare()                                                    // 
 	list<SPathPlace>  reach;
 	NWorld::PrepareAllPaths( pNet, &movesTable, &reach, pUS, place, nAPRadius, pUS, true );
 	pUS->SetWishPose( nOldWish );
-	// @0x74880 -- clear, then keep every reachable place that is passable and whose pose is neither
-	// CM_INACTIVE(3) nor CM_LAY(0); key on the normalized GetHash so direction/moving bits do not
-	// fragment the set (release: `places[GetHash(*i)] = 1`).
+	// @0x74880 -- clear, then keep every reachable place whose pose is neither CM_INACTIVE(3) nor
+	// CM_LAY(0); key on the normalized GetHash so direction/moving bits do not fragment the set
+	// (release: `places[GetHash(*i)] = 1`).
+	// ORIGINAL BUG (confirmed in the retail disasm @0x4749d2): the loop's passability call pushes
+	// `lea eax,[esi+0x10]` = &this->place -- the CENTRE, not *i -- so the per-place passability filter
+	// is inert (the centre already passed above). Reproduced verbatim, NOT corrected.
 	places.clear();
 	for ( list<SPathPlace>::const_iterator i = reach.begin(); i != reach.end(); ++i )
 	{
-		if ( !pNet->IsPassable( *i ) )
+		EPassable ePass = pNet->GetPassability( place );   // sic: the centre, not *i (retail @0x4749d2)
+		if ( ePass == AIP_NOT_PASSABLE || ePass == AIP_CANNOT_LAY )
 			continue;
 		if ( (*i).GetPose() == CM_INACTIVE || (*i).GetPose() == CM_LAY )
 			continue;

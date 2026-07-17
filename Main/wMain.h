@@ -56,6 +56,7 @@ namespace NDb
 	class CRPGEngGrenade;
 	class CRPGMeleeWeapon;
 	class CAISound;
+	struct SAISound;
 	class CDBAckSequence;
 	class CScript;
 	class CDBCamera;
@@ -277,7 +278,8 @@ public:
 		ZEND int operator&( CStructureSaver &f ) { f.Add(2,&pPlayer); f.Add(3,&nTimeLeft); return 0; }
 	};
 	vector<SWillWantTBS> willWantTBS;
-	bool bScriptWantTurnBased = false;  // retail @CWorld+0x1c0 -- script's turn-based wish (saved state; ScriptWantTurnBased)
+	bool bScriptWantTurnBased = false;  // retail @CWorld+0x1c0 -- script's turn-based wish (saved state; ScriptWantTurnBased);
+	                                    // read by IsRealTimePossible @0x364f10 ([this+8+0x1b8]): while set, TB is pinned
 	// retail @CWorld+0x1c4/+0x1c8 (save tags 0x39/0x3a): the delayed game-over leg. The command drain
 	// (ExecuteCommand, retail Segment @0x36bce0 DCK_GAME_OVER) stashes a CCmdDelayedCallGameOver's payload
 	// here; it fires when the hero's corpse settles (InformCorpseStop @0x362180) or once tMaxGameOverCall
@@ -610,8 +612,10 @@ public:
 	void GenerateDebris( NDb::CDebrisMaterial *pDebrisMaterial, const CVec3 &ptCenter, const CVec3 &ptDir, int nDebris );
 	void CreateSoundStuff( CUnitServer *pWho, vector<CObj<CTimedObject> > *stuff, CVec3 ptPos );   // @0x369110
 	// retail returns the created C3DSound* (or 0) -- CDumbUnitServer::CreateFlash hands it up to
-	// CExecShoot's long-burst retention slot (SLongBurstSnd, save tag 3, EndSound lifecycle)
-	C3DSound* MakeAISound( NDb::CAISound *pAISound, CDumbUnitServer *pWho, int nSoundType = 0, NDb::CSound *pSound = 0 );
+	// CExecShoot's long-burst retention slot (SLongBurstSnd, save tag 3, EndSound lifecycle).
+	// retail @0x36aaf0 signature: the SAISound descriptor {record, tile type, silencer attenuation}
+	// replaced the old (CAISound*, nSoundType) pair.
+	C3DSound* MakeAISound( const NDb::SAISound &sound, CDumbUnitServer *pWho, NDb::CSound *pSound = 0 );
 	void MakeSound( const CVec3 &ptCenter, NDb::CSound *pSound );
 	list< CObj<IDynamicObject> > *GetMiscObjects() { return &miscObjects; }
 	NAI::IAIJobManager *GetAIJobManager() { return pAIJobManager; }

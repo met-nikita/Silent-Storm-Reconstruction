@@ -505,6 +505,9 @@ OBJECT_BASIC_METHODS(CGScene);
 	SGroupSelect lastMask;
 	CObj<IHZBuffer> pHZBuffer;
 	bool bWaitForLoad;
+	// retail +0x1b8, not serialized: HSR_DYNAMIC frame counter -- reuse the ignore list while
+	// moving, recalc via MakeInvisibleElementsListFast every 2nd frame (or on a big change)
+	int nReuseIgnoreList;
 
 	struct SDynamicLightGroup
 	{
@@ -554,7 +557,7 @@ OBJECT_BASIC_METHODS(CGScene);
 	//void MakeTransparentList( CTransparentRenderer *pRes, CTransformStack *pTS, const SGroupSelect &mask );
 	void RecalcRenderStats( int nSceneTris, int nParticles, int nLitParticles );
 	void RecalcCullingInfo();
-	void UpdateIgnoreMark( IRender *pRender, CTransformStack *pTS, const SGroupSelect &mask );
+	void UpdateIgnoreMark( IRender *pRender, CTransformStack *pTS, const SGroupSelect &mask, EHSRMode hsrMode );
 	bool TraceParts( ERLRequest req, const SGroupSelect &mask, CVolumeNode *pNode, const SRayInfo &r, float *pfT, CVec3 *pNormal, CVec3 *pColor, CObjectBase **ppObject );
 	void ResetDynamicLightmapsCache();
 	void CalcNewLightState();

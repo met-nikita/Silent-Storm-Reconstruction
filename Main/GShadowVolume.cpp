@@ -454,6 +454,54 @@ void MakeInvisibleElementsList( IRender *pRender, CTransformStack *pTS,
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail @0x1770f0: the HSR_DYNAMIC occlusion pass -- same marking loop as
+// MakeInvisibleElementsList, but reuses a function-static 400x300 rasterizer and its persistent
+// HZ buffer (retail: static CPartsRender(400,300,40000) owning a CObj<CHZBuffer>) instead of
+// allocating screen-sized ones every call; screenSize is unused (retail keeps the parameter).
+void MakeInvisibleElementsListFast( IRender *pRender, CTransformStack *pTS,
+	const SGroupSelect &_mask, const CVec2 &screenSize, CIgnorePartsHash *pIgnore,
+	CObj<IHZBuffer> *pHZBuffer )
+{
+	static CPartsRender pr( 400, 300 );
+	static CObj<CHZBuffer> pPersistentHZ;
+	list<SRenderPartSet> listParts;
+	pRender->FormPartList( pTS, &listParts, IRender::DT_STATIC, _mask );
+	pr.FastInitZBuffer();
+	RenderStuff( pr, pRender, pTS, listParts );
+
+	if ( !pPersistentHZ )
+		pPersistentHZ = new CHZBuffer;
+	CHZBuffer *pHZ = pPersistentHZ;
+	*pHZBuffer = pHZ;
+	pr.BuildHZ( pHZ );
+
+	int nID = 0;
+	for ( list<SRenderPartSet>::iterator i = listParts.begin(); i != listParts.end(); i++ )
+	{
+		SRenderPartSet &rps = *i;
+		CIgnorePartsHash::iterator res = pIgnore->end();
+		const vector<SSphere> &bounds = rps.pGeometry->pVertices->GetBounds();
+		for ( int k = 0; k < rps.pParts->size(); ++k )
+		{
+			++nID;
+			bool bIsVisible = false;
+			if ( rps.parts.IsSet(k) && !rps.castShadow.IsSet( k ) )
+				bIsVisible = pHZ->IsVisible( bounds[k], pTS );
+			bIsVisible |= pr.GetRefs( nID ) != 0;
+
+			if ( !bIsVisible )
+			{
+				if ( res == pIgnore->end() )
+				{
+					(*pIgnore)[ rps.pNode.GetPtr() ].Clear();
+					res = pIgnore->find( rps.pNode.GetPtr() );
+				}
+				res->second.Set( k );
+			}
+		}
+	}
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 // Shadow volumes generator
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CShadowVolumeBuilder

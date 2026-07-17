@@ -18,6 +18,8 @@ namespace NWorld
 class CWorld;
 class CMineTracker;
 class CUnitServer;
+// retail CMine ctor angle sentinel @0x37ead0 (-0x1b207): random facing instead of a map-set angle
+const int MINE_ANGLE_RANDOM = -111111;
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CMine : public IMine, public IVisObj, public NRPG::IAttackable
 {
@@ -44,7 +46,7 @@ class CMine : public IMine, public IVisObj, public NRPG::IAttackable
 public:
 	void SetPerkModifiers( const SPerkMineModifiers &m ) { sPerkModifiers = m; }
 	CMine() {}
-	CMine( CWorld *_pWorld, const CVec3 &_vPlace, NDb::CRPGMine *pMine, int _nDC, int _nFloor, CUnitServer *_pMaster = 0 );
+	CMine( CWorld *_pWorld, const CVec3 &_vPlace, NDb::CRPGMine *pMine, int _nDC, int _nFloor, CUnitServer *_pMaster = 0, int _nAngle = MINE_ANGLE_RANDOM );
 	~CMine();
 	// implement IVisObj
 	virtual void Visit( IRenderVisitor* );

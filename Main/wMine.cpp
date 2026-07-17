@@ -17,12 +17,13 @@ namespace NWorld
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CMine
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CMine::CMine( CWorld *_pWorld, const CVec3 &_vPlace, NDb::CRPGMine *_pMine, int _nDC, int _nFloor, CUnitServer *_pMaster )
+CMine::CMine( CWorld *_pWorld, const CVec3 &_vPlace, NDb::CRPGMine *_pMine, int _nDC, int _nFloor, CUnitServer *_pMaster, int _nAngle )
 : pWorld(_pWorld), vPlace(_vPlace), pMine(_pMine), nDC(_nDC), nFloor(_nFloor), pMaster(_pMaster)
 {
 	SRand rnd;
 	pModel = pMine->pItem->pModel->CreateModel( &rnd );
-	fAngle = random.GetFloat( 0, FP_2PI );
+	// retail @0x37ead0: -111111 sentinel -> random facing, else degrees * pi/180
+	fAngle = _nAngle == MINE_ANGLE_RANDOM ? random.GetFloat( 0, FP_2PI ) : ToRadian( (float)_nAngle );
 	bindGlobal.Link( pWorld->GetUnits(), this );
 	pWorld->AddMine( this );
 	pMineTracker = pWorld->GetMineTracker();

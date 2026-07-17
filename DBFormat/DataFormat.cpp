@@ -309,6 +309,12 @@ void CAnimation::Import()
 		{ "GetBackpack", GET_BACKPACK },
 		{ "ThrowKnife", THROW_KNIFE },
 		{ "Fall", FALL },
+		// retail CAnimation::Import @0x3f81e0 string table: JumpBackLow->0x42, JumpBackHigh->0x41
+		// (values confirmed in raw disasm @RVA 0x3f889f/0x3f88b5; the table lists Low first)
+		{ "JumpBackLow", JUMP_BACK_LOW },
+		{ "JumpBackHigh", JUMP_BACK_HIGH },
+		{ "MineTile", MINE_TILE },
+		{ "MineObject", MINE_OBJECT },
 		{ "Destruct1", DESTRUCT_1 },
 		{ "Destruct2", DESTRUCT_2 },
 		{ "Destruct3", DESTRUCT_3 },
@@ -317,6 +323,9 @@ void CAnimation::Import()
 		// The retail content DB has 4 such rows (SkeletonID 8, Stand-only flags) -- the HUD unit-face idle clips.
 		// NB game.db must be REGENERATED (DataImport.exe) for this mapping to reach the runtime data.
 		{ "InterfaceIdle", INTERFACE_IDLE },
+		// retail @0x3f81e0 table tail: EndHeal->0x4a, MoveOneStep->0x4b
+		{ "EndHeal", END_HEAL },
+		{ "MoveOneStep", MOVE_ONE_STEP },
 		// retail directional death rows (string table in release CAnimation::Import; Game.exe @0x4cfb58..7c)
 		{ "DeathFront", DEATH_FRONT },
 		{ "DeathBack", DEATH_BACK },
