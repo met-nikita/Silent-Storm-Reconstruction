@@ -17,7 +17,6 @@ namespace NWorld
 namespace NAI
 {
 class IAIUnit;
-class IAISignal;
 class IAILogic;
 class CAIReaction;
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -104,8 +103,8 @@ class CAICommander: public NWorld::CCommander
 	// AI-convergence FINAL structural item -- SAIState is now EMBEDDED BY VALUE at tag7 (retail
 	// CallObjectSerialize<SAIState> @0x374d0), NOT a heap CObj pointer. This became possible once the AI-state
 	// layer was collapsed from the dev IAIState:CObjectBase interface (+CAIState impl) to a plain value struct
-	// (aiState.h): the serialized CPtr<IAIState> back-refs that used to block it (CAIPlayer tag2, CAIIterator
-	// tag3) were all DEAD and were removed, and the one live holder -- CAIUnit::pAIState -- is a raw, transient
+	// (aiState.h): the serialized CPtr<IAIState> back-refs that used to block it (in since-deleted dev-only
+	// layers) were all DEAD and were removed, and the one live holder -- CAIUnit::pAIState -- is a raw, transient
 	// (unserialized) weak pointer re-established every AI segment by SAIState::Synchronize. The state's own
 	// pAICommander back-ref points at THIS (a registered object), so serializing the struct inline produces no
 	// orphan. See aiState.h.
@@ -134,9 +133,12 @@ class CAICommander: public NWorld::CCommander
 	unordered_map< CPtr<IAILogic>, int, SPtrHash > eotLogics;
 	// Save-format (AI-convergence): tags now match retail (operator& @0x374d0) exactly where the dev shares the
 	// member -- units 4, worldToAIUnit 5, pWorld 6, state 7 (embedded SAIState, CallObjectSerialize<SAIState>),
-	// nAILag 8, commandTracker 9, eotLogics 10, updateTracker 11, unitsTracker 12, pLastReportedUnit 13; the
-	// dev-only members take retail-unused tags (bAITurn 14, bWantTurnBased 15, LockedObjects 16).
-	ZEND int operator&( CStructureSaver &f ) { f.Add(2,(NWorld::CCommander*)this); f.Add(3,&pPlayer); f.Add(4,&units); f.Add(5,&worldToAIUnit); f.Add(6,&pWorld); f.Add(7,&state); f.Add(8,&nAILag); f.Add(9,&commandTracker); f.Add(10,&eotLogics); f.Add(11,&updateTracker); f.Add(12,&unitsTracker); f.Add(13,&pLastReportedUnit); f.Add(14,&bAITurn); f.Add(15,&bWantTurnBased); f.Add(16,&LockedObjects); return 0; }
+	// nAILag 8, commandTracker 9, eotLogics 10, updateTracker 11, unitsTracker 12, pLastReportedUnit 13.
+	// Retail ENDS at tag 13 -- the dev-only members (bAITurn/bWantTurnBased/LockedObjects) are TRANSIENT:
+	// serializing them at 14/15/16 made dev-written saves diverge from retail's writer (wire-audit MISS
+	// 2.14-2.16); the deserialize ctor re-arms them (bAITurn/bWantTurnBased=false, LockedObjects empty).
+public:	// operator& must be reachable from CSequenceCommander's base-as-chunk Add (retail @0x393f0)
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,(NWorld::CCommander*)this); f.Add(3,&pPlayer); f.Add(4,&units); f.Add(5,&worldToAIUnit); f.Add(6,&pWorld); f.Add(7,&state); f.Add(8,&nAILag); f.Add(9,&commandTracker); f.Add(10,&eotLogics); f.Add(11,&updateTracker); f.Add(12,&unitsTracker); f.Add(13,&pLastReportedUnit); return 0; }
 	//
 private:
 	// TBSEvents
@@ -170,7 +172,10 @@ private:
 	void FinishTurn();                                    // @0x34790
 	//
 public:
-	CAICommander() : nAILag( 0 ) {}
+	// Wire-convergence note: bAITurn/bWantTurnBased are dev-only members (retail's 160-byte CAICommander has
+	// no such fields and its operator& @0x374d0 ends at tag 13), so a RETAIL save never carries tags 14/15 --
+	// the deserialize ctor (this one) must leave them in the retail-equivalent idle state, not uninitialized.
+	CAICommander() : nAILag( 0 ), bAITurn( false ), bWantTurnBased( false ) {}
 	CAICommander( NWorld::CWorld *_pWorld, NWorld::CPlayer *_pPlayer );
 	// retail CAICommander::SetPlayer @0x33e60: bind the commander to its player AFTER construction --
 	// sets pPlayer and re-seeds unitsTracker.pPlayer (nothing else). Used by the human player's
@@ -193,8 +198,12 @@ public:
 	void UnLockObject( NWorld::CObjectServerBase *pObject );
 	void UnLockAllObjects();
 	//
-	virtual void ProcessAISignals();
 	NWorld::CWorld *GetWorld() { return pWorld; }
+	// [post-load reconnect] a retail save stores pWorld as an IWorld* ref whose identity this fork's
+	// CPtr<NWorld::CWorld> deserialize resolves to null (multiple-inheritance base-adjust); re-establish it
+	// (and the embedded SAIState back-refs) from CWorld::CreateRestored before the first Segment runs, so
+	// GenerateCommand()'s GetWorld()->IsSequence() (aiCommander.cpp:889) is safe.
+	void ReconnectWorld( NWorld::CWorld *pW ) { pWorld = pW; state.SetBackRefs( pW, this ); }
 	NWorld::CPlayer *GetPlayer() { return pPlayer; }
 	SAIState *GetAIState() { return &state; }
 	const vector< CObj<IAIUnit> > &GetUnitsList() const { return units; }
@@ -209,11 +218,22 @@ public:
 // decomp/src/s2_aicommander.h, registered 0x51823190 alongside CAICommander 0x02731170). It carries
 // NO new data members; it differs from CAICommander only by its own vtable + a GenerateCommand override
 // that auto-drives the commander ONLY while the world runs a cinematic sequence (CWorld::IsSequence
-// @0x376ff0). Purely additive -- nothing in this snapshot instantiates it yet.
+// @0x376ff0). It is the HUMAN player's commander: CPlayerTracker's ctor (PlayerTracker.cpp, retail
+// @0x287d70) news one per mission, so every retail save carries exactly one instance.
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CSequenceCommander: public CAICommander
 {
 	OBJECT_BASIC_METHODS(CSequenceCommander);
+	ZDATA
+	ZPARENT( CAICommander );
+	// Wire-convergence (retail operator& @0x393f0): retail serializes the ENTIRE CAICommander base as ONE
+	// nested sub-chunk at tag 2 (CallObjectSerialize<NAI::CAICommander>) and nothing else -- the class adds
+	// NO wire fields of its own. Without this override the class inherited CAICommander::operator& and read/
+	// wrote the base's FLAT tag 2..16 table at TOP level, so every retail save (top-level = the single tag-2
+	// container) mis-parsed: retail 2.3 pPlayer(4B) was read as CCommander bInterruptRequest(1B), 2.4 units
+	// as bStopAction, and everything from worldToAIUnit onward was silently dropped -- per-slot corruption
+	// of the human player's commander on all 9 audit slots.
+	ZEND int operator&( CStructureSaver &f ) { f.Add( 2, (CAICommander*)this ); return 0; }
 public:
 	CSequenceCommander() {}
 	CSequenceCommander( NWorld::CWorld *_pWorld );

@@ -140,7 +140,8 @@ public:
 	ZDATA_(CDBRecord)
 	CPtr<CTemplVariant> pVar;
 	CPtr<CWaypointName> pName;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CDBRecord*)this); f.Add(2,&pVar); f.Add(3,&pName); return 0; }
+	bool b3DPoint;		// db "Is3DPoint": waypoint hangs in the air -- fly-snapped at map build (retail @0x496000)
+	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CDBRecord*)this); f.Add(2,&pVar); f.Add(3,&pName); f.Add(4,&b3DPoint); return 0; }
 
 	virtual void Import();
 };

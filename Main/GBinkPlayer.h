@@ -57,7 +57,7 @@ class CBinkVideoPlayer: public IVideoPlayer
 	DWORD         dwPlayFlags;    // +0x24  1=force-nonmult16 2=loop 4=from-memory 8=directsound 0x10=manual-step
 	string        szFileName;     // +0x28
 	vector<BYTE>  buffer;         // +0x34  preload buffer (from-memory path)
-	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&szFileName); f.Add(3,&dwPlayFlags); return 0; }
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&bForceUpdate); f.Add(3,&bStopped); f.Add(4,&dwCopyFlags); f.Add(5,&dwPlayFlags); f.Add(6,&szFileName); f.Add(7,&buffer); return 0; }   // retail @0xf86a0 (convergence W2; was 2=szFileName/3=dwPlayFlags)
 
 public:
 	CBinkVideoPlayer();                                       // @0xf8180

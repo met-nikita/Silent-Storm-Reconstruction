@@ -108,7 +108,7 @@ void CAILootAction::Do( CAILog *pLog ) const                            // @0x63
 	for ( int i = 0; i < (int)drops.size(); ++i )
 		if ( IsValid( drops[i] ) )
 			*pLog << new CAILogDropItem( pU, drops[i].GetPtr() );
-	*pLog << new CAILogPickUpItem( pU, info.pItem->GetInvItem() );
+	*pLog << new CAILogPickUpItem( pU, info.pItem, wishPose );
 	// (the release loots additional items within human-reach of the walked path's end in the same trip --
 	//  otherItem, tied to the elided GetHumanReachPlaces pathing -- omitted here; see the file header.)
 }

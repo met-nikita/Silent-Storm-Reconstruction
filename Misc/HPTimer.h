@@ -4,12 +4,17 @@
 namespace NHPTimer
 {
 	typedef int64 STime;
+	// release NHPTimer::UpdateHPTimerFrequency @0x3d4170 -- re-derive the RDTSC->seconds scale from a
+	// QueryPerformanceCounter reference window. Self-throttled: a call inside 50ms of the window start
+	// only samples and returns. Retail's main loop (WinMain @0x9810, @0x40a70b right after StepApp)
+	// calls this EVERY FRAME, so the scale tracks the CPU as SpeedStep/turbo move the TSC<->wall ratio.
+	void UpdateHPTimerFrequency();
 	double GetSeconds( const STime &a );
-	// получить текущее время
+	// пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅ
 	void GetTime( STime *pTime );
-	// получить время, прошедшее с момента, записанного в *pTime, при этом в *pTime будет записано текущее время
+	// пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅ, пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ, пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅ *pTime, пїЅпїЅпїЅ пїЅпїЅпїЅпїЅ пїЅ *pTime пїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅ
 	double GetTimePassed( STime *pTime );
-	// получить частоту процессора
+	// пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ
 	double GetClockRate();
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////

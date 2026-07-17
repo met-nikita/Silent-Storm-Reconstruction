@@ -31,7 +31,11 @@ BEGIN_SCRIPT_COMMAND( CreateRoute, "" )
 	int nWaypoints = luaGetParamCount( pState );
 	for ( int i = 1; i <= nWaypoints; ++i )
 	{
-		string szName = pScript->GetObject( i ).GetString();
+		// same NULL-guard as CreateGroup. NOTE retail luaCreateRoute @0x2eb8d0 does NOT guard --
+		// its nstl ctor derefs the raw lua_tostring result (a LATENT retail crash on a non-string
+		// waypoint name); hardened here like the CreateGroup twin rather than reproducing it.
+		const char *pszName = pScript->GetObject( i ).GetString();
+		string szName = pszName ? pszName : "";
 		CPtr<NAI::CAIRouteWaypoint> pWaypoint = pScript->pWorld->GetWaypoint( szName );
 		if ( IsValid( pWaypoint ) )
 			waypoints.push_back( pWaypoint );
@@ -173,7 +177,9 @@ BEGIN_SCRIPT_COMMAND( UnitFlyToWaypoint, "us" )
 		if ( IsValid( pWaypoint ) )
 		{
 			NAI::SPosition pos = pWaypoint->pos;
-			NAI::MakeFlyPos( &pos, &pos );
+			// retail @0x2ea9c0: a 3D waypoint is already a fly place (load-time MakeFlyPos) -- use as-is
+			if ( !pos.p.IsFinal() )
+				NAI::MakeFlyPos( &pos, &pos );
 			NAI::SUnitPosition unitPos;
 			unitPos.pos = pos;
 			unitPos.bRun = false;

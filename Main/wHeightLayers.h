@@ -11,19 +11,12 @@
 // Reconstructed against the matched-release decode (oracle: decomp/src/s2_heightlayers.h +
 // s2_nworld_wheightlayers.h) over the real dev CArray2D / STerrainInfo / CFuncBase types.
 //
-// SCOPE OF THIS SHELL:
-//   * The accessors (GetLayer/GetRealFloor/GetCreateLayer/HasTerrain), the ctor, and ComputeLayers
-//     steps 1-2 (the shared terrainLayer data product) are faithful.
-//   * ComputeLayers step 3 -- the path-network wall rasterization + per-floor beta-spline smoothing --
-//     reads a release NAI::CPathNetwork passage/geometry/cell substructure that the dev predecessor
-//     NAI::CPathNetwork (vector<CObj<CNodesLayer>> layers/groups, no passages) does not carry. It is a
-//     DEFERRED, documented no-op: no per-floor layers are populated, so GetLayer/GetRealFloor degrade
-//     to the shared terrainLayer. Behaviour-neutral and call-path-safe -- nothing in the dev tree
-//     calls CreateHeightLayers.
+// Owned by CWorld (+0x1a0, save tag 44); built by CreateRandom and sampled by CCamera::Update for the
+// focus-height easing + eye lift-off. ComputeLayers is FULLY ported, step 3 included.
 //
 // PDB layout (x86): SHLayer 16 { CArray2D<float> heights }; IHeightLayers 12 (: CObjectBase, no data);
 // CHeightLayers 72 (terrainLayer@12, layers@28, desired2realFloor@48, bHasTerrain@68); saveload id
-// 0xa2313130. IHeightLayers has no dev consumer, so its vtable slot order is functional, not byte-exact.
+// 0xa2313130. Vtable slot order is retail-exact (walked from the CHeightLayers vftable VA 0x8ca118).
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 #include "..\Misc\2DArray.h"   // CArray2D<float> -- complete type (SHLayer member)
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -50,10 +43,11 @@ struct SHLayer
 class IHeightLayers: public CObjectBase
 {
 public:
-	virtual SHLayer* GetLayer( int nFloor ) = 0;
-	virtual int GetRealFloor( int nFloor ) = 0;
-	virtual SHLayer* GetCreateLayer( int nFloor ) = 0;
-	virtual bool HasTerrain() const = 0;
+	virtual SHLayer* GetLayer( int nFloor ) = 0;   // vtbl +0x10 @0x35d630
+	// vtbl +0x14 @0x3726a0. ICF-folded to `lea eax,[ecx+0xc]; ret` (= &terrainLayer), so the PDB
+	// misnames the slot CPlayerBase<>::GetPlayerUnits. 0-arg -- NOT a GetLayer overload.
+	virtual SHLayer* GetTerrainLayer() = 0;        // vtbl +0x14 @0x3726a0
+	virtual bool HasTerrain() const = 0;           // vtbl +0x18 @0x35e290
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CHeightLayers -- the per-floor height cache. Saveload-registered (id 0xa2313130).
@@ -71,9 +65,11 @@ public:
 	CHeightLayers(): bHasTerrain( true ) {}
 	//
 	virtual SHLayer* GetLayer( int nFloor );
-	virtual int GetRealFloor( int nFloor );
-	virtual SHLayer* GetCreateLayer( int nFloor );
+	virtual SHLayer* GetTerrainLayer() { return &terrainLayer; }
 	virtual bool HasTerrain() const { return bHasTerrain; }
+	// retail keeps these OFF the vtable (7 slots end at +0x18); ComputeLayers + GetLayer call them direct
+	int GetRealFloor( int nFloor );                                        // @0x35d4f0
+	SHLayer* GetCreateLayer( int nFloor );                                 // @0x35d670
 	//
 	void ComputeLayers( int nXCells, int nYCells, CFuncBase<STerrainInfo>* pTerrain, NAI::IPathNetwork* pPathNet );
 };

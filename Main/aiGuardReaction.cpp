@@ -199,7 +199,7 @@ CAIReaction* CreateAIGuardReaction( IAIUnit *pUnit, NDb::CAnimation *pGuardAnima
 }
 //
 using namespace NAI;
-BASIC_REGISTER_CLASS( CAIGuardReaction )
+REGISTER_SAVELOAD_CLASS( 0x52443110, CAIGuardReaction )
 //
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // NDatabase::GetTable<NDb::CAnimation> @0x51a20 -- the typed-table accessor COMDAT the matched release emits

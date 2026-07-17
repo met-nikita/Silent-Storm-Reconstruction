@@ -46,7 +46,35 @@ private:
 	CObj<NUI::CGlobalMapUI> pGlobalMapUI;
 	//// sound
 	CObj<NSound::ISoundScene> pSoundScene;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&eMode); f.Add(3,&pGame); f.Add(4,&pGlobalMap); f.Add(5,&pGlobalInfo); f.Add(6,&pCursor); f.Add(7,&pInterface); f.Add(8,&pGlobalMapUI); f.Add(9,&pSoundScene); return 0; }
+	// retail NGame::CGlobalMap::operator& @0x1e4180: retail's CGlobalMap DERIVES from CMissionBase,
+	// so the wire is { 1 = the CMissionBase base chunk, 2 = bShowMode (1-byte bool), 3 = pGlobalMap,
+	// 4 = pGlobalInfo, 5 = pGlobalMapUI }. This fork keeps CGlobalMap a standalone IGlobalMap (the
+	// shared game/interface/cursor/sound members are flat here, not a CMissionBase base), so -- same
+	// as CChapterMap (iChapterMap.cpp) -- we emit the tag-1 base chunk through SBaseChunk, mapping our
+	// four shared members onto retail CMissionBase's own tags (pGlobalGame=2, pSoundScene=4,
+	// pCursor=15, pInterface=16 -- the CMissionBase table @0x19f3f0). Retail's 1-byte bShowMode is
+	// mapped onto the dev EMode enum (MODE_SHOW <-> true) so the WIRE stays 1 byte.
+	struct SBaseChunk
+	{
+		CPtr<NRPG::CGlobalGame> *pGame;
+		CObj<NSound::ISoundScene> *pSoundScene;
+		CObj<NUI::ICursor> *pCursor;
+		CObj<NUI::CInterface> *pInterface;
+		int operator&( CStructureSaver &f ) { f.Add(2,pGame); f.Add(4,pSoundScene); f.Add(15,pCursor); f.Add(16,pInterface); return 0; }
+	};
+	ZEND int operator&( CStructureSaver &f )
+	{
+		SBaseChunk sBase = { &pGame, &pSoundScene, &pCursor, &pInterface };
+		f.Add(1,&sBase);				// retail CMissionBase base chunk
+		bool bShowMode = ( eMode == MODE_SHOW );
+		f.Add(2,&bShowMode);			// retail tag 2: 1-byte bShowMode (PDB bool@312)
+		if ( f.IsReading() )
+			eMode = bShowMode ? MODE_SHOW : MODE_NORMAL;
+		f.Add(3,&pGlobalMap);
+		f.Add(4,&pGlobalInfo);
+		f.Add(5,&pGlobalMapUI);
+		return 0;
+	}
 
 protected:
 	void RenderFrame( const STime &sTime );

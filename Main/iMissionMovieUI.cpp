@@ -137,13 +137,7 @@ void CMissionMovieUI::UpdateDesktop( const STime &sTime )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 NGame::CUICmdExec* CMissionMovieUI::CreateExecutor( NWorld::CUICmd *pCmd )
 {
-	CDynamicCast<NWorld::CUICmdTurn> pTurn(pCmd);
-	if (pTurn)
-		return false;
-	CDynamicCast<NWorld::CUICmdUnit> pUnit(pCmd);
-	if (pUnit)
-		return false;
-
+	// (the CUICmdTurn/CUICmdUnit skip guards died with the classes -- W5 serialization-convergence)
 	return NGame::CreateExecutor( pCmd, pMission );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -288,13 +282,7 @@ void CMissionFadeUI::UpdateDesktop( const STime &sTime )
 // issued between FadeOut and FadeIn is consumed with no executor and its WaitForUI id never releases.
 NGame::CUICmdExec* CMissionFadeUI::CreateExecutor( NWorld::CUICmd *pCmd )
 {
-	CDynamicCast<NWorld::CUICmdTurn> pTurn(pCmd);
-	if (pTurn)
-		return 0;
-	CDynamicCast<NWorld::CUICmdUnit> pUnit(pCmd);
-	if (pUnit)
-		return 0;
-
+	// (the CUICmdTurn/CUICmdUnit skip guards died with the classes -- W5 serialization-convergence)
 	return NGame::CreateExecutor( pCmd, pMission );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////

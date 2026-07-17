@@ -630,11 +630,15 @@ void CExecMove::DoCommand()
 						//	return;
 						//}
 						//SpendAP( pWorld, this, NRPG::AC_ROTATE );
+						// retail @0x3b86e0 travel arm: prod doors on both ends BEFORE the passability test
+						CheckDoors( pUS->GetPosition() );
+						CheckDoors( pRotate->pos );
 						if (TestSingleGameMove(pRotate))
 						{
 							pCurCmd = pCmd;
 							animator.Rotate(position, pRotate->pos, pRotate->phase == CCmdRotate::START);
-							pUS->SetPosition(pRotate->pos);
+							// retail @0x3b86e0 travel arm: rotates go through DoGameMove (doors/action/locks), not bare SetPosition
+							DoGameMove(pRotate->pos);
 						}
 						else
 						{
@@ -981,6 +985,7 @@ void CExecMove::ConvertPath( NAI::CPath *pPath, ENeedActiveItem eActive )
 				bInterGrid = false;
 			}
 			commandsQueue.push_back( new CCmdEndMove( pUS, pLastMove ) );
+			pLastMove = 0;   // retail @0x3b9330: the pending CPtr is released with its ender
 			bMoving = false;
 		}
 		//
@@ -1007,6 +1012,25 @@ void CExecMove::ConvertPath( NAI::CPath *pPath, ENeedActiveItem eActive )
 			NAI::ETransitionType type = NAI::GetTransitionType( pNet, prev, cur );
 			if ( type == NAI::TT_INTERGRID_SAME )
 				continue;
+			if ( type == NAI::TT_TURN )
+			{
+				// retail @0x3b9330: a cross-layer in-place turn goes through CreateRotateQueue @0x3b9000
+				// (end the pending move, then rotate to cur's heading) -- NOT the inter-grid fold below,
+				// which silently drops the heading change.
+				if ( bWeapon && !bActive )
+				{
+					commandsQueue.push_back( new CCmdActivateItem( pUS, nSlot ) );
+					bActive = true;
+				}
+				if ( pLastMove )
+				{
+					commandsQueue.push_back( new CCmdEndMove( pUS, pLastMove ) );
+					pLastMove = 0;
+				}
+				CreateRotate( (NAI::EDirection)cur.GetDirection(), prevPos );
+				bMoving = false;
+				continue;
+			}
 			float fSqrDist = fabs2( pos.GetCPNoHeight() - prevPos.GetCPNoHeight() );
 			if ( fSqrDist < sqr(0.2f) )
 			{
@@ -1073,8 +1097,14 @@ void CExecMove::ConvertPath( NAI::CPath *pPath, ENeedActiveItem eActive )
 				commandsQueue.push_back( new CCmdActivateItem( pUS, nSlot ) );
 				bActive = true;
 			}
-			// rotate
+			// retail CreateRotateQueue @0x3b9000: a pending (unterminated) move is ended before the turn.
+			if ( pLastMove )
+			{
+				commandsQueue.push_back( new CCmdEndMove( pUS, pLastMove ) );
+				pLastMove = 0;
+			}
 			CreateRotate( (NAI::EDirection)cur.GetDirection(), prevPos );
+			bMoving = false;   // retail @0x3b9330: pending==null after the rotate queue
 		}
 		else if ( prev.GetX() != cur.GetX() || prev.GetY() != cur.GetY() )
 		{

@@ -58,7 +58,13 @@ const float F_3D_STEP = 0.1f;
 const float F_MAX_HEIGHT = 25.0f;
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 const int N_MAX_FLOORS = 8;
-const int N_MAX_LAYERS_PER_FLOOR = 4;
+// retail = 3 (disasm: RegisterFloorLayer @0x3f610 / SetOnBaseLayer @0x77ba0 `lea eax,[eax+eax*2]`,
+// PDB STempArrayGroup = [8][3]). LOAD-BEARING for bTop: on a 4+-surface column (switchback
+// stairwell) the 3rd slot IS the floor's top layer (bTop short-circuit) and the 4th surface
+// SPILLS into the next floor's slot 0 (retail's unguarded table write, see CreateAdditionalLayers)
+// -- with the old dev 4, the tile on slot 2 saw a same-floor surface above, bTop stayed false and
+// the (bCollides && !bTop) gate killed steep stairwell tiles.
+const int N_MAX_LAYERS_PER_FLOOR = 3;
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 inline unsigned short GetIHeight( float fH ) { return Float2Int( fH * (65536 / F_MAX_HEIGHT) ); }
 inline float GetFHeight( unsigned short nH ) { return nH * (F_MAX_HEIGHT / 65536); }
@@ -81,7 +87,12 @@ struct STile
 		char nMove[4];
 	};
 	unsigned short nHeight;
-	unsigned short nFake;
+	// retail STile +6 (PDB `short nFloor`): the NATIVE SOURCE FLOOR of the surface this tile stands
+	// on (terrain = 0, object = its record floor), stamped by CPassCalcer::CalcPoseInPoint from the
+	// height-field's floor channel. CPathNetwork::GetFloor @0x3df00 reads it per tile -- the
+	// approximate-path fallback keys on it, so a jump-landing tile on a building group's UPPER
+	// LAYER still reports the landing surface's floor. (Was the never-written Jan03 `nFake`.)
+	short nFloor;
 	char nLocks;
 	char nDynLocks;
 	char nPassable; // // set of 1<<ECheckPose bits
@@ -192,7 +203,9 @@ public:
 	int GetYSize() const { return nYSize; }
 	void RecalcSquare( int nX, int nY, IAIMap *pMap, char nLevel );
 	bool TestSquare( int nX, int nY, char nLevel );
-	void RefreshSpot( const SPathPlace &p, IAIMap *pMap, char cLevel );
+	// retail @0x441c70 returns bool (true = a square recalc ran) and takes bForce: a pending
+	// recolour job suppresses refreshes unless forced (the pass-calcer job forces, @0x488880).
+	bool RefreshSpot( const SPathPlace &p, IAIMap *pMap, char cLevel, bool bForce = false );
 	void SetTracker( int nX, int nY, IAIMap *pMap, const STempArrayGroup<STile> &tempArrays );
 	CVec2 GetCPNoHeight( float x, float y ) const 
 	{
@@ -207,6 +220,9 @@ public:
 	void RegisterFloorLayer( CNodesLayer *pLayer, int nFloor );
 	bool IsIgnored( float x, float y ) const;
 	CNodesLayer* GetRootFloorLayer( int nFloor );
+	// retail @0x3e740: the layer whose TILE at (x,y) natively belongs to nFloor (passable + some
+	// move connectivity); falls back to the floor's root layer
+	CNodesLayer* GetLayerWithFloor( int nFloor, int nX, int nY );
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CNodesLayer: public CObjectBase
@@ -276,7 +292,22 @@ public:
 	CLadderHash ladderEntrances;
 	CObj<CMapColourer> pColourer;
 	CObj<CLayersGroup> pGroup;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&nLayer); f.Add(3,&nFloor); f.Add(4,&tiles); f.Add(6,&transitions); f.Add(7,&ladders); f.Add(8,&ladderEntrances); f.Add(9,&pColourer); f.Add(10,&pGroup); return 0; }
+	bool bHappySave;   // retail 'small save': strip the recolour cache on save (set by SetSmallSaveSize @0x3db60)
+	// retail @0x46bd0: 9=pGroup, 10=bHappySave, 11=pColourer -- and a happy save writes a NULL colourer
+	// chunk at 11 instead of the live cache. (Dev pre-convergence had 9=pColourer/10=pGroup.)
+	ZEND int operator&( CStructureSaver &f )
+	{
+		f.Add(2,&nLayer); f.Add(3,&nFloor); f.Add(4,&tiles); f.Add(6,&transitions); f.Add(7,&ladders);
+		f.Add(8,&ladderEntrances); f.Add(9,&pGroup); f.Add(10,&bHappySave);
+		if ( !f.IsReading() && bHappySave )
+		{
+			CObj<CMapColourer> pNull;
+			f.Add(11,&pNull);
+		}
+		else
+			f.Add(11,&pColourer);
+		return 0;
+	}
 	
 	void RemoveAllTransitions( const CTRect<int> &rect );
 	//void RecalcHeightAndPassability( IAIMap *pMap, const CTRect<int> &region, CArray2D<STile> *pTemp );
@@ -285,7 +316,7 @@ public:
 	const CPathNetwork *GetNetwork() const { return pGroup->pNet; }
 	void GetSamePoints( const SPathPlace& p, vector<SPathPlace> *pRes );
 	int GetSamePoints( const SPathPlace& p, SPathPlace *places ); // quicker version: places is an array having enough memory
-	void RefreshLadder( int nLadder, IAIMap *pMap );
+	bool RefreshLadder( int nLadder, IAIMap *pMap );   // retail @0x408b0: true = a recalc actually ran
 
 	char GetLocks( int x, int y ) const { return tiles[y][x].nLocks; }
 	CVec2 GetCPNoHeight( float x, float y ) const 
@@ -327,6 +358,7 @@ public:
 		return pGroup->GetDirection(p);
 	}
 	int GetFloor() const { return nFloor; }
+	CNodesLayer(): bHappySave( false ) {}
 	//void ForceRecalc( const SSphere &s );
 	void AddNearPoints( const SSphere &s, vector<SPathPlace> *pRes, bool bTakeAll );
 	void BuildLayer( int nXSize, int nYSize, const CVec2 &_ptOrigin, const CVec2 &_ptXDir, 
@@ -395,7 +427,26 @@ private:
 	bool bFreeze;
 	vector<SPathPlace> mineTempLocks;
 	CPtr<CObjectBase> pJobManager;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&pMap); f.Add(3,&layers); f.Add(4,&lockedPlaces); f.Add(5,&dynLockedPlaces); f.Add(6,&bColouringConstructed); f.Add(7,&oldAccountPoints); f.Add(8,&pWaysCalcer); f.Add(9,&flippers); f.Add(10,&flippersHash); f.Add(11,&bFreeze); f.Add(12,&groups); f.Add(13,&mineTempLocks); return 0; }
+	bool bDoNotFlipAnything;   // retail tag 14: flipper freeze -- toggled by NAI::FindPath's door-free re-route (@0x8bd80), read by IsLocked (@0x45520)
+	bool bHappySave;           // retail tag 15: 'small save' -- strip recolour caches (SetSmallSaveSize @0x3db60; NO retail caller -- vtbl-only dead code, see W3 report)
+	bool bUpdated;             // retail tag 17: set by CLayersGroup::RecalcSquare tail (@0x41010), read-and-cleared by CheckUpdated (@0x4c9a0)
+	// retail @0x46d40: tags 2..13 as before + 14 bDoNotFlipAnything, 15 bHappySave, 16 pJobManager,
+	// 17 bUpdated; a happy save writes FALSE for bColouringConstructed at tag 6 (caches stripped).
+	ZEND int operator&( CStructureSaver &f )
+	{
+		f.Add(2,&pMap); f.Add(3,&layers); f.Add(4,&lockedPlaces); f.Add(5,&dynLockedPlaces);
+		if ( !f.IsReading() && bHappySave )
+		{
+			bool bFalse = false;
+			f.Add(6,&bFalse);
+		}
+		else
+			f.Add(6,&bColouringConstructed);
+		f.Add(7,&oldAccountPoints); f.Add(8,&pWaysCalcer); f.Add(9,&flippers); f.Add(10,&flippersHash);
+		f.Add(11,&bFreeze); f.Add(12,&groups); f.Add(13,&mineTempLocks);
+		f.Add(14,&bDoNotFlipAnything); f.Add(15,&bHappySave); f.Add(16,&pJobManager); f.Add(17,&bUpdated);
+		return 0;
+	}
 	
 	void AddLink( const SPathPlace &p, CNodesLayer *pLayer, vector<SShowLink> *pLinks, 
 		int nDir, const CTPoint<int> &shift, char nMoveFlags, SShowLink::EType type );
@@ -412,7 +463,14 @@ private:
 
 public:
 	CPathNetwork( IAIMap *_pMap = 0, IAIJobManager *pManager = 0 );
-	
+	void SetSmallSaveSize( bool bSmall );   // retail @0x3db60 -- flag net+layers for a cache-stripped save
+	// retail @0x4c9a0 (IAIMap vtbl slot): read-and-clear "network changed since last query".
+	// Retail consumer = CWorld::Segment @0x36bce0 -> GridInfoUpdated @0x375ca0 (TBS_GRID_INFO_UPDATED).
+	virtual bool CheckUpdated() { bool bWas = bUpdated; bUpdated = false; return bWas; }
+	// dev access shim for the retail direct member writes (retail NAI::FindPath @0x8bd80 toggles
+	// bDoNotFlipAnything around the door-free re-route; the member is private here).
+	void SetDoNotFlipAnything( bool b ) { bDoNotFlipAnything = b; }
+
 	const vector<CObj<CNodesLayer> >& GetLayers() const { return layers; }
 	
 	IAIMap* GetAIMap() const { return pMap; }
@@ -451,7 +509,7 @@ public:
 		bool *bIsNowOpen, bool *bBlocksInOpenState, bool *bBlocksInClosedState );
 	virtual bool IsNativePassable( const SPathPlace &p );
 	virtual void GetNearPlaces( const SSphere &s, vector<SPathPlace> *pRes, bool bTakeAll = false );
-	virtual void CreateLadder( int nX, int nY, int nHeight, int nRotation, int nLayersGroup, int nFloor );
+	virtual void CreateLadder( const CVec2 &ptPos, const CVec2 &ptUpperPos, int nHeight, int nFloor );   // retail @0x40290
 	virtual bool UpdateColouring( const vector<SPathPlace> &lockers );
 	virtual void FlipperOpenClose( CObjectBase* flipper, bool bOpen );
 	virtual void LockUnlockFlipper( CObjectBase* flipper, bool bLock );
@@ -479,6 +537,7 @@ public:
 	virtual SPathPlace GetDeployPlace( const SPathPlace &start, int nDisplacement );
 	virtual bool HasPassCalcerJobs() const;
 	friend class CNodesLayer;
+	friend class CLayersGroup;   // RecalcSquare flags the network updated (retail @0x41010 tail)
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 }

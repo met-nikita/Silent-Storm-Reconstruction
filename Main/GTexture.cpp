@@ -118,11 +118,11 @@ void CFileTexture::Recalc()
 
 	NDb::CTexture *pTex = NDb::GetTexture( GetKey().nID );
 	NGfx::ETextureUsage eUsage;
-	switch ( pTex->type )
+	switch ( pTex->usage )
 	{
-		case NDb::CTexture::REGULAR: eUsage = NGfx::REGULAR; break;
-		case NDb::CTexture::TEXTURE_2D: eUsage = NGfx::TEXTURE_2D; break;
-		case NDb::CTexture::TEXTURE_TRANSPARENT: eUsage = NGfx::REGULAR; break;
+		case NDb::CTexture::TEXTURE_USAGE_ORDINARY: eUsage = NGfx::REGULAR; break;
+		case NDb::CTexture::TEXTURE_USAGE_2D: eUsage = NGfx::TEXTURE_2D; break;
+		case NDb::CTexture::TEXTURE_USAGE_TRANSPARENT: eUsage = NGfx::REGULAR; break;
 		default: ASSERT(0); eUsage = NGfx::REGULAR; break;
 	}
 	if ( GetKey().nFlags & STextureKey::TK_TRANSPARENT )
@@ -131,7 +131,7 @@ void CFileTexture::Recalc()
 	if ( !IsValid(pRequest) )
 	{
 		pRequest = new CFileRequest( "Textures", GetRealTextureID( pTex ) );
-		if ( pTex->type == NDb::CTexture::TEXTURE_2D || pTex->bInstantLoad )
+		if ( pTex->usage == NDb::CTexture::TEXTURE_USAGE_2D || pTex->bInstantLoad )
 			pRequest->Read();
 		else
 			AddFileRequest( pRequest );
@@ -286,8 +286,14 @@ void CColorTexture::Recalc()
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail GTextureInit registers THREE vars: usedxt + gfx_texture_mip (int @0x9c60a4, the global
+// CTerrainTextureBlend::NeedUpdate consults -- lives in GTerrainTexture.cpp) + gfx_low_ram (unsaved)
+extern int nTextureUseMip;   // GTerrainTexture.cpp, retail @0x9c60a4
+static bool bLowRAM = false; // gfx_low_ram, retail @0x9c60a8
 START_REGISTER(GTexture)
 	REGISTER_VAR_EX( "gfx_texture_usedxt", NGlobal::VarBoolHandler, &bDXTModeOn, 1, true )
+	REGISTER_VAR_EX( "gfx_texture_mip", NGlobal::VarIntHandler, &nTextureUseMip, 0, true )
+	REGISTER_VAR_EX( "gfx_low_ram", NGlobal::VarBoolHandler, &bLowRAM, 0, false )
 FINISH_REGISTER
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 } // namespace

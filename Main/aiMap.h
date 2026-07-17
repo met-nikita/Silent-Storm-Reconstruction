@@ -83,7 +83,11 @@ public:
 		bool bSelect2DoorHulls = false ) = 0;
 	//virtual void TraceUnit( const CRay &, vector<SInterval> *pIntersections, CObjectBase *pTarget ) = 0;
 	//virtual void TraceUnit( CFastRenderer *pRes, CObjectBase *pTarget ) = 0;
-	virtual void GetUnitHLPos( CVec3 *pRes, CObjectBase *pHull, int nUserID ) = 0;
+	// retail @0x65ee0 returns BOOL: false = the target has no valid hull to aim at (retail resolves
+	// hulls via CUserHullsTracker; a found hull -- even without the asked piece -- yields the bound
+	// center and TRUE). The v1.2 CExecMeleeUnit hit-location helper (@0x7a1840) gates on it; every
+	// pre-existing caller ignores the result. (dev keeps the Jan03 direct-hull parameter shape.)
+	virtual bool GetUnitHLPos( CVec3 *pRes, CObjectBase *pHull, int nUserID ) = 0;
 	virtual void GetAccessibleUnitHL( vector<int> *pRes, const CVec3 &ptFrom, CObjectBase *pHull, float fMaxDistance ) = 0;
 	virtual CObjectBase* GetHull( CObjectBase *pUser ) = 0;
 	// retail NAI::CAIMap::GetObjectBound @0x465800 (IAIMap vtbl+0x2c): the union bound of EVERY hull

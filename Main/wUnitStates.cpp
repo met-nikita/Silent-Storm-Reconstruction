@@ -17,6 +17,7 @@
 #include "aiPosition.h"
 #include "RPGGlobal.h"
 #include "wUnitCommands.h"
+#include "wUnitAttackExec.h"	// CExecNotHeroWantsToTalk (corpse-carrier talk dispatch mirror)
 #include "rpgCheatConstants.h"
 
 #include "wUnitStates.h"
@@ -392,6 +393,11 @@ CCommandExecute* CUnitStateCorpseCarrier::CreateExecutor( CCmd *pCmd, EUnitComma
 		pDropCorpse->pCorpse = pDeadUnit;
 		return NWorld::CreateExecutor( pUS, pDropCorpse, pResult );
 	}
+	// retail corpse-carrier CreateExecutor @0x3c8c90 also honours a non-hero talk command (mirror of
+	// the normal-state dispatch) so the NPC-interaction bark still fires while carrying a corpse.
+	CDynamicCast<CCmdNotHeroWantsToTalk> pNotHeroTalk(pCmd);
+	if (pNotHeroTalk)
+		return new CExecNotHeroWantsToTalk( pUS );
 
 	*pResult = UCR_UNAVAILABLE;
 	return 0;
@@ -742,25 +748,33 @@ CUnitStateInPocket::CUnitStateInPocket( CUnitServer *_pUS ): CUnitState( _pUS )
 {
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail @0x3c9fb0: pocket the unit (master hold) + drop it from the world unit list (vtbl+0xdc =
+// RemoveUnit), then flag it OUT of the visitor set. That last store -- bNotAddedToVisitors = true at
+// CDumbUnitServer+0x12c (the decomp's `*(undefined1 *)(pUS + 300) = 1`) -- is the UNIT-side analogue
+// of the objects' BeAddedToVisitiors(false); without it a pocketed unit stays bound to the vis sync.
 void CUnitStateInPocket::OnStateStarted()
 {
 	CPtr<NWorld::CWorld> pWorld = pUS->GetWorld();
-	if ( !pWorld->IsUnitInPocket( pUS ) )
+	if ( !pWorld->GetPocket()->IsUnitInPocket( pUS ) )
 	{
-		pWorld->PlaceUnitInPocket( pUS );
+		pWorld->GetPocket()->PlaceUnitInPocket( pUS );
 		pWorld->RemoveUnit( pUS );
+		pUS->MarkNotAddedToVisitors();
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail @0x3ca060: the exact mirror -- re-add (vtbl+0xe0), settle onto a passable place, refresh
+// vision (vtbl+0x104, bForce=false), unpocket, then clear bNotAddedToVisitors.
 void CUnitStateInPocket::OnStateFinished()
 {
 	CPtr<NWorld::CWorld> pWorld = pUS->GetWorld();
-	if ( pWorld->IsUnitInPocket( pUS ) )
+	if ( pWorld->GetPocket()->IsUnitInPocket( pUS ) )
 	{
 		pWorld->AddUnit( pUS );
 		pUS->PlaceOnPassablePlace();
 		pWorld->UpdateVisible();
-		pWorld->RemoveUnitFromPocket( pUS );
+		pWorld->GetPocket()->RemoveUnitFromPocket( pUS );
+		pUS->ClearNotAddedToVisitors();
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////

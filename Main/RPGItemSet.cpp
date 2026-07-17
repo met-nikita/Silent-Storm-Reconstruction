@@ -163,7 +163,8 @@ void CWeaponItem::GetInfo( SWeaponInfo *pInfo ) const
 	int nDmgMod = pDBWeapon->nDamageMod;
 	pInfo->nRoF = Float2Int( float( pDBWeapon->nRoF ) / 6 );
 	pInfo->nDmgMin = ( pAmmo->nDmgMin * pDBWeapon->nDamageMod ) / 100;
-	pInfo->nDmgMax = ( pAmmo->nDmgMax * pDBWeapon->nDamageMod ) / 100;
+	// retail @0x2a08d0: max = ammo nDmgMin(+0x18) * weapon nDamageModMax(+0xa0); ammo nDmgMax is never read
+	pInfo->nDmgMax = ( pAmmo->nDmgMin * pDBWeapon->nDamageModMax ) / 100;
 	pInfo->nArmorPiercingAbility = int( float(pDBWeapon->nInitialVelocity) * pAmmo->fUnitWeight );
 	pInfo->nShotAP = pDBWeapon->nShotAP;
 	pInfo->nTargetingAP = pDBWeapon->nTargetingAP;
@@ -498,14 +499,17 @@ IInventoryItem *CreateClipItem( NDb::CRPGClip *pDBClip, NDb::CRPGAmmo *pDBAmmo, 
 // retail NRPG::CSimpleItem<NRPG::IClueItem> (ctors @0x2a58e0/@0x2a4b90/@0x2a8800): the IClueItem
 // marker base is what CMissionUI::UpdateVisibleItems @0x2130c0 RTDynamicCast-detects to raise the
 // in-world CClueIcon marker over a discovered clue pickup. No data of its own beyond CInventoryItem.
-// (Save id 0x51012110 is this fork's established one -- retail registers the class as 0xB3212130,
-// register thunk @0x8a3a40 -- kept for save compatibility with existing dev saves.)
+// Registered on retail's id 0xB3212130 (register thunk @0x8a3a40).
 class CClueItem: public CInventoryItem, public IClueItem
 {
 	OBJECT_BASIC_METHODS( CClueItem );
 	ZDATA
 	ZPARENT( CInventoryItem );
-	ZEND int operator&( CStructureSaver &f ) { f.Add(2,(CInventoryItem *)this); return 0; }
+	// retail nests the CInventoryItem parent at tag 1, NOT 2: CSimpleItem<IClueItem>::operator&
+	// @0x2ab7e0 (one ICF-folded body serving the clue/hint/dummy siblings) is a single
+	// CallObjectSerialize<CInventoryItem>( f, 1, ... ). Reading it at tag 2 left the parent
+	// default-constructed on every load from a retail save -- the item lost its DB record.
+	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CInventoryItem *)this); return 0; }
 	//
 public:
 	CClueItem() {}
@@ -520,19 +524,57 @@ class CHintItem: public CInventoryItem, public IHintItem
 	OBJECT_BASIC_METHODS( CHintItem );
 	ZDATA
 	ZPARENT( CInventoryItem );
-	ZEND int operator&( CStructureSaver &f ) { f.Add(2,(CInventoryItem *)this); return 0; }
+	// retail nests the parent at tag 1 -- see CClueItem above (same folded body @0x2ab7e0).
+	// Wire-audit proof: retail wrote 24B at tag 1 (UNREAD, x18) while dev read tag 2 (MISS, x18)
+	// across slots 1/3/4/8.
+	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CInventoryItem *)this); return 0; }
 	//
 public:
 	CHintItem() {}
 	CHintItem( NDb::CRPGItem *_pItem ): CInventoryItem( _pItem ) {}
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail NRPG::CSimpleItem<NRPG::IDummyItem> (ctors @0x2a4e90/@0x2a5b60/@0x2a98e0): inert wrapper
+// over a base CRPGItem whose pSuccessor is null/dead (CWorld::CreateObjects fallback @0x767214);
+// the IDummyItem marker is what CInventory::CanEquip @0x29d660 rejects.
+class CDummyItem: public CInventoryItem, public IDummyItem
+{
+	OBJECT_BASIC_METHODS( CDummyItem );
+	ZDATA
+	ZPARENT( CInventoryItem );
+	// retail nests the parent at tag 1 -- same folded operator& body @0x2ab7e0 as CClueItem/CHintItem.
+	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CInventoryItem *)this); return 0; }
+	//
+public:
+	CDummyItem() {}
+	CDummyItem( NDb::CRPGItem *_pItem ): CInventoryItem( _pItem ) {}
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
 // CToolItem
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CToolItem::CToolItem( NDb::CRPGTool *_pDBTool ): 
-	CInventoryItem( _pDBTool->pItem ), pDBTool( _pDBTool ) 
-{ 
-	nQuantity = pDBTool->nCharges;
+// retail @0x2a1ef0: chain the container base on the record's shared CRPGItem, then load ONE
+// CSimpleCharge seeded with the record's full nCharges (NOT a loop of N charges) -- the identical
+// shape to CPicklockItem @0x2a1c80 / CFirstAidItem @0x2a17a0. The Jan03 form this replaces wrote
+// `nQuantity = pDBTool->nCharges`, i.e. it put the charge count in the TOOL's own CItem stack
+// count; retail keeps the tool's stack count at the CItem default and holds the charges in the
+// contained CSimpleCharge.
+CToolItem::CToolItem( NDb::CRPGTool *_pDBTool ):
+	TChargeContainer( _pDBTool->pItem ), pDBTool( _pDBTool )
+{
+	CSimpleCharge *pCharge = new CSimpleCharge();
+	pCharge->nQuantity = _pDBTool->nCharges;
+	Load( pCharge );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail @0x2a0200 (IItemContainerInfo slot 1): the charge capacity is the record's nCharges.
+// Disasm is a *virtual* fetch of the record, not a direct member read (unlike CPicklockItem
+// @0x2a0750 / CFirstAidItem @0x2a0740, which read their member):
+//   mov eax,[ecx-0x3c] / add ecx,-0x3c / call [eax] / mov eax,[eax+0x14]
+// i.e. GetDBItemInfo() then +0x14 = NDb::CRPGTool::nCharges (CRPGItem+0x14 is nSubTypePriority,
+// which rules that record out as the callee's return).
+int CToolItem::GetMaxIncQuantity() const
+{
+	return GetDBItemInfo()->nCharges;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CToolItem::CanBeUsed( NRPG::CUnit *pUnit ) const
@@ -546,7 +588,10 @@ bool CToolItem::CanBeUsed( NRPG::CUnit *pUnit ) const
 		if ( IsValid( pTool->pNeededPerk ) && !pUnit->HasPerk( pTool->pNeededPerk->GetRecordID() ) )
 			bHasPerk = false;
 		bool bHasSkill = pUnit->Skills( NDb::ST_ENGINEERING ) >= pTool->nNeededEngSkill;
-		return bHasPerk && bHasSkill && GetQuantity() > 0;
+		// charges gate: retail @0x2a0be0 dispatches this through the IItemContainerInfo vbase
+		// (vbtable-driven `GetIncQuantity() < 1` -> false), because a tool's charges live in the
+		// CItemContainer base -- NOT in the tool's own CItem::nQuantity, which is its stack count.
+		return bHasPerk && bHasSkill && GetIncQuantity() > 0;
 	}
 	else
 	{
@@ -611,6 +656,12 @@ IInventoryItem *CreateHintItem()
 		return 0;
 	//
 	return new CHintItem( pDBItem );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail NRPG::CreateDummyItem @0x2a2220: NO validity gate on the record (unlike CreateClueItem).
+IInventoryItem *CreateDummyItem( NDb::CRPGItem *pDBItem )
+{
+	return new CDummyItem( pDBItem );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 IWeaponItem *CreateWeaponItem( NDb::CRPGWeapon *pDBWeapon )
@@ -762,8 +813,9 @@ REGISTER_SAVELOAD_CLASS( 0xA2312140, CSimpleCharge )    // retail id (reg thunk 
 // 0xA2312141 CPotionContainer DELETED with the first-aid container refactor (dev-only id, absent in retail)
 REGISTER_SAVELOAD_CLASS( 0xA0523091, CPicklockItem )    // retail id (reg thunk @0x4a3a00)
 REGISTER_SAVELOAD_TEMPL_CLASS( 0x11462170, CMineDetectorItem, CSomeItem )
-REGISTER_SAVELOAD_CLASS( 0x51012110, CClueItem )
+REGISTER_SAVELOAD_CLASS( 0xB3212130, CClueItem )	// retail CSimpleItem<IClueItem> id (register thunk @0x8a3a40); was dev-fork 0x51012110
 REGISTER_SAVELOAD_CLASS( 0xB3212131, CHintItem )	// retail CSimpleItem<IHintItem> id (register thunk @0x8a3a70)
+REGISTER_SAVELOAD_CLASS( 0xB3707160, CDummyItem )	// retail CSimpleItem<IDummyItem> id (register thunk @0x8a3ac0)
 REGISTER_SAVELOAD_TEMPL_CLASS( 0x018c2110, CMineItem, CSomeItem )
 REGISTER_SAVELOAD_TEMPL_CLASS( 0x024c2141, CKeyItem, CSomeItem )
 REGISTER_SAVELOAD_CLASS( 0x024c2140, CToolItem )

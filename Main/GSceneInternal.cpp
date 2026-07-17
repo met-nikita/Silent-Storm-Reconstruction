@@ -65,7 +65,9 @@ class CLightGroup: public CObjectBase
 public:
 	SDynamicAmbientInfo ambientData;
 	CVec3 vPrevPos;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&pGame); f.Add(3,&nGroup); return 0; }
+	// retail CLightGroup::operator& @0x1674d0 also emits tag 4 (ambientData, 0x60 POD) and tag 5
+	// (vPrevPos, CVec3) -- dev was dropping the cached dynamic-ambient + prev-position on load.
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&pGame); f.Add(3,&nGroup); f.Add(4,&ambientData); f.Add(5,&vPrevPos); return 0; }
 	CLightGroup() {}
 	CLightGroup( CGScene *p, int _n ) : pGame(p), nGroup(_n), vPrevPos(-1e6f, -1e6f, -1e6f) {}
 	~CLightGroup()
@@ -251,12 +253,15 @@ bool CAnimatedPart::Update( CVolumeNode *pVolume, SStaticTrackers *pTrackers )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CDynamicGeometryPart
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CDynamicGeometryPart::CDynamicGeometryPart( CPtrFuncBase<CObjectInfo> *pData, CFuncBase<SBound> *_pBound, 
+CDynamicGeometryPart::CDynamicGeometryPart( CPtrFuncBase<CObjectInfo> *pData, CFuncBase<SFBTransform> *pPos, CFuncBase<SBound> *_pBound,
 	IMaterial *_pMaterial, const SFullGroupInfo &_gInfo )
-	: CGenericDynamicPart( pData, _pMaterial, _gInfo ), pBound(_pBound)
+	: CGenericDynamicPart( pData, _pMaterial, _gInfo ), pTransform(pPos), pBound(_pBound)
 {
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail @0x160250: refresh the generator (via the CGenericDynamicPart tracking), then pBound AND
+// pTransform; the part re-places into the volume tree when either the generated mesh or the transform
+// node ticked (a head re-places every frame the unit's head bone moves).
 bool CDynamicGeometryPart::Update( CVolumeNode *pVolume, SStaticTrackers *pTrackers )
 {
 	bObjectInfoChanged |= pTrackObjInfo.Refresh();//RefreshObjectInfo();
@@ -267,7 +272,7 @@ bool CDynamicGeometryPart::Update( CVolumeNode *pVolume, SStaticTrackers *pTrack
 		return true;
 	}
 	pBound.Refresh();
-	if ( bObjectInfoChanged )
+	if ( pTransform.Refresh() | bObjectInfoChanged )
 	{
 		bObjectInfoChanged = false;
 		// update position
@@ -422,7 +427,7 @@ void CPostProcessBinder::Store( vector<IPostProcess::SObject> *pRes, CTransformS
 // CCombinedPart
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CCombinedPart::CCombinedPart( SStaticTrackers *pTrackers, EType t )
-	: nIgnoreMark(0), pCombiner( new CPerMaterialCombiner( pTrackers ) ), partType(t)
+	: nFloorMask(0), nIgnoreMark(0), pCombiner( new CPerMaterialCombiner( pTrackers ) ), partType(t)
 {
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -531,9 +536,25 @@ void CFakeParticleLMTexture::Recalc()
 	pValue = NGfx::MakeTexture( N_FAKE_LM_SIZEX, N_FAKE_LM_SIZEY, 1, NGfx::SPixel8888::ID, NGfx::REGULAR, NGfx::CLAMP );
 	NGfx::CTextureLock<NGfx::SPixel8888> lock( pValue, 0, NGfx::INPLACE );
 	dwNormalColor = NGfx::GetDWORDColor( CVec4( 0.25f, 0.25f, 0.25f, 1 ) );
-	dwParticleColor = NGfx::GetDWORDColor( CVec4( ( vAmbient + pColor->GetValue() ), 1 ) );
+	dwParticleColor = NGfx::GetDWORDColor( CVec4( ( pAmbient->GetValue() + pColor->GetValue() ), 1 ) );
 	lock[0][0].color = dwNormalColor;
 	lock[0][1].color = dwParticleColor;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// CAmbientMean
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// @0x163c60: value = (top + bottom) * 0.5
+void CAmbientMean::Recalc()
+{
+	value = ( pTopAmbient->GetValue() + pBottomAmbient->GetValue() ) * 0.5f;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// @0x163c30: refresh BOTH edges unconditionally, report either changed
+bool CAmbientMean::NeedUpdate()
+{
+	bool bTop = pTopAmbient.Refresh();
+	bool bBottom = pBottomAmbient.Refresh();
+	return bTop || bBottom;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -556,9 +577,10 @@ CGScene::CGScene( int ) : holdMask(0,0), nFrameCounter(100), lastMask(0,0)
 	pCamera = new CCVec3;
 	nSlowVolumeWalk = 30;
 	CVec3 vDefaultAmbient( 0.25f, 0.25f, 0.25f );
-	pAmbient = new CCVec3( vDefaultAmbient );
+	// @0x161e70: build the two edge nodes first, then the mean node fed by both.
 	pTopAmbient = new CCVec3( vDefaultAmbient );
 	pBottomAmbient = new CCVec3( vDefaultAmbient );
+	pAmbient = new CAmbientMean( pTopAmbient, pBottomAmbient );
 
 	//pAmbient->AddLight( new CAmbientLight( pAmbientColor, 0 ) );
 	//AddLightGroup( pAmbient );
@@ -567,7 +589,7 @@ CGScene::CGScene( int ) : holdMask(0,0), nFrameCounter(100), lastMask(0,0)
 	lightGroups.push_back( 0 );
 	pTransparentMaterial = CreateMaterial( CVec3(1,1,1), new CGetTranspCache, 0, 0, CVec3(0,0,0), 0, 0, 0, 0, 0, MA_OPAQUE|MA_ALPHA_TEST );
 	pFakeParticleLM = new CFakeParticleLMTexture;
-	pFakeParticleLM->SetAmbient( pAmbient->GetValue() );
+	pFakeParticleLM->SetAmbient( pAmbient );   // edge to the scene ambient-mean node
 	pFakeParticleLM->SetColor( new CCVec3( CVec3(0,0,0) ) );
 	bLightStateCalced = false;
 	pDecalsManager = new CDecalsManager( this );
@@ -883,7 +905,8 @@ CObjectBase* CGScene::CreateGeometry( CPtrFuncBase<CObjectInfo> *pInfo, IMateria
 	return pRes;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CObjectBase* CGScene::CreateDynamicGeometry( CPtrFuncBase<CObjectInfo> *pInfo, IMaterial *pMat, 
+// retail @0x15cd20: (generator, transform node, material, bound node, group).
+CObjectBase* CGScene::CreateDynamicGeometry( CPtrFuncBase<CObjectInfo> *pInfo, CFuncBase<SFBTransform> *pPlacement, IMaterial *pMat,
 	CFuncBase<SBound> *pBound, const SFullGroupInfo &_ginfo )
 {
 	CPtr< CPtrFuncBase<CObjectInfo> > pInfoHolder = pInfo;
@@ -891,7 +914,7 @@ CObjectBase* CGScene::CreateDynamicGeometry( CPtrFuncBase<CObjectInfo> *pInfo, I
 	//
 	if ( !CheckMaterial( pMat ) )
 		return 0;
-	CDynamicGeometryPart *pRes = new CDynamicGeometryPart( pInfo, pBound, pMat, _ginfo );
+	CDynamicGeometryPart *pRes = new CDynamicGeometryPart( pInfo, pPlacement, pBound, pMat, _ginfo );
 	dynamicFrags.push_back( pRes );
 	pDecalsManager->OnCreate( pRes );
 	return pRes;
@@ -938,11 +961,10 @@ CObjectBase* CGScene::CreatePostProcessor( CObjectBase *pRenderNode, IPostProces
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CGScene::SetAmbient( const CVec3 &_vBottomAmbientColor, const CVec3 &_vTopAmbientColor )
 {
+	// @0x159f20: write the two edge nodes (Set bumps their versions); pAmbient (CAmbientMean) and the
+	// fake-LM ambient now derive automatically through their DG edges -- no inline mean here anymore.
 	pBottomAmbient->Set( _vBottomAmbientColor );
 	pTopAmbient->Set( _vTopAmbientColor );
-	CVec3 vAmbientColor = ( _vTopAmbientColor + _vBottomAmbientColor ) * 0.5f;
-	pAmbient->Set( vAmbientColor );
-	pFakeParticleLM->SetAmbient( vAmbientColor );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 struct SSortLightGroups
@@ -1955,6 +1977,7 @@ void CGScene::Draw( CTransformStack *pTS, CTransformStack *pClipTS, NGfx::CRende
 		);
 	MakeRenderList( pClipTS, &renderList, rlReq, nUseIgnoreMark );
 
+
 	if ( bWireframe )
 		NGfx::SetWireframe( NGfx::WIREFRAME_ON );
 	else
@@ -2255,25 +2278,57 @@ static void VarSwitchLinearCache( const string &szID, const NGlobal::CValue &sVa
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail GSceneInternalInit @0x162a50 registers SEVEN vars: the 4 showcache debug switches plus
+// gfx_hw_hsr / gfx_decals / gfx_block_buffering bound through VarBoolHandler (0x99e2f3 / 0x97901b /
+// 0x99e2f4).
+static bool bUseHWHSR = false;        // gfx_hw_hsr @0x99e2f3
+static bool bUseDecals = true;        // gfx_decals @0x97901b (default 1.0)
+static bool bBlockBuffering = false;  // gfx_block_buffering @0x99e2f4
 START_REGISTER(GSceneInternal)
 	REGISTER_VAR( "gfx_showcache_2d", VarSwitchTexCache, 0.0f, false )
 	REGISTER_VAR( "gfx_showcache_transp", VarSwitchTranspCache, 0.0f, false )
 	REGISTER_VAR( "gfx_showcache_transplm", VarSwitchTranspLMCache, 0.0f, false )
 	REGISTER_VAR( "gfx_showcache_linear", VarSwitchLinearCache, 0.0f, false )
+	REGISTER_VAR_EX( "gfx_hw_hsr", NGlobal::VarBoolHandler, &bUseHWHSR, 0.0f, true )
+	REGISTER_VAR_EX( "gfx_decals", NGlobal::VarBoolHandler, &bUseDecals, 1.0f, true )
+	REGISTER_VAR_EX( "gfx_block_buffering", NGlobal::VarBoolHandler, &bBlockBuffering, 0.0f, true )
 FINISH_REGISTER
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // release-new animated-ambient DG node (GSceneInternal.obj, operator& @0x165350). Tracks the scene
-// top-ambient colour, overriding it with an animated light's colour while one is alive. DEAD in this
-// predecessor render: CGScene::pTopAmbientAnimator is never created here (animated-ambient is a
-// release-only feature) -> the node is never instantiated/driven, so NeedUpdate/Recalc are faithful-
-// stubbed and the CObj serializes as a null ref. Modeled on the sibling CFuncBase<CVec3> DG nodes
-// (CLightCalcer, GBuilding.h). Save-format reconcile only; animation behavior deferred.
+// top-ambient colour, overriding it with an animated light's colour while one is alive. This
+// predecessor render never CREATES a pTopAmbientAnimator (animated-ambient is a release-only feature),
+// but a RETAIL save does: its CAmbientMean's top edge points at a live CAmbientAnimator (not the raw
+// pTopAmbient), so loading such a save instantiates this node and the mean READS it. NeedUpdate/Recalc
+// must therefore be the real retail implementations (@0x164780 / @0x1647f0) -- the old no-op stubs
+// left value uninitialised, so the mean averaged garbage into the top ambient => a random whole-scene
+// colour tint after load. With no active animated light (pAnim null/dead) Recalc just passes through
+// pTopAmbient, i.e. the mean is (pTopAmbient + pBottomAmbient) * 0.5 exactly as the fresh-scene path.
 class CAmbientAnimator: public CFuncBase<CVec3>
 {
 	OBJECT_BASIC_METHODS(CAmbientAnimator);
 protected:
-	virtual bool NeedUpdate() { return false; }
-	virtual void Recalc() {}
+	// retail @0x164780: refresh the top-ambient edge; if an animated light is alive, refresh it too.
+	virtual bool NeedUpdate()
+	{
+		bool bTop = pTopAmbient.Refresh();
+		bool bAnim = IsValid( pAnim.Get() ) ? pAnim.Refresh() : false;
+		return bTop || bAnim;
+	}
+	// retail @0x1647f0: while an animated light is alive (and not ended) use its colour, else pass
+	// through the scene top-ambient colour.
+	virtual void Recalc()
+	{
+		if ( IsValid( pAnim.Get() ) )
+		{
+			CAnimLight *pLight = pAnim->GetValue();
+			if ( pLight && !pLight->bEnd )
+			{
+				value = pLight->color;
+				return;
+			}
+		}
+		value = pTopAmbient->GetValue();
+	}
 private:
 	ZDATA
 	CDGPtr< CFuncBase<CVec3> > pTopAmbient;
@@ -2285,6 +2340,7 @@ public:
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 }
 using namespace NGScene;
+REGISTER_SAVELOAD_CLASS( 0x01123130, CAmbientMean )
 REGISTER_SAVELOAD_CLASS( 0x01123131, CAmbientAnimator )
 REGISTER_SAVELOAD_CLASS( 0x0251100b, CGScene )
 REGISTER_SAVELOAD_CLASS( 0x03111000, CPolyline )

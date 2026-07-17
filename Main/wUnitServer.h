@@ -9,6 +9,9 @@
 #include "wTurnBased.h"
 #include "wVision.h"
 #include "wInterface.h"
+#include "wUnitCommands.h"   // SItem -- retail CUnitServer embeds sHandItem (@+0x200, tag 33)
+#include "RPGItemInfo.h"     // NRPG::IInventoryItem -- pHandItemHolder (@+0x224, tag 34)
+#include "Locks.h"           // CLockable -- retail CUnitServer base @+0x17c (tag 31)
 #include "..\Misc\EventsBase.h"
 #include "eventPlayer.h"
 namespace NDb
@@ -97,7 +100,8 @@ public:
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CUnitState;
 class CUnitServer: public CDumbUnitServer, public CUnit, public CTBSUnit<CUnitServer, CPlayer>,
-	public CSoundsTracker<CUnitServer>, public CAudibleSet<CUnitServer>, public CTBSUnitVision<CUnitServer,CPlayer>
+	public CSoundsTracker<CUnitServer>, public CAudibleSet<CUnitServer>, public CTBSUnitVision<CUnitServer,CPlayer>,
+	public CLockable   // retail base @+0x17c: the unit reservation lock (CCmdTakeCorpse locks corpses through it)
 {
 	OBJECT_NOCOPY_METHODS(CUnitServer);
 	typedef CTBSUnit<CUnitServer, CPlayer> TTBSUnit;
@@ -127,18 +131,40 @@ class CUnitServer: public CDumbUnitServer, public CUnit, public CTBSUnit<CUnitSe
 	NAI::SPathPlace plLast;
 	CPtr<CUnitServer> pWearingPK;
 	bool bIsPK;
-	STime tPrev;
+	STime tCriticalPrev;	// retail +0x1d4 (tag 20): tick of the last criticals pass (ctor seeds it with the current time)
+	STime tStatePrev;		// retail +0x1d8 (tag 21): tick of the last state pass (ctor seeds it with the current time)
 	int nDialog;
 	bool bCanTalk;
-	int nScriptToHit = -1;	// UnitSetToHit override (retail CUnitServer+0x1e8); -1 = use the computed to-hit
-	bool bForceNoChangePose = false;	// retail CUnitServer+0x1f4 (luaUnitLockPose writes it): a script "pose lock".
-										// Consumed by CannotFreelyChangePoses() -> FindPath move-only (keeps the pose).
+	int nScriptToHit = -1;	// UnitSetToHit override (retail CUnitServer+0x1e8, serialized tag 25); -1 = use the computed to-hit
+	bool bWalkWithoutWeapon = false;	// retail +0x1ec (tag 26): walk-with-holstered-weapon flag; retail
+										// CCmdActivateItem::AnimateCommand @0x3bb1a0 clears it before ActivateItem
+										// (dev's activation path has no AnimateCommand yet -- runtime-inert here).
+	list< CPtr<CUnitServer> > hiddenAtSight;	// retail +0x1f0 (tag 27): sight-bookkeeping list, cleared together with
+												// lostUnits in Die @0x3c2190 / OnUnitMadeUnconscious @0x3c2010.
+	bool bForceNoChangePose = false;	// retail CUnitServer+0x1f4 (serialized tag 28; luaUnitLockPose writes it): a script
+										// "pose lock". Consumed by CannotFreelyChangePoses() -> FindPath move-only.
+	int nBleed = 0;			// retail +0x1fc (tag 32): pending bleed damage, applied+cleared by retail
+							// ProcessCriticalsAndRegenerations @0x3c2770 (dev routes bleeding through the RPG
+							// critical in OnNewPlayerTurnOrTime -- runtime-inert here, format parity only).
+	SItem sHandItem;		// retail +0x200 (tag 33): the unit's in-hand item slot, and THE live hand state --
+							// written by SetHandItem (@0x387b30), read by CPlayer::GetInHandItem (@0x386ae0).
+							// (PDB-checked: sizeof(SItem) == 0x24, so +0x200 + 0x24 == +0x224 == pHandItemHolder.)
+	CObj<NRPG::IInventoryItem> pHandItemHolder;	// retail +0x224 (tag 34): strong ref pinning sHandItem.pItem alive
 public:
-	CPtr<CUnitServer> pKiller;	// retail CUnitServer+0x1f8 (serialized tag 0x19): read by CAICorpseEvent::Modify
+	CPtr<CUnitServer> pKiller;	// retail CUnitServer+0x1f8 (serialized tag 30 = 0x1e): read by CAICorpseEvent::Modify
 								// @0x3c470 (killer -> possibleEnemy). ⚠ retail NEVER writes it (byte-scan proven:
 								// only ctor-null + serializer) -- the arm is retail-inert; kept 1:1.
+								// (An earlier note here said "tag 0x19" -- that was the Ghidra vtordisp misread;
+								// the serializer names are displaced +0x10, PDB-offset-proven 2026-07-13.)
 private:
-	ZEND int operator&( CStructureSaver &f ) { f.Add(2,(CDumbUnitServer *)this); f.Add(3,(TTBSUnit *)this); f.Add(4,(CUSSoundTracker *)this); f.Add(5,(CASet *)this); f.Add(6,(TTBSUnitVision *)this); f.Add(7,&pExec); f.Add(8,&bCallTimeLabel); f.Add(9,&pCurrentCmd); f.Add(10,&pState); f.Add(11,&criticals); f.Add(12,&bIsRunningForcedAction); f.Add(13,&pAutoRunCmd); f.Add(14,&wasInterruptedList); f.Add(15,&lostUnits); f.Add(16,&fLastHeight); f.Add(17,&plLast); f.Add(18,&pWearingPK); f.Add(19,&bIsPK); f.Add(20,&tPrev); f.Add(21,&nDialog); f.Add(22,&bCanTalk); f.Add(23,&nScriptToHit); f.Add(24,&bForceNoChangePose); f.Add(25,&pKiller); return 0; }
+	// Retail operator& @0x3c6e80, member-by-member against the PDB layout (Ghidra's names in that body
+	// are displaced +0x10; every tag below was resolved by real offset): 2-6 bases, 7 pExec,
+	// 8 bCallTimeLabel, 9 pCurrentCmd, 10 pState, 11 criticals, 12 bIsRunningForcedAction,
+	// 13 pAutoRunCmd, 14 wasInterruptedList, 15 lostUnits, 16 fLastHeight, 17 plLast, 18 pWearingPK,
+	// 19 bIsPK, 20 tCriticalPrev, 21 tStatePrev, 22 nDialog, 23 bCanTalk, 24 nClueCount,
+	// 25 nScriptToHit, 26 bWalkWithoutWeapon, 27 hiddenAtSight, 28 bForceNoChangePose, (29 SKIPPED),
+	// 30 pKiller, 31 CLockable base, 32 nBleed, 33 sHandItem, 34 pHandItemHolder, 35 tDeathTime.
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,(CDumbUnitServer *)this); f.Add(3,(TTBSUnit *)this); f.Add(4,(CUSSoundTracker *)this); f.Add(5,(CASet *)this); f.Add(6,(TTBSUnitVision *)this); f.Add(7,&pExec); f.Add(8,&bCallTimeLabel); f.Add(9,&pCurrentCmd); f.Add(10,&pState); f.Add(11,&criticals); f.Add(12,&bIsRunningForcedAction); f.Add(13,&pAutoRunCmd); f.Add(14,&wasInterruptedList); f.Add(15,&lostUnits); f.Add(16,&fLastHeight); f.Add(17,&plLast); f.Add(18,&pWearingPK); f.Add(19,&bIsPK); f.Add(20,&tCriticalPrev); f.Add(21,&tStatePrev); f.Add(22,&nDialog); f.Add(23,&bCanTalk); f.Add(24,&nClueCount); f.Add(25,&nScriptToHit); f.Add(26,&bWalkWithoutWeapon); f.Add(27,&hiddenAtSight); f.Add(28,&bForceNoChangePose); f.Add(30,&pKiller); f.Add(31,(CLockable *)this); f.Add(32,&nBleed); f.Add(33,&sHandItem); f.Add(34,&pHandItemHolder); f.Add(35,&tDeathTime); return 0; }
 	void RefreshExecutor();
 	void CheckCmdExecState();
 	void Fall();
@@ -157,13 +183,20 @@ public:
 	int GetScriptToHit() const { return nScriptToHit; }			// UnitSetToHit override (-1 = none)
 	void SetScriptToHit( int n ) { nScriptToHit = n; }
 	// --- wCheckTooMuchCorpses corpse-density failsafe convergence surface ---
-	// Release CUnitServer carried a death timestamp (retail +0x228) and a quest-clue
-	// counter (retail +0x1e4); the dev class had not yet reconstructed them. Appended as
-	// non-serialized fields (operator& tags unchanged, so existing member offsets are
-	// untouched) and read by the corpse helpers to flag the OLDEST corpse first and spare
-	// clue-carrying corpses. Nothing sets them yet (parity surface only).
-	unsigned long tDeathTime = 0;	// retail +0x228: tick the unit became a corpse
-	int nClueCount = 0;				// retail +0x1e4: number of quest clues carried
+	// Release CUnitServer carried a death timestamp (retail +0x228) and a quest-clue counter
+	// (retail +0x1e4). Read by the corpse helpers to flag the OLDEST corpse first and spare
+	// clue-carrying corpses. BOTH ARE SERIALIZED by retail (operator& @0x3c6e80: nClueCount tag 24,
+	// tDeathTime tag 35 -- the earlier "non-serialized parity surface" note was decomp-disproven,
+	// W3 serialization convergence 2026-07-13). Retail seeds nClueCount=1 from the ctor's trailing
+	// bool (@0x3c3cc0); nothing writes tDeathTime yet (the corpse-timestamp writer is still unported).
+	unsigned long tDeathTime = 0;	// retail +0x228 (tag 35): tick the unit became a corpse
+	int nClueCount = 0;				// retail +0x1e4 (tag 24): number of quest clues carried
+	// retail CUnitServer::SetHandItem @0x387b30 (wPlayer.obj): copy the SItem into sHandItem, then
+	// pin the item alive via pHandItemHolder = sHandItem.pItem (a plain CObj swap). LIVE: called by
+	// CPlayer::SetInHandItem (@0x386e70) for any hand item that has an owning unit, and by
+	// CExecLoadWeapon::LoadClip (@0x3949a0) to clear a consumed in-hand clip.
+	void SetHandItem( const SItem &item ) { sHandItem = item; pHandItemHolder = sHandItem.pItem.GetPtr(); }
+	const SItem& GetHandItem() const { return sHandItem; }
 	unsigned long GetDeathTime() const { return tDeathTime; }
 	bool IsClueUnit() const { return nClueCount > 0; }	// retail CUnitServer::IsClueUnit @0x3c6900 (setg: > 0)
 	// retail CUnitServer::CanBlowUp @0x3c0420 (unit vtbl+0x28): a unit may be gibbed unless it is
@@ -171,13 +204,15 @@ public:
 	// GetWearingDBPK), or IS an empty PK shell (CUnit vtbl+0x10 IsEmptyPK).
 	virtual bool CanBlowUp() { return !IsClueUnit() && !IsValid( GetWearingDBPK() ) && !IsEmptyPK(); }
 	CUnitServer();
-	CUnitServer( CWorld *pWorld, NRPG::IUnitMission *_pRPG, NDb::CModel *pModel, CPlayer *pPlayer, const NAI::SUnitPosition &pos );
+	// retail ctor @0x3c3cc0 carries a trailing bool that seeds nClueCount=1 (quest-clue units);
+	// defaulted false -- dev's CreateUnit path does not pass it yet.
+	CUnitServer( CWorld *pWorld, NRPG::IUnitMission *_pRPG, NDb::CModel *pModel, CPlayer *pPlayer, const NAI::SUnitPosition &pos, bool bClueUnit = false );
 	// events
 	void OnNewPlayerTurnOrTime( const CEventOnNewPlayerTurnOrTime &event );
 	void OnNewPlayerFastTurnOrTime( const CEventOnNewPlayerFastTurnOrTime &event );   // @0x3c0300: re-arm hiding
 	//
 	// CDumdUnit callbacks
-	virtual void Die( bool bRemove = false );
+	virtual void Die( bool bDeathBeauty = false, bool bRemove = false );   // retail @0x3c2190 (bool,bool)
 	// implement CTBSUnit
 	virtual void Do( CCommand* );
 	virtual bool IsMoving() const; 
@@ -208,6 +243,7 @@ public:
 	virtual IPathViewer* CreatePathViewer();
 	virtual NRPG::IUnitMissionInfo* GetRPG() const;
 	virtual const NAI::SUnitPosition& GetPosition() const { return GetUnitPosition(); }
+	virtual NAI::SUnitPosition GetSetPosePosition() const { return GetUnitSetPosePosition(); }   // retail @0x3c6a00
 	virtual void GetRealPosition( CVec3 *pRes ) { GetRealUnitPosition( pRes ); }
 	virtual void AddVisitableChildren( vector<IVisObj*> *pRes ) { AddMiscObjects( pRes ); }
 	virtual bool GetCurrentCommandName( string *pName ) const;
@@ -247,7 +283,8 @@ public:
 	virtual void CollectSnipeAP( int nExtraAP );
 	CUnitStateSniping *GetSnipingState(); // the docked snipe state (0 if not sniping) -- for the AI snipe actions
 
-	virtual int ProcessAttack( int nUserID, NRPG::CAttackPortion *pAttack, NDb::CRPGArmor *pArmor );
+	virtual int ProcessAttack( NWorld::IWorld *pWorld, int nUserID, NRPG::CAttackPortion *pAttack,
+		const CVec3 &vDir, NDb::CRPGArmor *pArmor );
 	virtual int GetCarefulShotExtraAP();
 	virtual CDumbUnitServer *GetCorpse();
 	// retail @0x3c0370: blast-wave ragdoll impulse for an already-downed body (dead or unconscious,
@@ -260,7 +297,10 @@ public:
 	virtual bool CanStrafe() { return !pWearingPK; };
 
 	virtual NDb::CPanzerklein *GetWearingDBPK();
-	void FlipPanzerklein( CUnitServer *pPK, bool bUnloadWeapons = true );
+	// retail @0x3c1250: worn-PK pers is named "Boss" (the flying boss)
+	bool IsFlyingBoss() const;
+	// retail @0x3c1a90: bTakeInventory gates handing the PK's inventory to SetPanzerklein
+	void FlipPanzerklein( CUnitServer *pPK, bool bUnloadWeapons = true, bool bTakeInventory = true );
 	CUnitServer *GetWearingPK() { return pWearingPK; }
 	void OnUnitDied( CUnitServer *pUS );
 	void CheckStability();

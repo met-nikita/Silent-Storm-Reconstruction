@@ -59,6 +59,15 @@ struct SConsoleLine
 	SConsoleLine( int _nID, EStreamType _eType, bool _bCommand, wstring _szText ): nID( _nID ), eType( _eType ), bCommand( _bCommand ), szText( _szText ) {}
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail ILogNotify: the sink a CLogPanel installs (via SetLogNotify) so every console line written to
+// the log streams is pushed straight into the panel (CLogPanelNotify filters it by stream type).
+class ILogNotify: public CObjectBase
+{
+public:
+	virtual void OnAddConsoleLine( const SConsoleLine &line ) = 0;
+};
+void SetLogNotify( ILogNotify *pNotify );
+////////////////////////////////////////////////////////////////////////////////////////////////////
 // for Console.cpp
 externA5 bool bConsoleUpdated;
 externA5 list<SConsoleLine> consoleLines;
@@ -70,5 +79,10 @@ inline CLogStream& endl( CLogStream& sStream )
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 externA5 CLogStream csSystem, csScript, csAI, csRPG, csGame;
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// [HARNESS] when set, every appended console line is teed to ".\_console.log" (UTF-8) so unattended
+// harness runs can read the engine's own diagnostics (UI-ERROR, warnings, script/AI output). Set by
+// the -loadslot boot path in Game/Main.cpp. Sweep the whole harness by grepping "[HARNESS]".
+externA5 bool g_bHarnessLog;
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 #endif

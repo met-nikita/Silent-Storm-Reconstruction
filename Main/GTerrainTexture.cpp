@@ -11,6 +11,8 @@
 #include "..\DBFormat\DataFormat.h"
 #include "GGrass.h"
 #include "..\Misc\HPTimer.h"
+#include "..\MiscDll\Commands.h"      // REGISTER_VAR_EX (gfx_terrain_565)
+#include "..\FileIO\BasicChunk1.h"    // START_REGISTER / FINISH_REGISTER
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 namespace NGScene
 {
@@ -18,6 +20,13 @@ namespace NGScene
 static bool bAllWasReady = true;
 static bool bIsStress = false;
 static bool bIsLoading = false;
+// retail: when set (by CTerrainTextureBlend::NeedUpdate @0x17b180 while it refreshes its child
+// leaves to detect version changes), CTerrainTexture::Recalc @0x17d1f0 only DROPS the cached
+// texture instead of rendering it, so the version probe is cheap.
+static bool bFakeRecalc = false;
+// retail global @0x9c60a4 (texture-detail/mip quality) -- now driven by the gfx_texture_mip
+// console var (registered in GTexture.cpp, VarIntHandler, default 0, saved).
+int nTextureUseMip = 0;
 CPtrFuncBase<CSWTextureData>* GetSWTexture( NDb::CTexture *pTex ) 
 {
 	CSWTexture *pResult = (CSWTexture*)GetSWTex( pTex );
@@ -145,10 +154,12 @@ const float FP_BUMPMAPPINGSIZE = 2;
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // Terrain texture
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CTerrainTexture::CTerrainTexture( bool _bBump, SRandomSeed _sSeed, const CTRect<int> &_nrRegion, 
-	CFuncBase<int> *_pLOD, CFuncBase<STerrainInfo> *_pInfo, CVersioningBase *_pUpdateRegion, CGrassTracker *_pGrass )
-	: bBumpTexture(_bBump), sSeed(_sSeed), nrRegion(_nrRegion), pLOD(_pLOD), pInfo(_pInfo), pUpdateRegion(_pUpdateRegion),
-	pGrass(_pGrass), fWorldToScreen( FP_INV_GRID_STEP / nrRegion.Width() * N_VSPACE_SIZE )
+// @0x17b320: leaf ctor -- retail dropped pLOD, gained a trailing nDetail (this leaf's resolution).
+CTerrainTexture::CTerrainTexture( bool _bBump, SRandomSeed _sSeed, const CTRect<int> &_nrRegion,
+	CFuncBase<STerrainInfo> *_pInfo, CVersioningBase *_pUpdateRegion, CGrassTracker *_pGrass, int _nDetail )
+	: bBumpTexture(_bBump), sSeed(_sSeed), nrRegion(_nrRegion), pInfo(_pInfo),
+	pGrass(_pGrass), fWorldToScreen( FP_INV_GRID_STEP / nrRegion.Width() * N_VSPACE_SIZE ),
+	pUpdateRegion(_pUpdateRegion), nDetail(_nDetail)
 {
 	ASSERT( nrRegion.Width() == nrRegion.Height() ); // used in mapping world to screen
 }
@@ -591,16 +602,11 @@ bool CTerrainTexture::CalcNewTexture( int nSize )
 		// create texture buffer
 		if ( !IsValid(pValue) )
 		{
+			// retail single-resolution leaf: only the base pValue slot, no pTex128/pTex256 cache
 			if ( nSize == 256 )
-			{
 				pValue = cache256.GetTexture( this );
-				pTex256 = pValue;
-			}
 			else
-			{
 				pValue = cache128.GetTexture( this );
-				pTex128 = pValue;
-			}
 		}
 		if ( !IsValid( pValue ) )
 			return false;
@@ -615,46 +621,111 @@ bool CTerrainTexture::CalcNewTexture( int nSize )
 	//
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CTerrainTexture::UseFake()
+// @0x17d0b0: best-effort "fake" texture, RETURNED (not cached in pValue). Used by
+// CTerrainTextureBlend::UseAnything when neither resolution is ready. This is the else-branch of
+// the old Jan03 UseFake; the pTex128 fallback + pValue caching moved up into the blend node.
+NGfx::CTexture* CTerrainTexture::CalcFake()
 {
-	pValue = pTex128;
-	nDetail = 1;
-	if ( !IsValid( pValue ) )
+	if ( bBumpTexture )
+		return GetDefaultBump();
+	pInfo.Refresh();
+	const STerrainInfo &info = pInfo->GetValue();
+	if ( nrRegion.x2 <= info.avrgColor.GetXSize() && nrRegion.y2 <= info.avrgColor.GetYSize() )
 	{
-		if ( bBumpTexture )
-			pValue = GetDefaultBump();
-		else
+		NGfx::CTexture *pTex = NGfx::MakeTexture( nrRegion.Width(), nrRegion.Height(), 1, NGfx::SPixel8888::ID, NGfx::REGULAR, NGfx::CLAMP );
+		NGfx::CTextureLock<NGfx::SPixel8888> t( pTex, 0, NGfx::INPLACE );
+		for ( int y = 0; y < nrRegion.Height(); ++y )
 		{
-			pInfo.Refresh();
-			const STerrainInfo &info = pInfo->GetValue();
-			if ( nrRegion.x2 <= info.avrgColor.GetXSize() && nrRegion.y2 <= info.avrgColor.GetYSize() )
-			{
-				pValue = NGfx::MakeTexture( nrRegion.Width(), nrRegion.Height(), 1, NGfx::SPixel8888::ID, NGfx::REGULAR, NGfx::CLAMP );
-				NGfx::CTextureLock<NGfx::SPixel8888> t( pValue, 0, NGfx::INPLACE );
-				for ( int y = 0; y < nrRegion.Height(); ++y )
-				{
-					for ( int x = 0; x < nrRegion.Width(); ++x )
-						t[y][x].color = info.avrgColor[ y + nrRegion.y1 ][ x + nrRegion.x1 ];
-				}
-			}
-			else
-				pValue = GetGreenTexture();
+			for ( int x = 0; x < nrRegion.Width(); ++x )
+				t[y][x].color = info.avrgColor[ y + nrRegion.y1 ][ x + nrRegion.x1 ];
 		}
+		return pTex;
 	}
+	return GetGreenTexture();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 const float F_RELAXATION_TIME = 0.5f;
+const float F_TRANSFER_TIME = 1.0f;    // @0x8b86ec -- cross-fade duration
 #ifdef _MAPEDIT
 const float F_LIMIT_TIME_RECALC = 0.2f;
 #else
-const float F_LIMIT_TIME_RECALC = 0.02f;
+const float F_LIMIT_TIME_RECALC = 0.05f;  // @0x8b86e8 -- per-frame texture-render time budget (retail)
 #endif
 static int nPrevDGFrame;
 static float fElapsedTime;
+// @0x17d1f0: leaf Recalc -- render the single resolution (nDetail), or, when the blend node is only
+// probing versions (bFakeRecalc), just drop the cached texture cheaply.
 void CTerrainTexture::Recalc()
 {
-	ASSERT( nDetail == pLOD->GetValue() );
-	bool bFastRecalc = false, bDoRecalc = true;
+	if ( bFakeRecalc )
+	{
+		pValue = 0;
+		return;
+	}
+	CalcNewTexture( nDetail == 0 ? 256 : 128 );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// @0x17b060: leaf NeedUpdate -- refresh BOTH DG inputs (pInfo, pUpdateRegion) unconditionally and
+// report whether either changed. All the LOD / dual-resolution logic lives in CTerrainTextureBlend.
+bool CTerrainTexture::NeedUpdate()
+{
+	bool bInfo = pInfo.Refresh();
+	bool bRegion = pUpdateRegion.Refresh();
+	return bRegion || bInfo;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// @0x17b2f0: single cached slot now.
+void CTerrainTexture::FreeTexture( NGfx::CTexture *_pTex )
+{
+	if ( _pTex == pValue )
+		pValue = 0;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// CTerrainTextureBlend -- retail outer node owning the 128 + 256 leaves
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// @0x17d240: news its own two single-resolution leaves (nDetail 1 into pTex128, 0 into pTex256)
+// sharing one pLOD and the caller's pInfo / pUpdateRegion / pGrass.
+CTerrainTextureBlend::CTerrainTextureBlend( bool _bBump, SRandomSeed _sSeed, const CTRect<int> &_nrRegion,
+	CFuncBase<int> *_pLOD, CFuncBase<STerrainInfo> *_pInfo, CVersioningBase *_pUpdateRegion, CGrassTracker *_pGrass )
+	: pLOD( _pLOD ), bBumpTexture( _bBump ), nDetail( 0 ), nPrevDetail( -1 )
+{
+	tCalced256 = 0;
+	pTex128 = new CTerrainTexture( _bBump, _sSeed, _nrRegion, _pInfo, _pUpdateRegion, _pGrass, 1 );
+	pTex256 = new CTerrainTexture( _bBump, _sSeed, _nrRegion, _pInfo, _pUpdateRegion, _pGrass, 0 );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// @0x17af50: cross-fade weight remaining (F_TRANSFER_TIME seconds after the 256 result arrived).
+float CTerrainTextureBlend::GetBlend()
+{
+	float f = F_TRANSFER_TIME - (float)NHPTimer::GetTimePassed( &tCalced256 );  // Max<float>( 0, ... )
+	return f > 0 ? f : 0;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// @0x17d370: put SOMETHING in value.pTex[0] -- best available resolution, else a fake. Forces nDetail 1.
+void CTerrainTextureBlend::UseAnything()
+{
+	nDetail = 1;
+	if ( pTex128->IsValidValue() )
+	{
+		value.pTex[0] = pTex128->GetValue();
+		return;
+	}
+	if ( pTex256->IsValidValue() )
+	{
+		value.pTex[0] = pTex256->GetValue();
+		return;
+	}
+	if ( !IsValid( pFake ) )
+		pFake = pTex128->CalcFake();
+	value.pTex[0] = pFake;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// @0x17d470: pick value.pTex[0] for this frame (time budget / stress / loading modes), and when a
+// bump-less 256 result is shown, set up the 128->256 cross-fade in value.pTex[1] / value.fBlend.
+void CTerrainTextureBlend::Recalc()
+{
+	value.pTex[1] = 0;
+	value.fBlend = 0;
 	NHPTimer::STime tLast;
 	NHPTimer::GetTime( &tLast );
 	if ( nDGCurrentFrame != nPrevDGFrame )
@@ -664,100 +735,90 @@ void CTerrainTexture::Recalc()
 	}
 	if ( !bIsLoading && ( fElapsedTime > F_LIMIT_TIME_RECALC || ( bIsStress && bBumpTexture ) || HasFileRequestsInFly() ) )
 	{
-		// out of time, get some result anywhere
-		UseFake();
+		// out of time -- show whatever we already have
+		UseAnything();
+		nPrevDetail = nDetail;
 		return;
 	}
 	if ( bIsStress )
 	{
-		pValue = pTex128;
-		nDetail = 1;
-		if ( IsValid( pValue ) )
+		if ( nDetail == 0 && pTex256->IsValidValue() )
+		{
+			value.pTex[0] = pTex256->GetValue();
+			nPrevDetail = nDetail;
 			return;
+		}
+		if ( pTex128->IsValidValue() )
+		{
+			nDetail = 1;
+			value.pTex[0] = pTex128->GetValue();
+			nPrevDetail = nDetail;
+			return;
+		}
 	}
 	if ( nDetail == 0 )
-		bDoRecalc = bHasToRecalc256;
+	{
+		// (re)start the cross-fade clock when the 256 result is not yet ready or the detail flipped
+		if ( !pTex256->IsValidValue() || nPrevDetail != nDetail )
+			NHPTimer::GetTime( &tCalced256 );
+		value.pTex[0] = pTex256->GetValue();
+	}
 	else
-		bDoRecalc = bHasToRecalc128;
-	int nSize = nDetail == 0 ? 256 : 128;
-	ASSERT( bDoRecalc );
+		value.pTex[0] = pTex128->GetValue();
 
-	// do one of the recalcs
-	if ( bDoRecalc )//!IsValid( pValue ) )
+	if ( !IsValid( value.pTex[0] ) && !bIsLoading )
+		UseAnything();
+
+	if ( !bBumpTexture && nDetail == 0 && pTex256->IsValidValue() )
 	{
-		if ( CalcNewTexture( nSize ) )
+		if ( pTex128->IsValidValue() )
 		{
-			if ( nDetail == 0 )
-				bHasToRecalc256 = false;
-			else
-				bHasToRecalc128 = false;
-		}
-		else
-		{
-			UseFake();
-			fElapsedTime += 0.1f;
+			value.pTex[1] = pTex128->GetValue();
+			value.fBlend = GetBlend();
 		}
 	}
-	float fTimePassed = NHPTimer::GetTimePassed( &tLast );
-	//char szBuf[1000];
-	//int nBump = bBumpTexture;
-	//sprintf( szBuf, "%d size bump=%d %g ms per calc\n", nSize, nBump, fTimePassed * 1000 );
-	//OutputDebugString( szBuf );
-	fElapsedTime += fTimePassed;
+	fElapsedTime += (float)NHPTimer::GetTimePassed( &tLast );
+	nPrevDetail = nDetail;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-bool CTerrainTexture::NeedUpdate()
+// @0x17b180: refresh pLOD + both leaves (leaves refreshed under bFakeRecalc so their Recalc only
+// drops textures -- a cheap version probe), recompute nDetail from pLOD, and report staleness.
+bool CTerrainTextureBlend::NeedUpdate()
 {
-	// pLOD (the camera-bound CLODCalcer) is intentionally excluded from the save format (operator&
-	// skips tag 5), so a terrain texture RESTORED FROM A SAVE has a null pLOD; only fresh map-gen
-	// supplies one (GView.cpp). The release's base CTerrainTexture::NeedUpdate (@0x17b060) does not
-	// touch pLOD at all -- guard it so a loaded texture keeps its persisted nDetail (tag 10) instead
-	// of dereferencing the null LOD node (which crashed on load in PrecacheMaterials -> DG.H Refresh).
-	if ( IsValid( pLOD ) )
+	pLOD.Refresh();
+	bFakeRecalc = true;
+	bool bChanged128 = pTex128.Refresh();
+	bool bChanged256 = pTex256.Refresh();
+	bFakeRecalc = false;
+	nDetail = pLOD->GetValue();
+	if ( nTextureUseMip > 0 )
+		nDetail = 1;
+	if ( !bChanged128 && !bChanged256 && nPrevDetail == nDetail )
 	{
-		pLOD.Refresh();
-		nDetail = pLOD->GetValue();
+		if ( nDetail == 0 && pTex256->IsValidValue() )
+		{
+			if ( value.pTex[0] == pTex256->GetValue() && value.fBlend == GetBlend() )
+				return false;
+		}
+		if ( nDetail == 1 && pTex128->IsValidValue() )
+		{
+			if ( value.pTex[0] == pTex128->GetValue() )
+				return false;
+		}
 	}
-	pInfo.Refresh();
-	if ( pUpdateRegion.Refresh() )
-	{
-		bHasToRecalc256 = true;
-		bHasToRecalc128 = true;
-	}
-	bool bHasToRecalc = true;
-	if ( nDetail == 0 )
-	{
-		pValue = pTex256;
-		if ( !IsValid(pValue) )
-			bHasToRecalc256 = true;
-		bHasToRecalc = bHasToRecalc256;
-	}
-	else
-	{
-		pValue = pTex128;
-		if ( !IsValid(pValue) )
-			bHasToRecalc128 = true;
-		bHasToRecalc = bHasToRecalc128;
-	}
-	return bHasToRecalc;
+	return true;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CTerrainTexture::FreeTexture( NGfx::CTexture *_pTex )
-{
-	if ( _pTex == pTex128 )
-	{
-		pTex128 = 0;
-		bHasToRecalc128 = true;
-	}
-	if ( _pTex == pTex256 )
-	{
-		pTex256 = 0;
-		bHasToRecalc256 = true;
-	}
-	if ( _pTex == pValue )
-		pValue = 0;
-}	
+// retail GTerrainTextureInit @0x57d860: single var, bool, default 1.0, saved (this tree's terrain
+// path is 32-bit only -- the flag feeds the saved config)
+static bool bTerrain565Textures = true;
+START_REGISTER(GTerrainTexture)
+	REGISTER_VAR_EX( "gfx_terrain_565", NGlobal::VarBoolHandler, &bTerrain565Textures, 1, true )
+FINISH_REGISTER
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 } // namespace
 using namespace NGScene;
 REGISTER_SAVELOAD_CLASS( 0x18051160, CTerrainTexture );
+REGISTER_SAVELOAD_CLASS( 0x03052160, CTerrainTextureBlend );
+REGISTER_SAVELOAD_CLASS( 0x03052161, CTerrainTextureFetch );
+REGISTER_SAVELOAD_CLASS( 0x03052162, CTerrainTextureBlendColor );

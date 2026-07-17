@@ -91,8 +91,8 @@ private:
 	CObj<CHoverButton> pCancel;
 	CObj<CHoverButton> pEndMission;
 	CDBPtr<NDb::CString> pString;		// the prompt title carried from the command
-	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CWindow*)this); f.Add(2,&pCancel); f.Add(3,&pEndMission); f.Add(4,&pString); return 0; }
-	CPtr<CText> pText;					// prompt label control, rebuilt on EVENT_TEMPLATELOAD (transient; not saved)
+	CObj<CText> pText;					// prompt label control (retail serializes it OWNED at tag 3, @0x1f1cc0)
+	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CWindow*)this); f.Add(2,&pString); f.Add(3,&pText); f.Add(4,&pCancel); f.Add(5,&pEndMission); return 0; }   // retail @0x1f1cc0 (convergence W2)
 
 public:
 	CLeaveZoneMenuUI() {}
@@ -266,7 +266,8 @@ private:
 	CObj<NUI::CScreenShot> pScreenShot;
 	CPtr<IMission> pMission;
 	bool bAutoSave;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&pCursor); f.Add(3,&pInterface); f.Add(4,&pUI); f.Add(5,&pScreenShot); f.Add(6,&pMission); f.Add(7,&bAutoSave); return 0; }
+	CDGPtr<NGScene::CScreenshotTexture> pScreenShotTexture;   // retail tag 8: the freeze-frame texture behind the menu
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&bAutoSave); f.Add(3,&pMission); f.Add(4,&pCursor); f.Add(5,&pInterface); f.Add(6,&pUI); f.Add(7,&pScreenShot); f.Add(8,&pScreenShotTexture); return 0; }   // retail @0x1f1a20 (convergence W2; dev tags were permuted)
 
 public:
 	CLeaveZoneMenuInterface();
@@ -289,6 +290,7 @@ void CLeaveZoneMenuInterface::Initialize( IMission *_pMission, NDb::CString *pTi
 {
 	pMission = _pMission;
 	bAutoSave = _bAutoSave;
+	this->pScreenShotTexture = pScreenShotTexture;   // keep the freeze-frame ref for the save (retail tag 8)
 
 	pCursor = NUI::ICursor::Create();
 	pInterface = new NUI::CInterface( pCursor );
@@ -376,7 +378,7 @@ void CICLeaveZoneMenu::Exec()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 using namespace NUI;
 REGISTER_SAVELOAD_CLASS( 0xB1217151, CLoseMenuUI );
-REGISTER_SAVELOAD_CLASS( 0xB3130121, CLeaveZoneMenuUI );			// LUA convergence PART B (fresh id)
+REGISTER_SAVELOAD_CLASS( 0xB3130140, CLeaveZoneMenuUI );			// LUA convergence PART B (fresh id)
 using namespace NGame;
 REGISTER_SAVELOAD_CLASS( 0xB1217150, CLoseMenuInterface );
-REGISTER_SAVELOAD_CLASS( 0xB3130122, CLeaveZoneMenuInterface );	// LUA convergence PART B (fresh id)
+REGISTER_SAVELOAD_CLASS( 0xB3130141, CLeaveZoneMenuInterface );	// LUA convergence PART B (fresh id)

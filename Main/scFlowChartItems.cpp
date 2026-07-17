@@ -305,11 +305,16 @@ int CScenarioZone::GetVariantIDForTemplate( int nTemplateID )
 // CScenarioClue
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CScenarioClue::CScenarioClue( NDb::CDBScenarioClue *_pDBClue, int _nInnerID ):
-	pDBClue( _pDBClue ), bPlaced( false ), bCompound( false ), 
+	pDBClue( _pDBClue ), bPlaced( false ), bCompound( false ),
 	bInaccessible( true ), bJustFound( false ), nOpenOrder( 0 ),
-	bInShortestPath( false ),	nInnerID( _nInnerID ), bDestroyed( false )
+	bInShortestPath( false ),	nInnerID( _nInnerID ), bDestroyed( false ),
+	bDetected( false )
 {
 	ASSERT( IsValid( pDBClue ) );
+	// retail @0x2e0770 tail: a clue whose DB record carries a goal gets its runtime goal built
+	// right in the ctor, with this clue as the tasks' parent.
+	if ( IsValid( pDBClue ) && IsValid( pDBClue->pGoal ) )
+		pGoal = new CScenarioGoal( pDBClue->pGoal, this );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CScenarioObjective *CScenarioClue::GetObjectiveByType( NDb::EScenarioObjectiveType type )
@@ -491,14 +496,16 @@ CScenarioObjective *CreateScenarioObjective( NDb::CDBScenarioObjective *pDBObjec
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CScenarioGoal -- clone the DB goal's tasks into runtime tasks (each starting TS_UNKNOWN).
+// retail @0x2e0550: the parent clue (null for script-created goals) is threaded into each cloned
+// task's pParentClue.
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CScenarioGoal::CScenarioGoal( NDb::CScenarioGoal *_pGoal ): pGoal( _pGoal ), eState( TS_UNKNOWN )
+CScenarioGoal::CScenarioGoal( NDb::CScenarioGoal *_pGoal, CScenarioClue *pParentClue ): pGoal( _pGoal ), eState( TS_UNKNOWN )
 {
 	if ( IsValid( _pGoal ) )
 	{
 		const vector< CPtr<NDb::CScenarioTask> > &dbTasks = _pGoal->tasks;
 		for ( int i = 0; i < dbTasks.size(); ++i )
-			tasks.push_back( new CScenarioTask( dbTasks[ i ] ) );
+			tasks.push_back( new CScenarioTask( dbTasks[ i ], pParentClue ) );
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -509,5 +516,5 @@ using namespace NScenario;
 REGISTER_SAVELOAD_CLASS( 0x50982101, CScenarioZone );
 REGISTER_SAVELOAD_CLASS( 0x50982102, CScenarioClue );
 REGISTER_SAVELOAD_CLASS( 0x50982103, CScenarioObjective );
-REGISTER_SAVELOAD_CLASS( 0x50982104, CScenarioGoal );
-REGISTER_SAVELOAD_CLASS( 0x50982105, CScenarioTask );
+REGISTER_SAVELOAD_CLASS( 0xA0243160, CScenarioGoal );
+REGISTER_SAVELOAD_CLASS( 0xA1733130, CScenarioTask );

@@ -18,6 +18,10 @@
 
 #include "wOSBase.h"
 #include "wUnitServer.h"
+#include "rpgGlobal.h"   // CGlobalGame::pDifficulty -- the called-shots gate (bHeadshotShouldKill)
+#include "wMain.h"       // NWorld::CWorld::GetAIMap -- SelectTargetHLs @0x2b49e0
+#include "aiMap.h"       // NAI::IAIMap::GetAccessibleUnitHL / GetHull -- SelectTargetHLs @0x2b49e0
+#include "..\Misc\RandomGen.h"   // SRand -- the SelectTargetHLs HL_ANY roll @0x2b4a7b
 //
 #include "RPGToHit.h"
 //
@@ -34,13 +38,59 @@ inline float Cos3DistanceFunc( int nDistInTile, float fSlope )
 	return 100.f * pow( cos( float(nDistInTile) / fSlope ), 3 ) + 2;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// SelectTargetHLs
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail @0x2b49e0 (disasm-decoded; Ghidra's arg matching on the __fastcall was scrambled):
+//   pInfo->eHL = eHL;  pInfo->accessibleHLs freed+zeroed;           // retail frees the buffer;
+//                                                                   // clear() is behavior-identical
+//   if ( GetToHitType( pUS ) != TH_MELEE ) return true;             // non-melee: eHL only, empty set
+//   aimap->GetAccessibleUnitHL( &pInfo->accessibleHLs, pos.GetCenter(), hull(pTarget), F_MELEE_DISTANCE );
+//   if ( empty ) return false;                                      // nothing reachable to strike
+//   if ( eHL == HL_ANY ) { SRand rnd; rnd.Get( size ); return true; }         // see ORIGINAL BUG below
+//   if ( eHL is in the set ) { set = {eHL}; }                       // a reachable called shot narrows it
+//   return true;                                                    // (an UNreachable called shot keeps
+//                                                                   //  the full set AND the called eHL)
+bool SelectTargetHLs( NWorld::CUnitServer *pUS, const NAI::SUnitPosition &pos, STargetHLInfo *pInfo,
+	NWorld::CUnitServer *pTarget, NAI::EHitLocation eHL )
+{
+	pInfo->eHL = eHL;
+	pInfo->accessibleHLs.clear();
+	if ( GetToHitType( pUS ) != TH_MELEE )
+		return true;
+	//
+	NAI::IAIMap *pAIMap = pUS->GetWorld()->GetAIMap();
+	pAIMap->GetAccessibleUnitHL( &pInfo->accessibleHLs, pos.GetCenter(), pAIMap->GetHull( pTarget ), F_MELEE_DISTANCE );
+	if ( pInfo->accessibleHLs.empty() )
+		return false;
+	//
+	if ( NAI::HL_ANY == eHL )
+	{
+		// ORIGINAL BUG (confirmed disasm @0x2b4a7b..0x2b4a9f): the release rolls the random index but
+		// DISCARDS it -- no store to pInfo->eHL follows SRand::Get (the Jan03 Start assigned
+		// eHL = hls[rnd.Get(hls.size())]; the release evidently assigned the dead by-value parameter, so
+		// MSVC kept only the calls). Net retail behavior: an HL_ANY swing STAYS HL_ANY -- the aim point
+		// becomes the target hull's bound center (GetUnitHLPos(-1)) and the to-hit keeps the full
+		// accessible set (GetMeleeToHit: HL penalty from the set, headshot weighting 1.0 for HL_ANY).
+		// Reproduced 1:1, including the burned RNG state.
+		SRand rnd;
+		rnd.Get( pInfo->accessibleHLs.size() );
+		return true;
+	}
+	if ( find( pInfo->accessibleHLs.begin(), pInfo->accessibleHLs.end(), eHL ) != pInfo->accessibleHLs.end() )
+	{
+		pInfo->accessibleHLs.clear();
+		pInfo->accessibleHLs.push_back( eHL );
+	}
+	return true;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 // Release-new free helpers (RVA 0x2b6ca0 / 0x2b6d50) -- fully recovered from .rdata, no hooks.
 // GetHeadshotMultiplier weights the cover/area factor (and the thrown-blade result) for a called shot
 // at a specific body part. GetThrowToHitPenalty is the alternative malus when called shots are
 // DISABLED. Values confirmed from Game.exe @0x6b6ca0 / @0x6b6d50 (the spec's BODY=1.30 was wrong;
 // the .rdata constant @0x8c39fc is 0x3f266666 == 0.65).
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-inline float GetHeadshotMultiplier( NAI::EHitLocation hl )
+float GetHeadshotMultiplier( NAI::EHitLocation hl )   // declared in RPGUnitMission.h (shared with GetMeleeToHit)
 {
 	switch ( hl )
 	{
@@ -96,13 +146,19 @@ float GetMaxTrowDistance( IUnitMission *, IInventoryItem *, bool )
 	// elided: the (v/g)*v*FP_INV_GRID_STEP formula needs the absent GetMaxThrowVelocity / gravity chain.
 	return 15.0f; // matches CThrowKnifeToHitCalcer's fixed nMaxRange elision (RPGToHit.cpp ~line 605)
 }
-// The release gates the per-hit-location headshot reweighting on a global config flag
-// GetGlobalGame()->[+0x48][+0x69] (NRPG::CGlobalGame, a release-new world-config reach whose layout
-// differs from this predecessor tree -- not cleanly resolvable to a dev field). Elided to TRUE (the
-// shipped "called shots enabled" default): for HL_ANY GetHeadshotMultiplier==1.0 and
-// GetThrowToHitPenalty==0, so this only affects explicit called shots. Flip this one constant if the
-// flag is ever resolved.
-static const bool g_bCalledShotsEnabled = true;
+// The release gates the per-hit-location headshot reweighting on the campaign DIFFICULTY record:
+// world->GetGlobalGame()->pDifficulty->bHeadshotShouldKill (retail chain [+0x48][+0x69], resolved
+// 2026-07-12 -- CGlobalGame+0x48 = pDifficulty, CDBDifficulty+0x69 = bHeadshotShouldKill). For
+// HL_ANY GetHeadshotMultiplier==1.0 and GetThrowToHitPenalty==0, so this only affects called shots.
+static bool AreCalledShotsEnabled( NRPG::IUnitMission *pUnitMission )
+{
+	if ( !IsValid( pUnitMission ) )
+		return false;
+	CGlobalGame *pGlobalGame = pUnitMission->GetGlobalGame();
+	if ( !IsValid( pGlobalGame ) || !IsValid( pGlobalGame->pDifficulty ) )
+		return false;
+	return pGlobalGame->pDifficulty->bHeadshotShouldKill;
+}
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CToHitCalcer
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -433,9 +489,9 @@ float CUnitToHitCalcer::GetCA()
 	// ORIGINAL BUG (confirmed Game.exe @0x2b7840 `fdiv [esp+8]`, no zero guard): a zero param -> +/-inf.
 	if ( pTarget->GetUnitRPG()->HasPerk( 0x11, &fOut ) )
 		fCA = fCA / fOut;
-	// release-new: per-hit-location headshot reweighting when called shots are enabled (see
-	// g_bCalledShotsEnabled). For HL_ANY GetHeadshotMultiplier==1.0, so this is a no-op for normal shots.
-	if ( g_bCalledShotsEnabled )
+	// release-new: per-hit-location headshot reweighting when called shots are enabled (the
+	// difficulty's bHeadshotShouldKill). For HL_ANY GetHeadshotMultiplier==1.0 -> no-op for normal shots.
+	if ( AreCalledShotsEnabled( pUnitMission ) )
 		fCA *= GetHeadshotMultiplier( eHitLocation );
 	return fCA;
 }
@@ -692,7 +748,7 @@ int CThrowKnifeUnitToHitCalcer::GetToHit()
 	fToHit = GetAllMult() + ( GetAuraToHitAdd() + GetCarefulShootPerk() ) - GetWeatherPenalty();
 	// release: called shots enabled -> per-HL headshot multiplier on the whole result; else the
 	// per-HL throw penalty is subtracted. For HL_ANY both branches agree (mult 1.0 / penalty 0).
-	if ( g_bCalledShotsEnabled )
+	if ( AreCalledShotsEnabled( pUnitMission ) )
 		fToHit = GetHeadshotMultiplier( eHitLocation ) * fToHit;
 	else
 		fToHit = fToHit - GetThrowToHitPenalty( eHitLocation );
@@ -714,13 +770,10 @@ CThrowKnifeTileToHitCalcer::CThrowKnifeTileToHitCalcer( CUnitServer *_pUnitServe
 //
 using namespace NRPG;
 //
-REGISTER_SAVELOAD_CLASS( 0x52132140, CUnitToHitCalcer );
-REGISTER_SAVELOAD_CLASS( 0x52232150, CTileToHitCalcer );
-REGISTER_SAVELOAD_CLASS( 0x52232160, CGrenadeToHitCalcer );
-REGISTER_SAVELOAD_CLASS( 0x51262180, CAIUnitToHitCalcer );
-REGISTER_SAVELOAD_CLASS( 0x72762140, CRLauncherToHitCalcer );
-// release-new class (CObjectToHitCalcer 0x52132180 / CMeleeToHitCalcer 0x51642170 /
-// CAIUnitNoWeaponToHitCalcer 0x51462140 dropped). The real release id for the new class is not
-// recoverable from the answer key; 0x52132170 is an unused NRPG ToHit-family id (calcers are transient,
-// never in a real savegame, so the exact value is not behaviourally observable).
-REGISTER_SAVELOAD_CLASS( 0x52132170, CThrowKnifeUnitToHitCalcer );
+// W5 serialization-convergence: ALL ToHitCalcer REGISTRATIONS REMOVED (0x52132140 CUnitToHitCalcer,
+// 0x52232150 CTileToHitCalcer, 0x52232160 CGrenadeToHitCalcer, 0x51262180 CAIUnitToHitCalcer,
+// 0x72762140 CRLauncherToHitCalcer, 0x52132170 CThrowKnifeUnitToHitCalcer). Retail registers NO
+// calcer id at all (retail RPGToHit.obj holds only free functions -- GetToHitType @0x2b3790 etc.);
+// calcers are TRANSIENT: every consumer holds a local CPtr temporary, no operator& serializes one
+// (CExecThrowGrenade::pToHitCalcer is deliberately excluded from its tags 1-6, byte-matching retail
+// @0x3afc10). The classes stay as runtime logic.

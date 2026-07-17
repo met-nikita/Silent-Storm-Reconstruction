@@ -9,10 +9,13 @@ namespace NGScene
 struct SLightInfo
 {
 	bool bNeedSet;
+	// retail SLightInfo+1: lighting-options bit 2 (no CL) -- executor swaps the CL register for the
+	// default lightmap so interface scenes never sample the world's CL content (@0x14a2b0)
+	bool bIgnoreCL;
 	CVec3 vGlossColor, vShadowColor, vAmbientColor, vUpDifColor;
 	CVec4 vLightColor, vLightPos, vRadius;
 
-	SLightInfo(): bNeedSet(false), vLightColor(VNULL4), vGlossColor(VNULL3), vLightPos(VNULL4), vRadius(1,1,1,1) {}
+	SLightInfo(): bNeedSet(false), bIgnoreCL(false), vLightColor(VNULL4), vGlossColor(VNULL3), vLightPos(VNULL4), vRadius(1,1,1,1) {}
 };
 
 void Execute( IRender *pRender, NGfx::CRenderContext *pRC, const CTransformStack &ts, const CRenderCmdList &cl,

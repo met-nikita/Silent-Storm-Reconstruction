@@ -449,7 +449,7 @@ CCommandExecute* CreateActionExecutor( CUnitServer *pUS, CCmd *pCmd, EUnitComman
 	*pError = UCR_OK;
 	CDynamicCast<CCmdPlayAnimation> pAnim(pCmd);
 	if (pAnim)
-		return new CExecPlayAnimation(pUS, pAnim->nDBAnimationID, pAnim->bCircled);
+		return new CExecPlayAnimation(pUS, pAnim->nDBAnimationID, pAnim->bFreezeAfterLastFrame);
 	else {
 		CDynamicCast<CCmdShootTile> pAttackTile(pCmd);
 		if (pAttackTile)
@@ -648,7 +648,7 @@ CCommandExecute* CreateActionExecutor( CUnitServer *pUS, CCmd *pCmd, EUnitComman
 							else {
 								CDynamicCast<CCmdCannon> pCannonAtk(pCmd);
 								if (pCannonAtk)
-									return CreateActionQueue(pUS, pCannonAtk.GetPtr(), new CExecCannon(pUS, pCannonAtk->pObject, true), ITEM_INACTIVE, pError);
+									return CreateActionQueue(pUS, pCannonAtk.GetPtr(), new CExecCannon(pUS, pCannonAtk->pObject, true, pCannonAtk.GetPtr()), ITEM_INACTIVE, pError);   // retail: the exec carries the reserving cmd (@0x3a5e50)
 								else {
 									CDynamicCast<CCmdExitCannon> pCannonExit(pCmd);
 									if (pCannonExit)
@@ -677,12 +677,8 @@ CCommandExecute* CreateActionExecutor( CUnitServer *pUS, CCmd *pCmd, EUnitComman
 												if (pCreateItem)
 													return CreateSimpleAction(pUS, new CExecCreateInventoryItem(pUS, pCreateItem), pError);
 												else {
-													CDynamicCast<CCmdCreateAndActivateInventoryItem> pCreateActivate(pCmd);
-													if (pCreateActivate)
-														return CreateSimpleAction(pUS, new CExecCreateAndActivateInventoryItem(pUS, pCreateActivate), pError);
-													CDynamicCast<CCmdExchangeInventoryItems> pExchange(pCmd);
-													if (pExchange)
-														return CreateSimpleAction(pUS, new CExecExchangeInventoryItems(pUS, pExchange), pError);
+													// (CCmdCreateAndActivateInventoryItem AND CCmdExchangeInventoryItems are handled in
+													//  CreateExecutor -- retail @0x3b37b0 builds CExecQueues of registered execs there)
 													CDynamicCast<CCmdMoveInventoryItem> pMoveItem(pCmd);
 													if (pMoveItem)
 													{
@@ -711,7 +707,7 @@ CCommandExecute* CreateActionExecutor( CUnitServer *pUS, CCmd *pCmd, EUnitComman
 																CDynamicCast<CUnitServer> pDeadUnit(pCmdCorpse->pCorpse);
 																if (pDeadUnit->IsEmptyPK())
 																	return CreateActionQueue(pUS, pCmdCorpse.GetPtr(), new CExecPanzerklein(pUS, pCmdCorpse), ITEM_INACTIVE, pError);
-																return CreateActionQueue(pUS, pCmdCorpse.GetPtr(), new CExecCorpse(pUS, pDeadUnit, true), ITEM_INACTIVE, pError);
+																return CreateActionQueue(pUS, pCmdCorpse.GetPtr(), new CExecCorpse(pUS, pDeadUnit, true, pCmdCorpse.GetPtr()), ITEM_INACTIVE, pError);   // retail: the exec carries the reserving cmd (@0x3a6160)
 															}
 															else {
 																CDynamicCast<CCmdDropCorpse> pCmdCorpse(pCmd);

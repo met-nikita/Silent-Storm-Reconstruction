@@ -3,6 +3,8 @@
 //
 #include "..\Misc\Geom.h"          // CRay / CVec3 (by-value event-payload members)
 //
+namespace NRPG { class IInventoryItem; }   // CEventOnItemGiven payload (fwd -- CPtr needs only a decl here)
+//
 namespace NWorld
 {
 //
@@ -123,6 +125,37 @@ public:
 	CPtr<CUnitServer> pTarget;
 	CEventOnAttackAtUnit( CUnitServer *_pAttacker = 0, CUnitServer *_pTarget = 0 )
 		: pAttacker( _pAttacker ), pTarget( _pTarget ) {}
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail NWorld::CEventOnUnitSuccessfulMelee (type_info @VA 0x98273c): thrown by CExecMeleeUnit::
+// OnLabel @0x3a9677 after a landed melee blow (payload = the attacker, one AddRef'd pointer).
+// Consumer: CAckSuccessfulMeleeAttack::OnEvent (the "landed a melee hit" voice ack).
+class CEventOnUnitSuccessfulMelee
+{
+public:
+	CPtr<CUnitServer> pWho;
+	CEventOnUnitSuccessfulMelee( CUnitServer *_pWho = 0 ): pWho( _pWho ) {}
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail NWorld::CEventOnItemGiven: thrown by MoveInventoryItem @0x3aada1 when an item is equipped
+// into a slot that already held one (payload = the receiving unit + the replaced/new items).
+// Consumers: CAckGoodItemGiven / CAckBadItemGiven (bark when the swap is a big rating change).
+class CEventOnItemGiven
+{
+public:
+	CPtr<CUnitServer> pUnit;
+	CPtr<NRPG::IInventoryItem> pOldItem, pNewItem;
+	CEventOnItemGiven( CUnitServer *_pUnit = 0, NRPG::IInventoryItem *_pOldItem = 0, NRPG::IInventoryItem *_pNewItem = 0 )
+		: pUnit( _pUnit ), pOldItem( _pOldItem ), pNewItem( _pNewItem ) {}
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail NWorld::CEventOnNotHeroWantsToTalk: thrown by CExecNotHeroWantsToTalk::Run @0x3b56f0 when a
+// non-hero unit is told to talk (payload = that unit). Consumer: CAckNPCInteraction::OnEvent.
+class CEventOnNotHeroWantsToTalk
+{
+public:
+	CPtr<CUnitServer> pWho;
+	CEventOnNotHeroWantsToTalk( CUnitServer *_pWho = 0 ): pWho( _pWho ) {}
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 }

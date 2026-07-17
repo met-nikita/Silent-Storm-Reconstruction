@@ -117,7 +117,8 @@ BEGIN_SCRIPT_COMMAND( ObjectDestroy, "u" )
 			ray.ptOrigin = VNULL3;
 			atk.MakeClickOfDeath( ray );
 			atk.atkType = NRPG::AT_NORMAL;
-			pAtt->ProcessAttack( 0, &atk, NDb::GetArmor( NDb::N_DEFAULT_ARMOR ) );
+			// retail @0x2e7f00 passes VNULL3 as the direction (the CRay fed to MakeClickOfDeath is null too).
+			pAtt->ProcessAttack( pScript->pWorld, 0, &atk, VNULL3, NDb::GetArmor( NDb::N_DEFAULT_ARMOR ) );
 		}
 	}
 	return 0;

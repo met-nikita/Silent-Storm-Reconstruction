@@ -20,7 +20,8 @@ namespace NGfx
 	externA5 bool bHardwareVP, bHardwarePixelShaders, bHardwarePixelShaders14;
 	externA5 bool bTnLDevice;
 	externA5 bool bDoValidateDevice;
-	externA5 bool bNVHackNP2, bUseAnisotropy, bBanNP2, bBan32BitIndices, bStaticNooverwrite;
+	externA5 bool bNVHackNP2, bBanNP2, bBan32BitIndices, bStaticNooverwrite;
+	externA5 int nUseAnisotropy;   // retail @0x554ce4: anisotropy LEVEL, 1 = off
 	externA5 bool bNoCubeMapMipLevels;
 	externA5 D3DCAPS9 devCaps;
 ////////////////////////////////////////////////////////////////////////////////////////////////////

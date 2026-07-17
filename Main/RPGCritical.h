@@ -42,7 +42,7 @@ protected:
 private:
 	ZDATA
 	int nTurn;
-	vector<CPtr<CSkillModifier> > modifiers;
+	vector<CObj<CSkillModifier> > modifiers;   // retail PDB: OWNING refs (the skill holds the weak CPtr side)
 protected:
 	SCritical critical;
 

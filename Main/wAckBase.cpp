@@ -2,6 +2,7 @@
 #include "wAckBase.h"
 #include "..\Misc\RandomGen.h"
 #include "..\DBFormat\DataAck.h"
+#include "..\DBFormat\DataMap.h"	// NDb::EDiplomacyState / DS_ENEMY (CAckBase::IsEnemy gate)
 #include "wInterface.h"
 #include "wUnitServer.h"
 #include "wAck.h"
@@ -32,6 +33,8 @@ void CGlobalAck::HandlerName()                                                  
 DEFINE_EVENT_HANDLER( OnSegment );
 DEFINE_EVENT_HANDLER( OnRealTimeStarted );
 DEFINE_UNITSERVER_EVENT_HANDLER( OnLastPieceOfAmmo );
+// retail CGlobalAck::OnNoPlaceInInventory @0x338c30: a plain vAck broadcast (GlobalGame slot +0x5c).
+DEFINE_UNITSERVER_EVENT_HANDLER( OnNoPlaceInInventory );
 DEFINE_UNITSERVER_EVENT_HANDLER( OnWeaponJammed );
 DEFINE_UNITSERVER_EVENT_HANDLER( OnOrderConfirmation );
 DEFINE_UNITSERVER_EVENT_HANDLER( OnImpossibleToPerformAction );
@@ -333,9 +336,49 @@ NDb::CDBAck *CAckBase::GetDBAck()
 	return pDBAck; 
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CWorld *CAckBase::GetWorld() 
-{ 
-	return GetUnit()->GetWorld(); 
+CWorld *CAckBase::GetWorld()
+{
+	return GetUnit()->GetWorld();
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail CAckBase::IsThis @0x338ec0: the ack owner is alive AND is exactly this unit
+bool CAckBase::IsThis( CUnitServer *pWho )
+{
+	if ( !IsValid( pUnit ) )
+		return false;
+	return pWho == pUnit;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail CAckBase::IsFriend @0x338ef0: both units alive, DIFFERENT units, same player
+// (the "team" probe is the CUnit-base vtbl call resolved to CUnitServer::GetPlayer @0x3bf680;
+// vftable 0x8cd084 slot +0x34)
+bool CAckBase::IsFriend( CUnitServer *pWho )
+{
+	if ( !IsValid( pUnit ) || !IsValid( pWho ) )
+		return false;
+	if ( pWho == pUnit )
+		return false;
+	return pUnit->GetPlayer() == pWho->GetPlayer();
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail CAckBase::IsEnemy @0x338f80: owner alive, different unit, diplomacy toward pWho == DS_ENEMY.
+// NOTE: unlike IsFriend, retail does NOT gate pWho's liveness here -- kept faithful.
+bool CAckBase::IsEnemy( CUnitServer *pWho )
+{
+	if ( !IsValid( pUnit ) )
+		return false;
+	if ( pWho == pUnit )
+		return false;
+	return pUnit->GetDiplomacyState( pWho ) == NDb::DS_ENEMY;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail CAckBase::CanSee @0x338fe0: owner alive AND pWho is a member of the owner's TBS
+// visible-unit set (the same list CUnitServer::IsUnitVisible @0x3bfb70 walks).
+bool CAckBase::CanSee( CUnitServer *pWho )
+{
+	if ( !IsValid( pUnit ) )
+		return false;
+	return pUnit->IsUnitVisible( pWho );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CAckBase::PlayAck()

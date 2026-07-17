@@ -78,6 +78,14 @@ void CRenderBaseInterface::Initialize( int nTemplateID )
 		SetLightMode( 0 );
 
 	pCamera = CreateCamera( CAMERA_PC );
+	// retail @0x22ef80 (@0x62f497-0x62f510): the factory stamps the GAMEPLAY limits, so a 3D-backdrop
+	// menu immediately overrides them with the unbounded ctor defaults + bMovie, then LOCKS the camera.
+	// Both halves are load-bearing: bMovie skips the terrain/approach tail, the lock skips the
+	// clamps -- without them the menu's DB placement is dragged to the gameplay pitch limit.
+	ICamera::SCameraLimits sMenuLimits;
+	sMenuLimits.bMovie = true;					// @0x62f4ff
+	pCamera->SetLimits( sMenuLimits );			// @0x62f507, cam vtbl+0x64
+	pCamera->SetLock( true );					// @0x62f510, cam vtbl+0x70 (retail Lock)
 
 	pCursor = NUI::ICursor::Create();
 	// Wire the sound scene into the UI interface so CWindow::PlaySound (-> GetInterface()->GetSound()->Add2DSound)
@@ -95,38 +103,8 @@ void CRenderBaseInterface::Command( NWorld::CCommand *pCmd )
 	pCommander->Do( pCmd );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CRenderBaseInterface::SetLightMode( int _nLightMode )
-{
-	CDBTable<NDb::CTAmbientLight> *pTable = NDatabase::GetTable<NDb::CTAmbientLight>();
-  CDBIterator<NDb::CTAmbientLight> it( *pTable );
-	int nCount = _nLightMode;
-  while ( it.MoveNext() )
-  {
-		SRand rnd;
-		CPtr<NDb::CAmbientLightReal> pLight = it.Get()->GetLight( &rnd );
-		if ( !pLight->bInGameUse )
-			continue;
-		if ( nCount == 0 )
-		{
-			nLightMode = _nLightMode;
-			pLightSource = 0;
-			csSystem << "Light with ID = " << it.Get()->GetRecordID() << " selected" << endl;
-			GetScene()->SetAmbient( pLight );
-			return;
-		}
-		nCount--;
-	}
-	if ( _nLightMode == 0 )
-	{
-		// no lighting in table, using default one
-		nLightMode = 0;
-		GetScene()->SetAmbient( 0 );
-		pLightSource = GetScene()->AddDirectionalLight( CVec3(0.5f,0.4f,0.45f), CVec3( 0.6f,1.4f,-1), CVec3(5,5,0), CVec2( 150, 150 ), 20 );
-		GetScene()->SetAmbient( CVec3( 0.20f, 0.20f, 0.20f ), CVec3( 0.20f, 0.20f, 0.20f ) );
-	}
-	else
-		SetLightMode( 0 );
-}
+// W4.2: SetLightMode consolidated onto CMissionBase (retail @0x1a2640 -- one body on the base; the
+// CMission copy was identical).
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CRenderBaseInterface::OnGetFocus()
 {

@@ -23,20 +23,16 @@ namespace NRPG
 namespace NGame
 {
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// IChapterMap
-////////////////////////////////////////////////////////////////////////////////////////////////////
-class IChapterMap: public NMainLoop::IInterfaceBase
-{
-public:
-	virtual NUI::ICursor* GetCursor() const = 0;
-	virtual NUI::CInterface* GetInterface() const = 0;
-
-	virtual NRPG::CGlobalGame* GetGlobalGame() const = 0;
-	virtual NRPG::CGlobalPlayer* GetGlobalPlayer() const = 0;
-	virtual NSound::ISoundScene* GetSoundScene() const = 0;
-	virtual NDb::CChapterMap* GetChapterMap() const = 0;
-	virtual CPtrFuncBase<CChapterInfo>* GetChapterInfo() const = 0;
-};
+// NOTE: there is NO NGame::IChapterMap here, and there is none in retail either -- it is absent from
+// Game.pdb entirely (checked every one of the 10509 UDTs; the only survivals are the stale mangled
+// names in the legacy Main/FastDebug.def + Main/ReleaseDll.def export tables, snapshots from before
+// the fold -- neither .def is referenced by CMakeLists.txt, which only feeds third_party defs to
+// lib.exe). It was a Jan03-era artifact this fork kept. Retail instead derives
+// NGame::CChapterMap from NGame::CMissionBase (PDB: CChapterMap size 296, base CMissionBase size
+// 264 -> own members from 0x108) and folds the old IChapterMap accessors into the common mission
+// interface, so every holder just keeps a CPtr<NGame::IMission> (CChapterMapUI::operator& @0x1af170
+// tag 2 is a CPtr<NGame::IMission>). See iChapterMap.cpp for the reparent + IMission::GetChapterMap /
+// GetChapterInfo (retail mission vtbl+0x14c/+0x150) in iMission.h.
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CICBeginChapter: public NMainLoop::CInterfaceCommand
 {

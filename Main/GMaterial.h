@@ -50,6 +50,8 @@ IMaterial* CreateMaterial(
 IMaterial* CreateOccluderMaterial();
 IMaterial* CreateAlienMaterial( CPtrFuncBase<NGfx::CCubeTexture> *_pSky );
 IMaterial* CreateExplosionDecal( CPtrFuncBase<NGfx::CTexture> *pTexture );
+// @0x136270: attach a second diffuse texture layer + blend weight to a CGenericMaterial (terrain).
+void AddSecondDiffuse( IMaterial *pMaterial, CPtrFuncBase<NGfx::CTexture> *pTex, CFuncBase<float> *pBlend );
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////

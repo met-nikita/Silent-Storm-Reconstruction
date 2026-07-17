@@ -18,6 +18,7 @@
 #include "iInterMission.h"
 #include "GResource.h"
 #include "iLoading.h"   // NGame::ShowLoadingScreen / TermLoadingScreen -- loading-screen lifecycle on the load path
+#include "ModManager.h" // CModManager -- retail saves carry the active-mod list in the header (CICLoad/CICSave)
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void DumpMemoryStats() {}
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -42,9 +43,9 @@ void ShowLogo()
 		CRectLayout rl;
 
 		p2DScene->StartNewFrame();
-		rl.scale.x = vSize.x / 1024.0f;
-		rl.scale.y = vSize.y / 768.0f;
-		rl.AddRect( 0, 0, CRectLayout::STextureCoord( CTRect<float>( 0, pLogo->nHeight, pLogo->nWidth, 0 ) ) );
+		// quad size = logo dims * (vp/1024, vp/768) = the full viewport (baked; no layout scale)
+		rl.AddRect( 0, 0, pLogo->nWidth * vSize.x / 1024.0f, pLogo->nHeight * vSize.y / 768.0f,
+			CRectLayout::STextureCoord( CTRect<float>( 0, pLogo->nHeight, pLogo->nWidth, 0 ) ) );
 		p2DScene->CreateDynamicRects( pLogo,  rl, CTPoint<int>( 0, 0 ), window );
 		p2DScene->Flush();
 	}
@@ -200,10 +201,10 @@ void CICLoad::Exec()
 
 	if ( !bSilent )
 	{
-		NGame::ShowLoadingScreen( 0 );   // @0x1f5fd0: paint one loading frame at the top of the !bSilent path (release: xor ecx,ecx -> pct=0)
-		CArray2D<NGfx::SPixel8888> sScreenShot;
-		pSaveManager->GetSlotScreenShot( szName, &sScreenShot );
-		ShowSplash( NDb::GetUIContainer( 350 ), sScreenShot );
+		// retail @0x1f5fd0: the ONLY paint on the load path is one loading-screen frame. The old
+		// dev GetSlotScreenShot + ShowSplash(350) pair was CUT in retail -- keeping it stacked the
+		// splash's "Loading..." label over the loading screen's own PLEASE WAIT/LOADING pair.
+		NGame::ShowLoadingScreen( 0 );
 	}
 
 #ifndef _DEBUG
@@ -216,10 +217,17 @@ void CICLoad::Exec()
 		SSaveFileHeader sHeader;
 		sFile.Read( &sHeader, sizeof(SSaveFileHeader) );
 
-		if ( sHeader.nMagic != N_SAVE_MAGIC_NUMBER )
-			throw L"Invalid save file";
-//		if ( sHeader.nChecksum != CalcSaveCheckSum() )
-//			throw L"Save file corrupted";
+		if ( sHeader.nMagic != N_SAVE_MAGIC_NUMBER && sHeader.nMagic != N_SAVE_MAGIC_NUMBER_V0 )
+			throw L"Invalid save file";	// retail CICLoad::Exec @0x1f5fd0 dual magic check (same format)
+
+		// retail @0x1f5fd0: the header's second int counts the save's ACTIVE-MOD directory
+		// strings that follow; activate that mod set (DB rebuild) before deserializing. An
+		// unavailable mod aborts the load without touching the running state.
+		vector<string> modDirs( sHeader.nMods );
+		for ( int nTemp = 0; nTemp < sHeader.nMods; nTemp++ )
+			sFile.ReadString( modDirs[nTemp] );
+		if ( !CModManager::Activate( modDirs ) )
+			throw L"Save mods unavailable";
 
 		interfaces.clear();
 		CSharedHolder hold;
@@ -227,16 +235,29 @@ void CICLoad::Exec()
 		sSaver.Add( 2, &interfaces );
 		SerializeShared( &sSaver );
 		ASSERT( !interfaces.empty() );
+		SaveLoadDiag( "LOAD-DESERIALIZE-COMPLETE (%d interfaces)\n", (int)interfaces.size() );
+		// dev-only in-place-resume hook: OnSnapshotRestored -> CMission::OnSnapshotRestored ->
+		// CWorld::RestoreRuntimeCaches (rebuild building shells + camera height source, reconnect the
+		// AI commanders -- runtime refs this fork's shallower serialization does not restore; without
+		// it the AI Segment crashed on null pWorld). Retail's only post-deserialize call here is
+		// front->OnLoad(bSilent) (vtbl+0x18, CICLoad::Exec @0x1f5fd0 -> CMission::OnLoad @0x1fb8e0 =
+		// loading-bar counters only) -- retail restores NO world state here and in particular never
+		// restarts the turn; the deserialized TBS state resumes as saved.
+		for ( list< CObj<IInterfaceBase> >::iterator i = interfaces.begin(); i != interfaces.end(); ++i )
+			if ( IsValid( *i ) )
+				(*i)->OnSnapshotRestored();
 	}
 #ifndef _DEBUG
 	catch(...)
 	{
 		ASSERT( 0 && "Loading failed!" );
+		SaveLoadDiag( "LOAD-FAILED (exception caught in CICLoad)\n" );
 		return;
 	}
 #endif
 
 	pSaveManager->LoadSlot( szName );
+	SaveLoadDiag( "LOAD-SLOT-DONE (interfaces restored; entering main loop)\n" );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CICSave
@@ -268,7 +289,10 @@ void CICSave::Exec()
 
 		SSaveFileHeader sHeader;
 		sHeader.nMagic = N_SAVE_MAGIC_NUMBER;
-//		sHeader.nChecksum = CalcSaveCheckSum();
+		// retail @0x1f6390: the second header int = active-mod count; the mods' directory
+		// strings follow the header so the loader can re-activate the same DB set.
+		vector<SModInfo> &activeMods = *CModManager::GetActiveMods();
+		sHeader.nMods = activeMods.size();
 
 		CDGPtr<NGScene::CBilinearTexture> pTexture = new NGScene::CBilinearTexture( sScreenShot, N_SAVE_SCREENSHOT_X, N_SAVE_SCREENSHOT_Y );
 		pTexture.Refresh();
@@ -280,6 +304,8 @@ void CICSave::Exec()
 				sHeader.sScreenShot[nTempY][nTempX] = sScreenShot320x200[nTempY][nTempX];
 
 		sFile.Write( &sHeader, sizeof(SSaveFileHeader) );
+		for ( int nTemp = 0; nTemp < activeMods.size(); nTemp++ )
+			sFile.WriteString( activeMods[nTemp].szDirectory );
 
 		CStructureSaver sSaver( sFile, CStructureSaver::WRITE );
 		sSaver.Add( 2, &interfaces );

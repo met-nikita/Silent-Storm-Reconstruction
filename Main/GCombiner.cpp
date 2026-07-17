@@ -27,8 +27,12 @@ IPart::~IPart()
 		pCombiner->RemovePart( this ); 
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void IPart::RefreshObjectInfo() 
-{ 
+// retail @0xfe340: refresh the generator node, then WAIT for its value -- each loop pass re-enters
+// Recalc via CPtrFuncBase::GetValue (null/invalid pValue -> Recalc) until the mesh exists. No null-node
+// tolerance: a part without a generator is impossible by construction (every producer passes one, and
+// a loaded save resolves pObjInfo to the registered NLSHead::CHeadAnimator / decal / loader node).
+void IPart::RefreshObjectInfo()
+{
 	pObjInfo.Refresh();
 	while ( !pObjInfo->GetValue() )
 		Sleep(0);

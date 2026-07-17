@@ -59,6 +59,7 @@ public:
 	virtual IPathViewer* CreatePathViewer() { return 0; }
 	virtual NRPG::IUnitMissionInfo* GetRPG() const { return 0; }
 	virtual const NAI::SUnitPosition& GetPosition() const { static NAI::SUnitPosition pos; return pos; }
+	virtual NAI::SUnitPosition GetSetPosePosition() const { return GetPosition(); }   // editor unit never moves
 	virtual void AddVisitableChildren( vector<IVisObj*> *pRes ) {}
 	virtual bool GetCurrentCommandName( string *pName ) const { return false; }
 	virtual CVec3 GetAttackOrigin() const { return VNULL3; }

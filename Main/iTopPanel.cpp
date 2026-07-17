@@ -10,6 +10,7 @@
 #include "iMission.h"
 #include "Interface.h"
 #include "iCommonUI.h"
+#include "scFlowChartItems.h"	// NScenario::CScenarioZone -- the objectives-button gate (retail @0x24d670)
 #include "iTopPanel.h"
 #include "..\Misc\StrProc.h"
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -17,7 +18,8 @@ namespace NUI
 {
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 const int
-	N_FLASH_TIME = 3000;
+	N_FLASH_TIME = 3000,
+	N_LEAVEZONE_UPDATE_PERIOD = 500;	// CanLeaveZone/tooltip refresh throttle (retail @0x24d010: 0x1f4)
 enum EEndMissionButtonState
 {
 	EENDMISSTATE_OK,
@@ -33,11 +35,13 @@ class CAITurnProgressBar: public CWindow
 	OBJECT_BASIC_METHODS(CAITurnProgressBar)
 private:
 	ZDATA_(CWindow)
-	CPtr<NGame::IMission> pMission;
-	////
 	bool bAllies;
+	CPtr<NGame::IMission> pMission;
 	CPtr<CProgressBar> pBar;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CWindow*)this); f.Add(2,&pMission); f.Add(3,&bAllies); f.Add(4,&pBar); return 0; }
+	// retail @0x24e4e0: {1 CWindow base, 2 bAllies(1B), 3 pMission, 4 pBar}. Dev had 2/3 SWAPPED ->
+	// loading a retail save read the 1-byte bAllies chunk as the pMission ref -> null pMission ->
+	// AV in Draw the first time the enemy-turn bar went visible (give-away-turn crash).
+	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CWindow*)this); f.Add(2,&bAllies); f.Add(3,&pMission); f.Add(4,&pBar); return 0; }
 
 public:
 	CAITurnProgressBar() {}
@@ -128,6 +132,13 @@ bool CTopBar::ProcessMessage( const SEvent &sEvent )
 			pText = GetUIWindow<CText>( this, "text" );
 			pFlash = GetUIWindow<CWindow>( this, "flash" );
 			pPlayerTurn = GetUIWindow<CWindow>( this, "playerturn" );
+
+			// retail @0x24d670: the Objectives button is enabled only when the mission has a scenario
+			// zone (mission vtbl+0x144; null in the tutorial -> grayed); label = string 0x43af / 0x45ee.
+			pObjectives = GetUIWindow<CPushButton>( this, "objectives" );
+			bool bObjectivesActive = IsValid( pMission->GetScenarioZone() );
+			pObjectives->SetStyle( STYLE_ENABLED, bObjectivesActive );
+			pObjectives->SetText( GetDBString( bObjectivesActive ? 0x43af : 0x45ee ) );
 			break;
 		}
 	}
@@ -161,17 +172,25 @@ void CTopBar::Draw( const STime &sTime, NGScene::I2DGameView *pView )
 	else
 		eMode = ALLY_TURN;	// retail @0x24d010: non-enemy AI side gets the separate "allyturn" bar
 
-	pEndMission->SetStyle( STYLE_ENABLED, false );
-	pEndMission->SetActiveState( EENDMISSTATE_UNAVAILABLE );
-	if ( ( eMode == REALTIME ) || ( eMode == PLAYER_TURN ) )
+	// retail @0x24d010: every 500ms refresh CanLeaveZone and push the reason into the exit-button
+	// tooltip's "state" variable (the "Status:" line).
+	if ( sTime - sUpdateTime > N_LEAVEZONE_UPDATE_PERIOD )
 	{
-		pEndMission->SetStyle( STYLE_ENABLED, true );
-
-		if ( pMission->GetActivePlayer()->IsPlayerWinner() )
-			pEndMission->SetActiveState( EENDMISSTATE_OK );
-		else if ( pMission->IsRealTime() )
-			pEndMission->SetActiveState( EENDMISSTATE_WARNING );
+		sUpdateTime = sTime;
+		wstring wsReason;
+		bCanLeaveZone = pMission->CanLeaveZone( &wsReason );
+		if ( IsValid( pEndMission->GetToolTip() ) )
+			pEndMission->GetToolTip()->SetVal( L"state", wsReason );
 	}
+
+	// button face only -- retail never toggles STYLE_ENABLED here: a blocked click still reaches the
+	// handler, which logs the CanLeaveZone reason (CMission::ProcessEvent @0x202f96).
+	if ( !bCanLeaveZone )
+		pEndMission->SetActiveState( EENDMISSTATE_UNAVAILABLE );
+	else if ( pMission->GetActivePlayer()->IsPlayerWinner() )
+		pEndMission->SetActiveState( EENDMISSTATE_OK );
+	else
+		pEndMission->SetActiveState( EENDMISSTATE_WARNING );
 
 	if ( eMode != ePrevMode )
 	{

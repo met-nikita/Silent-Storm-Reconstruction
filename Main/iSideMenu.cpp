@@ -341,6 +341,6 @@ void CICSideMenu::Exec()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 using namespace NUI;
 REGISTER_SAVELOAD_CLASS( 0xB1112180, CSideMenuUI );
-REGISTER_SAVELOAD_CLASS( 0xB1112181, CScriptHoverButton );
+REGISTER_SAVELOAD_CLASS( 0xB3601000, CScriptHoverButton );
 using namespace NGame;
 REGISTER_SAVELOAD_CLASS( 0xB111218A, CSideMenuInterface );

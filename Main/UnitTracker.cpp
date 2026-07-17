@@ -16,76 +16,19 @@
 #include "iCommonUI.h"
 #include "MemObject.h"
 #include "UnitTracker.h"
+#include "iGameStates.h"	// GetSelectionColor (v1.2 selection palette)
 #include "..\Misc\StrProc.h"
 #include "..\DBFormat\DataMap.h"
 #include "..\DBFormat\DataFormat.h"
 #include "..\DBFormat\DataGeometry.h"
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-namespace NUI
-{
-////////////////////////////////////////////////////////////////////////////////////////////////////
-class CProjectedText: public CWindow
-{
-	OBJECT_BASIC_METHODS(CProjectedText)
-private:
-	ZDATA_(CWindow)
-	CVec3 vPos;
-	CPtr<NGame::IMission> pMission;
-	////
-	CObj<CImageNumber> pText;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CWindow*)this); f.Add(2,&vPos); f.Add(3,&pMission); f.Add(4,&pText); return 0; }
-
-public:
-	CProjectedText() {}
-	CProjectedText( const SWindowInfo &sInfo, int nAP, const CVec3 &vPos, NGame::IMission *pMission );
-
-	void Draw( const STime &sTime, NGScene::I2DGameView *pView );
-};
-////////////////////////////////////////////////////////////////////////////////////////////////////
-CProjectedText::CProjectedText( const SWindowInfo &sInfo, int nAP, const CVec3 &_vPos, NGame::IMission *_pMission ):
-	CWindow( sInfo ), vPos( _vPos ), pMission( _pMission )
-{
-	pText = new CImageNumber( SWindowInfo( this, SPoint( 0, 0 ), SPoint( 0, 0 ), "ap", STYLE_VISIBLE | STYLE_ENABLED | STYLE_TOPMOST ), CImageNumber::TYPE_UNITINFOPANEL );
-
-	// crap
-	pText->Set( nAP );
-	pText->SetSize( pText->GetRealSize() );
-	SetSize( pText->GetRealSize() );
-	pText->Set( 0 );
-	pText->Set( nAP );
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-void CProjectedText::Draw( const STime &sTime, NGScene::I2DGameView *pView )
-{
-	CVec2 vScreenPoint;
-	CVec2 vScreenRect = pMission->GetScene()->GetScreenRect();
-	CTransformStack sTS = pMission->GetCameraTransform();
-
-	pText->SetStyle( STYLE_VISIBLE, false );
-	if ( TestRayInFrustrum( vPos, &sTS, vScreenRect, &vScreenPoint ) )
-	{
-		vScreenPoint.x = vScreenPoint.x * 1024 / vScreenRect.x;
-		vScreenPoint.y = vScreenPoint.y * 768 / vScreenRect.y;
-		SPoint sPosition;
-		GetParent()->ScreenToClient( NUI::SPoint( vScreenPoint.x - sSize.x / 2, vScreenPoint.y - sSize.y / 2 ), &sPosition );
-		SetPosition( sPosition );
-
-		pText->SetStyle( STYLE_VISIBLE, true );
-	}
-
-	CWindow::Draw( sTime, pView );
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-} // NAMESPACE
-////////////////////////////////////////////////////////////////////////////////////////////////////
 namespace NGame
 {
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-const float 
+const float
 	F_PATHPOINT_DIST = 0.5f;
-const CVec4
-	V_SELECTIONCOLOR_SELECT = CVec4( 0.0431f, 0.2823f, 0, 1 ),
-	V_SELECTIONCOLOR_HILIGHT = CVec4( 0.0215f, 0.1411f, 0, 1 );
+// (the old local SELECT/HILIGHT greens became the shared palette entries 0/1 in v1.2 --
+// GetSelectionColor in iGameStates.cpp, dispatcher v1.2 @0x5d6130)
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 static bool IsSamePlace( const NAI::SPathPlace &s1, const NAI::SPathPlace &s2 )
 {
@@ -101,29 +44,68 @@ static bool IsSamePlace( const NAI::SPathPlace &s1, const NAI::SPathPlace &s2 )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CUnitTracker
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CUnitTracker::CUnitTracker( IMission *_pMission, NWorld::CUnit *_pUnit ): 
-	pMission( _pMission ), pUnit( _pUnit ), nFloor( 0 ), bSelected( false ), bHilighted( false ), bPathVisible( false ), bHilightTarget( false ), bPathDigitsVisible( false )
+CUnitTracker::CUnitTracker( IMission *_pMission, NWorld::CUnit *_pUnit ):
+	pMission( _pMission ), pUnit( _pUnit ), nFloor( 0 ), bSelected( false ), bHilighted( false ), bPathVisible( false ), bHilightTarget( false ), bPathDigitsVisible( false ),
+	bTrackRealTime( false )
 {
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CUnitTracker::SetTargetPosition( const NAI::SPosition &sPos, bool bInstantly )
+// retail CUnitTracker::GetSkillChanges @0x32c110: (current - baseline) for nSkill; the FIRST probe
+// of a skill records its current value as the baseline and reports 0.
+int CUnitTracker::GetSkillChanges( int nSkill )
+{
+	int nCur = 0;
+	if ( IsValid( pUnit ) && pUnit->GetRPG() )
+		nCur = pUnit->GetRPG()->GetSkillValue( (NDb::ESkillType)nSkill );
+
+	unordered_map<int,int>::iterator pos = skillsChanges.find( nSkill );
+	if ( pos != skillsChanges.end() )
+		return nCur - pos->second;
+
+	skillsChanges[nSkill] = nCur;
+	return 0;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail CUnitTracker::SyncAllSkills @0x32c180: re-baseline every watched skill to its CURRENT value
+// (after this GetSkillChanges reports 0 for each until the unit's skills move again).
+void CUnitTracker::SyncAllSkills()
+{
+	for ( unordered_map<int,int>::iterator pos = skillsChanges.begin(); pos != skillsChanges.end(); ++pos )
+	{
+		int nCur = 0;
+		if ( IsValid( pUnit ) && pUnit->GetRPG() )
+			nCur = pUnit->GetRPG()->GetSkillValue( (NDb::ESkillType)pos->first );
+		pos->second = nCur;
+	}
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail @0x32b670 (oracle s2_unittracker.h:888): build the command, gate it on the unit's own
+// CanDo -- for a CCmdPath that is the synchronous FindPath preview (wUnitServer.cpp:550) whose
+// UCR_PATH_NOT_FOUND is the click-time "Path not found" -- and submit ONLY on UCR_OK /
+// UCR_NOT_ENOUGH_AP (real-time: AP accrues). A rejected command is never queued and sTarget is
+// left untouched. The Jan03 IsRealTime()/bInstantly split survives only as Command's submit
+// flavor (retail forces it off for CCmdContinue @0x72b797). NOTE CanDo destroys a zero-ref
+// command, hence the CPtr holder. (Retail's extra bStandUp leg -- WALK-pose cancel + wish-pose,
+// v1.2 PK/corpse guards -- is a separate unported parity item.)
+NWorld::EUnitCommandResult CUnitTracker::SetTargetPosition( const NAI::SPosition &sPos, bool bInstantly )
 {
 	CObj<NAI::CPath> pCurrentPath( pUnit->GetCurrentPath() );
+	const bool bContinue = IsValid( pCurrentPath ) && IsSamePlace( sTarget.p, sPos.p );
 
-	if ( pMission->IsRealTime() || bInstantly )
-	{
-		sTarget = sPos;
-		pMission->Command( pUnit, new NWorld::CCmdPath( sPos, NAI::PF_DEFAULT ) );
-	}
+	CPtr<NWorld::CCmd> pCmd;
+	if ( bContinue )
+		pCmd = new NWorld::CCmdContinue;
 	else
-	{
-		if ( IsValid( pCurrentPath ) && IsSamePlace( sTarget.p, sPos.p ) )
-			pMission->Command( pUnit, new NWorld::CCmdContinue, false );
-		else
-			pMission->Command( pUnit, new NWorld::CCmdPath( sPos, NAI::PF_DEFAULT ), false );
+		pCmd = new NWorld::CCmdPath( sPos, NAI::PF_DEFAULT );
 
-		sTarget = sPos;
-	}
+	NWorld::EUnitCommandResult eResult = pUnit->CanDo( pCmd );
+	if ( eResult != NWorld::UCR_OK && eResult != NWorld::UCR_NOT_ENOUGH_AP )
+		return eResult;
+
+	const bool bSubmitInstantly = !bContinue && ( pMission->IsRealTime() || bInstantly );
+	pMission->Command( pUnit, pCmd, bSubmitInstantly );
+	sTarget = sPos;
+	return NWorld::UCR_OK;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 NAI::SPosition CUnitTracker::GetTargetPosition() const
@@ -202,9 +184,6 @@ void CUnitTracker::ShowPath()
 		sTarget.p = pPath->points.back();
 		sTarget.SetNetwork( pMission->GetWorld()->GetPathNetwork() );
 
-//		if ( !pMission->IsRealTime() )
-//			pPathAPText = new NUI::CProjectedText( NUI::SWindowInfo( pMission->GetMissionUI()->GetClientWindow(), NUI::SPoint( 0, 0 ), NUI::SPoint( 0, 0 ), "", NUI::STYLE_ENABLED | NUI::STYLE_TOPMOST | NUI::STYLE_TRANSPARENT | NUI::STYLE_VISIBLE ), points.back().nAP, vTargetPos, pMission );
-
 		NGScene::IGameView *pScene = pMission->GetScene();
 		CPtr<NRPG::IUnitMissionInfo> pRPG = pUnit->GetRPG();
 
@@ -214,8 +193,10 @@ void CUnitTracker::ShowPath()
 		int nAttackAP = 0;
 		SActionInfo sAction;
 		pMission->GetActionInfo( UA_ATTACK, &sAction );
-		if ( sAction.bAvailable )
-			nAttackAP = sAction.nActionAP;
+		// retail CUnitTracker::ShowPath @0x32c7b0: the "can still attack after moving" AP is the
+		// selection's folded MINIMUM, adopted when any unit reported one (nMinAP != -1)
+		if ( sAction.nMinAP != -1 )
+			nAttackAP = sAction.nMinAP;
 
 		if ( !resPoints.empty() )
 		{
@@ -267,7 +248,6 @@ void CUnitTracker::ShowPath()
 void CUnitTracker::HidePath()
 {
 	bPathVisible = false;
-	pPathAPText = 0;
 	groupsSet.clear();
 	nodesSet.clear();
 
@@ -298,8 +278,9 @@ void CUnitTracker::ShowPathDigits()
 	int nAttackAP = 0;
 	SActionInfo sAction;
 	pMission->GetActionInfo( UA_ATTACK, &sAction );
-	if ( sAction.bAvailable )
-		nAttackAP = sAction.nActionAP;
+	// retail CUnitTracker::ShowPathDigits @0x32cf70: same nMinAP != -1 adoption as ShowPath
+	if ( sAction.nMinAP != -1 )
+		nAttackAP = sAction.nMinAP;
 
 	bPathDigitsVisible = true;
 
@@ -413,10 +394,11 @@ void CUnitTracker::SetHilighted( bool bState )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CUnitTracker::ShowSelection()
 {
+	// v1.2 @0x72bf40: selected -> palette(0), hilighted -> palette(1) (game_selectionmode-aware)
 	if ( bSelected )
-		pSelection = pMission->GetRenderGame()->Select( pUnit, V_SELECTIONCOLOR_SELECT );
+		pSelection = pMission->GetRenderGame()->Select( pUnit, GetSelectionColor( 0 ) );
 	else if ( bHilighted )
-		pSelection = pMission->GetRenderGame()->Select( pUnit, V_SELECTIONCOLOR_HILIGHT );
+		pSelection = pMission->GetRenderGame()->Select( pUnit, GetSelectionColor( 1 ) );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CUnitTracker::HideSelection()
@@ -426,6 +408,14 @@ void CUnitTracker::HideSelection()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CUnitTracker::Update()
 {
+	// retail Update @0x32d520 step 1: across a turn-based/real-time switch, clear the stale path
+	// overlay and re-latch bTrackRealTime (serialized tag 12).
+	if ( bTrackRealTime != pMission->IsRealTime() )
+	{
+		HidePath();
+		bTrackRealTime = pMission->IsRealTime();
+	}
+
 	// retail CUnitTracker::Update @0x32d520 HIDEs the path/selection while a scripted sequence runs (mission
 	// vtbl+0x44 IsSequence) -- so the script-assigned move path of your character is not shown during a sequence.
 	if ( pMission->IsSequence() || pMission->IsInterfaceHidden() || ( !IsSelected() && !IsHilighted() ) || !pMission->IsRealTime() && ( pUnit->GetPlayer() != pMission->GetActivePlayer()->GetPlayer() ) )
@@ -582,5 +572,3 @@ float CUnitTracker::SmoothIteration( vector<NWorld::SPathPoint> *pRes )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 using namespace NGame;
 REGISTER_SAVELOAD_CLASS( 0x12221220, CUnitTracker )
-using namespace NUI;
-REGISTER_SAVELOAD_CLASS( 0x12221221, CProjectedText )

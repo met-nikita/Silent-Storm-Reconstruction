@@ -23,7 +23,13 @@ BEGIN_SCRIPT_COMMAND( CreateGroup, "" )
 		int nUnits = luaGetParamCount( pState );
 		for ( int i = 1; i <= nUnits; ++i )
 		{
-			string szName = pScript->GetObject( i ).GetString();
+			// retail luaCreateGroup @0x2ff240 NULL-guards lua_tostring: a non-string arg becomes an
+			// EMPTY name whose lookup fails, so the unit is silently skipped. Scripts hit this path
+			// live -- Common.l UnitCanSeeUnit does CreateGroup(UnitGetName(u2)), and UnitGetName of a
+			// dead/removed unit is nil (GFirst repro: a big eng blast kills a trigger's unit, the
+			// trigger thread resumes in CWorld::Segment and crashed here in string(NULL)).
+			const char *pszName = pScript->GetObject( i ).GetString();
+			string szName = pszName ? pszName : "";
 			CPtr<NWorld::CUnitServer> pUS = pScript->pWorld->GetUnitServer( szName );
 			if ( IsValid( pUS ) )
 				pGroup->units.Add( pUS );

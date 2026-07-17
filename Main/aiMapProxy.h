@@ -25,9 +25,8 @@ class CNodesLayerProxy : public CObjectBase // Proxy class which gives a "Square
 	friend class CMapColourer;
 	ZDATA
 	CPtr<CNodesLayer> pLayer;
-	CPtr<IAIMap> pMap;
 	EPathfinderMode mode;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&pLayer); f.Add(3,&pMap); f.Add(4,&mode); return 0; }
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&pLayer); f.Add(4,&mode); return 0; } // retail @0x31240: {2 pLayer, 4 mode}; retail has NO pMap member (PDB size 20) and dev never read it
 	bool IsValidPoint( const CNodesLayer::STile &t ) const
 	{
 		return ( ( t.nLocks == 0 ) && ( t.nPassable != 0 || ( t.nFlags & TF_STAND_PASSABLE ) ) );
@@ -38,9 +37,9 @@ class CNodesLayerProxy : public CObjectBase // Proxy class which gives a "Square
 		return ( t.nFlags & TF_STAND_PASSABLE );
 	}
 public:
-	CNodesLayerProxy(): pLayer(0), pMap(0), mode( PM_STAND_ONLY ) {}
-	CNodesLayerProxy(CNodesLayer* _pLayer, IAIMap* _pMap): 
-		pLayer(_pLayer), pMap(_pMap), mode( PM_STAND_ONLY ) {}
+	CNodesLayerProxy(): pLayer(0), mode( PM_STAND_ONLY ) {}
+	CNodesLayerProxy(CNodesLayer* _pLayer):
+		pLayer(_pLayer), mode( PM_STAND_ONLY ) {}
 
 	void SetPathfinderMode( EPathfinderMode _mode ) { mode = _mode; }
 

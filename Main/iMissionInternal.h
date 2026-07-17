@@ -5,6 +5,15 @@
 #endif // _MSC_VER > 1000
 #include "..\Input\Bind.h"
 #include "wInterfaceVisitors.h"
+#include "Transform.h"   // CTransformStack (CMission::sTransform by-value member; included by TUs beyond iMission.cpp now)
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// forward decls for CMission's member types -- this header is now also included by TUs that do not
+// pull the defining headers (iMultiPlayerMenu.cpp since the W4.2 CMultiPlayerInterface reparenting);
+// all of these classes are saveload-registered, so smart-pointer members link on the incomplete-type
+// cast path too.
+namespace NUI { class CMissionUI; }
+namespace NGScene { class CPolyline; }
+namespace NDb { class CMusic; class CString; class CUITexture; }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 namespace NGame
 {
@@ -65,8 +74,14 @@ public:
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CMission
+//
+// Serialization-convergence W4.2: split onto the retail NGame::CMissionBase (iMission.h) -- the
+// scene/sound/render/world/players/interface/camera/desktops/light/time members moved to the base
+// (retail base operator& @0x19f3f0, serialized as this table's tag-1 chunk); CMission keeps the
+// retail-derived member set with the retail tag table @0x1a03a0 (tags 2..39, gaps at 27/35).
+// Old dev saves (flat tags 2..71) are incompatible -- accepted for the campaign.
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-class CMission: public IMission
+class CMission: public CMissionBase
 {
 	OBJECT_BASIC_METHODS(CMission)
 private:
@@ -95,34 +110,16 @@ private:
 	NGlobal::CCmd cmdSetXPLevel, cmdSummonUnit, cmdUnsummonUnit, cmdGetItem;
 	NGlobal::CVar varCheatGodMode, varCheatSeeAll, varCheatTeleport, varCheatAP;
 
-	ZDATA
+	ZDATA_(CMissionBase)
 	int nTemplateID, nVariantID;
 	// retail CMission::Initialize @0x200690: the template variant's cut-floor range clamps the
 	// floor-switch keys (camera SetCutFloorRange(min, max-1); retail default [-3,4] when the
 	// variant leaves MinCutFloor/MaxCutFloor unset, i.e. min >= max). Dev keeps floors on the
-	// scene, so the clamp is applied at the bindAddFloor/bindSubFloor handler instead.
+	// scene, so the clamp is applied at the bindAddFloor/bindSubFloor handler instead. TRANSIENT.
 	int nMinCutFloor = -3;
 	int nMaxCutFloor = 4;
-	CPtr<NRPG::CGlobalGame> pGlobalGame;
 	////
 	CPtr<NScenario::CScenarioZone> pZone;
-	//// graphics
-	CObj<NGScene::IGameView> pScene;
-	CObj<NSound::ISoundScene> pSoundScene;
-	// (the render-sound mixers moved INTO the render game -- retail CRenderGame owns
-	// pSound/pUnitSounds so UpdateVisible can fog-gate the unit-sound source)
-	CObj<NRender::IRenderGame> pRender;
-	//// world
-	bool bPause;
-	CObj<NWorld::IWorld> pWorld;
-	//// players
-	CPtr<IPlayerTracker> pActivePlayer;
-	vector< CObj<IPlayerTracker> > playersSet;
-	//// interface
-	bool bHideInterface;
-	bool bSpecialHideInterface;
-	CObj<NUI::ICursor> pCursor;
-	CObj<NUI::CInterface> pInterface;
 	//// State
 	bool bUpdated;
 	bool bForceUpdateNextFrame;
@@ -130,48 +127,50 @@ private:
 	CPtr<CObjectBase> pStateTarget;
 	vector<CObj<IState> > updatedStatesSet;
 	//// information needed to track changes
+	// retail track pair (tags 10/11, TrackChanges @0x1fcf60): bTrackIsReady caches IsReady(),
+	// bTrackActionExecuted caches IsActionExecuted() (was the dev's bActionExecuted).
+	// bRealTime/bHasCommands are dev-extra trackers with no retail member -- TRANSIENT (no tags).
 	bool bRealTime;
 	bool bHasCommands;
-	bool bActionExecuted;
+	bool bTrackIsReady;
+	bool bTrackActionExecuted;
 	CPtr<CObjectBase> pTrackTarget;
-	CPtr<CObjectBase> pPlayerInHand;
+	CPtr<CObjectBase> pTrackPlayerInHand;	// retail name (was dev pPlayerInHand), tag 13
 	CPtr<NWorld::IPlayer> pTrackPlayer;
 	vector< CPtr<NGame::IUnitTracker> > selectedUnits;
 	//// Actions info
 	vector<SActionInfo> actionsInfoSet;
-	//// camera
+	//// camera -- dev-extra camera bookkeeping; retail keeps this state on the camera object
+	//// (serialized through the base pCamera) or recomputes it per frame. ALL TRANSIENT (no tags).
 	float fFOV;
 	ECameraType eCameraType;
-	ICamera::SCameraLimits cameraLimits;
-	CObj<ICamera> pCamera;
-	CPtr<IPlayerTracker> pCameraOwner;
-	// freeze pose
-	bool bFreezeCamera;
-	ICamera::SCameraPos sFreezePose;
-	// Camera result
+	// (the old dev-only mission FreezeCamera pose pin -- bFreezeCamera/sFreezePose -- is gone:
+	// retail CStateSelection @0x1d73b0/@0x1d75c0 locks the SELECTED camera via ICamera vtbl+0x70
+	// Lock instead, and the retail script CameraLock is the camera-side FreezeCamera @0xcffc0)
+	// Camera result (recomputed every InternalStep)
 	CVec3 vCameraCP;
 	SHMatrix sCameraPos;
 	CTransformStack sTransform;
-	//// trace
-	bool bTraceOk;
+	//// trace (retail tags 20/21: the loose dev bTraceOk/sTraceTile/pTraceObject collapsed into
+	//// the retail NWorld::STraceResult record -- bTileSet/sTile/pObject; bPointSet/vPoint stay
+	//// default: the dev computes the world point live in GetTracePosition(CVec3*))
 	CRay rTraceRay;
-	NAI::SPosition sTraceTile;
-	CPtr<CObjectBase> pTraceObject;
-	//// Active interface command
+	NWorld::STraceResult sTraceResult;
+	//// Active interface command -- TRANSIENT: retail serializes NO general executor on CMission
+	//// (only the base's dedicated pExecLocator slot); it is rebuilt from the world UI-command queue.
 	CPtr<CUICmdExec> pCmdExec;
-	// retail CMissionBase pExecLocator: a dedicated camera-command executor slot, SEPARATE from pCmdExec, so
-	// a CUICmdCameraLocator (CUICmdUnitCamera auto-focus) does NOT stall the general UI-command drain and can
-	// be preempted by a higher-priority one (MustReplaceCameraExecutor). Driven by ExecWorldCommand @0x1a30c0.
-	CPtr<CUICmdLocatorExec> pExecLocator;
 	//// interface
 	int nPanelsState;
-	bool bWaitForPartFinished;
 	EActionIconsSet eActionIconsSet;
+	// TRANSIENT: retail CMission has NO pMissionUI member -- the mission desktop lives at the
+	// BOTTOM of the base desktopWindowsList (Initialize pushes it; base tag 23 round-trips it
+	// through saves, so GetDesktop() works after a load). Live-session convenience cache only.
 	CObj<NUI::CMissionUI> pMissionUI;
-	list<CObj<NUI::CDesktopWindow> > desktopWindowsList;
 	//// crap
-	int nLightMode;
-	bool bCheatVisibility;
+	// retail CMission's OWN pLightSource (tag 24) -- retail carries a second light slot on the
+	// derived class, distinct from CMissionBase::pLightSource (base tag 25, the SetLightMode slot).
+	// No dev writer yet; serialized for format parity. NOTE: intentionally shadows the base member
+	// (retail has both); SetLightMode (base) writes the BASE slot.
 	CObj<CObjectBase> pLightSource;
 	CObj<CVisibleTracker> pVisibleTracker;
 	vector<CObj<CObjectBase> > buildingSchemas;
@@ -179,63 +178,65 @@ private:
 	CObj<NGScene::CPolyline> pIntersectLineHolder;
 	CVec3 vPrevCameraPosition;
 	int nFramesSameCameraPosition;
-	STime nDeltaTime;
+	// TRANSIENT: the picked combat track already lives in the serialized sound scene (base tag 4);
+	// retail CMission has no such member.
 	CDBPtr<NDb::CMusic> pCombatMelody;
-	CObj<CObjectBase> pTestWeatherEffect;
+	// retail tag 26: the test-weather-effect VECTOR (retail ShowWeatherEffect @0x201c60 clears the
+	// vector, then pushes the one new effect handle).
+	vector<CObj<CObjectBase> > testWeatherEffect;
 	// LUA convergence: the single, replaceable scene-wide ambient effect (SetAmbientEffect). The retail keeps it
 	// in a scene slot (CGameView::SetAmbientEffect @0x1895f0); the dev parks the live render handle here instead.
 	// Runtime-only (a render handle, like CUICmdPlayEffect::pHandle) -- NOT serialized.
 	CObj<CObjectBase> pAmbientEffect;
-	// LUA convergence (hint machinery): the script SetTutorialMode(b) command sets this; the ShowHint dispatch
-	// gate reads it (retail CMissionBase::ExecWorldCommand @0x1a30c0 tests CMissionBase+bTutorialMode) so hints
-	// always show in a tutorial even when the "ui_showhints" game option is off.
-	bool bTutorialMode;
-	// SetLeaveZoneMode: bLeaveBlockedByScript blocks the player from leaving the zone; nLeaveBlockReason is
-	// the DB string id of the "can't leave" message. Retail CMission::CanLeaveZone @0x1fcbd0 gates on
-	// `if (bLeaveBlockedByScript == false)`. DOCUMENTED GAP: the dev has no in-mission exit detector that
-	// calls a CanLeaveZone gate (the dev leaves a zone via the chapter map, CExitZoneSector) -- so the flag
-	// is recorded + save-correct + queryable (CanLeaveZone()), but its in-mission consumer is the still-
-	// absent leave-zone subsystem. Set faithfully by the CUICmdLeaveZoneMode dispatch.
+	// SetLeaveZoneMode: bLeaveBlockedByScript blocks the player from leaving the zone; pBlockReason is
+	// the DB string of the "can't leave" message (retail tag 33; the dev previously kept the raw int id).
+	// Consumed by CanLeaveZone (retail @0x1fcbd0); set by the CUICmdLeaveZoneMode dispatch.
 	bool bLeaveBlockedByScript = false;
-	int nLeaveBlockReason = -1;
-	// OnPlayerLose one-shot latch (retail @CMission bLoseSignalSended): fire the lua lose hook once per mission.
+	CDBPtr<NDb::CString> pBlockReason;
+	// OnPlayerLose one-shot latch (retail @CMission bLoseSignalSended, tag 31): queue the delayed lose
+	// hook once per mission (GameStep wraps it in CCmdDelayedCallGameOver(4000) -- see the W3.3 retail
+	// plumbing in CWorld; the old tGameOverTime/bLoseMenuShown 4s-timer approximation was removed with it).
 	bool bLoseSignalSended = false;
-	// BUG 3 (delayed Lose dialog): retail defers the lose menu ~4000ms after the hero dies (until his corpse
-	// settles, capped by CCmdDelayedCallGameOver nMaxDelay=4000 @0x204b50). We approximate with the cap:
-	// tGameOverTime = the GetTime() stamp of the first loss frame; bLoseMenuShown = the menu-opened one-shot.
-	STime tGameOverTime;
-	bool bLoseMenuShown = false;
-	// BeginSequence/EndSequence nesting depth. Scripts nest sequences (e.g. Common.l DelayGameStart() opens
-	// one via BeginSequence(true) and StartGame() closes one via EndSequence(), around the script's own
-	// BeginSequence/EndSequence). Retail (@0x1fd8c0 "nSequence") stacks ONE movieUI PER begin and
-	// EndSequence hides the TOP one; the depth gates only the camera-limits save (1) / restore (1->0).
-	int nSequenceDepth = 0;
-	// retail CMission::ExecWorldCommand @0x1fd8c0: the per-BeginSequence camera-pose stack. Every begin
-	// pushes the current camera pose; EndSequence pops -- bRestoreCamera ? SetPlacement(popped) : commit
-	// the CURRENT (cutscene-end) pose as the active player's gameplay camera (SetCamera) so the camera
-	// doesn't jump back after a scripted move. Serialized (dev-appended tag 69) so a save mid-sequence
-	// keeps the stack.
-	vector<ICamera::SCameraPos> sequenceCameraPoses;
+	// BeginSequence/EndSequence nesting depth (retail name nSequence, tag 17). Scripts nest sequences
+	// (e.g. Common.l DelayGameStart() opens one via BeginSequence(true) and StartGame() closes one via
+	// EndSequence(), around the script's own BeginSequence/EndSequence). Retail (@0x1fd8c0) stacks ONE
+	// movieUI PER begin and EndSequence hides the TOP one; the depth gates only the camera-limits save
+	// (1) / restore (1->0). The per-begin camera-pose stack is the base's cameraPosStack (base tag 20).
+	int nSequence = 0;
 	// SetFirstMissionMode(b) (retail CMission @0x1fd8c0 / SetPanelState @0x1fb7e0): while set, SetPanelState
-	// masks off the 0x14 panel bits -- the "first mission" HUD keeps those panels hidden. Save/loaded
-	// (retail iAutoPlay.c:3716).
+	// masks off the medals/biography bits (retail literal 0x14 in RETAIL bit values) -- the "first mission"
+	// HUD keeps those panels hidden. Save/loaded (retail tag 34, iAutoPlay.c:3716).
 	bool bSpecialFirstMissionMode = false;
+	// retail tag 36: the scripted scenario-failure latch. Retail GameStep fires OnPlayerLose WITHOUT the
+	// CCmdDelayedCallGameOver wrapper when this is set (scenario failure = immediate game over). Producer:
+	// CanLeaveZone @0x1fcbd0 (via CScenarioTracker::CanLeaveZone's unwinnable test).
+	bool bScenarioGameOver = false;
 	// EnableFeature("reenter") (retail CMission::ExecWorldCommand @0x1fd8c0): allow re-entering this zone's
-	// templates. Save/loaded (retail iAutoPlay.c:3722). Consumed by CMission::Terminate (@0x1fbc30): the zone
-	// world is saved per zone+template ("%d_%d.sav") when IsBase() || IsLinkedZone() || this flag; Initialize
+	// templates. Save/loaded (retail tag 39, iAutoPlay.c:3722). Consumed by CMission::Terminate (@0x1fbc30): the
+	// zone world is saved per zone+template ("%d_%d.sav") when IsBase() || IsLinkedZone() || this flag; Initialize
 	// (@0x200690) loads that file on re-entry and restores via CWorld::CreateRestored (@0x36e100: per-building
 	// Update() refresh + live-CGlobalGame rebind -- the save's weak global-game ref loads dangling).
 	bool bEnableFeatureReenter = false;
-	// retail CMission pPWLImage (CDBPtr<NDb::CUITexture>): the PreWorldLoad splash threaded from
+	// retail CMission pPWLImage (CDBPtr<NDb::CUITexture>, tag 37): the PreWorldLoad splash threaded from
 	// CICBeginMission::Exec -> Initialize @0x200690 (this->pPWLImage = param_6). Carries the chapter's
 	// loading background into the mission so a zone-reenter can re-show it.
 	CDBPtr<NDb::CUITexture> pPWLImage;
+	// retail tag 38 (+ TRANSIENT tLastCurrentPlayerChange @+0x58c): the previous world current-player;
+	// on a change, GameStep @0x2017a0 stamps tLastCurrentPlayerChange with the UI clock (writer at the
+	// top of InternalStep here). Feeds the CanDoCommand(CCommand*) end-of-turn 2s cooldown @0x1fbf10.
+	CPtr<NWorld::IPlayer> pPrevCurrentPlayer;
+	STime tLastCurrentPlayerChange = 0;
 public:
-	bool CanLeaveZone() const { return !bLeaveBlockedByScript; }	// honors SetLeaveZoneMode (retail @0x1fcbd0 gate)
-	int GetLeaveBlockReason() const { return nLeaveBlockReason; }
-	bool IsSpecialFirstMissionMode() const { return bSpecialFirstMissionMode; }	// retail @0x19def0
+	// retail @0x1fcbd0 (mission vtbl+0xe0): full exit-possibility query -- scenario-tracker clue gate,
+	// script block (pBlockReason), map-safe-zone border test, loser/winner/realtime gates; fills
+	// *pwsReason with the localized status line and refreshes bScenarioGameOver.
+	virtual bool CanLeaveZone( wstring *pwsReason );
+	NDb::CString* GetLeaveBlockReason() const { return pBlockReason; }
+	virtual bool IsSpecialFirstMissionMode() const { return bSpecialFirstMissionMode; }	// retail @0x19def0 (mission vtbl+0xf8)
 	void OnSnapshotRestored();	// restart.sav in-place resume: rebuild building shells + camera height source
-	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&nTemplateID); f.Add(3,&nVariantID); f.Add(4,&pGlobalGame); f.Add(5,&pZone); f.Add(6,&pScene); f.Add(7,&pSoundScene); f.Add(8,&pRender); f.Add(10,&bPause); f.Add(11,&pWorld); f.Add(12,&pActivePlayer); f.Add(13,&playersSet); f.Add(14,&bHideInterface); f.Add(15,&bSpecialHideInterface); f.Add(16,&pCursor); f.Add(17,&pInterface); f.Add(18,&bUpdated); f.Add(19,&bForceUpdateNextFrame); f.Add(20,&pState); f.Add(21,&pStateTarget); f.Add(22,&updatedStatesSet); f.Add(23,&bRealTime); f.Add(24,&bHasCommands); f.Add(25,&bActionExecuted); f.Add(26,&pTrackTarget); f.Add(27,&pPlayerInHand); f.Add(28,&pTrackPlayer); f.Add(29,&selectedUnits); f.Add(30,&actionsInfoSet); f.Add(31,&fFOV); f.Add(32,&eCameraType); f.Add(33,&cameraLimits); f.Add(34,&pCamera); f.Add(35,&pCameraOwner); f.Add(36,&bFreezeCamera); f.Add(37,&sFreezePose); f.Add(38,&vCameraCP); f.Add(39,&sCameraPos); f.Add(40,&sTransform); f.Add(41,&bTraceOk); f.Add(42,&rTraceRay); f.Add(43,&sTraceTile); f.Add(44,&pTraceObject); f.Add(45,&pCmdExec); f.Add(46,&nPanelsState); f.Add(47,&bWaitForPartFinished); f.Add(48,&eActionIconsSet); f.Add(49,&pMissionUI); f.Add(50,&desktopWindowsList); f.Add(51,&nLightMode); f.Add(52,&bCheatVisibility); f.Add(53,&pLightSource); f.Add(54,&pVisibleTracker); f.Add(55,&buildingSchemas); f.Add(56,&pIntersectHolder); f.Add(57,&pIntersectLineHolder); f.Add(58,&vPrevCameraPosition); f.Add(59,&nFramesSameCameraPosition); f.Add(60,&nDeltaTime); f.Add(61,&pCombatMelody); f.Add(62,&pTestWeatherEffect); f.Add(63,&bTutorialMode); f.Add(64,&bLeaveBlockedByScript); f.Add(65,&nLeaveBlockReason); f.Add(66,&nSequenceDepth); f.Add(67,&bSpecialFirstMissionMode); f.Add(68,&bEnableFeatureReenter); f.Add(69,&sequenceCameraPoses); f.Add(70,&pExecLocator); f.Add(71,&pPWLImage); return 0; }
+	// retail NGame::CMission::operator& @0x1a03a0 -- tag 1 = the CMissionBase chunk (non-virtual
+	// base chain), own tags 2..39 with the retail gaps at 27/35 preserved
+	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CMissionBase*)this); f.Add(2,&nTemplateID); f.Add(3,&nVariantID); f.Add(4,&pZone); f.Add(5,&bUpdated); f.Add(6,&bForceUpdateNextFrame); f.Add(7,&pState); f.Add(8,&pStateTarget); f.Add(9,&updatedStatesSet); f.Add(10,&bTrackIsReady); f.Add(11,&bTrackActionExecuted); f.Add(12,&pTrackTarget); f.Add(13,&pTrackPlayerInHand); f.Add(14,&pTrackPlayer); f.Add(15,&selectedUnits); f.Add(16,&actionsInfoSet); f.Add(17,&nSequence); f.Add(18,&nFramesSameCameraPosition); f.Add(19,&vPrevCameraPosition); f.Add(20,&rTraceRay); f.Add(21,&sTraceResult); f.Add(22,&nPanelsState); f.Add(23,&eActionIconsSet); f.Add(24,&pLightSource); f.Add(25,&pIntersectHolder); f.Add(26,&testWeatherEffect); f.Add(28,&pVisibleTracker); f.Add(29,&pIntersectLineHolder); f.Add(30,&buildingSchemas); f.Add(31,&bLoseSignalSended); f.Add(32,&bLeaveBlockedByScript); f.Add(33,&pBlockReason); f.Add(34,&bSpecialFirstMissionMode); f.Add(36,&bScenarioGameOver); f.Add(37,&pPWLImage); f.Add(38,&pPrevCurrentPlayer); f.Add(39,&bEnableFeatureReenter); return 0; }
 
 private:
 	void InternalStep();
@@ -254,7 +255,6 @@ protected:
 	void SelectWeaponMode( int nInc );
 	void UpdateActionsInfo();
 	void TraceCursor();
-	void SetLightMode( int _nLightMode );
 	void UnitCollectAP( NWorld::ECollectSnipeAP eAP );
 	void ExecWorldCommands();
 
@@ -271,30 +271,14 @@ protected:
 public:
 	CMission();
 
+	// The trivial accessors + player/desktop/light/camera-focus family moved to CMissionBase
+	// (retail placement -- see iMission.h); CMission keeps only its real overrides below.
 	bool Initialize( int nTemplateID, int nVariantID, NScenario::CScenarioZone *pZone, const vector<string> &params, NRPG::CGlobalGame *pGlobalGame, NDb::CUITexture *pPWLImage = 0 );
 	void Terminate();
 
+	// dev-extra bForceUpdateNextFrame latch on top of the retail base Command bodies
 	void Command( NWorld::CCommand *pCmd );
 	void Command( NWorld::CUnit *pUnit, NWorld::CCmd *pCmd, bool bInstantly = true );
-	void StopAction();
-	bool IsReady() const;
-	bool IsActionExecuted() const;
-	bool IsRealTime() const;
-
-	void PauseGame( bool bState );
-	bool IsGamePaused() const;
-
-	IPlayerTracker* GetActivePlayer() const;
-	void SetActivePlayer( IPlayerTracker *pPlayer );
-	void GetPlayers( vector< CPtr<IPlayerTracker> > *pPlayersSet ) const;
-
-	void GetUnits( vector< CPtr<IUnitTracker> > *pUnits ) const;
-	void GetSelectedUnits( vector< CPtr<IUnitTracker> > *pUnits ) const;
-
-	int CountSelected();
-	void Select( NWorld::CUnit *pUnit, bool bAdditive );
-	void SelectNext();
-	void SelectPrev();
 
 	bool IsUpdated() const;
 
@@ -308,16 +292,13 @@ public:
 	int GetUnitsState();
 	NWorld::CUnit::EState GetUnitsWorldState();
 	void GetActionInfo( EUnitAction eAction, SActionInfo *pInfo );
+	bool CanDoCommand( NWorld::CCommand *pCmd );	// retail @0x1fbf10 (mission vtbl+0xa8)
 	void CanDoCommand( NWorld::CCmd *pCmd, bool bNoTarget, SActionInfo *pInfo );
-	NWorld::EUnitCommandResult CanDoCommand( NWorld::CCmd *pCmd, bool bNoTarget = false, int *pnAP = 0 );
+	NWorld::EUnitCommandResult CanDoCommand( NWorld::CCmd *pCmd, bool bNoTarget = false, int *pnMinAP = 0, int *pnMaxAP = 0, bool *pbEnoughAPToStart = 0 );
 
-	ICamera* GetCamera() const;
 	float GetCameraFOV() const;
 	void GetCameraParams( ECameraType *pType, float *pFOV, ICamera::SCameraLimits *pLimits );
 	void SetCameraParams( ECameraType eType, float fFOV, const ICamera::SCameraLimits &limits );
-	void FreezeCamera( bool bState );
-	void FocusCameraOnUnit( NWorld::CUnit *pUnit );
-	void FocusCameraOnItem( NWorld::IItem *pItem );	// retail CMissionBase @0x1a1740 (vtbl+0xc4)
 	int GetCutFloor();
 	void SetCutFloor( int nFloor );
 	const CVec3& GetCameraCP() const;
@@ -329,16 +310,8 @@ public:
 	bool GetTracePosition( CVec3 *pPos ) const;
 	bool GetTracePosition( NAI::SPosition *pPos ) const;
 
-	NUI::ICursor* GetCursor() const;
-	NUI::CInterface* GetInterface() const;
-	bool IsInterfaceHidden() const;
 	bool IsSequence() const;
-	////
-	void SetWaitForPartFinished( bool bState );
-	bool IsWaitForPartFinished() const;
-	////
-	void PopDesktop( NUI::CDesktopWindow *pDesktop );
-	void PushDesktop( NUI::CDesktopWindow *pDesktop );
+	// dev fallback: the live-session pMissionUI cache when the desktop list is empty (pre-Initialize)
 	NUI::CDesktopWindow* GetDesktop() const;
 	////
 	EActionIconsSet GetActionIconsSet() const;
@@ -346,20 +319,12 @@ public:
 	////
 	int GetPanelState( int nMask ) const;
 	void SetPanelState( int nMask, bool bState );
-	////
-	void SetCheatVisibility( bool bState );
-	bool GetCheatVisibility() const;
-
-	NRPG::CGlobalGame *GetRPGGame() const;
-	NWorld::IWorld* GetWorld() const;
-	NGScene::IGameView* GetScene() const;
-	NSound::ISoundScene* GetSoundScene() const;
-	NRender::IRenderGame* GetRenderGame() const;
+	// retail mission vtbl+0x144: the zone this mission was started with (null for the tutorial)
+	NScenario::CScenarioZone* GetScenarioZone() const { return pZone; }
 
 	void Step();
 	void OnGetFocus();
 	bool ProcessEvent( const NInput::SEvent &sEvent );
-	void RenderFrame( int nMode, const STime &sTime, ICamera *pCamera = 0, bool bShowUnits = true );
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 } // NAMESPACE

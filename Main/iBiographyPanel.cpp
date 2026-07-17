@@ -46,7 +46,7 @@ bool CBiographyPanel::ProcessMessage( const SEvent &sEvent )
 			pCharacter->AddImageState( 1, NDb::GetUITexture( 383 ) );
 			pCharacter->AddImageState( 0, NDb::GetUITexture( 383 ) );
 
-			pDescriptionView = new CScrollWindow<CMLText>( sEvent.pLoader->GetControl( "view" ) );
+			pDescriptionView = new CScrollWindow<CText>( sEvent.pLoader->GetControl( "view" ) );
 			pDescription = pDescriptionView->GetClientWindow();
 			break;
 		}

@@ -142,3 +142,9 @@ void CRPGChestLayout::Import()
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 }
+// retail saveload ids (serialization-convergence W1; s2_scratch docs/SERIALIZATION_CONVERGENCE.md)
+using namespace NDb;
+REGISTER_SAVELOAD_CLASS( 0xA1023180, CRPGChest )
+REGISTER_SAVELOAD_CLASS( 0xA0943150, CRPGChestLayout )
+REGISTER_SAVELOAD_CLASS( 0xA1023181, CRPGLootInstances )
+REGISTER_SAVELOAD_CLASS( 0xA1023182, CTRPGChest )

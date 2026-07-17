@@ -51,8 +51,8 @@ enum EUnitCommandResult
 	UCR_NEED_HIGHER_SKILL,            // clearing tool unusable / skill too low (disarm trap+mine CanDoIt)
 	UCR_NOT_HERO,                     // can-talk-but-not-hero -- SILENT no-op (CExecTalk::CanDoIt)
 	UCR_NOT_ALL_UNITS_NEAR_PASSAGE,   // unit not in the passage zone (CExecUsePassage::CanDoIt)
-	UCR_PK_BAN,                       // crouching, fight-capable unit may not look-and-move -- CanDo @0x3c1570
-	                                  // (retail ordinal 0x13; here appended -> 16)
+	UCR_PK_BAN,                       // crouched unit WEARING a Panzerklein may not look-around -- CanDo @0x3c1570
+	                                  // (retail ordinal 0x15; here appended -> 16)
 	UCR_CANT_HEAL,                    // heal target's CanHeal() failed -- CanDoFirstAid @0x3a2d40
 	                                  // (retail ordinal 16; here appended -> 17)
 	UCR_DOOR_LOCKED                   // locked door, no key and no charged picklock in hand --
@@ -63,6 +63,12 @@ class CCmd: public CObjectBase
 {
 public:
 	virtual bool IsSkippable() const { return true; }
+	// retail CCmd vtbl +0x18/+0x1c -- reserve / release the command's target-reservation lock
+	// (CExecCannon::CanDoIt @0x3a2360 calls Unlock, probes ILockable::IsLocked, then Lock around the
+	// entry gate). Base = no-op; CCmdCannon (@0x3b1d20/@0x60650), CCmdTakeCorpse (@0x3b1c90/@0x61260)
+	// and CCmdMoveInventoryItem (@0x5f630/@0x5f9a0) override.
+	virtual void Lock( CUnit *pBy ) {}
+	virtual void Unlock() {}
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CCmdStartCombat: public CCmd
@@ -169,8 +175,11 @@ class CCmdShootTile: public CCmd
 	OBJECT_BASIC_METHODS(CCmdShootTile);
 public:
 	ZDATA
+	// retail @0x5eeb0: tag 2 = bCanBeReplacedByReload (the reload-replacement gate, same bool the
+	// sibling CCmdShootObject carries at its tag 6), tag 3 = ptTarget (dev wrote ptTarget at tag 2)
+	bool bCanBeReplacedByReload = false;
 	CVec3 ptTarget;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&ptTarget); return 0; }
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&bCanBeReplacedByReload); f.Add(3,&ptTarget); return 0; }
 	//
 	CCmdShootTile() {}
 	CCmdShootTile( const CVec3 &_ptTarget ):
@@ -197,10 +206,14 @@ class CCmdCannon: public CCmd
 public:
 	ZDATA
 	CPtr<IObject> pObject;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&pObject); return 0; }
+	CObj<CObjectBase> pLock;   // retail +0x10 (tag 3): the cannon-reservation token from ILockable::Lock
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&pObject); f.Add(3,&pLock); return 0; }   // retail @0x616d0
 	//
 	CCmdCannon() {}
 	CCmdCannon( IObject *_pObject ): pObject(_pObject) {}
+	//
+	virtual void Lock( CUnit *pBy );          // retail @0x3b1d20: pLock = dynamic_cast<ILockable*>(pObject)->Lock(pBy)
+	virtual void Unlock() { pLock = 0; }      // retail @0x60650: release the reservation token
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CCmdExitPK: public CCmd
@@ -243,10 +256,14 @@ class CCmdTakeCorpse: public CCmd
 public:
 	ZDATA
 	CPtr<CUnit> pCorpse;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&pCorpse); return 0; }
+	CObj<CObjectBase> pLock;   // retail +0x10 (tag 3): the corpse-reservation token from ILockable::Lock
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&pCorpse); f.Add(3,&pLock); return 0; }   // retail @0x61350
 	//
 	CCmdTakeCorpse() {}
 	CCmdTakeCorpse( CUnit *_pCorpse ): pCorpse(_pCorpse) {}
+	//
+	virtual void Lock( CUnit *pBy );          // retail @0x3b1c90: pLock = dynamic_cast<ILockable*>(pCorpse)->Lock(pBy)
+	virtual void Unlock() { pLock = 0; }      // retail @0x61260: release the reservation token
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CCmdTakeCorpseOnDeploy: public CCmd
@@ -256,12 +273,12 @@ public:
 	ZDATA
 	CPtr<CUnitServer> pCarrier;
 	CPtr<CUnitServer> pCorpse;
-	bool bDead;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&pCarrier); f.Add(3,&pCorpse); f.Add(4,&bDead); return 0; }
+	// retail @0x373510 serializes {2,3} only -- no bDead member (retail PDB size 20, ctor @0x370090 is 2-arg; W5)
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&pCarrier); f.Add(3,&pCorpse); return 0; }
 	//
 	CCmdTakeCorpseOnDeploy() {}
-	CCmdTakeCorpseOnDeploy( CUnitServer *_pCarrier, CUnitServer *_pCorpse, bool _bDead ): 
-		pCarrier( _pCarrier ), pCorpse( _pCorpse ), bDead( _bDead ) {}
+	CCmdTakeCorpseOnDeploy( CUnitServer *_pCarrier, CUnitServer *_pCorpse ):
+		pCarrier( _pCarrier ), pCorpse( _pCorpse ) {}
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CCmdDropCorpse: public CCmd
@@ -280,10 +297,11 @@ class CCmdReload: public CCmd
 	OBJECT_BASIC_METHODS(CCmdReload);
 public:
 	ZDATA
-	CPtr<NRPG::IInventoryItem> pItem;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&pItem); return 0; }
-		
-	CCmdReload( NRPG::IInventoryItem *_pItem = 0 ): pItem(_pItem) {}
+	// retail @0x3b1e30: slot to reload, -1 = active weapon (Jan03 carried an item ptr)
+	int nSlot;
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&nSlot); return 0; }
+
+	CCmdReload( int _nSlot = -1 ): nSlot(_nSlot) {}
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CCmdStrafe: public CCmd
@@ -388,15 +406,18 @@ public:
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 struct SItem
 {
+	// Enumerator ORDER matches the retail PDB (VACUUM=0 .. UNIT_ANYPLACE=6) -- eType is raw-serialized
+	// (tag 3), so the numeric values are part of the save format. The dev tree had VACUUM appended last
+	// (HAND=0..VACUUM=6), a byte-level divergence.
 	enum EPlacement
 	{
-		HAND,
-		SLOT,
-		GROUND,
-		BACKPACK,
-		STORAGE,
-		UNIT_ANYPLACE,
-		VACUUM			// move target only: the item is removed from the world (DestroyItemInHand)
+		VACUUM,			// retail 0 -- move target only: the item is removed from the world (DestroyItemInHand)
+		HAND,			// 1
+		SLOT,			// 2
+		GROUND,			// 3
+		BACKPACK,		// 4
+		STORAGE,		// 5
+		UNIT_ANYPLACE	// 6
 	};
 
 	ZDATA
@@ -407,7 +428,12 @@ struct SItem
 	CPtr<IItem> pWorldItem;
 	CPtr<IPlayer> pPlayer;
 	CPtr<NRPG::IInventoryItem> pItem;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&nSlot); f.Add(3,&eType); f.Add(4,&sPosition); f.Add(5,&pUnit); f.Add(6,&pWorldItem); f.Add(7,&pPlayer); f.Add(8,&pItem); return 0; }
+	CObj<CObjectBase> pLockItem;   // retail +0x20 (tag 9): the item-usage lock token from ILockable::Lock
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&nSlot); f.Add(3,&eType); f.Add(4,&sPosition); f.Add(5,&pUnit); f.Add(6,&pWorldItem); f.Add(7,&pPlayer); f.Add(8,&pItem); f.Add(9,&pLockItem); return 0; }   // retail @0x619c0
+
+	// retail SItem::LockItem @0x3b1c30: acquire the item's usage lock for pBy (ILockable::Lock through
+	// the IInventoryItem virtual base) and hold the token in pLockItem. Defined in wUnitCommands.cpp.
+	void LockItem( CUnit *pBy );
 
 	SItem() {}
 	SItem( CUnit *_pUnit, EPlacement _eType, int _nSlot, NRPG::IInventoryItem* _pItem = 0 ): pUnit( _pUnit ), eType( _eType ), nSlot( _nSlot ), pItem( _pItem ) {}
@@ -426,13 +452,17 @@ class CCmdCreateInventoryItem: public CCmd
 private:
 	ZDATA
 	CDBPtr<NDb::CRPGItem> pItem;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&pItem); return 0; }
+	// retail @0x20dbe0 tag 3: create a CLUE item (NRPG::CreateClueItem) instead of a plain one
+	// (the lua UnitCreateItem 3rd "b[false]" param; the old dev comment misread it as bEquip)
+	bool bClue = false;
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&pItem); f.Add(3,&bClue); return 0; }
 
 public:
 	CCmdCreateInventoryItem() {}
-	CCmdCreateInventoryItem( NDb::CRPGItem *_pItem ): pItem( _pItem ) {}
+	CCmdCreateInventoryItem( NDb::CRPGItem *_pItem, bool _bClue = false ): pItem( _pItem ), bClue( _bClue ) {}
 
 	NDb::CRPGItem* GetItem() const { return pItem; }
+	bool GetClue() const { return bClue; }
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CCmdMoveInventoryItem: public CCmd
@@ -450,6 +480,9 @@ public:
 
 	const SItem& GetSource() { return sSource; }
 	const SItem& GetTarget() { return sTarget; }
+	//
+	virtual void Lock( CUnit *pBy ) { sSource.LockItem( pBy ); }   // retail @0x5f630: lock the moved item
+	virtual void Unlock() { sSource.pLockItem = 0; }               // retail @0x5f9a0: drop the token
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CCmdLoadWeapon: public CCmd
@@ -504,15 +537,27 @@ class CCmdCreateAndActivateInventoryItem: public CCmd
 private:
 	ZDATA
 	CDBPtr<NDb::CRPGItem> pItem;
+	// retail @0x2fde50: 3=bNeedMove, 4=moveSource, 5=moveTarget, 6=nSlot (dev had nSlot at tag 3).
+	// bNeedMove queues a stash move (moveSource -> moveTarget, usually active hand -> backpack)
+	// AHEAD of the create+activate (retail CreateExecutor @0x3b37b0 prepends a CExecMoveInventoryItem).
+	bool bNeedMove = false;
+	SItem moveSource;
+	SItem moveTarget;
 	int nSlot;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&pItem); f.Add(3,&nSlot); return 0; }
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&pItem); f.Add(3,&bNeedMove); f.Add(4,&moveSource); f.Add(5,&moveTarget); f.Add(6,&nSlot); return 0; }
 
 public:
 	CCmdCreateAndActivateInventoryItem(): nSlot( 0 ) {}
-	CCmdCreateAndActivateInventoryItem( NDb::CRPGItem *_pItem, int _nSlot ): pItem( _pItem ), nSlot( _nSlot ) {}
+	// retail value ctor @0x2fda10: (pItem, nSlot, bNeedMove, moveSource, moveTarget)
+	CCmdCreateAndActivateInventoryItem( NDb::CRPGItem *_pItem, int _nSlot, bool _bNeedMove = false,
+		const SItem &_moveSource = SItem(), const SItem &_moveTarget = SItem() ):
+		pItem( _pItem ), nSlot( _nSlot ), bNeedMove( _bNeedMove ), moveSource( _moveSource ), moveTarget( _moveTarget ) {}
 
 	NDb::CRPGItem* GetItem() const { return pItem; }
 	int GetSlot() const { return nSlot; }
+	bool GetNeedMove() const { return bNeedMove; }
+	const SItem& GetMoveSource() const { return moveSource; }
+	const SItem& GetMoveTarget() const { return moveTarget; }
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // Exchange an inventory item into a hand slot, displacing whatever is there (lua UnitDrawWeapon /
@@ -523,19 +568,19 @@ class CCmdExchangeInventoryItems: public CCmd
 	OBJECT_BASIC_METHODS(CCmdExchangeInventoryItems);
 private:
 	ZDATA
-	SItem sSource;
-	SItem sTarget;
+	SItem moveSource; // retail PDB names (moveSource@12/moveTarget@48); wire @0x2fdec0 = {2,3,4,5}
+	SItem moveTarget;
 	bool bActivate;
 	int nSlot;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&sSource); f.Add(3,&sTarget); f.Add(4,&bActivate); f.Add(5,&nSlot); return 0; }
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&moveSource); f.Add(3,&moveTarget); f.Add(4,&bActivate); f.Add(5,&nSlot); return 0; }
 
 public:
 	CCmdExchangeInventoryItems(): bActivate( false ), nSlot( 0 ) {}
 	CCmdExchangeInventoryItems( const SItem &_sSource, const SItem &_sTarget, bool _bActivate, int _nSlot ):
-		sSource( _sSource ), sTarget( _sTarget ), bActivate( _bActivate ), nSlot( _nSlot ) {}
+		moveSource( _sSource ), moveTarget( _sTarget ), bActivate( _bActivate ), nSlot( _nSlot ) {}
 
-	const SItem& GetSource() const { return sSource; }
-	const SItem& GetTarget() const { return sTarget; }
+	const SItem& GetSource() const { return moveSource; }
+	const SItem& GetTarget() const { return moveTarget; }
 	bool GetActivate() const { return bActivate; }
 	int GetSlot() const { return nSlot; }
 };
@@ -582,10 +627,10 @@ class CCmdContinue: public CCmd
 	OBJECT_BASIC_METHODS(CCmdContinue);
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-class CCmdNeedReload: public CCmd
-{
-	OBJECT_BASIC_METHODS(CCmdNeedReload);
-};
+// (dev CCmdNeedReload 0x52062170 REMOVED -- W5 serialization-convergence: the pair does not exist
+// in retail in ANY form and had no creation site here either. Retail's "out of ammo" signal is the
+// already-live ack path: CStateAttack::OnLButtonUp @0x1dbec0 -> SayAckForAll(IA_WEAPON_EMPTY) ->
+// CWorld::PlayAck @0x361e50 -> CGlobalAck::OnLastPieceOfAmmo @0x338a20 -> CAckLastPieceOfAmmo.)
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CCmdWeaponJammed: public CCmd
 {
@@ -608,12 +653,12 @@ class CCmdPlayAnimation: public CCmd
 	ZDATA
 public:
 	int nDBAnimationID;
-	bool bCircled;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&nDBAnimationID); f.Add(3,&bCircled); return 0; }
+	bool bFreezeAfterLastFrame; // retail @0x2fd7b0: tag 4 (3 is a hole); Jan03 bCircled@3 was the pre-rename form
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&nDBAnimationID); f.Add(4,&bFreezeAfterLastFrame); return 0; }
 	//
 	CCmdPlayAnimation() {}
-	CCmdPlayAnimation( int _nDBAnimationID, bool _bCircled ): 
-		nDBAnimationID( _nDBAnimationID ), bCircled( _bCircled ) {}
+	CCmdPlayAnimation( int _nDBAnimationID, bool _bFreezeAfterLastFrame ):
+		nDBAnimationID( _nDBAnimationID ), bFreezeAfterLastFrame( _bFreezeAfterLastFrame ) {}
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CCmdHide: public CCmd
@@ -652,6 +697,20 @@ public:
 	//
 	CCmdTalk() {}
 	CCmdTalk( CUnit *_pTarget ): pTarget( _pTarget ) {}
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail NWorld::CCmdNotHeroWantsToTalk (id 0x50133140) -- payload-less command issued when a non-hero
+// unit is ordered to talk to an NPC; its executor (CExecNotHeroWantsToTalk) fires the NPC-interaction
+// voice ack. Bare CCmd, base-chain serialization only.
+class CCmdNotHeroWantsToTalk: public CCmd
+{
+	OBJECT_BASIC_METHODS( CCmdNotHeroWantsToTalk );
+	ZDATA
+	ZPARENT( CCmd )
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,(CCmd *)this); return 0; }
+	//
+public:
+	CCmdNotHeroWantsToTalk() {}
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 }

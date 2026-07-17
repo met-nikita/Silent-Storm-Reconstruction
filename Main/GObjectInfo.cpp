@@ -32,7 +32,7 @@ struct SLoadVertexHash
 };
 bool operator==( const SLoadVertex &a, const SLoadVertex &b ) { return memcmp( &a, &b, sizeof(a) ) == 0; }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// мелкость дискретизации
+// пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ
 const int N_STEPS_PER_METER = 4096;
 const int N_TEXTURE_PRECISION = 65536;
 const int N_VECTOR_PRECISION = 16384;
@@ -647,10 +647,14 @@ static void ConvertVertices( vector<SVertex> *pRes, const vector<SLoadVertex> &_
 		NGScene::SVertex &dst = (*pRes)[k];
 		const SLoadVertex &src = _src[k];
 		dst.pos = src.pos;
-		dst.normal = src.normal;
+		// release SVertex stores normal/texU/texV packed (SCompactVector). Release's
+		// SLoadVertex (PDB, 32B) is ALREADY compact so release copies verbatim; this
+		// tree's SLoadVertex still carries raw CVec3s (dev resource-file format), so
+		// pack at this load boundary -- same packed values either way.
+		NGfx::CalcCompactVector( &dst.normal, src.normal );
 		dst.tex = src.tex;
-		dst.texU = src.texU;
-		dst.texV = src.texV;
+		NGfx::CalcCompactVector( &dst.texU, src.texU );
+		NGfx::CalcCompactVector( &dst.texV, src.texV );
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -876,7 +880,7 @@ bool CWallObjectInfoClipper::GetClipPlane( SPlane *pPlane, short nClip, bool bLe
 	bool  bPerpen  = nClip & 0x1;
 	bool  bTop     = (nClip >> 3) & 0x1;
 	int   nInWidth = (nClip >> 1) & 0x3;
-	if ( 0 == nInWidth ) // нет входящей клипающей стенки
+	if ( 0 == nInWidth ) // пїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ
 		return false;
 	float fInWidth = ID2Width( nInWidth );
 	short nSrcWidthLen = clipInfo.nClip >> 16;
@@ -884,10 +888,10 @@ bool CWallObjectInfoClipper::GetClipPlane( SPlane *pPlane, short nClip, bool bLe
 	float fWidth   = ID2Width( nWidth );
 	float fLength  = FP_GRID_STEP * (nSrcWidthLen >> 8);
 
-	// перпендикулярные стенки
+	// пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ
 	if ( bPerpen )
 	{
-		// одинаковой толщины -> клип плоскость под 45 град.
+		// пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ -> пїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅ 45 пїЅпїЅпїЅпїЅ.
 		if ( nInWidth == nWidth )
 		{
 			if ( bLeft )
@@ -907,7 +911,7 @@ bool CWallObjectInfoClipper::GetClipPlane( SPlane *pPlane, short nClip, bool bLe
 			}
 			return true;
 		}
-		// разной толщины -> клип плоскость вдоль осей координат
+		// пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ -> пїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ
 		else if ( nInWidth > nWidth )
 		{
 			if ( bLeft )
@@ -918,9 +922,9 @@ bool CWallObjectInfoClipper::GetClipPlane( SPlane *pPlane, short nClip, bool bLe
 		}
 		return false;
 	}
-	// параллельные стенки
+	// пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ
 	/*
-	// если входящаяя стена тоньше, то не клипаем
+	// пїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ, пїЅпїЅ пїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ
 	if ( fInWidth < fWidth )
 	return false;
 	*/
@@ -958,7 +962,7 @@ void CWallObjectInfoClipper::Recalc()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CSolidObjectInfoClipper
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// сплошные объекты не клипаются
+// пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ
 void CSolidObjectInfoClipper::ClipSolid()
 {
 	CPieceMap &faces = pSrc->GetValue()->faces;

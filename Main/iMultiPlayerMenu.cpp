@@ -2,6 +2,7 @@
 #include "Gfx.h"
 #include "iMain.h"
 #include "G2DView.h"
+#include "GView.h"     // NGScene::IGameView complete -- the CMissionBase base op& serializes CObj<IGameView> (cast helpers instantiate here)
 #include "..\Misc\StrProc.h"
 #include "..\MiscDll\Commands.h"
 #include "..\Input\Bind.h"
@@ -13,6 +14,8 @@
 #include "iCommonUI.h"
 #include "iDesktopWindow.h"
 #include "iMission.h"
+#include "iMissionExec.h"		// complete CUICmdExec/CUICmdLocatorExec for the CMission member smart-ptrs
+#include "iMissionInternal.h"	// NGame::CMission -- retail base of CMultiPlayerInterface (W4.2)
 #include "iMultiPlayerMenu.h"
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // Module iMultiPlayerMenu -- the multiplayer / hot-seat pre-game setup screen. Reconstructed from the
@@ -22,17 +25,14 @@
 // following the menu idiom of iCharGen.cpp / iInGameMenu.cpp / iAdvFaceGen.cpp.
 //
 // FAITHFUL ADAPTATIONS (answer-key release form -> dev idiom):
-//  - The release CMultiPlayerInterface derived from the FULL concrete NGame::CMission (size 1468) so it
-//    owned real IMission/IPlayerTracker player slots and managed its own desktop via PushDesktop /
-//    GetDesktop, and CMultiPlayerUI/CPlayerLine drove those IPlayerTracker virtuals. Deriving a setup
-//    menu from the concrete CMission (iMissionInternal.h: world/scene/sound/render + ~80 binds) is not
-//    the dev menu idiom. Here CMultiPlayerInterface follows the lightweight CInGameMenuInterface /
-//    CCharGenMenuInterface pattern (NMainLoop::IInterfaceBase + own cursor + CInterface), and the lobby
-//    is modelled over the REAL data the release also created: an NRPG::CGlobalGame with four
-//    NRPG::CGlobalPlayer slots (Initialize). CMultiPlayerUI/CPlayerLine therefore read the players from
-//    the global game (the only player objects that exist outside a running mission) instead of through
-//    IMission::GetPlayers / IPlayerTracker virtuals -- behaviour-equivalent at the menu level and free
-//    of the opaque vtable mapping the answer-key flagged as risk #1.
+//  - W4.2 serialization-convergence UPDATE: CMultiPlayerInterface now derives the concrete
+//    NGame::CMission exactly like the release (PDB size 1468; operator& @0x21d720 = ObjSer<CMission>
+//    base + pMenuUI), and its cursor/interface/global-game ride the CMissionBase member slots. The
+//    lobby data model is unchanged: an NRPG::CGlobalGame with four NRPG::CGlobalPlayer slots
+//    (Initialize); CMultiPlayerUI/CPlayerLine still read the players from the global game (the only
+//    player objects that exist outside a running mission) instead of IPlayerTracker virtuals --
+//    behaviour-equivalent at the menu level (the earlier lightweight-IInterfaceBase adaptation note
+//    is superseded by this reparenting).
 //  - Release ReturnToMenu / GetPanelState are CMission desktop-stack overrides; they have no place in
 //    the IInterfaceBase pattern (the menu UI is always the shown child of pInterface), so they are
 //    dropped. "cancel" exits the modal (CICExitModal), exactly as the sibling menus do.
@@ -328,23 +328,24 @@ void CMultiPlayerUI::Draw( const STime &sTime, NGScene::I2DGameView *pView )
 namespace NGame
 {
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// CMultiPlayerInterface -- the multiplayer pre-game setup interface (lightweight IInterfaceBase menu,
-// cf. CInGameMenuInterface / CCharGenMenuInterface). Owns a cursor, a CInterface, the lobby global
-// game (four players) and the CMultiPlayerUI desktop. Five command binds drive it; "next" begins the
-// chosen mission template over the lobby game.
+// CMultiPlayerInterface -- the multiplayer pre-game setup interface. Serialization-convergence W4.2:
+// reparented onto CMission like retail (PDB: CMultiPlayerInterface : NGame::CMission + 5 binds +
+// pMenuUI; operator& @0x21d720 = tag 1 ObjSer<NGame::CMission> base + tag 2 pMenuUI). The old dev
+// members pCursor(2)/pInterface(3)/pGlobalGame(4) now ride the CMissionBase slots (base tags 15/16/2).
+// NOTE (retail-exact ownership): the base pGlobalGame is a WEAK CPtr -- retail has no owning ref to
+// the lobby game either (the fresh CreateGlobalGame object lives with refcount 0 until something
+// adopts it; the whole lobby chain -- CMultiPlayerUI::pGame, CICBeginMission -- is CPtr in both trees).
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-class CMultiPlayerInterface: public NMainLoop::IInterfaceBase
+class CMultiPlayerInterface: public CMission
 {
 	OBJECT_BASIC_METHODS(CMultiPlayerInterface);
 private:
 	NInput::CBind bindClose, bindPlay, bindWeapons, bindStore, bindInventory;
 
-	ZDATA
-	CObj<NUI::ICursor> pCursor;
-	CObj<NUI::CInterface> pInterface;
-	CObj<NRPG::CGlobalGame> pGlobalGame;
+	ZDATA_(CMission)
 	CObj<NUI::CMultiPlayerUI> pMenuUI;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&pCursor); f.Add(3,&pInterface); f.Add(4,&pGlobalGame); f.Add(5,&pMenuUI); return 0; }
+	// retail NGame::CMultiPlayerInterface::operator& @0x21d720
+	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CMission*)this); f.Add(2,&pMenuUI); return 0; }
 
 public:
 	CMultiPlayerInterface();

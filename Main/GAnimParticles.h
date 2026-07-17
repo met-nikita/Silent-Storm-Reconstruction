@@ -12,6 +12,7 @@ namespace NAI
 	class IAIMap;
 }
 namespace NDb { class CDBPhysParams; }      // fwd for CASphereSet::pPhys (release save-format)
+namespace NRPG { class IInventoryItem; }    // fwd for CASphereSet::Init physics-case classification
 namespace NWorld { class CUnitServer; }     // fwd for CParticleSkeleton::pUnit (release save-format)
 namespace NGScene
 {
@@ -103,6 +104,14 @@ public:
 	virtual void GetFrame( STime t, SSkeletonPose *pPose );
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail EPhysCase (PDB NAnimation::EPhysCase): selects the PhysParams DB record in CASphereSet::Init
+enum EPhysCase
+{
+	PH_GRENADE_ATTACK = 0,
+	PH_THROW_OUT = 1,
+	PH_FALL_FROM_BODY = 2,
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
 class CASphereSet : public CAnimator
 {
 	OBJECT_BASIC_METHODS(CASphereSet);
@@ -126,21 +135,20 @@ class CASphereSet : public CAnimator
 	STime tLast; // for case - finish time
 
 	bool bStopped; // is resting
-	bool bCollided;
+	// retail: collision COUNTER (char), not a bool -- Step's pIgnore filter only skips the ignore
+	// object while nCollided == 0 (@0x4ec7c0), DidCollide == nCollided != 0
+	char nCollided;
 public:
 	CDGPtr< CFuncBase<STime> > pTime;
 	CPtr<NAI::IAIMap> pMap;
-
-	float fResistance;
-	float fFriction;
 private:
 	int nFloor;
-	// release save-format: insert pPhys(18)/pIgnore(19) before pTime/pMap (now 20/21), DROP
-	// fResistance/fFriction from serialize (members kept), nFloor stays 22, append the existing
-	// posVel(23)/rotVel(24)/inertiaInv(25). Renumber independently decode-verified. Dead-in-dev.
+	// retail: pPhys = PhysParams DB record resolved by Init @0x4ebe00 (case name from EPhysCase +
+	// item RTTI), read by Step/Calc/GetFrame (friction/resistance/DELTA_T); pIgnore = collision
+	// ignore object (the grenade thrower), ctor arg @0x4eff40, read by Step @0x4ec7c0.
 	CDBPtr<NDb::CDBPhysParams> pPhys;
 	CPtr<CObjectBase> pIgnore;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CAnimator*)this); f.Add(2,&spheres); f.Add(3,&boundSize); f.Add(4,&fMass); f.Add(5,&massCenter); f.Add(6,&inertiaInvBody); f.Add(7,&fBoundSize); f.Add(8,&pos); f.Add(9,&rot); f.Add(10,&p); f.Add(11,&l); f.Add(12,&lastPos); f.Add(13,&lastRot); f.Add(14,&tCurrent); f.Add(15,&tLast); f.Add(16,&bStopped); f.Add(17,&bCollided); f.Add(18,&pPhys); f.Add(19,&pIgnore); f.Add(20,&pTime); f.Add(21,&pMap); f.Add(22,&nFloor); f.Add(23,&posVel); f.Add(24,&rotVel); f.Add(25,&inertiaInv); return 0; }
+	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CAnimator*)this); f.Add(2,&spheres); f.Add(3,&boundSize); f.Add(4,&fMass); f.Add(5,&massCenter); f.Add(6,&inertiaInvBody); f.Add(7,&fBoundSize); f.Add(8,&pos); f.Add(9,&rot); f.Add(10,&p); f.Add(11,&l); f.Add(12,&lastPos); f.Add(13,&lastRot); f.Add(14,&tCurrent); f.Add(15,&tLast); f.Add(16,&bStopped); f.Add(17,&nCollided); f.Add(18,&pPhys); f.Add(19,&pIgnore); f.Add(20,&pTime); f.Add(21,&pMap); f.Add(22,&nFloor); f.Add(23,&posVel); f.Add(24,&rotVel); f.Add(25,&inertiaInv); return 0; }
 
 	CVec3 posVel; // from p
 	CVec3 rotVel; // from l
@@ -156,14 +164,17 @@ private:
 	void ApplyCollision( CVec3 ptColl, CVec3 vel );
 	void AddSphere( const SSphere &sphere, float fMass );
 public:
-	CASphereSet( int _nFloor = -100 );
-	
-	void InitSpheres( const vector<SMassSphere> &_spheres );
-	void InitBound( const CVec3 center, const CVec3 size );
-	void Init( STime t, const CVec3 &pos, const CQuat &rot, const CVec3 &vel, bool bMassCenter = false );
+	CASphereSet() : nCollided(0), nFloor(-100) {}   // saveload factory path; operator& fills the rest
+	// retail ctor @0x4eff40 folds Jan03's InitSpheres/InitBound into the ctor and adds pIgnore
+	CASphereSet( const vector<SMassSphere> &_spheres, const CVec3 &_massCenter, const CVec3 &_boundSize,
+		CObjectBase *_pIgnore, int _nFloor );
+
+	// retail Init @0x4ebe00 tail resolves pPhys = GetDBPhysParams( name(ePhysCase, item RTTI) )
+	void Init( STime t, const CVec3 &pos, const CQuat &rot, const CVec3 &vel, bool bMassCenter,
+		EPhysCase ePhysCase, NRPG::IInventoryItem *pItem );
 	bool HasStopped();
 	virtual void GetFrame( STime t, SSkeletonPose *pPose );
-	bool DidCollide() { return bCollided; } 
+	bool DidCollide() { return nCollided != 0; }
 	void Calc( STime t );
 	int GetFloor() const { return nFloor; }
 };

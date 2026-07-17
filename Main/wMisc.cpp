@@ -16,30 +16,19 @@ class CDParticles: public CTimedObject
 	CDBPtr<NDb::CEffect> pEffect;
 	CObj<CFuncBase<SFBTransform> > pPosition;
 	int nFloor;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CTimedObject*)this); f.Add(2,&pEffect); f.Add(3,&pPosition); f.Add(4,&nFloor); return 0; }
+	CDGPtr<NAnimation::CSkeletonAnimator> pAnimator;   // retail tag 5 (@0x380f00): the skeleton the effect is glued to (retail CreateDParticles @0x380130 writer)
+	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CTimedObject*)this); f.Add(2,&pEffect); f.Add(3,&pPosition); f.Add(4,&nFloor); f.Add(5,&pAnimator); return 0; }
 public:
 	CDParticles() {}
 	CDParticles( CFuncBase<SFBTransform> *pPlace, NDb::CEffect *pEffect, int nFloor = -100 );
+	CDParticles( CFuncBase<SFBTransform> *pPlace, NAnimation::CSkeletonAnimator *pAnimator, NDb::CEffect *pEffect, int nFloor = -100 );
 	CDParticles( const CVec3 &_pos, const CQuat &_q, NDb::CEffect *pEffect, int nFloor = -100 );
-	
+
 	virtual void Visit( IRenderVisitor *p );
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-class C3DSound: public CTimedObject
-{
-	OBJECT_NOCOPY_METHODS(C3DSound);
-	ZDATA_(CTimedObject)
-	CObj<CFuncBase<CVec3> > pPosition;
-	CDBPtr<NDb::CSound> pSound;
-		bool bFinished = false;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CTimedObject*)this); f.Add(2,&pPosition); f.Add(3,&pSound); f.Add(4,&bFinished); return 0; }
-public:
-	C3DSound() {}
-	C3DSound( CFuncBase<CVec3> *pPos, NDb::CSound *pSound );
-	C3DSound( const CVec3 &_pos, NDb::CSound *pSound );
-
-	virtual void Visit( ISoundVisitor *p );
-};
+// (C3DSound class definition moved to wMisc.h -- W3: CExecShoot's SLongBurstSnd retention slot,
+//  retail save tag 3 @0x3b0ef0, needs the public surface + EndSound @0x37f7e0.)
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CDGrassEvent: public CTimedObject
 {
@@ -62,15 +51,20 @@ class CDMesh: public CTimedObject
 {
 	OBJECT_NOCOPY_METHODS(CDMesh);
 	ZDATA_(CTimedObject)
-	CPtr<CObjectBase> pUnit;        // @0x37f8d0: weak ref to the heard unit (targetability association)
-	CPtr<NDb::CModel> pModel;       // the static marker mesh (DB model 3899)
-	CVec3 pos;
-	int nFloor;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CTimedObject*)this); f.Add(2,&pUnit); f.Add(3,&pModel); f.Add(4,&pos); f.Add(5,&nFloor); return 0; }
+	int nFloor;                     // retail +0x28, save tag 2
+	CVec3 pos;                      // retail +0x2c, save tag 3
+	CQuat rot;                      // retail +0x38, save tag 4: marker rotation (identity from the only creator, CreateSoundStuff @0x369110)
+	CPtr<CObjectBase> pUnit;        // retail +0x48 (CPtr<CUnit>), save tag 5: weak ref to the heard unit (targetability association)
+	CPtr<NDb::CModel> pModel;       // retail +0x4c, save tag 6: the static marker mesh (DB model 3899)
+	// retail wire 1:1 (operator& @0x381050; byte-walk x58 across the retail slots: 1:32 2:4 3:12 4:16 5:4 6:4)
+	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CTimedObject*)this); f.Add(2,&nFloor); f.Add(3,&pos); f.Add(4,&rot); f.Add(5,&pUnit); f.Add(6,&pModel); return 0; }
 public:
-	CDMesh(): nFloor(0) {}
-	CDMesh( CObjectBase *_pUnit, const CVec3 &_pos, NDb::CModel *_pModel, int _nFloor )
-		: CTimedObject( 1000 ), pUnit(_pUnit), pModel(_pModel), pos(_pos), nFloor(_nFloor) {}
+	// retail default ctor @0x380580 nulls pUnit/pModel and zeroes tEvent/bind only; nFloor/pos/rot are
+	// left unwritten (the loader fills tags 2-4).
+	CDMesh() {}
+	// retail ctor @0x37f8d0: (pUnit, pos, rot, pModel, nFloor), nSegmentsLeft = 1000
+	CDMesh( CObjectBase *_pUnit, const CVec3 &_pos, const CQuat &_rot, NDb::CModel *_pModel, int _nFloor )
+		: CTimedObject( 1000 ), nFloor(_nFloor), pos(_pos), rot(_rot), pUnit(_pUnit), pModel(_pModel) {}
 
 	virtual void Visit( IRenderVisitor *p );
 	virtual void Visit( IAIVisitor *p );
@@ -106,8 +100,14 @@ void CTimedObject::Attach( CSyncSrc<NWorld::IVisObj> *pSrc, CWorld *pWorld )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CDParticles
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CDParticles::CDParticles( CFuncBase<SFBTransform> *_pPlace, NDb::CEffect *_pEffect, int _nFloor ) 
+CDParticles::CDParticles( CFuncBase<SFBTransform> *_pPlace, NDb::CEffect *_pEffect, int _nFloor )
 : CTimedObject( 1000 ), pPosition(_pPlace), pEffect(_pEffect), nFloor(_nFloor)
+{
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail @0x380130 (skeleton-glued): same as above + the bone-riding animator (save tag 5)
+CDParticles::CDParticles( CFuncBase<SFBTransform> *_pPlace, NAnimation::CSkeletonAnimator *_pAnimator, NDb::CEffect *_pEffect, int _nFloor )
+: CTimedObject( 1000 ), pPosition(_pPlace), pEffect(_pEffect), nFloor(_nFloor), pAnimator(_pAnimator)
 {
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -123,7 +123,8 @@ CDParticles::CDParticles( const CVec3 &_pos, const CQuat &_q, NDb::CEffect *_pEf
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CDParticles::Visit( IRenderVisitor *p )
 {
-	p->AddParticleEffect( GetEventTime(), pEffect, nFloor, pPosition );
+	// retail @0x37f580: the skeleton animator rides along so a glued effect follows the bones (null for free effects)
+	p->AddParticleEffect( GetEventTime(), pEffect, nFloor, pPosition, pAnimator.GetPtr() );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // C3DSound
@@ -143,6 +144,16 @@ void C3DSound::Visit( ISoundVisitor *p )
 	p->Add3DSound( GetEventTime(), pSound, pPosition );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail @0x37f7e0: only a record with ending samples reacts -- flag finished + re-emit the vis-binding
+void C3DSound::EndSound()
+{
+	if ( IsValid( pSound ) && pSound->nEndingSamples != 0 )
+	{
+		bFinished = true;
+		bindGlobal.Update();
+	}
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 // CDGrassEvent
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CDGrassEvent::CDGrassEvent( const CVec3 &_vPlace )
@@ -159,22 +170,26 @@ void CDGrassEvent::Visit( IRenderVisitor *p )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CDMesh::Visit( IRenderVisitor *p )
 {
-	if ( !IsValid( pModel ) )
-		return;
-	SFBTransform t;
-	MakeMatrix( &t, CVec3( 1, 1, 1 ), pos, 0.0f );   // @0x37f630: marker rotation is identity CQuat(0,(0,0,1))
-	p->AddMesh( pModel, t, 0, nFloor, -1 );
+	// retail @0x37f630: transform = fresh matrix stack Init() + Push(pos, rot); NO model guard --
+	// retail hands pModel straight to the visitor (the wire always carries a valid DB model).
+	CFBMatrixStack<4> m;
+	m.Init();
+	m.Push( pos, rot );
+	p->AddMesh( pModel, m.Get(), 0, nFloor, -1 );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CDMesh::Visit( IAIVisitor *p )
 {
-	// @0x37f700: submit a pickable hull so the heard marker is clickable/targetable (mask TS_PICK). Guarded on
-	// the marker model actually carrying AI geometry.
-	if ( !IsValid( pModel ) || !pModel->pGeometry || !pModel->pGeometry->pAIGeometry )
+	// retail @0x37f700: submit a pickable hull so the heard marker is clickable/targetable (mask TS_PICK,
+	// armor 0). Guard is IsValid(pModel->pGeometry) ONLY -- retail dereferences pModel unchecked and hands
+	// pGeometry->pAIGeometry to AddHull unchecked.
+	NDb::CGeometry *pGeometry = pModel->pGeometry;
+	if ( !IsValid( pGeometry ) )
 		return;
-	SFBTransform t;
-	MakeMatrix( &t, CVec3( 1, 1, 1 ), pos, 0.0f );
-	p->AddHull( pModel->pGeometry->pAIGeometry, t, 0, nFloor, TS_PICK );
+	CFBMatrixStack<4> m;
+	m.Init();
+	m.Push( pos, rot );
+	p->AddHull( pGeometry->pAIGeometry, m.Get(), 0, nFloor, TS_PICK );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CDFlash
@@ -199,14 +214,20 @@ CTimedObject *CreateDParticles( const CVec3 &pos, const CQuat &q, NDb::CEffect *
 	return new CDParticles( pos, q, pEffect, nFloor );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CTimedObject *Create3DSound( CFuncBase<CVec3> *pPos, NDb::CSound *pSound )
+// retail @0x380130 -- the skeleton-glued variant (fills CDParticles::pAnimator, save tag 5)
+CTimedObject *CreateDParticles( CFuncBase<SFBTransform> *pPlace, NAnimation::CSkeletonAnimator *pAnimator, NDb::CEffect *pEffect, int nFloor )
+{
+	return new CDParticles( pPlace, pAnimator, pEffect, nFloor );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+C3DSound *Create3DSound( CFuncBase<CVec3> *pPos, NDb::CSound *pSound )
 {
 	return new C3DSound( pPos, pSound );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CTimedObject *CreateDMesh( CObjectBase *pUnit, const CVec3 &pos, NDb::CModel *pModel, int nFloor )
+CTimedObject *CreateDMesh( CObjectBase *pUnit, const CVec3 &pos, const CQuat &rot, NDb::CModel *pModel, int nFloor )
 {
-	return new CDMesh( pUnit, pos, pModel, nFloor );   // @0x3800f0
+	return new CDMesh( pUnit, pos, rot, pModel, nFloor );   // @0x3800f0
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CObjectBase* GetDMeshUnit( CObjectBase *p )
@@ -226,7 +247,7 @@ bool GetDMeshPos( CObjectBase *p, CVec3 *pPos )
 	return true;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CTimedObject *Create3DSound( const CVec3 &pos, NDb::CSound *pSound )
+C3DSound *Create3DSound( const CVec3 &pos, NDb::CSound *pSound )
 {
 	return new C3DSound( pos, pSound );
 }

@@ -37,6 +37,8 @@ namespace NDb
 	class CDBAckSequence;
 	class CComplexHead;
 	class CPanzerklein;
+	class CRPGGrenade;       // IExplosionMaster::AddExplosion (ordinary grenade)
+	class CRPGEngGrenade;    // IExplosionMaster::AddExplosion (engineer grenade)
 	enum EDiplomacyState;
 }
 namespace NWorld
@@ -44,11 +46,14 @@ namespace NWorld
 	class CUnit;
 	class CPlayer;
 	class CGlobalAck;
+	class CPocket;               // wPocket.h -- IWorld::GetPocket (retail vtbl+0xd8 @0x376f60)
+	class IHeightLayers;         // wHeightLayers.h -- IWorld::GetHeightLayers (retail vtbl+0x90 @0x376f00)
 	enum ETBSEvent;
 	class CUnitServer;
 	enum EUnitCommandResult;
 	class CCmd;
 	struct SItem;
+	struct SPerkMineModifiers;   // wExplosionPerks.h (IExplosionMaster::AddExplosion)
 }
 namespace NAI
 {
@@ -139,11 +144,32 @@ public:
 	CCmdCallScriptFunction( string _szFuncName, char *szParams, ...  );
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// not implemented yet
-class CCmdQuitGame: public CCommand
+// retail-new (iMission.obj; ctor @0x204b50, operator& @0x205440): wraps a game-over script call to be
+// fired LATER. CMission::GameStep wraps OnPlayerLose in it (nMaxDelay = 4000ms) on a natural (non-
+// scenario) single-player defeat; CWorld's command drain stashes the payload (pGameOverCall /
+// tMaxGameOverCall = now + nMaxDelay) and fires it when the hero's corpse settles
+// (CWorld::InformCorpseStop @0x362180) or when the cap expires (CWorld::Segment tail @0x36bce0).
+// NOT saveload-registered in retail (serialization audit: retail_registered=false) -- only the
+// serializer exists (tags 2/3); the stashed CObj<CCmdCallScriptFunction> is what reaches the save.
+class CCmdDelayedCallGameOver: public CCommand
 {
-	OBJECT_BASIC_METHODS(CCmdQuitGame);
+	OBJECT_BASIC_METHODS( CCmdDelayedCallGameOver );
+	ZDATA
+public:
+	CObj<CCmdCallScriptFunction> pGameOverCommand;	// retail @0x0c
+	int nMaxDelay;									// retail @0x10 (ms)
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&pGameOverCommand); f.Add(3,&nMaxDelay); return 0; }
+	//
+	CCmdDelayedCallGameOver(): nMaxDelay( 0 ) {}
+	// retail ctor @0x204b50: adopt the wrapped call (CObj assign AddRefs) + the delay cap
+	CCmdDelayedCallGameOver( CCmdCallScriptFunction *_pGameOverCommand, int _nMaxDelay ):
+		pGameOverCommand( _pGameOverCommand ), nMaxDelay( _nMaxDelay ) {}
 };
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// (dev CCmdQuitGame 0x02741156 REMOVED -- W5 serialization-convergence: never constructed, its only
+// dispatch was an ASSERT(0) stub, and the id is ABSENT from retail. Retail quits through the UI
+// bind layer -- CMainMenuInterface::ProcessEvent @0x1f7540 / CExitMenuInterface @0x1d1310 /
+// CLoseMenuInterface @0x1f3880 -- never a world command.)
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CCommander: public CObjectBase
 {
@@ -178,7 +204,6 @@ public:
 	virtual void OnUnitDied( CUnitServer *pUnit ) {}
 	virtual void OnSeeUnit( CUnitServer *pWatcher, CUnitServer *pTarget ) {}
 	virtual void Segment() {}
-	virtual void ProcessAISignals() {}
 	virtual void OnUnitAdded( CUnitServer *pUnit ) {}
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -325,6 +350,9 @@ public:
 	virtual IPathViewer* CreatePathViewer() = 0;
 	virtual NRPG::IUnitMissionInfo* GetRPG() const = 0;
 	virtual const NAI::SUnitPosition& GetPosition() const = 0;
+	// retail CUnit vtbl+0x48 @0x3c6a00 -> @0x34f430: pose-change anchor -- nextLock (the tile being
+	// stepped into) when mid-step (bLocksTwoPlaces) in realtime, else the current position.
+	virtual NAI::SUnitPosition GetSetPosePosition() const = 0;
 	virtual void GetRealPosition( CVec3 *pRes ) = 0;
 	virtual void AddVisitableChildren( vector<IVisObj*> *pRes ) = 0;
 	virtual bool GetCurrentCommandName( string *pName ) const = 0;
@@ -379,11 +407,19 @@ class CHitLocator: public CObjectBase
 public:
 	ZDATA
 	int nHitValue;
+	// retail PDB layout: +0x0c nHitValue [tag 2], +0x10 bool bPK [tag 3], +0x14 vPosition [tag 4],
+	// +0x20 CPtr<CUnit> pUnit (NOT serialized). bPK = the damage receiver was a Panzerklein
+	// (CReceivedDmg.type == RD_PK at the ProcessAttack site @0x350e20) -- the hit-number floater
+	// colors PK hits differently (retail NUI::CHitText).
+	bool bPK;
 	CVec3 vPosition;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&nHitValue); f.Add(3,&vPosition); return 0; }
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&nHitValue); f.Add(3,&bPK); f.Add(4,&vPosition); return 0; }   // retail @0x353120
+	CPtr<NWorld::CUnit> pUnit;   // the hit unit (retail back-ref, not in the save stream)
 
-	CHitLocator(): nHitValue( 0 ), vPosition( 0, 0, 0 ) {}
-	CHitLocator( int _nHitValue, const CVec3 &_vPosition ): nHitValue( _nHitValue ), vPosition( _vPosition ) {}
+	CHitLocator(): nHitValue( 0 ), bPK( false ), vPosition( 0, 0, 0 ) {}
+	// retail 4-arg ctor @0x3530c0
+	CHitLocator( int _nHitValue, bool _bPK, const CVec3 &_vPosition, NWorld::CUnit *_pUnit = 0 ):
+		nHitValue( _nHitValue ), bPK( _bPK ), vPosition( _vPosition ), pUnit( _pUnit ) {}
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // Commands
@@ -425,7 +461,8 @@ class CCmdPlayAck: public CCmdUnit
 	OBJECT_BASIC_METHODS(CCmdPlayAck);
 	ZDATA_(CCmdUnit)
 	int eAck;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CCmdUnit*)this); f.Add(2,&eAck); return 0; }
+	// retail @0x1e1690: {2 = pUnit direct, 3 = condition} -- NO base chunk (retail owns pUnit itself; W5)
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&pUnit); f.Add(3,&eAck); return 0; }
 public:
 	CCmdPlayAck(): eAck( IA_CONFIRMATION ) {}
 	CCmdPlayAck( CUnit *_pUnit, EInterfaceAcks _eAck ): CCmdUnit(_pUnit), eAck(_eAck) {}
@@ -507,20 +544,18 @@ class IPlayer: public CObjectBase
 {
 public:
 	typedef vector< CPtr<CUnit> > CUnitSet;
-	struct SItemInfo
-	{
-		ZDATA
-		CPtr<CUnit> pUnit;
-		CPtr<NRPG::IInventoryItem> pItem;
-		ZEND int operator&( CStructureSaver &f ) { f.Add(2,&pUnit); f.Add(3,&pItem); return 0; }
-	};
 
-	virtual CCommander *GetCommander() = 0;	
+	virtual CCommander *GetCommander() = 0;
 	virtual const wstring& GetPlayerName() const = 0;
 	virtual NRPG::CGlobalPlayer* GetGlobalPlayer() const = 0;
 	virtual void GetDeploySpot( NAI::SPathPlace *pRes ) = 0;
 	////
-	virtual bool GetInHandItem( SItemInfo *pInfo ) const = 0;
+	// retail IPlayer vtable slot 12 (+0x30, PDB-confirmed; NUI::CSlot::GetDragItem @0x1beb80 and
+	// CExecMoveInventoryItem::GetActionType @0x3a7990 both dispatch it there). The parameter is the
+	// FULL NWorld::SItem: retail has no IPlayer::SItemInfo at all (zero UDT hits in Game.pdb), and
+	// the in-hand item's eType/nSlot/sPosition ARE load-bearing -- they record the item's drag ORIGIN,
+	// which GetActionType @0x3a7990 compares against the drop destination.
+	virtual bool GetInHandItem( SItem *pInfo ) const = 0;
 	virtual void GetStoreItems( list<CPtr<NRPG::IInventoryItem> > *pItems ) = 0;
 	virtual bool TakeStoreItem( NRPG::IInventoryItem *pItem ) = 0;
 	virtual void PlaceStoreItem( NRPG::IInventoryItem *pItem ) = 0;
@@ -543,6 +578,41 @@ public:
 	virtual int GetScenarioPlayerID() const = 0;
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// CEarthQuakeEvent (retail wInterface.obj, 0x1c bytes, saveload id 0xB3625120): a grenade blast's
+// camera-shake request. Producers: both CWorld::AddGrenadeExplosion overloads (gated on the
+// game_eq_on_grenades console var); drain: the mission's per-step ProcessCameraCommands loop ->
+// active camera AddEarthQuake(vPosition, fPower). fPower = the grenade record's fDecalRadius.
+class CEarthQuakeEvent: public CObjectBase
+{
+	OBJECT_BASIC_METHODS( CEarthQuakeEvent );
+public:
+	ZDATA
+	float fPower;      // retail +0x0c (operator& @0x35ef90 chunk 2)
+	CVec3 vPosition;   // retail +0x10 (chunk 3)
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&fPower); f.Add(3,&vPosition); return 0; }
+	//
+	CEarthQuakeEvent(): fPower( 0 ), vPosition( VNULL3 ) {}
+	CEarthQuakeEvent( float _fPower, const CVec3 &_vPosition ): fPower( _fPower ), vPosition( _vPosition ) {}
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// IExplosionMaster (retail wExplTracker.obj; W4 serialization-convergence) -- the engine-wide voxel
+// explosion scheduler interface. CWorld owns one (retail CWorld+0x1b4, save tag 0x32) and drives it
+// once per Segment; both CWorld::AddGrenadeExplosion overloads hand the blast to it in retail.
+// Concrete class: NWorld::CExplosionMaster (wExplTracker.h, factory NWorld::CreateExplosionMaster
+// @0x355b40 = new CExplosionMaster(pWorld)).
+class IExplosionMaster: public CObjectBase
+{
+public:
+	// retail IExplosionMaster vtbl+0x10 (CExplosionMaster::AddExplosion @0x357620): engineer-grenade blast
+	virtual void AddExplosion( const CVec3 &vCenter, CObjectBase *pIgnitionObject, NDb::CRPGEngGrenade *pEngGrenade,
+		CUnitServer *pThrower, const SPerkMineModifiers &modifiers, int nEngSkill ) = 0;
+	// retail IExplosionMaster vtbl+0x14 (CExplosionMaster::AddExplosion @0x357520): ordinary-grenade blast
+	virtual void AddExplosion( const CVec3 &vCenter, CObjectBase *pIgnitionObject, NDb::CRPGGrenade *pGrenade,
+		CUnitServer *pThrower, const SPerkMineModifiers &modifiers ) = 0;
+	// retail IExplosionMaster vtbl+0x18 (CExplosionMaster::Segment @0x3571d0): the per-segment driver
+	virtual void Segment() = 0;
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
 class CUICmd;
 class CPostWorldCreateInfo;
 class CDebrisController;
@@ -553,13 +623,36 @@ public:
 	virtual CSyncSrc<IVisObj>* GetUnits() const = 0;
 	virtual CUICmd* GetUICommand() { return 0; }
 	virtual CHitLocator* GetHitEvent() = 0;
+	// retail IWorld vtbl+0x10 @0x363ff0: pop-front (ownership transfer) of the earthquake queue
+	virtual CEarthQuakeEvent* GetEarthQuakeEvent() { return 0; }
 	//
 	virtual CCTime* GetAimTime() const = 0;
 	virtual NRPG::IGame* GetGame() = 0;
 	virtual NAI::IAIMap* GetAIMap() = 0;
 	virtual NAI::IPathNetwork* GetPathNetwork() = 0;
 	virtual CFuncBase<STerrainInfo>* GetTerrainInfo() const = 0;
+	// retail IWorld vtbl+0x90 = CWorld::GetHeightLayers @0x376f00 -- the per-floor height cache the
+	// camera samples (CCamera::Update @0x4cdd4a). GetTerrainInfo is the raw GROUND heightmap; this is
+	// the building-aware field, so the two are NOT interchangeable.
+	virtual IHeightLayers* GetHeightLayers() = 0;
 	virtual NDb::CAmbientLightReal* GetDefaultLight() = 0;
+	// retail IWorld vtbl+0xd8 = CWorld::GetPocket @0x376f60 -- the strategic between-maps pocket
+	// (units + objects). Every retail consumer reaches the pocket through this and calls CPocket
+	// directly: luaUnitPlaceInPocket @0x2f9500, luaObjectPlaceInPocket @0x2e9000,
+	// CUnitStateInPocket::OnStateStarted/OnStateFinished @0x3c9fb0/@0x3ca060.
+	virtual CPocket* GetPocket() = 0;
+	// retail NWorld::IWorld::EWeather (PDB) + IWorld vtbl+0x1c0 = CWorld::GetWeather @0x376e00,
+	// returning the CWeatherTracker state (rolled by CWorld::RollNewWeather @0x3631c0). Consumed
+	// by CRenderGame::SyncWeather @0x2cb9b0 (1500ms sun<->rain light cross-fade + precipitation).
+	// The dev world predates the weather tracker, so the interface defaults to sunny until that
+	// subsystem is ported.
+	enum EWeather
+	{
+		WEATHER_SUNNY = 0,
+		WEATHER_SNOW  = 1,
+		WEATHER_RAIN  = 2,
+	};
+	virtual EWeather GetWeather() const { return WEATHER_SUNNY; }
 	virtual void GetInterrupts( vector< CPtr<IPlayer> > *pInterrups ) const = 0;
 	virtual CGlobalAck *GetGlobalAck() const = 0;
 	//
@@ -572,8 +665,14 @@ public:
 	virtual void CreateDefault() = 0;
 	// retail @0x36e100 takes the LIVE session's CGlobalGame: the zone-reenter save carries only a
 	// dangling weak ref to it, so the loaded world must be re-bound (and every building's parts
-	// refreshed) before StartGame.
+	// refreshed) before StartGame. ZONE-REENTER ONLY: StartGame restarts the turn.
 	virtual void CreateRestored( NRPG::CGlobalGame *pGlobalGame ) = 0;
+	// dev-only save-load reconnect (game.sav/restart.sav resume): CreateRestored MINUS StartGame --
+	// retail's load path runs NO world restore hook (CICLoad::Exec @0x1f5fd0 post-deserialize call is
+	// CMission::OnLoad @0x1fb8e0 = loading-bar counters only; CICLoadFile::Exec @0x1f6830 runs nothing),
+	// so loading must NOT touch TBS state: a realtime save stores bTurnDone=0 for every live player and
+	// StartGame's IsRealTimePossible (@0x364f10) gate would falsely restart a player turn.
+	virtual void RestoreRuntimeCaches( NRPG::CGlobalGame *pGlobalGame ) {}
 	virtual IPlayer* AddPlayer( const wstring &wsName, NRPG::CGlobalPlayer *pGlobalPlayer, 
 		CCommander *pCommander, bool bAddOnManyDeploySpots = false ) = 0;
 	virtual void RemovePlayer( IPlayer *pPlayer ) = 0;
@@ -599,9 +698,8 @@ public:
 	virtual NDb::EDiplomacyState GetDiplomacyState( CUnit *pUnit, IPlayer *pPlayer ) const = 0;
 	virtual NDb::EDiplomacyState GetDiplomacyState( IPlayer *pPlayer1, IPlayer *pPlayer2 ) const = 0;
 	// retail vtbl slot (release +0x1f8): a corpse has settled. Added at the end of the dev IWorld (no
-	// existing slot shifts; the dispatcher calls it by name, not raw index). Default no-op here -- the
-	// faithful CWorld impl (corpse-cap game-over arming via pGameOverCall) is a separate wMain leg,
-	// deferred with the wCheckTooMuchCorpses arming path.
+	// existing slot shifts; the dispatcher calls it by name, not raw index). Default no-op here; the
+	// faithful CWorld impl @0x362180 (hero-corpse gate -> fire the stashed pGameOverCall) lives in wMain.cpp.
 	virtual void InformCorpseStop( CUnitServer *pUS ) {}
 	// retail CWorld::IsSequence @0x376ff0 (world vtbl+0x1a8): true while a scripted-interrupt sequence runs.
 	// Default no-op here (same tail-append rationale as InformCorpseStop); CWorld delegates to its existing
@@ -631,6 +729,9 @@ public:
 	// debris manager the stability trackers hand unsupported frozen items to
 	// (CStabilityTracker::OnChange @0xa59a0 debris branch). Tail-appended, dispatch by name.
 	virtual CDebrisController* GetDebris() { return 0; }
+	// retail IWorld slot 59 (CWorld::GetGlobalGame @0x376f40); CalcStructDmg @0x28f960 reaches
+	// pDifficulty through it. Tail-appended, dispatch by name.
+	virtual NRPG::CGlobalGame* GetGlobalGame() const { return 0; }
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CWorldSyncSrc: public CSyncSrc<IVisObj>

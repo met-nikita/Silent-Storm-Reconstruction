@@ -45,78 +45,102 @@ const int N_MAX_SKILL = 140;
 const int N_MAX_VP = 250;
 const int N_MAX_DC = 300;
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// Skill cell - a dynamic value such as HP or AP
+// The {multiplier, flat add} payload of a skill modifier -- retail NRPG::SSkillModifyInfo
+// (PDB: fMul @0, fAdd @4, sizeof 8). Serialized raw (8-byte DataChunk) inside SModifierHolder.
+struct SSkillModifyInfo
+{
+	float fMul;
+	float fAdd;
+	SSkillModifyInfo(): fMul( 1 ), fAdd( 0 ) {}
+	SSkillModifyInfo( float _fMul, float _fAdd ): fMul( _fMul ), fAdd( _fAdd ) {}
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
+class CSkillModifier;
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// Skill cell - a dynamic value such as HP or AP.
+// Retail model (@0x2bdc40 operator&, PDB sizeof 48): the Jan03 scalar fMultiplier is GONE --
+// retail keeps the list of applied CSkillModifier objects ON the cell (weak CPtr refs; the
+// OWNING refs live on the criticals / unit-mission modifier vectors) plus a separate XP-earned
+// component (nXPValue; nMaxValue is the DERIVED, modifier-adjusted cap recomputed by Update)
+// and a freeze-to-max flag.
 class CDynamicSkill: public CObjectBase
 {
 	OBJECT_BASIC_METHODS(CDynamicSkill);
 private:
+	friend class CSkillModifier;   // ctor/dtor self-install via AddModifier/RemoveModifier
 	ZDATA
-	int nBaseValue; // base value derived from the stat
-	int nMaxValue;  // max value the skill can reach for the current XP, plus the base value
-	int nValue;     // current value, may be lower than nMaxValue
-	float fMultiplier; // current modifier
-	float fProgress;   // progress toward the next +1
-	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&nBaseValue); f.Add(3,&nMaxValue); f.Add(4,&nValue); f.Add(5,&fMultiplier); f.Add(6,&fProgress); return 0; }
+	int nBaseValue;  // base value derived from the stat
+	int nXPValue;    // whole XP-earned points (retail keeps XP separate from the cap)
+	float fProgress; // progress toward the next +1
+	int nMaxValue;   // modifier-adjusted cap: ROUND((nXPValue+nBaseValue)*IImul + Iadd), by Update()
+	int nValue;      // current value, may be lower than nMaxValue
+	vector< CPtr<CSkillModifier> > modifiers; // weak refs; Update() sweeps dead entries
+	bool bFreezedToMax;
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&nBaseValue); f.Add(3,&nXPValue); f.Add(4,&fProgress); f.Add(5,&nMaxValue); f.Add(6,&nValue); f.Add(7,&modifiers); f.Add(8,&bFreezedToMax); return 0; } // retail @0x2bdc40
 public:
+	// dev-compat two-arg ctor expressed in the retail member model (retail's own ctor
+	// @0x2bd380 takes just the base value and leaves the cell empty; dev creation sites
+	// construct full cells, so the XP part is derived from the requested set value).
 	CDynamicSkill( int nSetValue = 0, int nBaseStatValue = 0 ):
-		nBaseValue(nBaseStatValue), nValue(nSetValue), nMaxValue(nSetValue), fMultiplier( 1 ), fProgress( 0 )
+		nBaseValue(nBaseStatValue), nXPValue( nSetValue - nBaseStatValue ), fProgress( 0 ),
+		nMaxValue( nSetValue ), nValue( nSetValue ), bFreezedToMax( false )
 	{
-		if ( nBaseValue > nMaxValue )
+		if ( nXPValue < 0 )
+		{
+			nXPValue = 0;
 			nMaxValue = nBaseValue;
-		fMultiplier = 1.0f;
+			nValue = nBaseValue;
+		}
 	}
 
+	void Update();                          // retail @0x2bbb20: recompute nMaxValue, sweep dead modifiers, clamp nValue down
+	void AddModifier( CSkillModifier *p );  // retail @0x2bc6a0
+	void RemoveModifier( CSkillModifier *p );// retail @0x2bbbe0
 	void SetNewMaxValue( int nNewValue );
 	void SetNewBaseValue( int nNewValue );
-	void Modify( int nModif ) { nValue += nModif; nMaxValue += nModif; }
-	bool Upgrade( float fAddToProgress );
-	int  GetXPPart() const { return nMaxValue - nBaseValue;} // value gained from XP only
-	void SetXPPart( int nNewXPPart ) { nValue += nNewXPPart - GetXPPart(); nMaxValue = nBaseValue + nNewXPPart; }
-	void Multiply( float fValue );
+	void Modify( int nModif );              // retail @0x2bd1a0: clamped value-only shift
+	bool Upgrade( float fAddToProgress, float fCap ); // retail @0x2bbc30: XP-based, clamped to the cap
+	int  GetXPPart() const { return nXPValue; } // value gained from XP only
+	void SetXPPart( int nNewXPPart ) { nValue += nNewXPPart - nXPValue; nXPValue = nNewXPPart; Update(); }
 
 	float GetProgress() const { return fProgress; }
-	int GetMaxValue() const { return nMaxValue; }
-	int GetCurrentMaxValue() const { return fMultiplier * nMaxValue; }
-	void Reset() { nValue = fMultiplier * nMaxValue; }
-	void SetValue( int n ) { nValue = n; }
+	int GetMaxValue() const { return nMaxValue; }  // already modifier-adjusted in the retail model
+	int GetTheoreticalMax() const { return nXPValue + nBaseValue; }  // the UNmodified base+XP cap (retail reads it raw, e.g. @0x295280/@0x2c3400)
+	int GetCurrentMaxValue() const { return nMaxValue; } // dev-compat alias (retail folds the modifiers into nMaxValue)
+	void Reset() { nValue = nMaxValue; }
+	void SetValue( int n ) { nValue = n < nMaxValue ? n : nMaxValue; } // retail @0x29b230 clamps to the cap
 	void SetProgress( float p ) { fProgress = p; }
+	void FreezeToMax( bool b ) { bFreezedToMax = b; }
 
-	void SetConst( int nConstValue ) { nValue = nMaxValue = nBaseValue = nConstValue; }
+	void SetConst( int nConstValue ) { nValue = nMaxValue = nBaseValue = nConstValue; nXPValue = 0; }
+
+	// retail CWorld::CreateAIUnits @0x36b2b0 (inline): difficulty scaling writes the cap
+	// directly from the CURRENT figure and clamps the live value to it.
+	void ScaleForDifficulty( float fCoeff );
 
 	const CDynamicSkill& operator += ( int n ) { nValue += n; if ( nValue > nMaxValue ) nValue = nMaxValue; return *this; }
 	const CDynamicSkill& operator -= ( int n ) { nValue -= n; return *this; }
-	operator int () const { return nValue; }
+	// retail @0x232e0: the effective figure is frozen-to-max ? cap : min(cap, value)
+	operator int () const { return ( bFreezedToMax || nValue > nMaxValue ) ? nMaxValue : nValue; }
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// Retail CSkillModifier (@0x296830 operator&, PDB sizeof 24): {pSkill, fMul, fAdd}. Still RAII
+// like the Jan03 SModif -- the ctor (@0x295e40) installs itself into the skill's modifier list
+// via AddModifier, the dtor (@0x295ee0) detaches via RemoveModifier -- but the applied effect
+// lives on the CELL (Update folds every attached modifier into nMaxValue).
 class CSkillModifier: public CObjectBase
 {
 	OBJECT_NOCOPY_METHODS(CSkillModifier);
-	struct SModif
-	{
-		CPtr<CDynamicSkill> pSkill;
-		float fMultiplier; // applied modifier
-
-		SModif(): fMultiplier(1) {}
-		SModif( CDynamicSkill *_pSkill, float fModif ) : pSkill(_pSkill), fMultiplier(fModif) { pSkill->Multiply(fModif); }
-		~SModif() { pSkill->Multiply(1.0f/fMultiplier); }
-	}data;
 public:
-	CSkillModifier() {}
-	CSkillModifier( CDynamicSkill *pSkill, float fMultiplier ) : data( pSkill, fMultiplier) {}
-	void Set( float fMultiplier )
-	{
-		data.pSkill->Multiply( 1.0f/data.fMultiplier );
-		data.fMultiplier = fMultiplier;
-		data.pSkill->Multiply( data.fMultiplier );
-	}
-	float Get() { return data.fMultiplier; }
+	ZDATA
+	CPtr<CDynamicSkill> pSkill;
+	float fMul;
+	float fAdd;
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&pSkill); f.Add(3,&fMul); f.Add(4,&fAdd); return 0; } // retail @0x296830
 
-	int operator&( CStructureSaver &f )
-	{
-		f.Add( 1, &data.fMultiplier );
-		f.Add( 2, &data.pSkill );
-		return 0;
-	}
+	CSkillModifier(): fMul( 1 ), fAdd( 0 ) {}
+	CSkillModifier( CDynamicSkill *_pSkill, const SSkillModifyInfo &info ); // retail @0x295e40: self-installs
+	~CSkillModifier();                                                      // retail @0x295ee0: self-detaches
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CSkilledObject -- the "thing that has skills" base (release re-architecture). Holds the XP
@@ -347,6 +371,10 @@ public:
 	NDb::CString* GetBiography() const { return pBiography; }
 	bool HasPerk( int nPerkID, float *pParam1 = 0, float *pParam2 = 0, float *pParam3 = 0 ) const;
 	float GetWeaponAdaptation( IInventoryItem *pItem ) const;   // retail @0x2bb4a0: live familiarity of pItem (0 unless adapted to it)
+	// retail @0x2bba60: per-shot familiarity update. Same weapon: counter=Min(nMaxAdaptation,counter+fRate),
+	// bonus=fRate*counter. Other weapon: counter-=fRate; drained (<=0) -> switch pAdaptatedWeapon to pItem,
+	// counter=0; bonus=fOtherRate*counter. Called from CreateAttack's adaptation tail.
+	void UseWeapon( IInventoryItem *pItem, float fRate, int nMaxAdaptation, float fOtherRate );
 	bool IsHero() const { return bHero; }
 	// retail CUnit::GetSightDistance @0x2ba680: a FLAT 20.0 world units, scaled by perk 0x53's param when
 	// present. (The per-pose CUnitMission::GetSightDistance table is a different, older surface -- retail's

@@ -91,7 +91,7 @@ public:
 	virtual CCoverInfo* CalcCoversForTile( const CVec3 &src, const CAttackPortion &attack, NWorld::CUnit *pIgnore,
 		const CVec3 &ptTarget, float fMinClearDistance );
 	virtual void ProcessMeleeAttackPortion( const CAttackPortion &a, const CRay &ray, const vector<IAttackable*> &ignores );
-	virtual void ProcessRangedAttackPortion( const CAttackPortion &a, const CRay &ray, const vector<IAttackable*> &ignores, vector<STrailPoint> *pTrail );
+	virtual void ProcessRangedAttackPortion( const CAttackPortion &a, const CRay &ray, const vector<IAttackable*> &ignores, vector<STrailPoint> *pTrail, float fMaxRange );
 	virtual EAttackResult ProcessThrowingAttackPortion( CAttackPortion *pA, IAttackable *pTarget, NDb::CRPGArmor *pArmor, int nUserID );
 	virtual int GetCompositeToHit( NWorld::CUnit *pAttacker, NWorld::CUnit *pTarget, NAI::EHitLocation eHL, bool bFirstTurn );
 	virtual int GetGrenadeCompositeToHit( NWorld::CUnit *pAttacker, 
@@ -115,6 +115,7 @@ public:
 
 	virtual CVec3 GetIllumination( const vector<CVec3> &unit ) { return CVec3(1,1,1); }
 	virtual IVisionTracker* GetVisionTracker() { return pVision; }
+	virtual bool UpdateVision( float fTime ) { return pVision->UpdateVision( fTime ); }   // retail @0x2995a0
 	virtual int GetMaxCriticalSeverity() const { return nMaxCriticalSeverity; }
 	virtual void SetMaxCriticalSeverity( int n ) { if ( n < 1 ) n = 300; nMaxCriticalSeverity = n; }
 };
@@ -422,7 +423,9 @@ void CGame::ProcessMeleeAttackPortion( const CAttackPortion &a, const CRay &ray,
 				return;
 			// tally up the damage inflicted
 			if ( pAttackCatcher && IsValid( i->pSrc->pUserData ) )
-				pAttackCatcher->ProcessAttack( i->nUserID, &tmpAttackPortion, pArmor );
+				// dead Jan03 ancestor (retail has only the free PerformMeleeAttackPortion @0x290f70, and
+			// nothing here calls this): no IWorld in scope -> 0 skips the difficulty multiplier.
+			pAttackCatcher->ProcessAttack( 0, i->nUserID, &tmpAttackPortion, ray.ptDir, pArmor );
 			tmpAttackPortion.nK -= GetAPASubstraction( i->enter.fT, i->exit.fT, pArmor );
 			//sTrail.explosions.push_back( SWound( i->pUserData, ray.Get( i->enter.fT ), -ray.ptDir, pArmor ) );
 			if ( tmpAttackPortion.nK <= 0 )
@@ -431,7 +434,7 @@ void CGame::ProcessMeleeAttackPortion( const CAttackPortion &a, const CRay &ray,
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CGame::ProcessRangedAttackPortion( const CAttackPortion &a, const CRay &ray, const vector<IAttackable*> &ignores, vector<STrailPoint> *pTrails )
+void CGame::ProcessRangedAttackPortion( const CAttackPortion &a, const CRay &ray, const vector<IAttackable*> &ignores, vector<STrailPoint> *pTrails, float fMaxRange )
 {
 	// every unit/object on path receives damage
 	vector<NAI::SInterval> intersect;
@@ -453,7 +456,7 @@ void CGame::ProcessRangedAttackPortion( const CAttackPortion &a, const CRay &ray
 
 	for ( vector<NAI::SInterval>::iterator i = intersect.begin(); i != intersect.end(); ++i )
 	{
-		if ( i->enter.fT > 0 && i->enter.fT < N_WEAPONTRAIL_MAXDISTANCE )	// because this is actually not a ray but a straight line
+		if ( i->enter.fT > 0 && i->enter.fT < fMaxRange )	// because this is actually not a ray but a straight line
 		{
 			CDynamicCast<IAttackable> pAttackCatcher( i->pSrc->pUserData );
 			if ( pAttackCatcher )
@@ -483,18 +486,18 @@ void CGame::ProcessRangedAttackPortion( const CAttackPortion &a, const CRay &ray
 			tmpAttackPortion.nK -= GetAPASubstraction( i->enter.fT, i->exit.fT, pArmor );
 			if ( tmpAttackPortion.nK <= 0 )
 				return;	// the bullet got stuck, no need to damage anything further
-			if ( bDrawExit && i->exit.fT > 0 && i->exit.fT < N_WEAPONTRAIL_MAXDISTANCE )
+			if ( bDrawExit && i->exit.fT > 0 && i->exit.fT < fMaxRange )
 				pTrails->push_back( STrailPoint( i->nUserID, ray.ptDir, ray.Get( i->exit.fT ), tmpAttackPortion, 0, i->pSrc->pUserData, pArmor, -i->exit.ptNormal, i->pSrc->nFloor ) );
 		}
 	}
-	pTrails->push_back( STrailPoint( 0, ray.ptDir, ray.Get( N_WEAPONTRAIL_MAXDISTANCE ), tmpAttackPortion, 0, 0, 0, CVec3(0,0,1), 100 ) );
+	pTrails->push_back( STrailPoint( 0, ray.ptDir, ray.Get( fMaxRange ), tmpAttackPortion, 0, 0, 0, CVec3(0,0,1), 100 ) );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 EAttackResult CGame::ProcessThrowingAttackPortion( CAttackPortion *pA, IAttackable *pTarget, NDb::CRPGArmor *pArmor, int nUserID )
 {
 	if ( pArmor == NDb::GetArmor( NDb::N_HUMAN_BODY_ARMOR ) )
 	{
-		pTarget->ProcessAttack( nUserID, pA, pArmor );
+		pTarget->ProcessAttack( 0, nUserID, pA, pA->rTtrajectory.ptDir, pArmor );
 		return AR_BOUNCE_BODY;
 	}
 	// Foliage
@@ -503,7 +506,7 @@ EAttackResult CGame::ProcessThrowingAttackPortion( CAttackPortion *pA, IAttackab
 	// Glass
 	if ( pArmor->pMaterial->nDR == 0 )
 	{
-		pTarget->ProcessAttack( nUserID, pA, pArmor );
+		pTarget->ProcessAttack( 0, nUserID, pA, pA->rTtrajectory.ptDir, pArmor );
 		return AR_IGNORE;
 	}
 	// Wood
@@ -640,19 +643,21 @@ int GetHitCover( const NWorld::CUnit *pAttacker, CCoverInfo *pCover )
 	return nHitCover;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail @0x2b52e0/@0x2b5090: both take the burst bullet index and thread it into the calcers
+// (the Jan03 mission-side bullet cursor is gone).
 int GetAttackerTileToHit( const NWorld::CUnit *pAttacker, const CVec3 ptTarget, int nExtraAP,
-	NAI::ETileHitLocation eHitLocation, CCoverInfo *pCover, bool bFirstRound )
+	NAI::ETileHitLocation eHitLocation, CCoverInfo *pCover, bool bFirstRound, int nBullet )
 {
 	int nHitCover = GetHitCover( pAttacker, pCover );
 	int nDistance = fabs(pAttacker->GetPosition().GetCP() - ptTarget ) / FP_GRID_STEP;
 	CVec3 ptAttacker = pAttacker->GetPosition().GetCenter();
 	//
 	return NRPG::GetTileToHit( pAttacker, pAttacker->GetPose(), nDistance, ptAttacker,
-		ptTarget, eHitLocation, nExtraAP, nHitCover, bFirstRound );
+		ptTarget, eHitLocation, nExtraAP, nHitCover, bFirstRound, CVec3(1,1,1), nBullet );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 int GetAttackerToHit( const NWorld::CUnit *pAttacker, NWorld::CUnit *pTarget, int nExtraAP,
-	NAI::EHitLocation eHL, const vector<int> &accessibleHLs, CCoverInfo *pCover, bool bFirstRound )
+	NAI::EHitLocation eHL, const vector<int> &accessibleHLs, CCoverInfo *pCover, bool bFirstRound, int nBullet )
 {
 	ASSERT(pCover);
 	if ( !IsValid( pTarget ) )
@@ -666,7 +671,7 @@ int GetAttackerToHit( const NWorld::CUnit *pAttacker, NWorld::CUnit *pTarget, in
 	bool bBackStab = !pTarget->IsUnitAudible( pAttacker ) && !pTarget->IsUnitVisible( pAttacker );
 	return NRPG::GetToHit( pAttacker, pAttacker->GetPose(), nDistance, ptAttacker,
 		pTarget->GetPosition().pos, eHL, nExtraAP,
-		pTarget, accessibleHLs, nHitCover, bFirstRound, CVec3( 1, 1, 1 ), bBackStab );
+		pTarget, accessibleHLs, nHitCover, bFirstRound, CVec3( 1, 1, 1 ), bBackStab, nBullet );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // Used only for inteface tasks. Returns not exactly correct value.
@@ -721,12 +726,12 @@ int CGame::GetCompositeToHit( NWorld::CUnit *pAttacker,
 	}
 	int nToHit = 0;
 	int nRof = pRealAttacker->GetBulletsQuantityInShot();
-	pRealAttacker->StartAttack();
+	// retail @0x2b5ee0: the burst preview passes the LOOP INDEX as the bullet number (no
+	// mission-side StartAttack/NextBullet cursor exists in retail).
 	for ( int i = 0; i < nRof; ++i )
 	{
-		nToHit += GetAttackerToHit( pAttacker, pTarget, pAttacker->GetCarefulShotExtraAP(), 
-			eHL, accessibleHLs, pCover, bFirstTurn );
-		pRealAttacker->NextBullet();
+		nToHit += GetAttackerToHit( pAttacker, pTarget, pAttacker->GetCarefulShotExtraAP(),
+			eHL, accessibleHLs, pCover, bFirstTurn, i );
 	}
 	nToHit /= nRof;
 	pRealAttacker->PrintLog( true );
@@ -815,10 +820,10 @@ static int GetRandomForToHit( const NWorld::CUnit *pAttacker )
 	return nLastRndForToHit = nRnd;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-float CheckToHit( NWorld::CUnit *pAttacker, NWorld::CUnit *pTarget, int nExtraAP, NAI::EHitLocation eHL, 
-	const vector<int> &accessibleHLs, CCoverInfo *pCover, bool bFirstRound, int *nToHit )
+float CheckToHit( NWorld::CUnit *pAttacker, NWorld::CUnit *pTarget, int nExtraAP, NAI::EHitLocation eHL,
+	const vector<int> &accessibleHLs, CCoverInfo *pCover, bool bFirstRound, int *nToHit, int nBullet )
 {
-	*nToHit = GetAttackerToHit( pAttacker, pTarget, nExtraAP, eHL, accessibleHLs, pCover, bFirstRound );
+	*nToHit = GetAttackerToHit( pAttacker, pTarget, nExtraAP, eHL, accessibleHLs, pCover, bFirstRound, nBullet );
 	csRPG << "\tToHit = " << *nToHit;
 	int nCheck = GetRandomForToHit( pAttacker );
 	csRPG << "\tCheck = " << nCheck << " Hit: " << bool(nCheck < *nToHit) << "\n";
@@ -826,9 +831,9 @@ float CheckToHit( NWorld::CUnit *pAttacker, NWorld::CUnit *pTarget, int nExtraAP
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 float CheckTileToHit( NWorld::CUnit *pAttacker, const CVec3 ptTarget, int nExtraAP,
-	NAI::ETileHitLocation eHitLocation, CCoverInfo *pCover, bool bFirstRound, int *nToHit )
+	NAI::ETileHitLocation eHitLocation, CCoverInfo *pCover, bool bFirstRound, int *nToHit, int nBullet )
 {
-	*nToHit = GetAttackerTileToHit( pAttacker, ptTarget, nExtraAP, eHitLocation, pCover, bFirstRound );
+	*nToHit = GetAttackerTileToHit( pAttacker, ptTarget, nExtraAP, eHitLocation, pCover, bFirstRound, nBullet );
 	csRPG << "\tTileToHit = " << *nToHit;
 	int nCheck = GetRandomForToHit( pAttacker );
 	csRPG << "\tCheck = " << nCheck << " Hit: " << bool(nCheck < *nToHit) << "\n";

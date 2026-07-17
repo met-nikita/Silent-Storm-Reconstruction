@@ -152,15 +152,18 @@ static void InitializeIdleAnimations()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CHeadAnimator
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CHeadAnimator::CHeadAnimator( CFuncBase<STime> *_pTime, NDb::CHead *_pDbHead ): pTime(_pTime), pDbHead(_pDbHead)
+// release ctor @0x265580: (time node, mesh node, IDLE_NONE). This convenience overload resolves the
+// shared base-pack mesh node from the DB record first (what retail's CHeadInfo ctor @0x2656f0 does
+// before handing CHeadInfo::pMesh to the animator).
+CHeadAnimator::CHeadAnimator( CFuncBase<STime> *_pTime, NDb::CHead *_pDbHead ): pTime(_pTime)
 {
-	pHead = shareHeads.Get( pDbHead->GetRecordID() );
+	pHead = shareHeads.Get( _pDbHead->GetRecordID() );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// Static baked head: pHead is the CFaceGenMeshHolder (CreateHeadInfo's morph bake) instead of the shared
-// base mesh; pDbHead stays null (only the ctor used it). bStatic routes Recalc to the whole-head morph
-// branch sourced from the holder's pLSAnimators[0]. (retail static CHeadAnimator branch @0x2cd7f0.)
-CHeadAnimator::CHeadAnimator( CFuncBase<STime> *_pTime, CPtrFuncBase<CHeadMeshInfo> *_pStaticMesh ): pTime(_pTime), bStatic(true)
+// Baked static head: pHead is the CFaceGenMeshHolder (CreateHeadInfo's morph bake) instead of the shared
+// base mesh. No flag -- the holder publishes ONE whole-head animator covering all real vertices, which
+// the per-segment Recalc loop (retail @0x265a30) processes in a single iteration.
+CHeadAnimator::CHeadAnimator( CFuncBase<STime> *_pTime, CPtrFuncBase<CHeadMeshInfo> *_pStaticMesh ): pTime(_pTime)
 {
 	pHead = _pStaticMesh;
 }
@@ -206,10 +209,6 @@ void CHeadAnimator::PlaySequence( NDb::CSequence *pDbSeq, NDb::CSequence *pDbExp
 			s.bIdle = false;
 			s.bMask = false;
 			sequences.push_back( s );
-			// legacy dev-format mirror (save tags 5/6/7; see the operator& note in LSHead.h)
-			pSequence = pNode;
-			tStart = _tStart;
-			bCycle = _bCycle;
 		}
 	}
 	// release @0x265890 second leg: the expression MASK entry (same tStart/bCycle, bMask=true)
@@ -230,7 +229,7 @@ void CHeadAnimator::PlaySequence( NDb::CSequence *pDbSeq, NDb::CSequence *pDbExp
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // release @0x2654d0: prune every NON-idle entry (spoken/mask sequences); the armed ambient idles keep
-// playing. Also clears the legacy dev-format mirror.
+// playing.
 void CHeadAnimator::StopSequence()
 {
 	for ( vector<SSequence>::iterator it = sequences.begin(); it != sequences.end(); )
@@ -240,9 +239,6 @@ void CHeadAnimator::StopSequence()
 		else
 			++it;
 	}
-	pSequence = 0;
-	tStart = 0;
-	bCycle = false;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // release @0x265520: on an idle-mode CHANGE drop the death mask and prune the armed idle entries, so
@@ -262,14 +258,32 @@ void CHeadAnimator::SetIdleType( EIdleType e )
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// release @0x265a30: the animator IS the head-mesh generator -- one pass produces the head CObjectInfo
+// into the inherited pValue. Order exactly as retail: refresh the mesh source, sequence maintenance
+// (mask pruning, expiry, idle arming, death-mask freeze), the LifeStudio render into the vertex
+// positions (ClearAllMacroMuscles -> RenderMacroMuscles -> ComputePhysics -> FillUnused -> Process),
+// then the geometry bake -- copys[] seam duplication, the x0.014 model scale, and the smoothing-range
+// normal accumulation (CalcHeadGeometry @0x265100) plus the per-vertex normal/texU/texV basis
+// (CalcHeadVectors @0x264ee0; float math here where retail packs the same values through its MMX
+// 1024-fixed-point pipeline into the 32-byte compact SVertex) -- and finally
+// pValue = new CObjectInfo + AssignFast. The output is MODEL-space: the render part's pTransform
+// (the CreateLSHead CMSRNode) places it, exactly like retail.
 void CHeadAnimator::Recalc()
 {
 	CHeadMeshInfo *pMesh = pHead->GetValue();
 	if ( !pMesh )
-		return;   // holder rebuild threw / stale stream -> keep the prior frame rather than deref null
-	value.mesh.resize( pMesh->UVs.size() );
-	value.normals.resize( pMesh->UVs.size() );
-	memset( &value.normals[0], 0, sizeof(CVec3) * value.normals.size() );
+		return;   // dev CFaceGenMeshHolder can publish null on a failed rebake (retail's blocking loader cannot); pValue stays null -> the RefreshObjectInfo wait re-Recalcs
+	int nVerts = pMesh->UVs.size();
+	// working position/normal buffers (retail builds them inside its SData verts; split here because
+	// LifeStudio Process writes tightly-packed CVec3 positions -- stride 3 floats)
+	vector<CVec3> mesh, normals;
+	mesh.resize( nVerts );
+	normals.resize( nVerts );
+	if ( nVerts > 0 )
+	{
+		memset( &mesh[0], 0, sizeof(CVec3) * nVerts );
+		memset( &normals[0], 0, sizeof(CVec3) * nVerts );
+	}
 
 	STime t = pTime->GetValue();
 
@@ -343,13 +357,7 @@ void CHeadAnimator::Recalc()
 		}
 		else
 		{
-			// expired / valueless: drop it (and the legacy dev-format mirror when it was the spoken one)
-			if ( !it->bIdle )
-			{
-				pSequence = 0;
-				tStart = 0;
-				bCycle = false;
-			}
+			// expired / valueless: drop it
 			it = sequences.erase( it );
 		}
 	}
@@ -383,130 +391,98 @@ void CHeadAnimator::Recalc()
 	// TransformableGDP (Res\FaceGenHead.gdp) and morphed by the slider tensions -- NOT from the base "Heads"-pack
 	// animators (whose geometry the FaceGenHead.mmt deltas were NOT authored against -> applying them there did
 	// nothing visible). pHeadTransformInfo owns that rig + its Generate()'d output animator; Process IT into
-	// value.mesh. The base pack still supplies the UVs/indices/tris/copys topology used by CHead::Recalc below.
+	// the positions. The base pack still supplies the UVs/indices/tris/copys topology baked below.
 	int nReal = 0;
 	for ( int i = 0; i < pMesh->nVertices.size(); ++i )
 		nReal += pMesh->nVertices[i];
-	if ( bStatic )
+	LifeStudioHeadAPI::IAnimator *pMorph = IsValid( pHeadTransformInfo ) ? pHeadTransformInfo->GetMorphedAnimator() : 0;
+	if ( pMorph && pMorph->VerticesCount() == nReal && nReal > 0 )
 	{
-		// Baked STATIC head (advanced FaceGen commit): the committed morph is the single whole-head GDP animator
-		// pLSAnimators[0], reloaded from the saved stream. Unlike the live editor pMorph (Generate()'d THIS frame
-		// by CHeadTransformInfo::Recalc), a just-Load()ed animator has computed nothing, so it must
-		// ClearAllMacroMuscles + ComputePhysics before Process -- exactly retail CHeadAnimator::Recalc @0x265a30
-		// (every mesh animator: ClearAllMacroMuscles -> ComputePhysics -> FillUnused -> Process). The morph rides in
-		// the GDP base geometry, not in macro-muscle tensions, so clearing them is safe. One animator over ALL UVs
-		// (never the per-segment loop, which would fill only segment 0 of a single-stream baked mesh).
-		// NB: extract the raw pointer with operator T*() via a plain assignment -- do NOT use a
-		// `cond ? 0 : pLSAnimators[0]` ternary: that yields a temporary CLSPtr<IAnimator> (the only common
-		// type of `0` and CLSPtr), whose destructor calls ptr->Destroy() on the animator the vector STILL
-		// owns -> use-after-free (latent since a6fb87c; the texture rig's allocations now reuse the freed
-		// memory and make it a deterministic crash in CHeadAnimator::Recalc). The non-static fallback below
-		// uses this same direct-assignment form and never crashed.
-		LifeStudioHeadAPI::IAnimator *pStatic = 0;
-		if ( !pMesh->pLSAnimators.empty() )
-			pStatic = pMesh->pLSAnimators[0];
-		if ( pStatic && pStatic->VerticesCount() == nReal && nReal > 0 )
-		{
-			pStatic->ClearAllMacroMuscles();
-			// release @0x265a30 renders every playing sequence into every mesh animator before
-			// ComputePhysics -- the baked hero head blinks/lip-syncs exactly like a base head (the
-			// morph rides in the GDP base geometry; sequence macro-muscles layer on top).
-			for ( int r = 0; r < frames.size(); ++r )
-				frames[r].pSeq->pLSSequence->RenderMacroMuscles( pStatic, frames[r].nFrameTime );
-			pStatic->ComputePhysics();
-			pStatic->FillUnused( true );
-			pStatic->Process( &(value.mesh[0].x), 3 );
-		}
-		// (count mismatch -> leave value.mesh zeroed rather than corrupt memory; never the per-segment path)
+		// Whole head = the single live morphed GDP animator (positions); base pack supplies topology only.
+		// pMorph was Generate()'d this frame (CHeadTransformInfo::Recalc) with the slider tensions.
+		// retail @0x260000 idle leg: ClearAllMacroMuscles (vtbl+0x38) BEFORE rendering the sequence, then
+		// one ComputePhysics. The sliders are already BAKED into the Generate()'d vertices, so the clear
+		// wipes only the previous tick's sequence tensions -- without it they ACCUMULATE render-over-render
+		// once the clock ticks per frame (runaway physics solve = the smeared/collapsed FaceGen face).
+		pMorph->ClearAllMacroMuscles();
+		for ( int r = 0; r < frames.size(); ++r )
+			frames[r].pSeq->pLSSequence->RenderMacroMuscles( pMorph, frames[r].nFrameTime );
+		if ( !frames.empty() )
+			pMorph->ComputePhysics();
+		pMorph->FillUnused( true );
+		pMorph->Process( &(mesh[0].x), 3 );
 	}
 	else
 	{
-		LifeStudioHeadAPI::IAnimator *pMorph = IsValid( pHeadTransformInfo ) ? pHeadTransformInfo->GetMorphedAnimator() : 0;
-		if ( pMorph && pMorph->VerticesCount() == nReal && nReal > 0 )
+		// release @0x265a30: the per-segment render over pLSAnimators. Every playing sequence (spoken +
+		// armed blinks + masks) renders its macro-muscles into every segment animator at its own
+		// sequence-local time, then ClearAllMacroMuscles -> ComputePhysics -> FillUnused -> Process.
+		// A baked static head (CFaceGenMeshHolder: ONE whole-head animator covering all real vertices)
+		// runs this same loop in a single iteration -- exactly retail, which has no static special case.
+		// NB: extract the raw pointer with a plain assignment -- do NOT use a `cond ? 0 : pLSAnimators[i]`
+		// ternary: that yields a temporary CLSPtr<IAnimator> whose destructor Destroy()s the animator the
+		// vector still owns -> use-after-free.
+		int nVert = 0;
+		for ( int i = 0; i < pMesh->pLSAnimators.size(); ++i )
 		{
-			// Whole head = the single live morphed GDP animator (positions); base pack supplies topology only.
-			// pMorph was Generate()'d this frame (CHeadTransformInfo::Recalc) with the slider tensions.
-			// release layers the playing sequences (armed ambient idles / expressions) ON TOP of the morph
-			// -- RenderMacroMuscles adds to the tensions Generate() installed (NO ClearAllMacroMuscles here,
-			// that would wipe the sliders), then one re-solve. This is what makes the AdvFaceGen preview
-			// head blink/emote instead of sitting frozen.
+			LifeStudioHeadAPI::IAnimator *pLSAnimator = pMesh->pLSAnimators[i];
+			pLSAnimator->ClearAllMacroMuscles();
 			for ( int r = 0; r < frames.size(); ++r )
-				frames[r].pSeq->pLSSequence->RenderMacroMuscles( pMorph, frames[r].nFrameTime );
-			if ( !frames.empty() )
-				pMorph->ComputePhysics();
-			pMorph->FillUnused( true );
-			pMorph->Process( &(value.mesh[0].x), 3 );
-		}
-		else
-		{
-			// Fallback: non-transformable head (or a GDP/base vertex-count mismatch) -> the base-pack idle render.
-			int nVert = 0;
-			for ( int i = 0; i < pMesh->pLSAnimators.size(); ++i )
-			{
-				LifeStudioHeadAPI::IAnimator *pLSAnimator = pMesh->pLSAnimators[i];
-				pLSAnimator->ClearAllMacroMuscles();
-				// release @0x265a30: every playing sequence (spoken + armed blinks + masks) renders its
-				// macro-muscles into every segment animator at its own sequence-local time.
-				for ( int r = 0; r < frames.size(); ++r )
-					frames[r].pSeq->pLSSequence->RenderMacroMuscles( pLSAnimator, frames[r].nFrameTime );
-				pLSAnimator->ComputePhysics();
-				pLSAnimator->FillUnused( true );
-				pLSAnimator->Process( &(value.mesh[nVert].x), 3 );
-				nVert += pMesh->nVertices[i];
-			}
+				frames[r].pSeq->pLSSequence->RenderMacroMuscles( pLSAnimator, frames[r].nFrameTime );
+			pLSAnimator->ComputePhysics();
+			pLSAnimator->FillUnused( true );
+			pLSAnimator->Process( &(mesh[nVert].x), 3 );
+			nVert += pMesh->nVertices[i];
 		}
 	}
 
+	// ==== release CalcHeadGeometry @0x265100 =====================================================
+	// (1) seam duplicates: copy the POSITION of each source vertex onto its smoothing-group twins.
 	for ( int i = 0; i < pMesh->copys.size(); ++i )
-		value.mesh[ pMesh->copys[i].y ] = value.mesh[ pMesh->copys[i].x ];
+		mesh[ pMesh->copys[i].y ] = mesh[ pMesh->copys[i].x ];
+
+	// (2) bake the model scale INTO the geometry (retail const 0x3c656042 == 0.014f). The CreateLSHead
+	// CMSRConvert scale node is (1,1,1) in retail -- the scale lives HERE, never in both places.
+	for ( int i = 0; i < nVerts; ++i )
+		mesh[i] *= 0.014f;
 
 	// NB (nose-tip-at-origin, 2026-07-02): a runtime session with the origin-vertex diagnostic here
-	// showed value.mesh is CLEAN while the on-screen nose still shows one vertex at the model
+	// showed the position buffer is CLEAN while the on-screen nose still shows one vertex at the model
 	// center -- the defect is DOWNSTREAM of NLSHead (AssignFast -> CreateDynamicGeometry ->
 	// GfxBuffers vertex packer). Offline audits (all 134 retail heads + a real-DLL harness over all
-	// four fill branches) also cleared this stage. Hunt there next; nose tip = source vertex 117.
+	// fill branches) also cleared this stage. Hunt there next; nose tip = source vertex 117.
 
+	// (3) per smoothing range [nFrom, tris[i]): the face normal of the range's FIRST triangle,
+	// accumulated into every index of the range (the extra indices are the smoothing duplicates).
+	// Retail accumulates in MMX shorts (face normal x1024, ROUND-quantized); float accumulation here
+	// normalizes to the same vectors without the fixed-point quantization.
 	int nFrom = 0;
 	int nTo = 0;
 	for ( int i = 0; i < pMesh->tris.size(); ++i )
 	{
 		nTo = pMesh->tris[i];
-		CVec3 &v1 = value.mesh[ pMesh->indices[nFrom] ];
-		CVec3 &v2 = value.mesh[ pMesh->indices[nFrom+1] ];
-		CVec3 &v3 = value.mesh[ pMesh->indices[nFrom+2] ];
+		CVec3 &v1 = mesh[ pMesh->indices[nFrom] ];
+		CVec3 &v2 = mesh[ pMesh->indices[nFrom+1] ];
+		CVec3 &v3 = mesh[ pMesh->indices[nFrom+2] ];
 		CVec3 normal = (v2 - v1) ^ (v3 - v1);
 		Normalize(&normal);
 		for ( int j = nFrom; j < nTo; ++j )
-			value.normals[ pMesh->indices[j] ] += normal;
+			normals[ pMesh->indices[j] ] += normal;
 		nFrom = nTo;
 	}
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-// CHead
-////////////////////////////////////////////////////////////////////////////////////////////////////
-void CHead::Recalc()
-{
-	CHeadMeshInfo *pMesh = pHead->GetValue();
-	const SHeadFrame &frame = pAnimator->GetValue();
-	int nVertices = frame.mesh.size();
-	ASSERT( nVertices == pMesh->UVs.size() );
-	if ( nVertices > pMesh->UVs.size() )
-		nVertices = pMesh->UVs.size();
-	pValue = new NGScene::CObjectInfo;
+
+	// ==== release @0x265a30 tail: assemble the CObjectInfo ======================================
 	NGScene::CObjectInfo::SData res;
-	res.verts.resize( nVertices );
-	NGScene::SVertex *pRes = &res.verts[0];
+	res.verts.resize( nVerts );
 	// The head pack's indices/tris are the NORMAL-SMOOTHING data: each poly range is
 	// [a,b,c, +every smoothing-group duplicate of a/b/c], and tris[] holds cumulative END
 	// offsets with no leading 0. That layout is only meant for the face-normal accumulation
-	// above (CalcHeadGeometry, release @0x265100). The renderer's SPolygonIndices fan-walker
-	// expects an N+1 sentinel table of pure triangles, so feeding the raw data merged the
-	// first two triangles into one fan (hole on the nose of every head) and emitted the
-	// duplicate-vertex spokes as coincident triangles with the seam's other UVs (z-fighting).
-	// Release derives a TRUE triangle list instead -- CHeadMeshLoader::Recalc @0x266070
-	// builds trueIndices/trueTris = leading 0 + the first 3 indices of each range, and
-	// CHeadMeshTransformer::Recalc @0x25fab0 renders THOSE. Build them inline here so both
-	// mesh sources (base pack + baked FaceGen heads) get the clean list.
+	// above (CalcHeadGeometry @0x265100). The renderer's SPolygonIndices fan-walker expects
+	// an N+1 sentinel table of pure triangles; release stores that TRUE triangle list as
+	// CHeadMeshInfo::trueIndices/trueTris (built once by CHeadMeshLoader::Recalc @0x266070 and
+	// copied by Recalc @0x265a30). The dev CHeadMeshInfo carries no trueIndices/trueTris, so the
+	// identical list is derived inline here -- same bytes, both mesh sources (base pack + baked
+	// FaceGen holders) covered.
 	res.geometry.indices.clear();
 	res.geometry.polys.clear();
 	res.geometry.polys.push_back( 0 );				// release trueTris leading sentinel
@@ -520,12 +496,13 @@ void CHead::Recalc()
 		nBase = pMesh->tris[k];
 	}
 
-	const SFBTransform &trans = pParent->GetValue();
-
-	for ( int i = 0; i < nVertices; ++i, ++pRes )
+	// Per-vertex normal + tangent basis (release CalcHeadVectors @0x264ee0, float form of its MMX
+	// fixed-point: texU = normalize(n.y, -n.x, 0), texV = texU ^ n). MODEL-space -- the part's
+	// pTransform (CMSRNode) places the head; the TT_SIMPLE combiner path rotates all three vectors.
+	NGScene::SVertex *pRes = res.verts.empty() ? 0 : &res.verts[0];
+	for ( int i = 0; i < nVerts; ++i, ++pRes )
 	{
-		CVec3 normal;
-		trans.forward.RotateVector( &normal, frame.normals[i] );
+		CVec3 normal = normals[i];
 		Normalize( &normal );
 		CVec3 b1 = CVec3( 1, 0, 0 ), b2;
 		if ( fabs2(normal.x) > 1e-12f )
@@ -534,13 +511,17 @@ void CHead::Recalc()
 			Normalize( &b1 );
 		}
 		b2 = b1 ^ normal;
-		// fill vertex
-		trans.forward.RotateHVector( &(pRes->pos), frame.mesh[i] );
-		pRes->normal = normal;
+		// fill vertex -- packed into the 32-byte compact SVertex (release CalcHeadVectors
+		// @0x264ee0 produces these same packed bytes out of its MMX 1024-fixed-point
+		// pipeline; float math + CalcCompactVector packs to the same 8-bit lanes up to
+		// the fixed-point quantization already documented above)
+		pRes->pos = mesh[i];
+		NGfx::CalcCompactVector( &pRes->normal, normal );
 		pRes->tex = pMesh->UVs[i];
-		pRes->texU = b1;
-		pRes->texV = b2;
+		NGfx::CalcCompactVector( &pRes->texU, b1 );
+		NGfx::CalcCompactVector( &pRes->texV, b2 );
 	}
+	pValue = new NGScene::CObjectInfo;
 	pValue->AssignFast( res );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1167,10 +1148,13 @@ CHeadInfo* CHeadTransformInfo::CreateHeadInfo()
 using namespace NLSHead;
 REGISTER_SAVELOAD_CLASS( 0x10942150, CHeadBound )
 REGISTER_SAVELOAD_CLASS( 0x10942151, CHeadAnimator )
-REGISTER_SAVELOAD_CLASS( 0x10942152, CHead )
+// (0x10942152 "CHead" was a dev-only id -- retail's classreg has no such class; the dev CHead split
+// node is gone, the animator itself is the CPtrFuncBase<CObjectInfo> generator like retail.)
 REGISTER_SAVELOAD_CLASS( 0x11042141, CHeadMeshLoader )
 REGISTER_SAVELOAD_CLASS( 0x11042142, CHeadSequenceLoader )
-REGISTER_SAVELOAD_CLASS( 0x11042143, CFaceGenMeshHolder )
-REGISTER_SAVELOAD_CLASS( 0x11042144, CFaceGenTextureHolder )
+REGISTER_SAVELOAD_CLASS( 0xA2543121, CFaceGenMeshHolder )
+REGISTER_SAVELOAD_CLASS( 0xA2543122, CFaceGenTextureHolder )
 REGISTER_SAVELOAD_CLASS( 0xA2543120, CHeadInfo )
 REGISTER_SAVELOAD_CLASS( 0xA1743120, CHeadTransformInfo )
+// retail saveload id (serialization-convergence W2; operator& @0x264540 landed in W3 -- LSHead.h)
+REGISTER_SAVELOAD_CLASS( 0xA1743122, CHeadTextureTransformer )

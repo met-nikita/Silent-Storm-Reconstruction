@@ -9,7 +9,6 @@
 #include "wUICommands.h"     // NWorld::CUICmdAIUnitWillMove (the AI "unit will move" UI hint)
 //
 #include "aiUnit.h"
-#include "aiSignal.h"
 #include "aiState.h"
 #include "aiPlayer.h"
 #include "aiUnitState.h"      // SAIUnitState (the per-unit threat tracker: pEnemy / IsModified)
@@ -192,6 +191,9 @@ CAICommander::CAICommander( NWorld::CWorld *_pWorld, NWorld::CPlayer *_pPlayer )
 	// AI-convergence: the commander OWNS the embedded SAIState by value (tag7) -- constructed above with a
 	// store-only ctor (world + this, no half-built-member deref). Seed the units-tracker's target player.
 	unitsTracker.SetPlayer( pPlayer );
+	// retail ctor @0x35a10 stores its player arg into state.pPlayer (state+4) at construction; SetPlayer
+	// @0x33e60 never refreshes it later. Mirror that here (execution order: member pPlayer is already set).
+	state.pPlayer = pPlayer;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // retail CAICommander::SetPlayer @0x33e60: pPlayer + unitsTracker.pPlayer, nothing else.
@@ -821,19 +823,8 @@ void CAICommander::UnLockAllObjects()
 	LockedObjects.clear();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// RETAIL PARITY (2026-07-10): the whole NAI signal layer is a Jan03 dev-ism -- retail Game.exe has ZERO
-// NAI::*Signal* functions (inventory-verified). Retail routes every stimulus this loop modeled through the
-// (ported) CAIEventTracker events instead: heard shot/step -> OnHear* -> AddPossibleEnemy -> the HUNT rung;
-// bullet/hit -> OnBullet/OnAttack -> enemy events; corpse -> CheckForVisibleCorpses @0xab7a0 -> CAICorpseEvent
-// (that scan's range query is still a dev stub -- flagged separately). Left LIVE, this loop was a combat
-// killer: CAISoundSignal (wBullet.cpp shot sound, radius 3, NO self/player exclusion) made a shooter detect
-// HIS OWN muzzle sound -> Process -> SetLogic(turn-to-face route) -> his ATTACK logic destroyed and the
-// in-flight CCmdShootObject executor cancelled mid-shot (the GFirst runner: fires once, stares sideways,
-// dead for the rest of the mission -- the route logic never re-thinks and the reaction pump sees no state
-// change). The manager still Segment()s (expiring queued one-segment signals); it just no longer acts.
-void CAICommander::ProcessAISignals()
-{
-}
+// (W5: the dev NAI signal layer was REMOVED outright -- retail has ZERO NAI::*Signal* symbols; retail routes
+// every modeled stimulus through the ported CAIEventTracker events: OnHear*/OnBullet/OnAttack/CheckForVisibleCorpses.)
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // @0x33eb0: retail's O(1) lookup through the worldToAIUnit cache (was a dev O(n) linear scan over `units`).
 // The cache is kept in lockstep with `units` at every commander-units mutation (OnUnitAdded / RemoveUnit /

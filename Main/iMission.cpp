@@ -36,6 +36,7 @@
 #include "iMission.h"
 #include "iLoading.h"		// NGame::SetLoadingImage / ShowLoadingScreen -- per-mission splash before world load
 #include "iInterMission.h"
+#include "iMainMenu.h"		// CICMainMenu -- retail @0x20a850: mission exit with no chapter/global map
 #include "iGlobalMap.h"
 #include "iChapterMap.h"
 #include "iSaveLoad.h"
@@ -86,36 +87,26 @@ const int
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 static bool bShowAllCheat = false;
 static float fDefaultCameraFOV = N_FOV;
-// iMissionIC default-camera tuning record. The release widened ICamera::SCameraLimits (32->56) to
-// carry these per-default camera-feel fields. ICamera::SCameraLimits is a SHARED, SERIALIZED type
-// (CBaseCamera::sLimits is written via f.Add in operator& as a raw sizeof-blob -- see Camera.cpp:20
-// and BasicChunk1.h:139), and that widening is the still-deferred "SCameraLimits 32->56 ripple" leg.
-// To stay surgical and not change that serialized save layout, the extra release fields live in this
-// module-local derived record used only by the mission_camera_* console setters below. Functional
-// parity (identical observable command behaviour), not byte-exact with the retail 56-byte struct.
-struct SDefaultCameraTuning : public ICamera::SCameraLimits
+// NGame::defaultCameraLimits / defaultCameraSoftLimits -- the module default-camera records the
+// mission_camera_* console setters below mutate. The SCameraLimits 32->56 ripple LANDED (Camera.h):
+// the type now IS the retail widened 56-byte record, so the old module-local SDefaultCameraTuning
+// derived hedge is gone. Values seeded from the retail .data image (Game.exe @0x57c8d8 hard /
+// @0x57c910 soft, identical to the iBase pair @0x57a970/@0x57a9a8): hard {7, 55, -1.5, -0.1},
+// soft {10, 50, -1.5, -0.1}; the tuning tail equals the SCameraLimits ctor defaults (attenuation 1,
+// minHeight 4, scrollZoomAccel 1.2, scrollSpeed 1, zoomAccel 5, zoomSpeed 0.1, yawSpeed 1,
+// yawZoomAccel 1, pitchSpeed 1), bMovie false. The scroll-zone rect is NOT part of the record any
+// more -- it lives on the camera (SetZoneLimits) and comes from the world's map safe zone.
+static ICamera::SCameraLimits MakeDefaultCameraLimits( float fMinRod, float fMaxRod, float fMinPitch, float fMaxPitch )
 {
-	bool  bMovie;
-	float fAttenuation;
-	float fMinHeight;
-	float fScrollZoomAcceleration;
-	float fScrollSpeed;
-	float fZoomAcceleration;
-	float fZoomSpeed;
-	float fYawSpeed;
-	float fYawZoomAcceleration;
-	float fPitchSpeed;
-
-	SDefaultCameraTuning()
-		: bMovie( false ), fAttenuation( 1 ), fMinHeight( 0 ), fScrollZoomAcceleration( 1 ), fScrollSpeed( 1 ),
-		  fZoomAcceleration( 1 ), fZoomSpeed( 1 ), fYawSpeed( 1 ), fYawZoomAcceleration( 1 ), fPitchSpeed( 1 ) {}
-	SDefaultCameraTuning( float _fMinRod, float _fMaxRod, float _fMinPitch, float _fMaxPitch, const CTRect<float> &_sZoneLimit )
-		: ICamera::SCameraLimits( _fMinRod, _fMaxRod, _fMinPitch, _fMaxPitch, _sZoneLimit ),
-		  bMovie( false ), fAttenuation( 1 ), fMinHeight( 0 ), fScrollZoomAcceleration( 1 ), fScrollSpeed( 1 ),
-		  fZoomAcceleration( 1 ), fZoomSpeed( 1 ), fYawSpeed( 1 ), fYawZoomAcceleration( 1 ), fPitchSpeed( 1 ) {}
-};
-static SDefaultCameraTuning defaultCameraLimits( 10, 50, -1.5f, -0.1f, CTRect<float>( -1000, -1000, 1000, 1000 ) );
-static SDefaultCameraTuning defaultCameraSoftLimits( 10, 50, -1.5f, -0.1f, CTRect<float>( -1000, -1000, 1000, 1000 ) );
+	ICamera::SCameraLimits sLimits;
+	sLimits.fMinRod = fMinRod;
+	sLimits.fMaxRod = fMaxRod;
+	sLimits.fMinPitch = fMinPitch;
+	sLimits.fMaxPitch = fMaxPitch;
+	return sLimits;
+}
+static ICamera::SCameraLimits defaultCameraLimits = MakeDefaultCameraLimits( 7, 55, -1.5f, -0.1f );
+static ICamera::SCameraLimits defaultCameraSoftLimits = MakeDefaultCameraLimits( 10, 50, -1.5f, -0.1f );
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 static void CommandSurrender( const string &szID, const vector<wstring> &paramsSet, void *pContext );
 static void CommandTypeCameraParams( const string &szID, const vector<wstring> &paramsSet, void *pContext );
@@ -131,10 +122,13 @@ static void VarCheatAP( const string &szID, const NGlobal::CValue &sValue, void 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CMission
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// W4.2: the base-class members (bPause/bHideInterface/nLightMode/bCheatVisibility/bTutorialMode/...)
+// are initialized by the CMissionBase ctor (retail @0x1a2c70); only the CMission-side state stays here.
 CMission::CMission():
-	bHideInterface( false ), bSpecialHideInterface( false ), bPause( false ), actionsInfoSet( UA_MAXVALUE ), nPanelsState( 0 ), nFramesSameCameraPosition(0), vPrevCameraPosition(0,0,0),
-	fFOV( fDefaultCameraFOV ), eCameraType( CAMERA_PC ), nLightMode( 0 ), bFreezeCamera( false ), bTraceOk( false ),
-	bCheatVisibility(false), bTutorialMode( false ),
+	actionsInfoSet( UA_MAXVALUE ), nPanelsState( 0 ), nFramesSameCameraPosition(0), vPrevCameraPosition(0,0,0),
+	fFOV( fDefaultCameraFOV ), eCameraType( CAMERA_PC ),
+	bUpdated( false ), bForceUpdateNextFrame( false ),
+	bRealTime( false ), bHasCommands( false ), bTrackIsReady( false ), bTrackActionExecuted( false ),
 	bindCancel( "cancel" ),	bindCancelAction( "cancelaction" ),	bindContinue( "continue" ),	bindPause( "pause" ), bindMainMenu( "mainmenu" ), bindEndMission( "endmission" ), bindHideInterface( "hideinterface" ), bindSpecialHideInterface( "hideinterface_special" ), bindTrailerHideInterface( "hideinterface_trailer" ), 
 	bindHero1( "hero_1" ), bindHero2( "hero_2" ), bindHero3( "hero_3" ), bindHero4( "hero_4" ), bindHero5( "hero_5" ), bindHero6( "hero_6" ), bindSelPrev( "hero_prev" ), bindSelNext( "hero_next" ),
 	bindSnapShot( "weapon_snapshot" ), bindAimedShot( "weapon_aimedshot" ), bindCarefulShot( "weapon_carefulshot" ), bindShortBurst( "weapon_shortburst" ), bindLongBurst( "weapon_longburst" ), bindSnipeShot( "weapon_snipeshot" ), bindWeaponPrevMode( "weapon_prevmode" ), bindWeaponNextMode( "weapon_nextmode" ),
@@ -301,6 +295,11 @@ bool CMission::Initialize( int _nTemplateID, int _nVariantID, NScenario::CScenar
 		WCHAR wsString[1024];
 		swprintf( wsString, L"Player %d", nTemp );
 		playersSet[nTemp] = new CPlayerTracker( this, pGlobalGame->players[nTemp], wsString );
+		// retail @0x200690: stamp the variant's inclusive cut-floor range on each tracker's OWN
+		// camera right after creation (tracker vtbl+0x18 GetCamera -> camera vtbl+0x3c
+		// SetCutFloorRange @0xcba10; retail passes variant min / max-1 -- the same inclusive range
+		// resolved into nMinCutFloor/nMaxCutFloor above).
+		playersSet[nTemp]->GetCamera()->SetCutFloorRange( nMinCutFloor, nMaxCutFloor );
 	}
 	pActivePlayer = playersSet.front();
 	CommandState( new CStateEmpty );
@@ -315,8 +314,10 @@ bool CMission::Initialize( int _nTemplateID, int _nVariantID, NScenario::CScenar
 	else
 		SetLightMode( 0 );
 
+	// The cinematic camera (base pCamera, tag 18). Retail Initialize does NOT copy the tracker's
+	// deploy pose into it -- the deploy view IS the active player's own camera (seeded in the
+	// CPlayerTracker ctor @0x287d70); the cinematic camera only gets a pose when a script drives it.
 	SetCameraParams( CAMERA_PC, fFOV, defaultCameraLimits );
-	pCamera->SetPlacement( GetActivePlayer()->GetCamera() );
 
 	TraceCursor();
 
@@ -324,11 +325,16 @@ bool CMission::Initialize( int _nTemplateID, int _nVariantID, NScenario::CScenar
 	pMissionUI = new NUI::CMissionUI( NUI::SWindowInfo( pInterface, NUI::SPoint( 0, 0 ), NUI::SPoint( 1024, 768 ), "missionUI" ), this );
 	NUI::LoadTemplate( pMissionUI, NDb::GetUIContainer( 123 ) );
 	pMissionUI->ShowWindow( NUI::SWTYPE_SHOW );
+	// W4.2 (retail shape): the mission desktop sits at the BOTTOM of the base desktopWindowsList --
+	// retail GetDesktop @0x1a2000 returns list.back() unchecked, and base tag 23 serializes the list,
+	// so the desktop round-trips through saves without a dedicated pMissionUI tag (dev tag 49 dropped;
+	// the raw pMissionUI member above is now a transient live-session cache).
+	PushDesktop( pMissionUI );
 
 	vector<CObj<IState> > updatedStatesSet;
 	updatedStatesSet.push_back( new CStateWait() );
 	updatedStatesSet.push_back( new CStateDragItem() );
-	updatedStatesSet.push_back( new CStateUntrap() );
+	updatedStatesSet.push_back( new CStateUntrap( false ) );	// retail CMission::Initialize @0x200690: the hover-pool untrap is explicitly NON-forced
 	updatedStatesSet.push_back( new CStateUse() );
 	updatedStatesSet.push_back( new CStateTeam() );
 	updatedStatesSet.push_back( new CStateFriend() );
@@ -394,7 +400,7 @@ bool CMission::Initialize( int _nTemplateID, int _nVariantID, NScenario::CScenar
 	// Dev has NO CMissionBase split, and its CMission::InternalStep also runs the interactive frame
 	// (TraceCursor / UpdateState / pState->Step / UpdateSound) -- calling that here gave a live camera /
 	// half-sequence. So drain ONLY the world + camera commands (retail's base-step subset), not the
-	// interactive tail: ExecWorldCommands opens the movieUI letterbox (CUICmdBeginSequence -> nSequenceDepth>0
+	// interactive tail: ExecWorldCommands opens the movieUI letterbox (CUICmdBeginSequence -> nSequence>0
 	// = input block + camera lock) and builds pCmdExec from the opening CUICmdMoveCamera; one Update
 	// (transitionTime 0) settles it; then refresh the camera transform for the first frame. Also fixes
 	// the tutorial's fixed corner camera (its opening CameraSet was the same undrained command).
@@ -412,10 +418,13 @@ bool CMission::Initialize( int _nTemplateID, int _nVariantID, NScenario::CScenar
 		pCmdExec->Finished();
 		pCmdExec = 0;
 	}
-	pCamera->Update( GetTime() );
-	vCameraCP = pCamera->GetCP();
-	sCameraPos = pCamera->GetPos();
-	pCamera->GetTransform( &sTransform, GetScene()->GetScreenRect() );
+	// through the SELECTOR (@0x1a1ee0), like the InternalStep it mirrors: during the opening
+	// sequence that is the cinematic camera, else the active player's deploy camera.
+	ICamera *pInitCamera = GetCamera();
+	pInitCamera->Update( GetTime() );
+	vCameraCP = pInitCamera->GetCP();
+	sCameraPos = pInitCamera->GetPos();
+	pInitCamera->GetTransform( &sTransform, GetScene()->GetScreenRect() );
 
 	// retail @0x200690 tail: enqueue the mission-start "restart" snapshot (CICSaveRestartMission
 	// @0x20b860 -> writes "restart.sav" @0x1f6a80). Deferred through the command queue ON PURPOSE:
@@ -467,101 +476,14 @@ void CMission::Command( NWorld::CUnit *pUnit, NWorld::CCmd *pCmd, bool bInstantl
 		Command( new NWorld::CCmdSetCommand( pUnit, new NWorld::CCmdContinue ) );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CMission::StopAction()
-{
-	pActivePlayer->GetCommander()->StopAction();
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-bool CMission::IsReady() const
-{
-	// retail CMissionBase::IsReady @0x1a1e60: NOT ready while a sequence runs -> stops TraceCursor/
-	// UpdateState so units cannot be hover-highlighted / selected during a sequence. Cover BOTH the
-	// client sequence (nSequenceDepth, via CUICmdBeginSequence) AND a world-level / interrupt sequence
-	// (CWorld::IsSequence) -- a cutscene that raises only the world predicate would otherwise leave
-	// hover live.
-	if ( IsSequence() || pWorld->IsSequence() )
-		return false;
-
-	if ( !IsRealTime() && ( IsActionExecuted() || ( pWorld->GetCurrentPlayer() != pActivePlayer->GetPlayer() ) ) )
-		return false;
-
-	return true;
-}
+// W4.2: StopAction/IsReady/IsActionExecuted/IsRealTime/PauseGame/IsGamePaused, the player-tracker
+// forwards (Get/SetActivePlayer, GetPlayers, GetUnits, GetSelectedUnits, CountSelected, Select,
+// SelectNext/Prev) and the trivial accessors moved to CMissionBase (iMissionBase.cpp) -- their
+// retail bodies live on the base (@0x1a29d0/@0x1a1e60/@0x1a3e30/@0x1a1900/...).
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CMission::IsSequence() const
 {
-	return nSequenceDepth > 0;   // retail mission vtbl+0x44 (@0x1a1e60 IsReady + @0x32d520 UnitTracker::Update gate)
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-bool CMission::IsActionExecuted() const
-{
-	return pWorld->IsExecuting() || pActivePlayer->GetCommander()->HasCommands();
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-bool CMission::IsRealTime() const
-{
-	return pWorld->GetCurrentPlayer() == 0;
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-void CMission::PauseGame( bool bState )
-{
-	bPause = bState;
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-bool CMission::IsGamePaused() const
-{
-	return bPause;
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-IPlayerTracker* CMission::GetActivePlayer() const
-{
-	ASSERT( pActivePlayer );
-	return pActivePlayer;
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-void CMission::SetActivePlayer( IPlayerTracker* pPlayer )
-{
-	ASSERT( find( playersSet.begin(), playersSet.end(), pPlayer ) != playersSet.end() );
-	pActivePlayer = pPlayer;
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-void CMission::GetPlayers( vector< CPtr<IPlayerTracker> > *pPlayersSet ) const
-{
-	ASSERT( pPlayersSet );
-	pPlayersSet->clear();
-	pPlayersSet->resize( playersSet.size() );
-	for ( int nTemp = 0; nTemp < playersSet.size(); nTemp++ )
-		(*pPlayersSet)[nTemp] = playersSet[nTemp].GetPtr();
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-void CMission::GetUnits( vector< CPtr<IUnitTracker> > *pUnits ) const
-{
-	pActivePlayer->GetUnits( pUnits );
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-void CMission::GetSelectedUnits( vector< CPtr<IUnitTracker> > *pUnits ) const
-{
-	pActivePlayer->GetSelectedUnits( pUnits );
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-int CMission::CountSelected()
-{
-	return pActivePlayer->CountSelected();
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-void CMission::Select( NWorld::CUnit *pUnit, bool bAdditive )
-{
-	pActivePlayer->Select( pUnit, bAdditive );
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-void CMission::SelectNext()
-{
-	pActivePlayer->SelectNext();
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-void CMission::SelectPrev()
-{
-	pActivePlayer->SelectPrev();
+	return nSequence > 0;   // retail mission vtbl+0x44 (@0x1a1e60 IsReady + @0x32d520 UnitTracker::Update gate)
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CMission::IsUpdated() const
@@ -609,7 +531,7 @@ CObjectBase* CMission::GetStateTarget() const
 	if ( IsValid( pStateTarget ) )
 		return pStateTarget;
 
-	return pTraceObject;
+	return sTraceResult.pObject;	// W4.2: the cursor trace now lives in the retail STraceResult record
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CMission::SetStateTarget( CObjectBase* pObject )
@@ -668,10 +590,24 @@ void CMission::GetActionInfo( EUnitAction eAction, SActionInfo *pInfo )
 	*pInfo = actionsInfoSet[eAction];
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail CMission::CanDoCommand @0x1fbf10 (mission vtbl+0xa8): only CCmdEndOfTurn is gated -- a 2s
+// cooldown after the world current-player change (UI clock); every other command is true.
+bool CMission::CanDoCommand( NWorld::CCommand *pCmd )
+{
+	CObj<NWorld::CCommand> pHold( pCmd );
+	if ( CDynamicCast<NWorld::CCmdEndOfTurn>( pCmd ) )
+		return GetUITime() - tLastCurrentPlayerChange > 2000;
+
+	return true;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 void CMission::CanDoCommand( NWorld::CCmd *pCmd, bool bNoTarget, SActionInfo *pInfo )
 {
-	pInfo->eResult = CanDoCommand( pCmd, bNoTarget, &pInfo->nActionAP );
+	// retail @0x1fb680: the low-level probe fills nMinAP/nMaxAP/bEnoughAPToStart directly in the
+	// out struct; bValid is set true on every compute (the actionsInfoSet lazy-cache flag).
+	pInfo->eResult = CanDoCommand( pCmd, bNoTarget, &pInfo->nMinAP, &pInfo->nMaxAP, &pInfo->bEnoughAPToStart );
 
+	pInfo->bValid = true;
 	pInfo->bOk = false;
 	pInfo->bEnoughAP = true;
 	pInfo->bAvailable = false;
@@ -710,7 +646,7 @@ void CMission::CanDoCommand( NWorld::CCmd *pCmd, bool bNoTarget, SActionInfo *pI
 	case NWorld::UCR_CANT_HEAL:                    // heal target's CanHeal() failed -- blocked but available (retail @0x1fb680 groups it here)
 	case NWorld::UCR_NEED_HIGHER_SKILL:           // skill too low to use the tool -- blocked but available
 	case NWorld::UCR_NOT_ALL_UNITS_NEAR_PASSAGE:  // not every selected unit is at the passage -- blocked but available
-	case NWorld::UCR_PK_BAN:                      // crouch+look banned (CanDo @0x3c1570) -- blocked but available (retail @0x1fb680)
+	case NWorld::UCR_PK_BAN:                      // PK-wearer crouch+look banned (CanDo @0x3c1570) -- blocked but available (retail @0x1fb680)
 	case NWorld::UCR_DOOR_LOCKED:                 // locked door, no key/picklock -- blocked but available (retail @0x1fb680 groups it here; no message)
 		pInfo->bOk = false;
 		pInfo->bEnoughAP = true;
@@ -725,15 +661,72 @@ void CMission::CanDoCommand( NWorld::CCmd *pCmd, bool bNoTarget, SActionInfo *pI
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-NWorld::EUnitCommandResult CMission::CanDoCommand( NWorld::CCmd *pCmd, bool bNoTarget, int *pnAP )
+// Maps a dev EUnitCommandResult onto its RETAIL ordinal so the retail result-combining rule
+// (retail @0x1fc870, see below) can be evaluated exactly. Retail ordinals recovered from the
+// binary: the CMission::CanDoCommand @0x1fb680 jump table (eResult-1 -> flag case) plus the
+// ShowError @0x1d5fc0 switch (case values 3..0x15) plus the literal compares scattered through
+// the state code (INVENTORY_NO_PLACE: `cmp eResult,0x12` @0x5dc911; PK_BAN: silent case 0x13;
+// CANT_HEAL: case 0x10; DOOR_LOCKED: dev-doc ordinal 17; NEED_RELOAD: raw code 10 in
+// CStateAttack::OnLButtonUp). The dev enum ordinals deliberately diverge (see wUnitCommands.h --
+// NEVER reorder them), hence this explicit map. The middle "condition" band (NO_EQUIPMENT..
+// TARGET_OUT_OF_RANGE) follows the declaration order shared by Jan03/dev/retail; retail ordinal 9
+// is UCR_CANT_SEE_TARGET, a retail-only code the dev enum does not carry.
+static int UCRRetailOrdinal( NWorld::EUnitCommandResult eRes )
+{
+	switch ( eRes )
+	{
+	case NWorld::UCR_OK:							return 1;
+	case NWorld::UCR_NO_TARGET:						return 3;
+	case NWorld::UCR_NOT_ENOUGH_AP:					return 4;
+	case NWorld::UCR_NOT_HERO:						return 5;
+	case NWorld::UCR_GENERAL_FAILURE:				return 6;
+	case NWorld::UCR_INVALID_COMMAND:				return 7;
+	case NWorld::UCR_PATH_NOT_FOUND:				return 8;
+	case NWorld::UCR_NEED_RELOAD:					return 10;
+	case NWorld::UCR_NO_EQUIPMENT:					return 11;
+	case NWorld::UCR_WEAPON_JAMMED:					return 12;
+	case NWorld::UCR_CRITICALS_BAN:					return 13;
+	case NWorld::UCR_TARGET_OUT_OF_RANGE:			return 14;
+	case NWorld::UCR_NEED_HIGHER_SKILL:				return 15;
+	case NWorld::UCR_CANT_HEAL:						return 16;
+	case NWorld::UCR_DOOR_LOCKED:					return 17;
+	case NWorld::UCR_INVENTORY_NO_PLACE:			return 18;
+	case NWorld::UCR_PK_BAN:						return 19;
+	case NWorld::UCR_NOT_ALL_UNITS_NEAR_PASSAGE:	return 20;
+	case NWorld::UCR_UNAVAILABLE:					return 21;	// dev-reordered; retail keeps it past the messages
+	}
+	return 21;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail CMission::CanDoCommand @0x1fc870 (mission vtbl+0xac). Probes the command against EVERY
+// selected unit (no early-out): the per-unit full-action AP is folded into *pnMinAP/*pnMaxAP
+// (both -1 when no unit reported an AP), *pbEnoughAPToStart AND-accumulates
+// (AP-to-start <= unit->GetRPG()->GetAP()) in turn-based only, and the per-unit results combine
+// by RETAIL-ordinal priority: the numerically-lowest retail code wins (so one unit's UCR_OK beats
+// another's failure); when the kept code and the new code are BOTH hard failures (retail
+// ordinal > 4 == beyond NOT_ENOUGH_AP) and differ, the total collapses to UCR_UNAVAILABLE.
+NWorld::EUnitCommandResult CMission::CanDoCommand( NWorld::CCmd *pCmd, bool bNoTarget, int *pnMinAP, int *pnMaxAP, bool *pbEnoughAPToStart )
 {
 	CObj<NWorld::CCmd> pHolder( pCmd );
 	vector< CPtr<IUnitTracker> > unitsSet;
 	GetSelectedUnits( &unitsSet );
 
 	if ( unitsSet.size() == 0 )
+	{
+		// retail @0x1fc870: the outs stay untouched on the empty-selection bail
 		return NWorld::UCR_GENERAL_FAILURE;
+	}
 
+	if ( pnMinAP )
+		*pnMinAP = -1;
+	if ( pnMaxAP )
+		*pnMaxAP = -1;
+	if ( pbEnoughAPToStart )
+		*pbEnoughAPToStart = true;
+
+	int nMinAP = -1, nMaxAP = -1;
+	bool bHaveAP = false;
+	bool bHaveRes = false;
 	NWorld::EUnitCommandResult eTotalRes = NWorld::UCR_OK;
 	for ( vector< CPtr<IUnitTracker> >::iterator iTemp = unitsSet.begin(); iTemp != unitsSet.end(); iTemp++ )
 	{
@@ -761,45 +754,70 @@ NWorld::EUnitCommandResult CMission::CanDoCommand( NWorld::CCmd *pCmd, bool bNoT
 			}
 		}
 
-		int nTemp;
-		NWorld::EUnitCommandResult eRes = pUnit->CanDo( pCmd, &nTemp, pnAP );
-		if ( eRes == NWorld::UCR_OK )
-			continue;
+		int nStartAP = -1, nFullAP = -1;
+		NWorld::EUnitCommandResult eRes = pUnit->CanDo( pCmd, &nStartAP, &nFullAP );
 
-		return eRes;
+		// retail min/max fold over the full-action AP; units reporting -1 are skipped
+		if ( nFullAP != -1 )
+		{
+			if ( !bHaveAP )
+			{
+				bHaveAP = true;
+				nMinAP = nFullAP;
+			}
+			else if ( nFullAP < nMinAP )
+				nMinAP = nFullAP;
+			if ( nFullAP > nMaxAP || nMaxAP == -1 )
+				nMaxAP = nFullAP;
+		}
+
+		// retail: bEnoughAPToStart &= (AP-to-start <= current AP), evaluated in turn-based only
+		// (retail reads the world mode through mission vtbl+0x134 -> world vtbl+0x1a4)
+		if ( pbEnoughAPToStart && !IsRealTime() )
+			*pbEnoughAPToStart = *pbEnoughAPToStart && ( nStartAP <= pUnit->GetRPG()->GetAP() );
+
+		// retail result combine (order-dependent, reproduced structurally):
+		//   total==<none> -> total = eRes
+		//   total <= eRes (retail ordinals) -> keep total, EXCEPT two distinct hard failures
+		//                                      (both ordinal > 4) collapse to UCR_UNAVAILABLE
+		//   total >  eRes                   -> total = eRes (no collapse check in retail)
+		if ( !bHaveRes )
+		{
+			bHaveRes = true;
+			eTotalRes = eRes;
+		}
+		else if ( UCRRetailOrdinal( eTotalRes ) <= UCRRetailOrdinal( eRes ) )
+		{
+			if ( UCRRetailOrdinal( eTotalRes ) > 4 && UCRRetailOrdinal( eRes ) > 4 && eTotalRes != eRes )
+				eTotalRes = NWorld::UCR_UNAVAILABLE;
+		}
+		else
+			eTotalRes = eRes;
 	}
 
-	if ( pnAP && unitsSet.size() != 1 )
-		*pnAP = -1;
+	if ( pnMinAP )
+		*pnMinAP = nMinAP;
+	if ( pnMaxAP )
+		*pnMaxAP = nMaxAP;
 
 	return eTotalRes;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CMission::UpdateActionsInfo()
 {
-	actionsInfoSet[UA_DEFAULT].eResult = NWorld::UCR_OK;
-	actionsInfoSet[UA_DEFAULT].nActionAP = 0;
-	actionsInfoSet[UA_DEFAULT].bOk = true;
-	actionsInfoSet[UA_DEFAULT].bEnoughAP = true;
-	actionsInfoSet[UA_DEFAULT].bAvailable = true;
-	
-	actionsInfoSet[UA_STOP].eResult = NWorld::UCR_OK;
-	actionsInfoSet[UA_STOP].nActionAP = 0;
-	actionsInfoSet[UA_STOP].bOk = true;
-	actionsInfoSet[UA_STOP].bEnoughAP = true;
-	actionsInfoSet[UA_STOP].bAvailable = true;
-	
+	// retail SActionInfo::SetValid @0x1a18d0 -- the "instant OK, zero AP" filler retail's
+	// UpdateActionsInfo (@0x1fb9c0) applies to the always-possible actions
+	actionsInfoSet[UA_DEFAULT].SetValid();
+
+	actionsInfoSet[UA_STOP].SetValid();
+
 	CanDoCommand( new NWorld::CCmdContinue(), true, &actionsInfoSet[UA_CONTINUE] );
 	CanDoCommand( new NWorld::CCmdReload(), true, &actionsInfoSet[UA_WEAPONRELOAD] );
 
 	CanDoCommand( new NWorld::CCmdPath( NAI::SPosition(), NAI::PF_DEFAULT ), true, &actionsInfoSet[UA_MOVE] );
 	CanDoCommand( new NWorld::CCmdLook( NAI::SPosition() ), true, &actionsInfoSet[UA_LOOK] );
 
-	actionsInfoSet[UA_USE].eResult = NWorld::UCR_OK;
-	actionsInfoSet[UA_USE].nActionAP = 0;
-	actionsInfoSet[UA_USE].bOk = true;
-	actionsInfoSet[UA_USE].bEnoughAP = true;
-	actionsInfoSet[UA_USE].bAvailable = true;
+	actionsInfoSet[UA_USE].SetValid();	// retail @0x1fb9c0 SetValid slot (see above)
 	// the use-tool action (retail action 9) is availability-shaped like USE; the icon-bar button
 	// is additionally gated on the unit actually holding a tool (ST_NORMAL_TOOL)
 	actionsInfoSet[UA_USETOOL] = actionsInfoSet[UA_USE];
@@ -825,10 +843,7 @@ void CMission::UpdateActionsInfo()
 	CanDoCommand( new NWorld::CCmdCollectSnipeAP( NWorld::CSAP_ALL ), true, &actionsInfoSet[UA_COLLECTAP_ALL] );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-ICamera* CMission::GetCamera() const
-{
-	return pCamera;
-}
+// W4.2: GetCamera moved to CMissionBase (retail @0x1a1ee0).
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 float CMission::GetCameraFOV() const
 {
@@ -841,55 +856,6 @@ void CMission::GetCameraParams( ECameraType *pType, float *pFOV, ICamera::SCamer
 	*pType = eCameraType;
 	*pLimits = cameraLimits;
 }
-////////////////////////////////////////////////////////////////////////////////////////////////////
-// release CCamera samples the world terrain grids through its CPtr<IWorld> (@+0xF4) for the per-frame
-// focus-height easing (Update @0xcd930) and eye lift-off (CorrectPlacement @0xccd60). The dev camera
-// is world-agnostic, so this source implements the two samplers over the mission world's STerrainInfo
-// (heights in world meters: FP_TERRAIN_H_SCALE * heightMap -- GetMeterHeightCheck's transform).
-class CMissionCameraHeightSource: public ICameraHeightSource
-{
-	OBJECT_BASIC_METHODS(CMissionCameraHeightSource);
-	CPtr<NWorld::IWorld> pWorld;
-public:
-	CMissionCameraHeightSource() {}
-	CMissionCameraHeightSource( NWorld::IWorld *_pWorld ): pWorld( _pWorld ) {}
-	virtual bool GetHeight( float fWorldX, float fWorldY, float *pfHeight )
-	{
-		if ( !IsValid( pWorld ) || pWorld->GetTerrainInfo() == 0 )
-			return false;
-		CDGPtr<CFuncBase<STerrainInfo> > pInfo = pWorld->GetTerrainInfo();
-		pInfo.Refresh();
-		const STerrainInfo &info = pInfo->GetValue();
-		const float fX = fWorldX * FP_INV_GRID_STEP;
-		const float fY = fWorldY * FP_INV_GRID_STEP;
-		if ( fX < 0 || fY < 0 || fX >= (float)info.heightMap.GetXSize() || fY >= (float)info.heightMap.GetYSize() )
-			return false;                                       // off-grid (release GetHeight @0xccc10)
-		*pfHeight = GetMeterHeightCheck( info, fWorldX, fWorldY );
-		return true;
-	}
-	virtual bool EstimateAverageHeight( float fWorldX, float fWorldY, int nHalf, float *pfAvg )
-	{
-		if ( !IsValid( pWorld ) || pWorld->GetTerrainInfo() == 0 )
-			return false;
-		CDGPtr<CFuncBase<STerrainInfo> > pInfo = pWorld->GetTerrainInfo();
-		pInfo.Refresh();
-		const STerrainInfo &info = pInfo->GetValue();
-		// release EstimateAverageHeight @0xcc970: plain mean over the clamped window of grid cells
-		const int nGX = Float2Int( fWorldX * FP_INV_GRID_STEP );
-		const int nGY = Float2Int( fWorldY * FP_INV_GRID_STEP );
-		const int nX1 = Max( nGX - nHalf, 0 ), nX2 = Min( nGX + nHalf, info.heightMap.GetXSize() - 1 );
-		const int nY1 = Max( nGY - nHalf, 0 ), nY2 = Min( nGY + nHalf, info.heightMap.GetYSize() - 1 );
-		if ( nX1 > nX2 || nY1 > nY2 )
-			return false;
-		float fSum = 0;
-		int nCount = 0;
-		for ( int y = nY1; y <= nY2; ++y )
-			for ( int x = nX1; x <= nX2; ++x, ++nCount )
-				fSum += (float)info.heightMap[y][x];
-		*pfAvg = FP_TERRAIN_H_SCALE * fSum / (float)nCount;
-		return true;
-	}
-};
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // release keeps the tactical cut floor on the camera; this dev build owns it on the render scene, so the
 // camera reaches it through this accessor (installed like the height source) for the two-point framing.
@@ -904,6 +870,40 @@ public:
 	virtual void SetCutFloor( int nFloor ) { if ( IsValid( pMission ) ) pMission->SetCutFloor( nFloor ); }
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// The dev runtime-only camera handles: the world/view/UI handles (retail threads pWorld/pView/pUI
+// through the camera factory ctor args @0xcf8e0 -- the dev factory keeps its 2-arg signature, so every
+// camera-creation/restore path installs them here instead) and the render cut-floor accessor (the
+// documented dev relocation of the live floor onto the scene). The terrain height source that used to
+// lead this list is gone -- the camera samples pWorld->GetHeightLayers() directly, as retail does.
+static void InstallCameraRuntimeHandles( ICamera *pCam, IMission *pMission )
+{
+	pCam->SetWorld( pMission->GetWorld() );
+	pCam->SetView( pMission->GetScene() );
+	pCam->SetUI( pMission->GetInterface() );
+	pCam->SetCutFloorSource( new CMissionCameraCutFloor( pMission ) );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail CMissionBase::CreateCamera @0x1a2390 (mission vtbl+0xb4) -- the camera FACTORY: create the
+// camera and stamp the module DEFAULT hard limits (cam vtbl+0x64 <- ::defaultCameraLimits), the
+// default soft limits (vtbl+0x6c <- ::defaultCameraSoftLimits) and the world's map safe zone as the
+// scroll-zone rect (vtbl+0x78 <- world vtbl+0x40 GetMapSafeZone). Every CPlayerTracker creates its
+// own camera through this (retail ctor @0x287d70). Body lives in iMission.cpp because the
+// default-limit statics and the dev accessor helpers are module-locals here.
+ICamera* CMissionBase::CreateCamera( ECameraType eType )
+{
+	ICamera *pNewCamera = ::CreateCamera( eType );
+	if ( !pNewCamera )
+	{
+		ASSERT( 0 );
+		return 0;
+	}
+	pNewCamera->SetLimits( defaultCameraLimits );
+	pNewCamera->SetSoftLimits( defaultCameraSoftLimits );
+	pNewCamera->SetZoneLimits( GetWorld()->GetMapSafeZone() );
+	InstallCameraRuntimeHandles( pNewCamera, this );
+	return pNewCamera;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 void CMission::SetCameraParams( ECameraType eType, float _fFOV, const ICamera::SCameraLimits &limits )
 {
 	CPtr<ICamera> pNewCamera;
@@ -911,8 +911,10 @@ void CMission::SetCameraParams( ECameraType eType, float _fFOV, const ICamera::S
 	fFOV = _fFOV;
 	eCameraType = eType;
 	cameraLimits = limits;
-	cameraLimits.sZoneLimit = GetWorld()->GetMapSafeZone();
 
+	// the retail factory (CMissionBase::CreateCamera @0x1a2390) stamps the default hard/soft limits,
+	// the zone rect and the dev runtime handles; the mission-specific hard limits then override the
+	// factory defaults below.
 	pNewCamera = CreateCamera( eType );
 	if ( !IsValid( pNewCamera ) )
 	{
@@ -926,64 +928,49 @@ void CMission::SetCameraParams( ECameraType eType, float _fFOV, const ICamera::S
 		pNewCamera->SetPlacement( sPos );
 	}
 	pNewCamera->SetLimits( cameraLimits );
-	// release: the camera's IWorld handle powers the terrain focus-height legs; installed here
-	// (the only camera-creation path) so camera-type switches keep it too
-	pNewCamera->SetHeightSource( new CMissionCameraHeightSource( GetWorld() ) );
-	// release CCamera +0xF4 IWorld handle (the occlusion raycast for the two-point framing) + the render
-	// cut-floor accessor -- installed here alongside the height source so camera-type switches keep them.
-	pNewCamera->SetWorld( GetWorld() );
-	pNewCamera->SetCutFloorSource( new CMissionCameraCutFloor( this ) );
 	pCamera = pNewCamera;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// A raw snapshot reload (CICLoadFile "restart.sav") resumes this mission IN PLACE -- no Initialize
-// runs. Rebuild the two runtime-only caches Initialize normally derives:
+// A raw snapshot reload (CICLoad "game.sav" / CICLoadFile "restart.sav") resumes this mission IN
+// PLACE -- no Initialize runs. Rebuild the two runtime-only caches Initialize normally derives:
 //  - every building's SBuildingInfo shell cache (deliberately never serialized; without the
 //    rebuild the render pipeline re-Builds from an EMPTY cache and the walls/roof/floors vanish)
-//    via CWorld::CreateRestored's building->Update() pass (which also re-binds the world's
-//    pGlobalGame weak ref and restarts the turn -- correct for a mission-start snapshot);
+//    via CWorld::RestoreRuntimeCaches' building->Update() pass (which also re-binds the world's
+//    pGlobalGame weak ref). NOT CreateRestored: its StartGame tail restarted a player turn, so a
+//    realtime save loaded into turn-based -- retail's load path runs no world hook at all
+//    (CICLoad::Exec @0x1f5fd0 -> CMission::OnLoad @0x1fb8e0 = loading-bar counters only) and the
+//    deserialized TBS state resumes untouched;
 //  - the camera's terrain height source (runtime-only per Camera.cpp; installed only by
 //    SetCameraParams @ iMission.cpp).
 void CMission::OnSnapshotRestored()
 {
+	// Re-apply the scene lighting exactly as Initialize does: the in-place snapshot resume runs no
+	// Initialize, so without this the scene's ambient + directional light + fog render state is never set
+	// up on load -> the 3D scene renders with an uninitialized global light color (random green/red/blue
+	// tint of the whole map, varying per run). Apply it BEFORE the building rebuild so the lightmap
+	// bake there uses the correct lighting rather than the uninitialized state.
+	NDb::CAmbientLightReal *pLight = GetWorld()->GetDefaultLight();
+	if ( pLight )
+		GetScene()->SetAmbient( pLight );
+	else
+		SetLightMode( 0 );
 	if ( IsValid( pWorld ) )
-		pWorld->CreateRestored( pGlobalGame );
+		pWorld->RestoreRuntimeCaches( pGlobalGame );
+	// re-wire the runtime-only handles on EVERY deserialized camera: the cinematic camera (base
+	// tag 18) AND each player tracker's own camera (tracker tag 10 -- the camera the player drives,
+	// CMissionBase::GetCamera selector @0x1a1ee0). Retail needs no equivalent: its cameras carry
+	// serialized pWorld/pView CPtrs (CCamera tags 2/3).
 	if ( IsValid( pCamera ) )
+		InstallCameraRuntimeHandles( pCamera, this );
+	for ( vector< CObj<IPlayerTracker> >::iterator iPlayer = playersSet.begin(); iPlayer != playersSet.end(); iPlayer++ )
 	{
-		pCamera->SetHeightSource( new CMissionCameraHeightSource( GetWorld() ) );
-		pCamera->SetWorld( GetWorld() );
-		pCamera->SetCutFloorSource( new CMissionCameraCutFloor( this ) );
+		if ( IsValid( *iPlayer ) && (*iPlayer)->GetCamera() )
+			InstallCameraRuntimeHandles( (*iPlayer)->GetCamera(), this );
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CMission::FreezeCamera( bool bState )
-{
-	bFreezeCamera = bState;
-	if ( bState )
-		pCamera->GetPlacement( &sFreezePose );
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-void CMission::FocusCameraOnUnit( NWorld::CUnit *pUnit )
-{
-	ICamera::SCameraPos sPos;
-	pCamera->GetPlacement( &sPos );
-	sPos.ptAnchor = pUnit->GetPosition().pos.GetCP();
-	pCamera->SetPlacement( sPos );
-	GetScene()->SetCutFloor( pUnit->GetPosition().pos.GetFloor() );
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-// retail CMissionBase::FocusCameraOnItem @0x1a1740 (mission vtbl+0xc4): anchor the camera on the
-// item's position and cut the scene to the item's floor -- the same camera vtbl+0x58 anchor+floor
-// call as FocusCameraOnUnit @0x1a16e0, minus that path's +0.5z lift (items anchor on their pos).
-// Fired by the in-world hint/clue icons' RBUTTONUP (retail SEvent 0x6000034).
-void CMission::FocusCameraOnItem( NWorld::IItem *pItem )
-{
-	ICamera::SCameraPos sPos;
-	pCamera->GetPlacement( &sPos );
-	sPos.ptAnchor = pItem->GetPos();
-	pCamera->SetPlacement( sPos );
-	GetScene()->SetCutFloor( pItem->GetFloor() );
-}
+// W4.2: FocusCameraOnUnit @0x1a16e0 / FocusCameraOnItem @0x1a1740 moved to CMissionBase
+// (iMissionBase.cpp) -- retail keeps the camera-focus family on the base.
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 int CMission::GetCutFloor()
 {
@@ -1012,7 +999,7 @@ const CTransformStack& CMission::GetCameraTransform() const
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CObjectBase* CMission::GetTraceObject() const
 {
-	return pTraceObject;
+	return sTraceResult.pObject;	// W4.2: retail STraceResult record (tag 21)
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CMission::GetTracePosition( CVec3 *pPos ) const
@@ -1035,8 +1022,8 @@ bool CMission::GetTracePosition( CVec3 *pPos ) const
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CMission::GetTracePosition( NAI::SPosition *pPos ) const
 {
-	*pPos = sTraceTile;
-	return bTraceOk;
+	*pPos = sTraceResult.sTile;
+	return sTraceResult.bTileSet;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CRay CMission::GetTraceRay() const
@@ -1047,47 +1034,11 @@ CRay CMission::GetTraceRay() const
 	return res;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-NUI::ICursor* CMission::GetCursor() const
-{
-	return pCursor;
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-NUI::CInterface* CMission::GetInterface() const
-{
-	return pInterface;
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-bool CMission::IsInterfaceHidden() const
-{
-	return bHideInterface;
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-void CMission::SetWaitForPartFinished( bool bState )
-{
-	bWaitForPartFinished = bState;
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-bool CMission::IsWaitForPartFinished() const
-{
-	return bWaitForPartFinished;
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-void CMission::PopDesktop( NUI::CDesktopWindow *pDesktop )
-{
-	for ( int nTemp = 0; nTemp < desktopWindowsList.size(); nTemp++ )
-	{
-		NUI::CDesktopWindow *pTempWnd = desktopWindowsList.back();
-		desktopWindowsList.pop_back();
-
-		if ( pTempWnd == pDesktop )
-			break;
-	}
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-void CMission::PushDesktop( NUI::CDesktopWindow *pDesktop )
-{
-	desktopWindowsList.push_back( pDesktop );
-}
+// W4.2: GetCursor/GetInterface/IsInterfaceHidden, Set/IsWaitForPartFinished and the desktop stack
+// (PopDesktop @0x1a2fc0 / PushDesktop @0x1a3030 / GetDesktop @0x1a2000) moved to CMissionBase.
+// CMission keeps ONLY the GetDesktop override below: the retail mission desktop sits at the bottom
+// of the base desktopWindowsList (Initialize pushes it), so the base back() covers the retail path;
+// the pMissionUI fallback is the dev live-session cache for the pre-Initialize window.
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 NUI::CDesktopWindow* CMission::GetDesktop() const
 {
@@ -1114,57 +1065,53 @@ int CMission::GetPanelState( int nMask ) const
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CMission::SetPanelState( int nMask, bool bState )
 {
-	// first-mission HUD: while in special first-mission mode, keep the 0x14 panel bits hidden (retail @0x1fb7e0)
+	// first-mission HUD (retail @0x1fb7e0 masks 0x14 = retail bits MEDALS(0x4)|BIOGRAPHY(0x10);
+	// dev renumbered EPanel, so use the names -- the raw 0x14 wrongly blocked dev PANEL_INVENTORY)
 	if ( bSpecialFirstMissionMode && bState )
-		nMask &= 0xffffffeb;
+		nMask &= ~( PANEL_MEDALS | PANEL_BIOGRAPHY );
 	if ( bState )
 		nPanelsState |= nMask;
 	else
 		nPanelsState &= ~nMask;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CMission::SetCheatVisibility( bool bState )
-{
-	bCheatVisibility = bState;
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-bool CMission::GetCheatVisibility() const
-{
-	return bCheatVisibility;
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-NRPG::CGlobalGame* CMission::GetRPGGame() const
-{
-	return pGlobalGame;
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-NWorld::IWorld* CMission::GetWorld() const
-{
-	return pWorld;
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-NGScene::IGameView* CMission::GetScene() const
-{
-	return pScene;
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-NSound::ISoundScene* CMission::GetSoundScene() const
-{
-	return pSoundScene;
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-NRender::IRenderGame* CMission::GetRenderGame() const
-{
-	return pRender;
-}
+// W4.2: Set/GetCheatVisibility and the subsystem getters (GetRPGGame/GetWorld/GetScene/
+// GetSoundScene/GetRenderGame) moved to CMissionBase (iMissionBase.cpp).
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CMission::Step()
 {
+	// release CMissionBase::Step @0x1a3ad0 head -- ALL of this was missing (retail's CMission
+	// overrides neither Step nor InternalStep: no such symbol exists, so @0x1a3ad0 IS the mission's
+	// Step). Three pieces, in retail's order, before CanRender:
+	//
+	// 1. The FPS limiter (@0x5a3adb-@0x5a3ae7): skip the ENTIRE frame while less than sMinFrameTime
+	//    has elapsed. sMinFrameTime/sFPSLimitLastTime were serialized (tags 36/37) with NO consumer
+	//    anywhere -- the 5th "serialized, no consumer" pair found in this tree. The compare is
+	//    UNSIGNED (`jb`), so the shipped mission default of 0 makes it a no-op, exactly as in retail
+	//    (only CChapterMap/CGlobalMap::Initialize stamp 5 -- .text has no other writer to +0xfc).
+	// 2. sTimeCounter (@0x5a3b10) -- the pausable accumulating GAME clock, and sUITimeCounter
+	//    (@0x5a3b25) which runs even while paused. Dev built both counters in the ctor and wired
+	//    pTimeFunc/pUITimeFunc to their CCTime nodes, then NEVER advanced them: the whole
+	//    CTimeCounter subsystem was dead, which is why nDeltaTime had to be folded into GetTime().
+	//    CTimeCounter::Advance is already byte-faithful to retail's @0x70f570 (same 150ms clamp,
+	//    same accumulate + DG version bump) -- it only ever lacked a caller.
+	if ( GetTime() - sFPSLimitLastTime < sMinFrameTime )
+		return;
+	sFPSLimitLastTime = GetTime();
+	sTimeCounter.Advance( !bPause, GetTime() );
+	sUITimeCounter.Advance( true, GetTime() );
+
 	if ( CanRender() )
 	{
 		int nStepCount = 0;
 		do
 		{
+			// release CMissionBase::Step @0x5a3c24 adds nDeltaTime HERE (`add edi,[esi+0x50]` before
+			// the UpdateViewWorld push @0x5a3c36) because retail's GetTime() does NOT carry it. Dev's
+			// GetTime() override already folds nDeltaTime in (see iMissionInternal.h -- it is what
+			// drives the skip-part fast-forward through InternalStep's script), so adding it again
+			// here would double it. Same value reaches the render either way; the two trees just put
+			// the add in different places. Do not add nDeltaTime here while that override exists.
 			pRender->UpdateViewWorld( !bPause, GetTime(), pActivePlayer->GetPlayer(), bShowAllCheat || bCheatVisibility );
 
 			InternalStep();
@@ -1206,20 +1153,26 @@ void CMission::Step()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CMission::InternalStep()
 {
-	if ( ( playersSet.size() > 1 ) && !IsRealTime() && ( pActivePlayer->GetPlayer() != pWorld->GetCurrentPlayer() ) )
+	// retail CMission::GameStep @0x2017a0 head: track the world current-player; on a change stamp
+	// tLastCurrentPlayerChange with the UI clock (the @0x1fbf10 end-of-turn 2s cooldown reads it).
+	NWorld::IPlayer *pCurrentPlayer = pWorld->GetCurrentPlayer();
+	if ( pCurrentPlayer != pPrevCurrentPlayer )
 	{
-		ICamera::SCameraPos sPosition;
-		pCamera->GetPlacement( &sPosition );
-		pActivePlayer->SetCamera( sPosition );
-		pActivePlayer->Deactivate();
+		pPrevCurrentPlayer = pCurrentPlayer;
+		if ( pCurrentPlayer )
+			tLastCurrentPlayerChange = GetUITime();
+	}
 
+	// retail CMissionBase::InternalStep @0x1a29f0: on a turn change (hot-seat) just Deactivate ->
+	// swap pActivePlayer -> Activate. NO camera copies -- each tracker OWNS its camera (tag 10) and
+	// the GetCamera selector (@0x1a1ee0) switches with the active player automatically.
+	if ( ( playersSet.size() > 1 ) && !IsPlayerTurn() )
+	{
+		pActivePlayer->Deactivate();
 		for ( vector< CObj<IPlayerTracker> >::iterator iPlayer = playersSet.begin(); iPlayer != playersSet.end(); iPlayer++ )
 		{
 			if ( (*iPlayer)->GetPlayer() == pWorld->GetCurrentPlayer() )
-			{
 				pActivePlayer = (*iPlayer);
-				pCamera->SetPlacement( pActivePlayer->GetCamera() );
-			}
 		}
 		pActivePlayer->Activate();
 	}
@@ -1244,14 +1197,26 @@ void CMission::InternalStep()
 		}
 	}
 
-	pCamera->Update( GetTime() );
+	// retail CMissionBase::ProcessCameraCommands @0x1a25a0 (called from InternalStep after the
+	// world-command drain, BEFORE the camera Update): drain the world earthquake queue into the
+	// active camera. GetEarthQuakeEvent pops with ownership transfer; a null/zombie event terminates.
+	// (both the drain and the frame update go through the SELECTOR vtbl+0xb8, like retail)
+	for ( ;; )
+	{
+		CPtr<NWorld::CEarthQuakeEvent> pEQ = pWorld->GetEarthQuakeEvent();
+		if ( !IsValid( pEQ ) )
+			break;
+		GetCamera()->AddEarthQuake( pEQ->vPosition, pEQ->fPower );
+	}
 
-	if ( bFreezeCamera )
-		pCamera->SetPlacement( sFreezePose );
+	// retail InternalStep @0x1a29f0: GetCamera()->Update (cam vtbl+0x80) -- the ACTIVE camera only;
+	// the frame transform below is dev bookkeeping recomputed from the same selected camera.
+	ICamera *pFrameCamera = GetCamera();
+	pFrameCamera->Update( GetTime() );
 
-	vCameraCP = pCamera->GetCP();
-	sCameraPos = pCamera->GetPos();
-	pCamera->GetTransform( &sTransform, GetScene()->GetScreenRect() );
+	vCameraCP = pFrameCamera->GetCP();
+	sCameraPos = pFrameCamera->GetPos();
+	pFrameCamera->GetTransform( &sTransform, GetScene()->GetScreenRect() );
 	if ( vPrevCameraPosition != vCameraCP )
 	{
 		vPrevCameraPosition = vCameraCP;
@@ -1263,33 +1228,28 @@ void CMission::InternalStep()
 	for ( vector< CObj<IPlayerTracker> >::iterator iPlayer = playersSet.begin(); iPlayer != playersSet.end(); iPlayer++ )
 		(*iPlayer)->Update( (*iPlayer)->GetPlayer() == pWorld->GetCurrentPlayer() );
 
-	if ( pActivePlayer->IsPlayerLoser() )
+	if ( !bLoseSignalSended && pActivePlayer->IsPlayerLoser() )
 	{
-		// BUG 3 (delayed Lose dialog): retail does NOT open the lose menu the instant the hero dies. Retail
-		// GameStep @0x2017a0 (single-player defeat) fires OnPlayerLose wrapped in a CCmdDelayedCallGameOver
-		// (nMaxDelay = 4000ms, ctor @0x204b50): CWorld stashes it (pGameOverCall @+0x1c4) and fires it when the
-		// hero's corpse SETTLES (CWorld::InformCorpseStop @0x362180), capped at 4000ms (CWorld::Segment tail
-		// @0x36bce0). The a5dll lacks that command/CWorld plumbing, so approximate the observable delay with
-		// the 4000ms cap: on the first loss frame, fire the lua lose hook + stamp the deferral clock; open the
-		// menu only once ~4s has passed, so the death animation plays out first (matching retail).
-		if ( !bLoseSignalSended )
-		{
-			bLoseSignalSended = true;
-			tGameOverTime = GetTime();
-			// retail GameStep (iMission.c:5023): fire the lua lose hook once per mission. Param = bScenarioGameOver
-			// (1) vs natural defeat (0); the dev has no scenario-failure source wired yet, so pass 0 (natural defeat).
-			Command( new NWorld::CCmdCallScriptFunction( "OnPlayerLose", "i", 0 ) );
-		}
-		else if ( !bLoseMenuShown && GetTime() - tGameOverTime > 4000 )
-		{
-			bLoseMenuShown = true;
-			NMainLoop::Command( new CICLoseMenu );
-		}
+		// BUG 3 (delayed Lose dialog) -- retail plumbing now ported (W3.3): GameStep @0x2017a0 (single-player
+		// defeat) fires OnPlayerLose wrapped in a CCmdDelayedCallGameOver (nMaxDelay = 4000ms, ctor @0x204b50).
+		// CWorld stashes it (pGameOverCall @+0x1c4) and fires it when the HERO's corpse settles
+		// (CWorld::InformCorpseStop @0x362180, IsHero gate), capped at 4000ms (CWorld::Segment tail @0x36bce0).
+		// The lose UI itself is lua-driven: OnPlayerLose -> ShowLoseDialog(20984/20985) -> CUICmdLoseDialog ->
+		// CICLoseMenu (ExecWorldCommand below) -- retail opens no menu here in single-player.
+		// Param = bScenarioGameOver (1) vs natural defeat (0). Retail skips the delay wrapper only when
+		// bScenarioGameOver is set (scenario failure = immediate game over); the member (retail tag 36,
+		// W4.2) has no dev scenario-failure writer yet, so the delayed path is the one that runs.
+		bLoseSignalSended = true;
+		if ( bScenarioGameOver )
+			Command( new NWorld::CCmdCallScriptFunction( "OnPlayerLose", "i", 1 ) );
+		else
+			Command( new NWorld::CCmdDelayedCallGameOver(
+				new NWorld::CCmdCallScriptFunction( "OnPlayerLose", "i", 0 ), 4000 ) );
 	}
 
 	pInterface->UpdateCursor();
 
-	bTraceOk = false;
+	sTraceResult.bTileSet = false;	// W4.2: was the dev bTraceOk
 	if ( IsReady() )
 	{
 		TraceCursor();
@@ -1308,11 +1268,7 @@ void CMission::InternalStep()
 		for( int nTemp = 0; nTemp < actionsInfoSet.size(); nTemp++ )
 			actionsInfoSet[nTemp].bOk = false;
 
-		actionsInfoSet[UA_STOP].eResult = NWorld::UCR_OK;
-		actionsInfoSet[UA_STOP].nActionAP = 0;
-		actionsInfoSet[UA_STOP].bOk = true;
-		actionsInfoSet[UA_STOP].bEnoughAP = true;
-		actionsInfoSet[UA_STOP].bAvailable = true;
+		actionsInfoSet[UA_STOP].SetValid();	// retail SActionInfo::SetValid @0x1a18d0
 	}
 
 	if ( ( pState->GetType() != IState::TEMPORARY ) && ( IsUpdated() || ( pState->GetType() == IState::INSTANT ) ) )
@@ -1327,11 +1283,85 @@ void CMission::InternalStep()
 	GetDesktop()->UpdateDesktop( GetTime() );
 
 	bHasCommands |= pActivePlayer->GetCommander()->HasCommands();
+
+	// retail CMissionBase::InternalStep @0x1a29f0 tail (@0x1a2bd4): while the cinematic camera is
+	// NOT the live one and no camera-locator exec is running, park it on the live camera's pose and
+	// cut floor. This is why retail shows no cut when the enemy-turn/interrupt handover swaps to it:
+	// it was already sitting exactly where the user left his own camera.
+	if ( GetCamera() != pCamera && !IsValid( pExecLocator ) )
+	{
+		ICamera::SCameraPos sPos;
+		GetCamera()->GetPlacement( &sPos );
+		pCamera->SetPlacement( sPos );							// @0x1a2c41, bOnTerrain = false
+		pCamera->SetCutFloor( GetCamera()->GetCutFloor() );		// @0x1a2c57/@0x1a2c5d
+	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CMission::OnGetFocus()
 {
 	pRender->ResetTiming();
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail @0x1fcbd0 (mission vtbl+0xe0). Status-string ids verified against the retail Strings table:
+// 17855 "You haven't found critical information clue yet.", 17433 "Can't leave the area during combat",
+// 20238 "You can leave the combat area.", 20239 "Can't leave the area. Not all units at the border."
+bool CMission::CanLeaveZone( wstring *pwsReason )
+{
+	vector< CPtr<NWorld::CUnit> > unitsSet;
+	GetActivePlayer()->GetPlayer()->GetUnits( &unitsSet );
+
+	// scenario gate: leaving must not strand a key clue (also refreshes bScenarioGameOver)
+	if ( IsValid( pZone ) )
+	{
+		if ( !GetRPGGame()->pScenarioTracker->CanLeaveZone( unitsSet, pZone, &bScenarioGameOver ) )
+		{
+			*pwsReason = NUI::GetDBString( 17855 );
+			return false;
+		}
+	}
+
+	// script block (SetLeaveZoneMode)
+	if ( bLeaveBlockedByScript )
+	{
+		if ( IsValid( pBlockReason ) )
+			*pwsReason = NUI::GetDBString( pBlockReason );
+		else
+			*pwsReason = NUI::GetDBString( 17855 );
+		return false;
+	}
+
+	// classify live units against the map safe zone: at-border = outside the interior rect
+	bool bAllAtBorder = true;
+	bool bSomeAtBorder = false;
+	const CTRect<float> &rcSafe = GetWorld()->GetMapSafeZone();
+	for ( int nTemp = 0; nTemp < unitsSet.size(); nTemp++ )
+	{
+		if ( unitsSet[nTemp]->IsDead() )
+			continue;	// a dead unit touches neither flag (retail unit vtbl+4 skip)
+		CVec3 vCP = unitsSet[nTemp]->GetPosition().GetCP();
+		if ( vCP.x <= rcSafe.minx || vCP.x >= rcSafe.maxx || vCP.y <= rcSafe.miny || vCP.y >= rcSafe.maxy )
+			bSomeAtBorder = true;
+		else
+			bAllAtBorder = false;
+	}
+
+	if ( GetActivePlayer()->IsPlayerLoser() )
+	{
+		*pwsReason = NUI::GetDBString( 17433 );
+		return false;
+	}
+
+	if ( IsRealTime() || GetActivePlayer()->IsPlayerWinner() || bAllAtBorder )
+	{
+		*pwsReason = NUI::GetDBString( 20238 );
+		return true;
+	}
+
+	if ( bSomeAtBorder )
+		*pwsReason = NUI::GetDBString( 20239 );
+	else
+		*pwsReason = NUI::GetDBString( 17433 );
+	return false;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CMission::ProcessEvent( const NInput::SEvent &sEvent )
@@ -1359,17 +1389,17 @@ bool CMission::ProcessEvent( const NInput::SEvent &sEvent )
 	// "mainmenu" is the F10 key; "gamemenu" is the on-screen Pause-Menu (HUD) button -- both open the in-game menu.
 	if ( bindMainMenu.ProcessEvent( sEvent ) || bindGameMenu.ProcessEvent( sEvent ) )
 	{
-		NMainLoop::Command( new CICInGameMenu( GetActivePlayer()->GetGlobalPlayer(), true /*bAllowRestart: opened from a mission*/ ) );
+		NMainLoop::Command( new CICInGameMenu( GetActivePlayer()->GetGlobalPlayer(), true /*bAllowRestart: opened from a mission*/, bCanSave ) );
 		return true;
 	}
 	else if ( bindSaveMenu.ProcessEvent( sEvent ) )
 	{
-		NMainLoop::Command( new CICSaveLoadMenu( SAVE ) );
+		NMainLoop::Command( new CICSaveLoadMenu( SAVE, 0, bCanSave ) );   // retail CMissionBase::ProcessEvent passes this->bCanSave (disasm mov al,[esi+0xe4])
 		return true;
 	}
 	else if ( bindLoadMenu.ProcessEvent( sEvent ) )
 	{
-		NMainLoop::Command( new CICSaveLoadMenu( LOAD ) );
+		NMainLoop::Command( new CICSaveLoadMenu( LOAD, 0, bCanSave ) );
 		return true;
 	}
 	// Retail @0x202400: the UI/console (CInterface::ProcessEvent) gets the event AFTER the
@@ -1391,7 +1421,7 @@ bool CMission::ProcessEvent( const NInput::SEvent &sEvent )
 	{
 		// retail: the HUD Objectives button opens the FRAMED objectives modal (CICShowObjectives ->
 		// CShowObjectivesUI: CClueLine "?" title rows + numbered CTaskLine rows in bordered boxes, only the
-		// next open task per goal), not the old flat CMLText list (CICObjectives). Exec no-ops when not in a zone.
+		// next open task per goal), not the old flat CText list (CICObjectives). Exec no-ops when not in a zone.
 		NMainLoop::Command( new NGame::CICShowObjectives( this, GetRPGGame()->pCurrentZone ) );
 		return true;
 	}
@@ -1419,8 +1449,8 @@ bool CMission::ProcessEvent( const NInput::SEvent &sEvent )
 	else if ( bindShowAI.ProcessEvent( sEvent ) )
 	{
 		ICamera::SCameraPos cameraPos;
-		pCamera->GetPlacement( &cameraPos );
-		NMainLoop::Command( new CICAIView( 
+		GetCamera()->GetPlacement( &cameraPos );   // the SELECTED (visible) camera's pose
+		NMainLoop::Command( new CICAIView(
 			pWorld->GetAIMap(), 
 			pWorld->GetPathNetwork(), 
 			pWorld->GetGame()->GetVisionTracker(), 
@@ -1430,7 +1460,7 @@ bool CMission::ProcessEvent( const NInput::SEvent &sEvent )
 	else if ( bindShowRAD.ProcessEvent( sEvent ) )
 	{
 		ICamera::SCameraPos cameraPos;
-		pCamera->GetPlacement( &cameraPos );
+		GetCamera()->GetPlacement( &cameraPos );   // the SELECTED (visible) camera's pose
 		NMainLoop::Command( new CICRadTest( pScene, cameraPos ) );
 		return true;
 	}
@@ -1517,20 +1547,22 @@ bool CMission::ProcessEvent( const NInput::SEvent &sEvent )
 	if ( GetDesktop()->ProcessEvent( sEvent ) )
 		return true;
 
-	// retail: while a sequence runs the movieUI DESKTOP is the modal top window, so camera bind
-	// events never reach CBaseCamera::ProcessEvent -- no player camera control during cutscenes.
-	// The dev desktop chain passes unconsumed events through, so gate explicitly on the sequence.
+	// retail CMission::ProcessEvent @0x202400: the event goes UNCONDITIONALLY to the SELECTED camera
+	// (GetCamera() vtbl+0xb8 -> ProcessEvent vtbl+0x84). During an enemy-turn follow the selected
+	// camera is the locked cinematic one -- ProcessEvent latching its unlock-intent pair (@0xcbd00)
+	// is exactly what makes the next GetCamera() hand control back to the player's camera (the
+	// "interrupt the enemy-turn cinematic" feature, UserWantedItToUnlock @0xd0020).
+	// Dev adaptation kept: while a sequence runs, retail's movieUI DESKTOP is modal and consumes the
+	// event before this point; the dev desktop chain passes unconsumed events through, so the
+	// explicit sequence gate stands in for that modality.
 	if ( !IsSequence() && !pWorld->IsSequence() )
-	{
-		if ( IsRealTime()
-			|| GetWorld()->GetCurrentPlayer() == GetActivePlayer()->GetPlayer()
-			|| !GetWorld()->CanSeeAction( GetActivePlayer()->GetPlayer() ) )
-			pCamera->ProcessEvent( sEvent );
-	}
+		GetCamera()->ProcessEvent( sEvent );
 
 //////////////////////////////////////////
 /// Unit control
-	if ( !IsRealTime() && ( pWorld->GetCurrentPlayer() != pActivePlayer->GetPlayer() ) )
+	// retail @0x202400: the unit-control binds below are gated on IsPlayerTurn (mission vtbl+0x48
+	// @0x1a1910)
+	if ( !IsPlayerTurn() )
 		return false;
 
 	if ( bindCancel.ProcessEvent( sEvent ) || bindCancelAction.ProcessEvent( sEvent ) )
@@ -1582,13 +1614,16 @@ bool CMission::ProcessEvent( const NInput::SEvent &sEvent )
 
 	if ( bindEndMission.ProcessEvent( sEvent ) )
 	{
-		// retail CMission::ProcessEvent @0x202f96: the End-Mission key fires the engine->script hook OnExit(),
-		// gated on CanLeaveZone. The campaign OnExit() -> ShowLeaveZoneDialog(17041) -> CUICmdLeaveZoneDlg ->
-		// CICLeaveZoneMenu -> (confirm) CICEndMission. Replaces the dev's old hardcoded autosave+CICEndMission so
-		// the script drives the leave-zone confirm (and any per-campaign OnExit override runs). When the script
-		// has blocked leaving (CanLeaveZone()==false) the key is a no-op, exactly as retail.
-		if ( CanLeaveZone() )
-			Command( new NWorld::CCmdCallScriptFunction( "OnExit", "" ) );
+		// retail CMission::ProcessEvent @0x202f96: a blocked exit prints the CanLeaveZone reason into the
+		// on-screen game log; an allowed one fires the engine->script hook OnExit(). The campaign OnExit()
+		// -> ShowLeaveZoneDialog(17041) -> CUICmdLeaveZoneDlg -> CICLeaveZoneMenu -> (confirm) CICEndMission.
+		wstring wsReason;
+		if ( !CanLeaveZone( &wsReason ) )
+		{
+			csGame << wsReason << endl;
+			return true;
+		}
+		Command( new NWorld::CCmdCallScriptFunction( "OnExit", "" ) );
 		return true;
 	}
 
@@ -1702,7 +1737,7 @@ bool CMission::ProcessEvent( const NInput::SEvent &sEvent )
 	else if ( bindSetMine.ProcessEvent( sEvent ) )
 		CommandState( new CStateSetMine() );
 	else if ( bindUseTool.ProcessEvent( sEvent ) )
-		CommandState( new CStateUntrap() );	// use the held tool on a target (disassemble/disarm/mount)
+		CommandState( new CStateUntrap( true ) );	// use the held tool on a target (disassemble/disarm/mount) -- retail @0x202600 constructs the FORCED untrap here
 	else if ( bindSetTrap.ProcessEvent( sEvent ) )
 		CommandState( new CStateSetTrap() );
 	else if ( bindFirstAid.ProcessEvent( sEvent ) )
@@ -1828,49 +1863,8 @@ bool CMission::ProcessEvent( const NInput::SEvent &sEvent )
 	return false;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CMission::RenderFrame( int nMode, const STime &sTime, ICamera *pCamera, bool bShowUnits )
-{
-	if ( nMode & N_RENDERMODE_3D )
-	{
-		CTransformStack ts;
-		pCamera->GetTransform( &ts, pScene->GetScreenRect() );
-
-		pRender->UpdateSound( &ts, sTime );	// retail CMissionBase::RenderFrame @0x1a19f0 -> @0x2cb1c0
-
-		const CTRect<float> &rScreen = pCamera->GetScreenRect();
-		if ( ( rScreen.Width() != 0 ) && ( rScreen.Height() != 0 ) )
-		{
-			NGScene::IGameView::SDrawInfo drawInfo;
-			drawInfo.pTS = &ts;
-			drawInfo.vOrigin = CVec2( rScreen.x1, rScreen.y1 );
-			drawInfo.vSize = CVec2( rScreen.x2 - rScreen.x1, rScreen.y2 - rScreen.y1 );
-			drawInfo.bUseDefaultClearColor = true;
-			drawInfo.vClearColor = CVec3(0.25f,0.25f,0.25f); // not used due to using default clear color
-			pScene->Draw( drawInfo );
-		}
-	}
-
-	if ( !bHideInterface && !bSpecialHideInterface && ( nMode & N_RENDERMODE_2D ) )
-		pInterface->Draw( sTime );
-
-	float fFrameTime = NGScene::GetFrameTime();
-	static float fMinFrameTime = 1, fMaxFrameTime = 1e-4f, fElapsed = 0;
-	static int nFrames;
-	fMinFrameTime = Min( fMinFrameTime, fFrameTime );
-	fMaxFrameTime = Max( fMaxFrameTime, fFrameTime );
-	fElapsed += fFrameTime;
-	++nFrames;
-	if ( fElapsed > 3 )
-	{
-		DebugTrace( "min %f max %f average %f\n", 1 / fMaxFrameTime, 1 / fMinFrameTime, nFrames / fElapsed );
-		fMinFrameTime = 1;
-		fMaxFrameTime = 1e-4f;
-		fElapsed = 0;
-		nFrames = 0;
-	}
-
-	NGScene::Flip();
-}
+// W4.2: RenderFrame moved to CMissionBase (retail @0x1a19f0 keeps the frame render on the base;
+// the body only touched base members).
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // Internal
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1893,6 +1887,11 @@ bool CMission::TrackChanges()
 		selectedUnits = unitsSet;
 	}
 
+	// W4.2: retail TrackChanges @0x1fcf60 caches IsReady() into bTrackIsReady (tag 10) with a PLAIN
+	// store -- a readiness flip alone does not raise the update flag in retail either.
+	bTrackIsReady = IsReady();
+
+	// dev-extra realtime tracker (retail has no bRealTime member; kept transient)
 	bool bNewRealTime = IsRealTime();
 	if ( bNewRealTime != bRealTime )
 	{
@@ -1900,16 +1899,17 @@ bool CMission::TrackChanges()
 		bRealTime = bNewRealTime;
 	}
 
-	NWorld::IPlayer::SItemInfo sItem;
+	NWorld::SItem sItem;
 	CPtr<CObjectBase> pNewPlayerInHand;
 	if ( pActivePlayer->GetPlayer()->GetInHandItem( &sItem ) )
 		pNewPlayerInHand = sItem.pItem;
-	if ( pNewPlayerInHand != pPlayerInHand )
+	if ( pNewPlayerInHand != pTrackPlayerInHand )
 	{
 		bUpdated = true;
-		pPlayerInHand = pNewPlayerInHand;
+		pTrackPlayerInHand = pNewPlayerInHand;
 	}
 
+	// dev-extra commander-queue tracker (retail folds it into IsActionExecuted; kept transient)
 	bool bNewHasCommands = pActivePlayer->GetCommander()->HasCommands();
 	if ( bNewHasCommands != bHasCommands )
 	{
@@ -1918,10 +1918,10 @@ bool CMission::TrackChanges()
 	}
 
 	bool bNewActionExecuted = IsActionExecuted();
-	if ( bNewActionExecuted != bActionExecuted )
+	if ( bNewActionExecuted != bTrackActionExecuted )
 	{
 		bUpdated = true;
-		bActionExecuted = bNewActionExecuted;
+		bTrackActionExecuted = bNewActionExecuted;
 	}
 
 	CPtr<CObjectBase> pNewTrackTarget = GetStateTarget();
@@ -2056,38 +2056,8 @@ void CMission::SelectWeaponMode( int nInc )
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CMission::SetLightMode( int _nLightMode )
-{
-	CDBTable<NDb::CTAmbientLight> *pTable = NDatabase::GetTable<NDb::CTAmbientLight>();
-  CDBIterator<NDb::CTAmbientLight> it( *pTable );
-	int nCount = _nLightMode;
-  while ( it.MoveNext() )
-  {
-		SRand rnd;
-		CPtr<NDb::CAmbientLightReal> pLight = it.Get()->GetLight( &rnd );
-		if ( !pLight->bInGameUse )
-			continue;
-		if ( nCount == 0 )
-		{
-			nLightMode = _nLightMode;
-			pLightSource = 0;
-			csSystem << "Light with ID = " << it.Get()->GetRecordID() << " selected" << endl;
-			GetScene()->SetAmbient( pLight );
-			return;
-		}
-		nCount--;
-	}
-	if ( _nLightMode == 0 )
-	{
-		// no lighting in table, using default one
-		nLightMode = 0;
-		GetScene()->SetAmbient( 0 );
-		pLightSource = GetScene()->AddDirectionalLight( CVec3(0.5f,0.4f,0.45f), CVec3( 0.6f,1.4f,-1), CVec3(5,5,0), CVec2( 150, 150 ), 20 );
-		GetScene()->SetAmbient( CVec3( 0.20f, 0.20f, 0.20f ), CVec3( 0.20f, 0.20f, 0.20f ) );
-	}
-	else
-		SetLightMode( 0 );
-}
+// W4.2: SetLightMode moved to CMissionBase (retail @0x1a2640; the identical CRenderBaseInterface
+// copy was consolidated into the same base body).
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CMission::TraceCursor()
 {
@@ -2096,15 +2066,16 @@ void CMission::TraceCursor()
 	// pre-move values, so a click while the camera eased pathfound against a stale/off-map tile ->
 	// "Path not found". The camera-still counter gates ONLY the hovered OBJECT (see the tail), matching
 	// retail GetStateTarget @0x1fbd40 (which suppresses sTraceResult.bObjectSet while nFrames <= 3).
+	// W4.2: the result now lives in the retail NWorld::STraceResult record (CMission tag 21).
 	CTransformStack sTS;
-	pCamera->GetTransform( &sTS, GetScene()->GetScreenRect() );
+	GetCamera()->GetTransform( &sTS, GetScene()->GetScreenRect() );   // retail @0x1fec80 traces against the SELECTED camera (vtbl+0xb8)
 	MakeProjectiveRay( &rTraceRay.ptDir, &rTraceRay.ptOrigin, &sTS, GetScene()->GetScreenRect(), GetCursor()->GetPos() );
-	bTraceOk = NWorld::TraceTile( GetWorld(), rTraceRay, &sTraceTile, GetScene()->GetCutFloor() );
+	sTraceResult.bTileSet = NWorld::TraceTile( GetWorld(), rTraceRay, &sTraceResult.sTile, GetScene()->GetCutFloor() );
 
 	list< CPtr<NWorld::CUnit> > visibleList;
 	GetActivePlayer()->GetPlayer()->GetVisible( &visibleList );
 
-	pTraceObject = 0;
+	CPtr<CObjectBase> pTraceObject;
 	vector<CObjectBase*> objectsSet;
 	NWorld::TraceObjects( GetWorld(), rTraceRay, &objectsSet, GetScene()->GetCutFloor() );
 	if ( !objectsSet.empty() )
@@ -2165,7 +2136,7 @@ void CMission::TraceCursor()
 	if ( !IsValid( pTraceObject ) )
 	{
 		NAI::SUnitPosition sPosition;
-		sPosition.pos = sTraceTile;
+		sPosition.pos = sTraceResult.sTile;
 		sPosition.bRun = false;
 		NWorld::CUnit *pTempUnit = GetWorld()->GetUnitInTile( sPosition );
 		if ( find( visibleList.begin(), visibleList.end(), pTempUnit ) != visibleList.end() )
@@ -2183,10 +2154,13 @@ void CMission::TraceCursor()
 		NWorld::CUnit *pTempUnit = dynamic_cast<NWorld::CUnit*>( pTraceObject.GetPtr() );
 		if ( pTempUnit )
 		{
-			bTraceOk = true;
-			sTraceTile = pTempUnit->GetPosition().pos;
+			sTraceResult.bTileSet = true;
+			sTraceResult.sTile = pTempUnit->GetPosition().pos;
 		}
 	}
+
+	sTraceResult.pObject = pTraceObject;
+	sTraceResult.bObjectSet = IsValid( pTraceObject );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CMission::UnitCollectAP( NWorld::ECollectSnipeAP eAP )
@@ -2253,7 +2227,20 @@ void CMission::ExecWorldCommands()
 		else if ( CDynamicCast<NWorld::CUICmdLockCamera>( pCmd ) )
 		{
 			bool bLock = CDynamicCast<NWorld::CUICmdLockCamera>( pCmd )->bLock;
-			pCamera->FreezeCamera( bLock );
+			// retail CMissionBase::ExecWorldCommand @0x1a30c0, CUICmdLockCamera branch @0x5a3367
+			// (RTTI descriptor @0x97aaa4): the freeze targets the SELECTED camera (GetCamera vtbl+0xb8
+			// @0x5a337e -> FreezeCamera vtbl+0x74 @0x5a338c) -- during a sequence the cinematic camera,
+			// during normal play the active player's.
+			GetCamera()->FreezeCamera( bLock );
+			// ...and in TUTORIAL mode retail freezes the ACTIVE TRACKER's camera as well -- a SECOND
+			// freeze the dev tree never had. @0x5a338f tests [this+0xe5] = bTutorialMode (PDB offset
+			// 229, between bCanSave@228 and bCanRestart@230); @0x5a33a1 is IPlayerTracker vtbl+0x18 =
+			// GetCamera, @0x5a33ac the FreezeCamera on it. Both calls push the same pCmd->bLock
+			// (CUICmdLockCamera+0x10). Targeting the tracker EXPLICITLY is what makes a tutorial
+			// CameraLock/Unlock pair balance even when the selector returns a different camera for the
+			// lock than for the unlock.
+			if ( bTutorialMode )
+				pActivePlayer->GetCamera()->FreezeCamera( bLock );
 			pScene->SetCutFloorLock( bLock );
 		}
 		// release CMissionBase::ExecWorldCommand @0x1a30c0: a camera-locator command (CUICmdUnitCamera
@@ -2400,11 +2387,12 @@ void CMission::ExecWorldCommands()
 		{
 			bTutorialMode = CDynamicCast<NWorld::CUICmdTutorialMode>( pCmd )->bTutorial;
 		}
-		// LUA convergence: SetFirstMissionMode(b) -- strip the 0x14 HUD panels now + latch the flag (retail
-		// CMission::ExecWorldCommand @0x1fd8c0 / iMission.c:2454: SetPanelState(0x14,0) then bSpecialFirstMissionMode=b).
+		// LUA convergence: SetFirstMissionMode(b) -- close the medals/biography panels now + latch the flag
+		// (retail CMission::ExecWorldCommand @0x1fd8c0: SetPanelState(0x14,0) -- retail bits MEDALS|BIOGRAPHY --
+		// then bSpecialFirstMissionMode=b).
 		else if ( CDynamicCast<NWorld::CUICmdFirstMissionMode>( pCmd ) )
 		{
-			SetPanelState( 0x14, false );
+			SetPanelState( PANEL_MEDALS | PANEL_BIOGRAPHY, false );
 			bSpecialFirstMissionMode = CDynamicCast<NWorld::CUICmdFirstMissionMode>( pCmd )->bMode;
 		}
 		// LUA convergence: EnableFeature("reenter") -- allow re-entering this zone's templates (retail
@@ -2416,12 +2404,16 @@ void CMission::ExecWorldCommands()
 		}
 		// LUA convergence: SetLeaveZoneMode -- block/allow leaving the zone (retail CMission::ExecWorldCommand
 		// @0x1fd8c0 sets bLeaveBlockedByScript = !bMode + pBlockReason = GetString(nReason)). The flag feeds
-		// CMission::CanLeaveZone(); its in-mission consumer (exit detection) is the still-absent leave-zone subsystem.
+		// CMission::CanLeaveZone @0x1fcbd0 (exit-button gate + tooltip status + blocked-click log).
 		else if ( CDynamicCast<NWorld::CUICmdLeaveZoneMode>( pCmd ) )
 		{
 			NWorld::CUICmdLeaveZoneMode *pLeaveMode = CDynamicCast<NWorld::CUICmdLeaveZoneMode>( pCmd );
 			bLeaveBlockedByScript = !pLeaveMode->bMode;
-			nLeaveBlockReason = ( pLeaveMode->nReason > 0 ) ? pLeaveMode->nReason : -1;
+			// W4.2: store the DB string like retail (tag 33 CDBPtr<NDb::CString>), not the raw id
+			if ( pLeaveMode->nReason > 0 )
+				pBlockReason = NDb::GetString( pLeaveMode->nReason );
+			else
+				pBlockReason = 0;
 		}
 		// LUA convergence: PlayVideo -- play the named .seq cut-scene via the existing iIntroScreen sequence
 		// player (retail CMissionBase::ExecWorldCommand @0x1a30c0 -> new CICPlaySequence(this, nID, file, false)).
@@ -2462,18 +2454,24 @@ void CMission::ExecWorldCommands()
 				// camera pose onto the per-mission pose stack AND stacks a fresh movieUI letterbox (nested
 				// dialog sequences fade invisibly over the outer bars) -- EndSequence hides the TOP one.
 				// The retail depth-1 limits are DEFAULT limits with bMovie=TRUE (the decomp's bStack_38
-				// store into the fresh SCameraLimits before scene SetLimits vtbl+0x64): bMovie is what
-				// makes CCamera::Update (@0xcd930) skip the terrain/approach tail so scripted poses HOLD.
-				// The dev SCameraLimits is the frozen 32-byte one, so the flag rides SetMovieMode instead.
-				if (nSequenceDepth++ == 0)
+				// store at +0x10 of the fresh SCameraLimits before the camera SetLimits vtbl+0x64): bMovie
+				// is what makes CCamera::Update (@0xcd930) skip the terrain/approach tail so scripted poses
+				// HOLD. With the widened SCameraLimits the flag now rides the limits, exactly like retail.
+				// retail @0x1fd8c0: nSequence++ FIRST, so every camera access below goes through the
+				// SELECTOR (@0x1a1ee0) with IsSequence() already true = the CINEMATIC camera. Depth 1
+				// saves the camera's CURRENT limits (vtbl+0x60 -> this->cameraLimits, restored by the
+				// matching EndSequence) before installing the fresh bMovie=TRUE defaults.
+				if (nSequence++ == 0)
 				{
-					pCamera->SetLimits(ICamera::SCameraLimits());
-					pCamera->SetMovieMode(true);
+					GetCamera()->GetLimits(&cameraLimits);
+					ICamera::SCameraLimits sMovieLimits;
+					sMovieLimits.bMovie = true;
+					GetCamera()->SetLimits(sMovieLimits);
 				}
 				////
 				ICamera::SCameraPos sSeqPose;
-				pCamera->GetPlacement(&sSeqPose);
-				sequenceCameraPoses.push_back(sSeqPose);
+				GetCamera()->GetPlacement(&sSeqPose);
+				cameraPosStack.push_back(sSeqPose);
 				////
 				CPtr<NUI::CMissionMovieUI> pMissionMovieUI = new NUI::CMissionMovieUI(NUI::SWindowInfo(pInterface, NUI::SPoint(0, 0), NUI::SPoint(1024, 768), "movieUI", NUI::STYLE_ENABLED), this, GetDesktop(), pBeginSequence->bSkipFadeOut);
 				// retail loads container 344 ("Movie") for the letterbox; 364 is the DIALOG container --
@@ -2493,29 +2491,32 @@ void CMission::ExecWorldCommands()
 					CDynamicCast<NUI::CMissionMovieUI> pMissionMovieUI(GetDesktop());
 					if (pMissionMovieUI)
 					{
-						if (!sequenceCameraPoses.empty())
+						// (nSequence is still >= 1 here, so GetCamera() = the cinematic camera)
+						if (!cameraPosStack.empty())
 						{
 							if (pEndSequence->bRestoreCamera)
-								pCamera->SetPlacement(sequenceCameraPoses.back());
-							sequenceCameraPoses.pop_back();
+								GetCamera()->SetPlacement(cameraPosStack.back());
+							cameraPosStack.pop_back();
 						}
 						if (!pEndSequence->bRestoreCamera)
 						{
+							// retail @0x1fd8c0: commit the cutscene-end pose INTO THE ACTIVE PLAYER'S
+							// OWN camera (tracker vtbl+0x18 GetCamera -> camera vtbl+0x50 SetPlacement)
+							// so gameplay resumes from the scripted view instead of jumping back.
 							ICamera::SCameraPos sSeqPose;
-							pCamera->GetPlacement(&sSeqPose);
-							pActivePlayer->SetCamera(sSeqPose);
+							GetCamera()->GetPlacement(&sSeqPose);
+							pActivePlayer->GetCamera()->SetPlacement(sSeqPose);
 						}
-						if (nSequenceDepth == 1)
+						if (nSequence == 1)
 						{
-							// retail @0x1fd8c0: the LAST EndSequence restores the saved (bMovie-less)
+							// retail @0x1fd8c0: the LAST EndSequence restores the saved (bMovie=false)
 							// mission limits -- the terrain/approach tail resumes from the committed pose.
-							pCamera->SetLimits(cameraLimits);
-							pCamera->SetMovieMode(false);
+							GetCamera()->SetLimits(cameraLimits);
 						}
 						pMissionMovieUI->SetSkipFade(pEndSequence->bSkipFade);
 						pMissionMovieUI->HideDesktop(pEndSequence->GetID());
-						if (nSequenceDepth > 0)
-							--nSequenceDepth;
+						if (nSequence > 0)
+							--nSequence;
 					}
 					else
 					{
@@ -2558,8 +2559,32 @@ void CMission::ExecWorldCommands()
 									if (IsValid(pClue->pClue))
 										NMainLoop::Command(new NGame::CICShowClue(pGlobalGame, pClue->pClue));
 								}
-								else
-									pCmdExec = GetDesktop()->CreateExecutor(pCmd);
+								// W5 serialization-convergence: the NGame UICmdExec wrappers are gone -- retail
+								// CMission::ExecWorldCommand @0x1fd8c0 executes these three INLINE:
+								// LoadTemplate -> NMainLoop::Command(new CICBeginMission(pZone, nTemplateID,
+								// vector<string>(), GetRPGGame())); ShowStore -> the immediate panel open
+								// (mission vtbl+0x68 == SetPanelState(PANEL_STORE|PANEL_INVENTORY, true));
+								// ShowTeamMng -> NMainLoop::Command(new CICTeamMngMenu(globalPlayer, this, nID))
+								// -- NB retail passes the command's wait id as the 3rd arg.
+								else {
+									CDynamicCast<NWorld::CUICmdLoadTemplate> pLoadTemplate(pCmd);
+									if (pLoadTemplate)
+										NMainLoop::Command(new CICBeginMission(pLoadTemplate->pZone,
+											pLoadTemplate->nTemplateID, vector<string>(), GetRPGGame()));
+									else {
+										CDynamicCast<NWorld::CUICmdShowStore> pShowStore(pCmd);
+										if (pShowStore)
+											SetPanelState(PANEL_STORE | PANEL_INVENTORY, true);
+										else {
+											CDynamicCast<NWorld::CUICmdShowTeamMng> pShowTeamMng(pCmd);
+											if (pShowTeamMng)
+												NMainLoop::Command(new CICTeamMngMenu(
+													GetActivePlayer()->GetGlobalPlayer(), this, pShowTeamMng->GetID()));
+											else
+												pCmdExec = GetDesktop()->CreateExecutor(pCmd);
+										}
+									}
+								}
 							}
 						}
 					}
@@ -2661,7 +2686,10 @@ void CMission::ShowWeatherEffect( int nID )
 	MakeMatrix( &pos, CVec3(1,1,1), cameraPos.ptAnchor, 0 );
 	NDb::CTEffect *pTEffect = NDb::GetTEffect( nID );
 	SRand rnd;
-	pTestWeatherEffect = GetScene()->CreateParticles( pTEffect->GetEffect( &rnd ), 0, pRender->GetTime(), pos );
+	// W4.2: retail ShowWeatherEffect @0x201c60 keeps a VECTOR (tag 26): clear the previous test
+	// effects, then push the one new handle.
+	testWeatherEffect.clear();
+	testWeatherEffect.push_back( GetScene()->CreateParticles( pTEffect->GetEffect( &rnd ), 0, pRender->GetTime(), pos ) );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CMission::ShowVisibleFrom()
@@ -3264,7 +3292,7 @@ void CICRealEndMission::Exec()
 	else if ( pGame->bGlobalMapSet )
 		NMainLoop::Command( new CICContinueGlobal( pGame ) );
 	else
-		csSystem << CC_RED << L"ERROR: GlobalMap and ChapterMap not set!" << endl;
+		NMainLoop::Command( new CICMainMenu() );	// retail @0x20a850: no chapter/global map (tutorial) -> main menu
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CICBeginMission

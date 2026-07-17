@@ -53,15 +53,15 @@ bool CBuilding::Update( IGScene *pScene, CMaterialShare *pMaterials )
 	{
 		if ( !bGridUpd )
 		{
-			// BuildInfo изменилась(в MapEditore), надо проверить соотвествие размеров BuildingGrid
+			// BuildInfo changed (in the MapEditor); need to verify the BuildingGrid dimensions still match
 			CVec3 ptMin, ptMax;
 			pBuildingGrid->GetSize( &ptMin, &ptMax );
 			ASSERT(0);
 			/*
 			CBuildInfo *pBI = pBInfo->GetValue();
 			if ( ptMax.x != pBI->nMaxX || ptMax.y != pBI->nMaxY || ptMax.z != pBI->nMaxFloor || ptMin.z != pBI->nMinFloor )
-				pBuildingGrid->Setup( pBI->nMaxX, pBI->nMaxY, pBI->nMinFloor, pBI->nMaxFloor, VNULL2, pBuildingGrid->GetPos() );
-			pBuildingGrid->Updated(); // чтобы перестроить AIMap
+				pBuildingGrid->Setup( pBI->nMaxX, pBI->nMaxY, pBI->nMinFloor, pBI->nMaxFloor, VNULL2 ); // retail @0xc3a90: no transform param
+			pBuildingGrid->Updated(); // to rebuild the AIMap
 			*/
 		}
 		Build( pScene, pMaterials );

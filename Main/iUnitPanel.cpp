@@ -24,6 +24,8 @@
 #include "iUnitIconBar.h"
 #include "iGameStates.h"
 #include "iActionDecorator.h"
+#include "UIInterface.h"     // NUI::GetDBString -- the special-slot ammo text prefix (retail id 18759)
+#include "RPGUnitMission.h"  // NRPG::IUnitMission::GetPanzerklein -- the PK single-slot selector (retail @0x257170)
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 namespace NUI
 {
@@ -76,12 +78,12 @@ CUnitTab::CUnitTab( const SWindowInfo &sInfo, NGame::IMission *_pMission ):
 {
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail @0x254070 (vftable slot +0x34 of 0x8c10b4): unconditional `return true` -- retail DELETED
+// Jan03's CStateMove veto. The veto self-locks: with CStateMove ambient (any selection, cursor off
+// a world unit) the tab never claims SetStateTarget, so CStateTeam::Initialize can never win and
+// tab clicks stop selecting units entirely.
 bool CUnitTab::CanHandleState( NGame::IState *pState ) const
 {
-	CDynamicCast<NGame::CStateMove> pMove(pState);
-	if (pMove)
-		return false;
-
 	return true;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -302,7 +304,6 @@ public:
 	void SetUnit( NGame::IUnitTracker *pUnit );
 	// release CUnitFace::PlayAckEvent @0x254ba0: arm the ack-effect state machine (Draw @0x254df0)
 	void PlayAckEvent( const STime &sTime, NUI::CAckEvent *pEvent );
-	bool IsPlayingAck() const { return eStage != ST_NONE; }
 
 	bool ProcessMessage( const SEvent &sEvent );
 	void Draw( const STime &sTime, NGScene::I2DGameView *pView );
@@ -338,30 +339,15 @@ CObjectBase* CUnitFace::GetTarget()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CUnitFace::SetUnit( NGame::IUnitTracker *_pUnit )
 {
-	// Guard on change (retail SetUnit @0x254c80): the dev called this every frame, re-creating the
-	// show-unit and resetting the skeletal animation to frame 0 -> the face looked frozen. Build the
-	// face model once per unit so its looping idle (CFakeWorldUnit::Update) can play out.
+	// retail @0x254c80 (58-byte disasm, whole body): on tracker CHANGE just swap the CPtr and arm
+	// ST_ACK_TERMINATE -- ALWAYS, ack in flight or not. Draw's terminate case binds the new face
+	// next frame (and lets any pending ack's voice/subtitle run on in CAckIcon). Never set the view
+	// here directly. Same-tracker calls are a no-op, so the looping idle is not reset per frame.
 	if ( pUnit == _pUnit )
 		return;
 
 	pUnit = _pUnit;
-	// retail SetUnit @0x254c80: a unit change while an ack is in flight arms ST_ACK_TERMINATE --
-	// Draw restores the (new) unit's face and retires the event; setting the view here directly
-	// would clobber the speaker's face mid-crossfade.
-	if ( eStage != ST_NONE )
-	{
-		eStage = ST_ACK_TERMINATE;
-		return;
-	}
-	if ( IsValid( pUnit ) )
-	{
-		// release CUnitFace::SetUnitFace @0x254cc0: pFaceUnit = unit; then
-		// CUnitView::SetUnit(unit, GetDBCamera(0x13a1 = 5025 "PersInventory"), false, true, true)
-		// -> bItems=false, bShowCap=true, bPlayIdle=true: the face body plays the looping
-		// INTERFACE_IDLE clip instead of a frozen POSE stand.
-		pFaceUnit = pUnit->GetUnit();
-		CUnitView::SetUnit( pUnit->GetUnit(), NDb::GetDBCamera( 5025 ), false, true, true );
-	}
+	eStage = ST_ACK_TERMINATE;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CUnitFace::ProcessMessage( const SEvent &sEvent )
@@ -593,21 +579,20 @@ void CUnitFace::Draw( const STime &sTime, NGScene::I2DGameView *pView )
 		}
 		break;
 	case ST_ACK_TERMINATE:
-		// retail SetUnit @0x254c80: the tracked unit changed while an ack was in flight -- restore the
-		// (new) unit's face immediately and retire the event from the face machine. FALLBACK: still
-		// flip bReady (Set) so the ack's voice/subtitle play out through CAckIcon even though the
-		// portrait dance was aborted -- Cancel() alone would leave bReady=false and hang the un-played
-		// ack (its voice would NEVER start under the deferred scheme). CAckIcon keeps its own ref to
-		// the same event, so the voice continues there after we drop ours.
-		// retail ACK_TERMINATE @0x655xxx: overlay OFF.
+		// retail terminate case (Draw @0x254df0, disasm @0x655198..0x6551f8): the tracked unit changed
+		// (SetUnit @0x254c80 arms this on EVERY change) -- stage NONE, overlay OFF, and flip bReady
+		// (CAckEvent::Set) ONLY if the ack had not started yet: its voice/subtitle then play out
+		// through CAckIcon without the portrait dance. An unconditional Set here would re-arm the TTL
+		// (now+3000) on an already-playing ack, stretching the subtitle on every selection change.
+		// Then bind the (new) tracked unit's face. Retail keeps pEvent until the next PlayAckEvent;
+		// retail's PlayAnimation(null) reset is covered by SetUnitFace's bPlayIdle.
+		eStage = ST_NONE;
 		if ( IsValid( pAckEffect ) )
 			pAckEffect->SetStyle( STYLE_VISIBLE, false );
+		if ( IsValid( pEvent ) && !pEvent->IsReady() )
+			pEvent->Set( sTime );
 		if ( IsValid( pUnit ) )
 			SetUnitFace( pUnit->GetUnit() );
-		if ( IsValid( pEvent ) )
-			pEvent->Set( sTime );
-		pEvent = 0;
-		eStage = ST_NONE;
 		break;
 	default:
 		break;
@@ -652,16 +637,19 @@ public:
 
 public:
 	CSlotReloadButton() {}
-	CSlotReloadButton( const SWindowInfo &sInfo, NGame::IMission *pMission );
+	CSlotReloadButton( const SWindowInfo &sInfo, NGame::IMission *pMission, int nSlot );
 
 	void Set( NDb::CRPGItem *pItem );
 	bool ProcessMessage( const SEvent &sEvent );
 	void Draw( const STime &sTime, NGScene::I2DGameView *pView );
+	virtual void OnAction();   // retail @0x256f80
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CSlotReloadButton::CSlotReloadButton( const SWindowInfo &sInfo, NGame::IMission *_pMission ):
+// retail @0x2583f0: takes the slot to reload (-1 = active weapon)
+CSlotReloadButton::CSlotReloadButton( const SWindowInfo &sInfo, NGame::IMission *_pMission, int _nSlot ):
 	CButton( sInfo ), pMission( _pMission )
 {
+	nSlot = _nSlot;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CSlotReloadButton::Set( NDb::CRPGItem *_pItem )
@@ -670,7 +658,8 @@ void CSlotReloadButton::Set( NDb::CRPGItem *_pItem )
 		return;
 
 	pItem = _pItem;
-	if ( pItem->pModel )
+	// retail @0x255280: guards the item itself, not just its model
+	if ( IsValid( pItem ) && pItem->pModel )
 	{
 		const NDb::SCameraParams &sCamera = pItem->sCameras[NDb::CAMERA_RELOADBUTTON];
 
@@ -679,12 +668,13 @@ void CSlotReloadButton::Set( NDb::CRPGItem *_pItem )
 		q.GetYAxis( &vForwardDir );
 
 		CVec3 vCP( sCamera.vAnchor - vForwardDir * sCamera.fDistance );
-		SFBTransform res;
-		MakeMatrix( &res, sCamera.fPitch, sCamera.fYaw, sCamera.fRoll, vCP );
+		// retail @0x255280: SHMatrix into SetCameraTransform (Draw folds it into the mesh transform)
+		SHMatrix sCameraTransform;
+		MakeMatrix( &sCameraTransform, sCamera.fPitch, sCamera.fYaw, sCamera.fRoll, vCP );
 
 		SRand sRnd;
 		pModel->SetModel( pItem->pModel->CreateModel( &sRnd ) );
-		pModel->SetTransform( new CFBTransform( res ) );
+		pModel->SetCameraTransform( sCameraTransform );
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -694,8 +684,13 @@ bool CSlotReloadButton::ProcessMessage( const SEvent &sEvent )
 	{
 	case EVENT_TEMPLATECREATE:
 		{
+			// retail @0x255410: icon (the crossed-out overlay, texture 939) + model + tooltip;
+			// the tooltip text template is DB string 4313 (carries the <ap> tag), set once here
+			pIcon = new CImage( SWindowInfo( this, SPoint( 0, 0 ), GetSize(), "", STYLE_ENABLED | STYLE_VISIBLE | STYLE_TRANSPARENT | STYLE_TOPMOST ) );
 			pModel = new CModel( SWindowInfo( this, SPoint( 0, 0 ), GetSize(), "", STYLE_ENABLED | STYLE_VISIBLE | STYLE_TRANSPARENT | STYLE_TOPMOST ) );
-			pToolTip = new CToolTip( SWindowInfo( GetInterface(), SPoint( 0, 0 ), SPoint( 0, 0 ), "tooltip", STYLE_ENABLED ) );
+			pToolTip = new CToolTip( SWindowInfo( GetInterface(), SPoint( 0, 0 ), SPoint( 0, 0 ), "tooltip", STYLE_ENABLED | STYLE_TRANSPARENT | STYLE_TOPMOST ) );
+			pIcon->SetImage( NDb::GetUITexture( 939 ) );
+			pToolTip->SetText( GetDBString( 4313 ) );
 			SetToolTip( pToolTip );
 			break;
 		}
@@ -716,17 +711,7 @@ void CSlotReloadButton::Draw( const STime &sTime, NGScene::I2DGameView *pView )
 	CPtr<NGame::IUnitTracker> pUnit = unitsSet.front();
 
 	int nActionAP = 0;
-	NWorld::EUnitCommandResult eResult = pUnit->GetUnit()->CanDo( new NWorld::CCmdReload, 0, &nActionAP );
-
-	CPtr<NDb::CString> pString;
-	if ( ( eResult == NWorld::UCR_OK ) || ( eResult == NWorld::UCR_NOT_ENOUGH_AP ) )
-		pString = NDb::GetString( 4313 );
-	else
-		pString = NDb::GetString( 4314 );
-
-	wstring wsToolTipTemplate( L"%s" );
-	if ( IsValid( pString ) )
-		wsToolTipTemplate = pString->szStr;
+	NWorld::EUnitCommandResult eResult = pUnit->GetUnit()->CanDo( new NWorld::CCmdReload( nSlot ), 0, &nActionAP );
 
 	if ( nActionAP != -1 )
 		pToolTip->SetVal( L"ap", nActionAP );
@@ -739,8 +724,27 @@ void CSlotReloadButton::Draw( const STime &sTime, NGScene::I2DGameView *pView )
 
 	SetColor( sColor );
 	pModel->SetColor( sColor );
+	// retail @0x256d40: crossed-out overlay only when the reload is impossible outright
+	pIcon->SetStyle( STYLE_VISIBLE, ( eResult != NWorld::UCR_OK ) && ( eResult != NWorld::UCR_NOT_ENOUGH_AP ) );
 
 	CButton::Draw( sTime, pView );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail @0x256f80 (absent in Jan03): the click issues the reload itself, no EVENT_NOTIFY chain
+void CSlotReloadButton::OnAction()
+{
+	vector<CPtr<NGame::IUnitTracker> > unitsSet;
+	pMission->GetSelectedUnits( &unitsSet );
+
+	if ( unitsSet.size() != 1 )
+		return;
+
+	CPtr<NGame::IUnitTracker> pUnit = unitsSet.front();
+	NWorld::EUnitCommandResult eResult = pUnit->GetUnit()->CanDo( new NWorld::CCmdReload( nSlot ), 0, 0 );
+	if ( eResult == NWorld::UCR_OK )
+		pMission->Command( pUnit->GetUnit(), new NWorld::CCmdReload( nSlot ) );
+	else
+		NGame::ShowError( pMission, eResult );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CInfoPanelSlot
@@ -756,7 +760,7 @@ private:
 	CPtr<NWorld::CUnit> pUnit;
 	////
 	CPtr<CWindow> pFade;
-	CObj<CMLText> pAmmo;
+	CObj<CText> pAmmo;   // retail's "ammo" text is a CText
 	CObj<CSlotReloadButton> pReload;
 public:
 	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CSlot*)this); f.Add(2,&pMission); f.Add(3,&eType); f.Add(4,&pUnit); f.Add(5,&pFade); f.Add(6,&pAmmo); f.Add(7,&pReload); return 0; }
@@ -766,6 +770,9 @@ public:
 	CInfoPanelSlot( const SWindowInfo &sInfo, NGame::IMission *pMission, NDb::ESlot eType );
 
 	void Set( NWorld::CUnit *pUnit );
+
+	NWorld::CUnit* GetUnit() { return pUnit; }   // retail slot vtbl+0x44, ICF-folded getter @0x25a770
+	CObjectBase* GetTarget();      // retail @0x255880 (CActionDecorator pure virtual)
 
 	void Take( int nX, int nY );
 	void Place( int nX, int nY, const NWorld::SItem &sItem );
@@ -786,6 +793,12 @@ CInfoPanelSlot::CInfoPanelSlot( const SWindowInfo &sInfo, NGame::IMission *_pMis
 void CInfoPanelSlot::Set( NWorld::CUnit *_pUnit )
 {
 	pUnit = _pUnit;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail @0x255880: a hand slot is a SLOT drop target; nSlot carries which hand (the NDb::ESlot).
+CObjectBase* CInfoPanelSlot::GetTarget()
+{
+	return new CSlotInfo( CSlotInfo::SLOT, eType, pUnit );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CInfoPanelSlot::Take( int nX, int nY )
@@ -845,7 +858,7 @@ bool CInfoPanelSlot::ProcessMessage( const SEvent &sEvent )
 	{
 	case EVENT_LBUTTONDOWN:
 		{
-			NWorld::IPlayer::SItemInfo sInfo;
+			NWorld::SItem sInfo;
 			if ( !GetDragItem( &sInfo ) && ( pUnit->GetRPG()->GetInventoryInfo()->GetActiveSlot() != eType ) )
 			{
 				pMission->Command( pUnit, new NWorld::CCmdSetActiveItem( eType ) );
@@ -856,8 +869,9 @@ bool CInfoPanelSlot::ProcessMessage( const SEvent &sEvent )
 		}
 	case EVENT_TEMPLATELOAD:
 		{
-			pAmmo = new CMLText( sEvent.pLoader->GetControl( "ammo" ) );
-			pReload = new CSlotReloadButton( sEvent.pLoader->GetControl( "weapon_reload" ), pMission );
+			pAmmo = new CText( sEvent.pLoader->GetControl( "ammo" ) );
+			// retail @0x258540: the button reloads THIS slot's weapon
+			pReload = new CSlotReloadButton( sEvent.pLoader->GetControl( "weapon_reload" ), pMission, eType );
 			break;
 		}
 	case EVENT_TEMPLATELOADCOMPLETE:
@@ -875,7 +889,7 @@ bool CInfoPanelSlot::ProcessMessage( const SEvent &sEvent )
 	case EVENT_RBUTTONDOWN:
 	case EVENT_LBUTTONDOWN:
 		{
-			NWorld::IPlayer::SItemInfo sInfo;
+			NWorld::SItem sInfo;
 			if ( GetDragItem( &sInfo ) )
 			{
 				NWorld::SItem sSource( sInfo.pUnit, NWorld::SItem::HAND, sInfo.pItem );
@@ -948,8 +962,12 @@ private:
 	CObj<CText> pWeaponAmmoText;
 	CObj<CShowItemModel> pItemModel;
 	CObj<CSlotReloadButton> pReload;
+	// retail +0x94, wire tag 7 (operator& @0x25cbf0): the weapon-in-hand cache Draw compares against
+	// so the item model / ammo text are only rebuilt on a weapon CHANGE (dev rebuilt every frame and
+	// never carried the retail save's tag 7 -- wire audit UNREAD 7).
+	CPtr<NRPG::IWeaponItemInfo> pWeaponItem;
 public:
-	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CWindow*)this); f.Add(2,&pMission); f.Add(3,&pUnit); f.Add(4,&pWeaponAmmoText); f.Add(5,&pItemModel); f.Add(6,&pReload); return 0; }
+	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CWindow*)this); f.Add(2,&pMission); f.Add(3,&pUnit); f.Add(4,&pWeaponAmmoText); f.Add(5,&pItemModel); f.Add(6,&pReload); f.Add(7,&pWeaponItem); return 0; }
 
 public:
 	CInfoPanelSpecialSlot() {}
@@ -978,7 +996,8 @@ bool CInfoPanelSpecialSlot::ProcessMessage( const SEvent &sEvent )
 	{
 	case EVENT_TEMPLATELOAD:
 		{
-			pReload = new CSlotReloadButton( sEvent.pLoader->GetControl( "weapon_reload" ), pMission );
+			// retail @0x258ad0: nSlot -1 = the active (cannon) weapon
+			pReload = new CSlotReloadButton( sEvent.pLoader->GetControl( "weapon_reload" ), pMission, -1 );
 			pItemModel = new CShowItemModel( sEvent.pLoader->GetControl( "view" ) );
 			break;
 		}
@@ -992,18 +1011,29 @@ bool CInfoPanelSpecialSlot::ProcessMessage( const SEvent &sEvent )
 	return CWindow::ProcessMessage( sEvent );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail @0x256160: the weapon-in-hand cache (pWeaponItem, wire tag 7) gates the model rebuild --
+// pItemModel->Set runs only when the weapon CHANGED (dev rebuilt the model + its whole static tooltip
+// every frame, and crashed on an unarmed unit through the unguarded GetInnerClip). The ammo text pass
+// runs only for a valid weapon with a loaded clip, and its markup prefix comes from the string DB
+// (GetDBString(18759) + "%d/%d"), not a hardcoded literal.
 void CInfoPanelSpecialSlot::Draw( const STime &sTime, NGScene::I2DGameView *pView )
 {
-	CPtr<NRPG::IWeaponItemInfo> pItem = pUnit->GetRPG()->GetCannonItemInfo();
+	if ( pWeaponItem != pUnit->GetRPG()->GetCannonItemInfo() )
+	{
+		pWeaponItem = pUnit->GetRPG()->GetCannonItemInfo();
+		// retail @0x256160 passes a NULL view -> the icon keeps its own private scene/view
+		pItemModel->Set( 0, pUnit, pWeaponItem, NDb::CAMERA_SLOT );
+	}
 
-	pItemModel->Set( pItem, NDb::CAMERA_SLOT, pUnit );   // the owning unit -> live "familiarity" in the tooltip
-
-	CPtr<NRPG::IClipItem> pRPGClipItem = pItem->GetInnerClip();
-	pReload->Set( pRPGClipItem->GetDBItem() );
-
-	WCHAR wsBuffer[1024];
-	swprintf( wsBuffer, L"<font face=Courier size=16pt><center>%d/%d", pRPGClipItem->GetIncQuantity(), pRPGClipItem->GetMaxIncQuantity() );
-	pWeaponAmmoText->SetText( wsBuffer );
+	if ( IsValid( pWeaponItem ) )
+	{
+		CPtr<NRPG::IClipItem> pRPGClipItem = pWeaponItem->GetInnerClip();
+		if ( IsValid( pRPGClipItem ) )
+		{
+			pReload->Set( pRPGClipItem->GetDBItem() );
+			pWeaponAmmoText->SetText( GetDBString( 18759 ) + NStr::Format( L"%d/%d", pRPGClipItem->GetIncQuantity(), pRPGClipItem->GetMaxIncQuantity() ), true );
+		}
+	}
 
 	CWindow::Draw( sTime, pView );
 }
@@ -1019,14 +1049,20 @@ private:
 	////
 	CPtr<NGame::IUnitTracker> pUnit;
 	////
-	CPtr<CMLText> pAP;
+	// retail's "ap" control (tag 4) is a CText. Match retail.
+	CPtr<CText> pAP;
 	CObj<CUnitFace> pUnitFace;
 	CObj<CInfoPanelSlot> pLeftSlot;
 	CObj<CInfoPanelSlot> pRightSlot;
+	// retail @0x25cd30 tag 8: the 4th, wide "slot_pk_singleslot" (shown while a bSingleSlot
+	// Panzerklein is worn -- selector in Draw @0x257170). Also load-critical: a retail save
+	// serializes it, and without an owner the deserialized slot was freed under a live window
+	// (UAF, ASan 2026-07-14).
+	CObj<CInfoPanelSlot> pPKSingleSlot;
 	CObj<CInfoPanelSpecialSlot> pSpecialSlot;
 	////
 	vector<CObj<CInfoPanelCritical> > criticalIconsSet;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CWindow*)this); f.Add(2,&pMission); f.Add(3,&pUnit); f.Add(4,&pAP); f.Add(5,&pUnitFace); f.Add(6,&pLeftSlot); f.Add(7,&pRightSlot); f.Add(8,&pSpecialSlot); f.Add(9,&criticalIconsSet); return 0; }
+	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CWindow*)this); f.Add(2,&pMission); f.Add(3,&pUnit); f.Add(4,&pAP); f.Add(5,&pUnitFace); f.Add(6,&pLeftSlot); f.Add(7,&pRightSlot); f.Add(8,&pPKSingleSlot); f.Add(9,&pSpecialSlot); f.Add(10,&criticalIconsSet); return 0; }
 
 public:
 	CInfoPanelSingleUnit() {}
@@ -1059,11 +1095,14 @@ bool CInfoPanelSingleUnit::ProcessMessage( const SEvent &sEvent )
 		}
 	case EVENT_TEMPLATELOAD:
 		{
-			pAP = new CMLText( sEvent.pLoader->GetControl( "ap" ) );
+			pAP = new CText( sEvent.pLoader->GetControl( "ap" ) );   // retail's "ap" is a CText (see pAP decl)
 			pUnitFace = new CUnitFace( sEvent.pLoader->GetControl( "face" ), pMission );
 			pLeftSlot = new CInfoPanelSlot( sEvent.pLoader->GetControl( "slot_left" ), pMission, NDb::SLOT_1 );
 			pRightSlot = new CInfoPanelSlot( sEvent.pLoader->GetControl( "slot_right" ), pMission, NDb::SLOT_2 );
 			pSpecialSlot = new CInfoPanelSpecialSlot( sEvent.pLoader->GetControl( "slot_double" ), pMission );
+			// retail @0x2578b0: claim the 4th template control; unclaimed it is auto-created
+			// template-visible and its merged-slot backdrop draws every frame.
+			pPKSingleSlot = new CInfoPanelSlot( sEvent.pLoader->GetControl( "slot_pk_singleslot" ), pMission, NDb::SLOT_1 );
 
 			criticalIconsSet.resize( N_NUM_CRITICALS_ICONS );
 			for ( int nTemp = 0; nTemp < N_NUM_CRITICALS_ICONS; nTemp++ )
@@ -1084,29 +1123,52 @@ void CInfoPanelSingleUnit::Draw( const STime &sTime, NGScene::I2DGameView *pView
 
 	UpdateCriticalIcons( pUnit, criticalIconsSet ); // release @0x1cda90 shared helper (iCriticalIcons)
 
+	// retail @0x257170 (v1.2 @0x656e10 identical): hide all four, then light EXACTLY ONE of
+	// {slot_double | slot_pk_singleslot | slot_left+slot_right}: a mounted cannon -> the special
+	// slot; a worn Panzerklein with NDb::CPanzerklein::bSingleSlot -> the wide PK single slot;
+	// else the normal two-hand pair.
+	pLeftSlot->SetStyle( STYLE_VISIBLE, false );
+	pRightSlot->SetStyle( STYLE_VISIBLE, false );
+	pSpecialSlot->SetStyle( STYLE_VISIBLE, false );
+	pPKSingleSlot->SetStyle( STYLE_VISIBLE, false );
 
-	CPtr<NRPG::IWeaponItemInfo> pItem = pUnit->GetUnit()->GetRPG()->GetCannonItemInfo();
-	pSpecialSlot->Set( pUnit->GetUnit() );
-	pSpecialSlot->SetStyle( STYLE_VISIBLE, IsValid( pItem ) );
+	NRPG::IUnitMissionInfo *pRPG = pUnit->GetUnit()->GetRPG();
+	CPtr<NRPG::IWeaponItemInfo> pItem = pRPG->GetCannonItemInfo();
+	if ( IsValid( pItem ) )
+		pSpecialSlot->SetStyle( STYLE_VISIBLE, true );
+	else
+	{
+		// retail reads GetPanzerklein off the rpg-info vtable (+0x74); the dev interface split keeps it on IUnitMission
+		CDynamicCast<NRPG::IUnitMission> pUM( pRPG );
+		NDb::CPanzerklein *pPK = IsValid( pUM ) ? pUM->GetPanzerklein() : 0;
+		if ( IsValid( pPK ) && pPK->bSingleSlot )
+			pPKSingleSlot->SetStyle( STYLE_VISIBLE, true );
+		else
+		{
+			pLeftSlot->SetStyle( STYLE_VISIBLE, true );
+			pRightSlot->SetStyle( STYLE_VISIBLE, true );
+		}
+	}
 
-	pAP->SetStyle( STYLE_VISIBLE, !pMission->IsRealTime() );
+	// retail @0x257170: AP shows in turn-based only AND while the unit can still fight
+	// (CUnitServer::CanFight, CUnit vtbl slot 0)
+	pAP->SetStyle( STYLE_VISIBLE, !pMission->IsRealTime() && pUnit->GetUnit()->CanFight() );
 	if ( !pMission->IsRealTime() )
 	{
 		NRPG::SUnitInfo sUnitInfo;
 		pUnit->GetUnit()->GetInfo( &sUnitInfo );
-
-		WCHAR wsBuffer[256];
-		swprintf( wsBuffer, L"<color=FFB4997C><font face=Impact size=36pt outlinesize=2 outlinecolor=FF513E2B><wrapright>%d<br><left>AP", sUnitInfo.nAP );
-		pAP->SetText( wsBuffer );
+		// retail: DB-wrapped (18760 + "%d" + 18761), not a hardcoded literal
+		pAP->SetText( GetDBString( 18760 ) + NStr::Format( L"%d", sUnitInfo.nAP ) + GetDBString( 18761 ) );
 	}
 
 	pLeftSlot->Set( pUnit->GetUnit() );
 	pRightSlot->Set( pUnit->GetUnit() );
 	pSpecialSlot->Set( pUnit->GetUnit() );
-	// while an ack is playing, the face is showing the SPEAKER (state machine owns it); don't yank it
-	// back to the selected unit every frame -- the ack's ST_SOURCE_SHOW step restores it on finish.
-	if ( !pUnitFace->IsPlayingAck() )
-		pUnitFace->SetUnit( pUnit );
+	pPKSingleSlot->Set( pUnit->GetUnit() );
+	// retail @0x257170 tail (inlined SetUnit): UNCONDITIONAL -- a tracker change mid-ack arms
+	// ST_ACK_TERMINATE, so the portrait follows the selection IMMEDIATELY while the ack's
+	// voice/subtitle play out in CAckIcon.
+	pUnitFace->SetUnit( pUnit );
 
 	CWindow::Draw( sTime, pView );
 }
@@ -1123,7 +1185,12 @@ private:
 	////
 	vector<CPtr<CImage> > selectionsSet;
 	vector<CObj<CUnitFace> > facesSet;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CWindow*)this); f.Add(2,&pMission); f.Add(3,&pUnit); f.Add(4,&selectionsSet); f.Add(5,&facesSet); return 0; }
+	// retail CInfoPanelMultipleUnits::operator& @0x25d5a0 does NOT serialize selectionsSet (it is runtime-only,
+	// rebuilt every load from the template via GetUIWindow<CImage> in EVENT_TEMPLATELOADCOMPLETE). dev's extra
+	// tag-4 selectionsSet shifted facesSet to tag 5 -> a retail save's tag-4 facesSet (CObj<CUnitFace> vector)
+	// was read into selectionsSet as CPtr<CImage> (RTDynamicCast fails -> nulls) and facesSet stayed empty ->
+	// the panel loses its unit faces / null-derefs. Match retail: drop selectionsSet, facesSet at tag 4.
+	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CWindow*)this); f.Add(2,&pMission); f.Add(3,&pUnit); f.Add(4,&facesSet); return 0; }
 
 public:
 	CInfoPanelMultipleUnits() {}
@@ -1204,12 +1271,23 @@ private:
 		STATE_BASEMENT_VISIBLE = 2,
 		STATE_BASEMENT_HIDDEN  = 3
 	};
+	// retail NUI::CLevelSwitchBar::SButton (@0x25d440): each slot pairs the button with its
+	// tooltip; serialized inline (tags 2/3) inside the tag-5 vector. Dev creates no per-slot
+	// tooltips yet, so pToolTip serializes null -- format-parity with retail (tooltip wiring
+	// per Draw @0x254420 is a follow-up).
+	struct SButton
+	{
+		ZDATA
+		CPtr<CButton> pButton;
+		CPtr<CToolTip> pToolTip;
+		ZEND int operator&( CStructureSaver &f ) { f.Add(2,&pButton); f.Add(3,&pToolTip); return 0; }
+	};
 	ZDATA_(CWindow)
 	CPtr<NGame::IMission> pMission;
 	////
 	CPtr<CButton> pUp;
 	CPtr<CButton> pDown;
-	vector<CPtr<CButton> > buttonsSet;
+	vector<SButton> buttonsSet;   // retail @0x25d2b0 tag 5: DoVector<SButton>
 	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CWindow*)this); f.Add(2,&pMission); f.Add(3,&pUp); f.Add(4,&pDown); f.Add(5,&buttonsSet); return 0; }
 
 public:
@@ -1266,11 +1344,11 @@ bool CLevelSwitchBar::ProcessMessage( const SEvent &sEvent )
 			// depends on the LIVE range (min+i < 0), decided per frame in Draw, not per slot here.
 			for ( int nTemp = 0; nTemp < buttonsSet.size(); nTemp++ )
 			{
-				buttonsSet[nTemp] = GetUIWindow<CButton>( this, NStr::Format( "level_%d", ( nTemp + 1 ) ) );
-				buttonsSet[nTemp]->AddImageState( STATE_FLOOR_VISIBLE,    NDb::GetUITexture( 404 ) );
-				buttonsSet[nTemp]->AddImageState( STATE_FLOOR_HIDDEN,     NDb::GetUITexture( 406 ) );
-				buttonsSet[nTemp]->AddImageState( STATE_BASEMENT_VISIBLE, NDb::GetUITexture( 405 ) );
-				buttonsSet[nTemp]->AddImageState( STATE_BASEMENT_HIDDEN,  NDb::GetUITexture( 407 ) );
+				buttonsSet[nTemp].pButton = GetUIWindow<CButton>( this, NStr::Format( "level_%d", ( nTemp + 1 ) ) );
+				buttonsSet[nTemp].pButton->AddImageState( STATE_FLOOR_VISIBLE,    NDb::GetUITexture( 404 ) );
+				buttonsSet[nTemp].pButton->AddImageState( STATE_FLOOR_HIDDEN,     NDb::GetUITexture( 406 ) );
+				buttonsSet[nTemp].pButton->AddImageState( STATE_BASEMENT_VISIBLE, NDb::GetUITexture( 405 ) );
+				buttonsSet[nTemp].pButton->AddImageState( STATE_BASEMENT_HIDDEN,  NDb::GetUITexture( 407 ) );
 			}
 
 			break;
@@ -1293,9 +1371,9 @@ void CLevelSwitchBar::Draw( const STime &sTime, NGScene::I2DGameView *pView )
 	{
 		int nFloor = nRangeMin + nTemp;
 		if ( nFloor < 0 )
-			buttonsSet[nTemp]->SetActiveState( nFloor > nCut ? STATE_BASEMENT_HIDDEN : STATE_BASEMENT_VISIBLE );
+			buttonsSet[nTemp].pButton->SetActiveState( nFloor > nCut ? STATE_BASEMENT_HIDDEN : STATE_BASEMENT_VISIBLE );
 		else
-			buttonsSet[nTemp]->SetActiveState( nFloor > nCut ? STATE_FLOOR_HIDDEN : STATE_FLOOR_VISIBLE );
+			buttonsSet[nTemp].pButton->SetActiveState( nFloor > nCut ? STATE_FLOOR_HIDDEN : STATE_FLOOR_VISIBLE );
 	}
 
 	CWindow::Draw( sTime, pView );
@@ -1306,6 +1384,15 @@ void CLevelSwitchBar::Draw( const STime &sTime, NGScene::I2DGameView *pView )
 CUnitPanel::CUnitPanel( const SWindowInfo &sInfo, NGame::IMission *_pMission ):
 	CWindow( sInfo ), pMission( _pMission )
 {
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail @0x259220 (tail of operator& @0x25c380): on READ, when tag-12 pBackgroundEmpty arrived
+// null/dead (a save predating the third backdrop), re-resolve it from the window tree -- Draw
+// dereferences it unconditionally.
+void CUnitPanel::OnSerialize( CStructureSaver &f )
+{
+	if ( f.IsReading() && !IsValid( pBackgroundEmpty ) )
+		pBackgroundEmpty = GetUIWindow<CImage>( this, "background_empty" );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // release CUnitPanel::PlayAckEvent @0x2563e0: forward the ack to the single-unit face panel.
@@ -1336,14 +1423,19 @@ bool CUnitPanel::ProcessMessage( const SEvent &sEvent )
 		}
 	case EVENT_TEMPLATELOADCOMPLETE:
 		{
+			// v1.2 @0x658f60: the v1.1 baked-text AddImageState(0, tex 379/469) is GONE (v1.2
+			// assets stripped the baked-text art; the button frame comes from the template
+			// control's own mount textures). The exe overlays LOCALIZED DB text instead, two
+			// states per button: 0 = enabled (markup 21065), 1 = disabled (markup 21066);
+			// labels 19971 "END OF TURN" / 19972 "START COMBAT". Draw picks the state.
 			pEndOfTurn = GetUIWindow<CButton>( this, "endofturn" );
-			pEndOfTurn->AddImageState( 0, NDb::GetUITexture( 379 ) );
+			pEndOfTurn->AddTextState( 0, GetDBString( 21065 ) + GetDBString( 19971 ) );
+			pEndOfTurn->AddTextState( 1, GetDBString( 21066 ) + GetDBString( 19971 ) );
 
 			pStartOfTurn = GetUIWindow<CButton>( this, "startofturn" );
-			pStartOfTurn->AddImageState( 0, NDb::GetUITexture( 469 ) );
+			pStartOfTurn->AddTextState( 0, GetDBString( 21065 ) + GetDBString( 19972 ) );
+			pStartOfTurn->AddTextState( 1, GetDBString( 21066 ) + GetDBString( 19972 ) );
 
-			pBackgroundSingleUnit = GetUIWindow<CImage>( this, "background_single" );
-			pBackgroundMultipleUnits = GetUIWindow<CImage>( this, "background_multi" );
 			// release @0x2592c0: the THIRD backdrop, "background_empty" (retail-added ctrl 2726,
 			// tex 962, depth 2, template-VISIBLE). It sits ABOVE background_single/multi, so if it
 			// is never toggled off it covers them with its plain plate every frame -- wiping the
@@ -1351,6 +1443,8 @@ bool CUnitPanel::ProcessMessage( const SEvent &sEvent )
 			// (Control exists in the retail/Steam game.db the runtime loads; a dev-generated db
 			// lacks it -> the fetch logs a "not found" UI-ERROR dummy there, which is harmless.)
 			pBackgroundEmpty = GetUIWindow<CImage>( this, "background_empty" );
+			pBackgroundSingleUnit = GetUIWindow<CImage>( this, "background_single" );
+			pBackgroundMultipleUnits = GetUIWindow<CImage>( this, "background_multi" );
 			break;
 		}
 	}
@@ -1382,18 +1476,29 @@ void CUnitPanel::Draw( const STime &sTime, NGScene::I2DGameView *pView )
 	else if ( nCountSelected > 1 )
 		bMultiPanel = true;
 
+	// v1.2 Draw @0x653f40: gate the buttons on the end-of-turn cooldown -- once the mission
+	// IsReady (v1.2-added guard; v1.1 @0x2542e0 probed unconditionally), CanDoCommand(new
+	// CCmdEndOfTurn) drives both STYLE_ENABLED and the text state (0 enabled / 1 disabled).
+	bool bCanEndTurn = false;
+	if ( pMission->IsReady() )
+		bCanEndTurn = pMission->CanDoCommand( new NWorld::CCmdEndOfTurn );
+
 	pEndOfTurn->SetStyle( STYLE_VISIBLE, !pMission->IsRealTime() );
+	pEndOfTurn->SetStyle( STYLE_ENABLED, bCanEndTurn );
+	pEndOfTurn->SetActiveState( bCanEndTurn ? 0 : 1 );
 	pStartOfTurn->SetStyle( STYLE_VISIBLE, pMission->IsRealTime() );
+	pStartOfTurn->SetStyle( STYLE_ENABLED, bCanEndTurn );
+	pStartOfTurn->SetActiveState( bCanEndTurn ? 0 : 1 );
+
+	// release CUnitPanel::Draw @0x2542e0: the 3-way backdrop toggle -- the empty plate shows only
+	// with NO selection; without this it stays template-visible and overdraws the other two.
+	pBackgroundEmpty->SetStyle( STYLE_VISIBLE, nCountSelected == 0 );
 
 	pInfoPanelSingleUnit->SetStyle( STYLE_VISIBLE, bSignlePanel );
 	pBackgroundSingleUnit->SetStyle( STYLE_VISIBLE, bSignlePanel );
 
 	pInfoPanelMultipleUnits->SetStyle( STYLE_VISIBLE, bMultiPanel );
 	pBackgroundMultipleUnits->SetStyle( STYLE_VISIBLE, bMultiPanel );
-
-	// release CUnitPanel::Draw @0x2542e0: the 3-way backdrop toggle -- the empty plate shows only
-	// with NO selection; without this it stays template-visible and overdraws the other two.
-	pBackgroundEmpty->SetStyle( STYLE_VISIBLE, nCountSelected == 0 );
 
 	CWindow::Draw( sTime, pView );
 }

@@ -115,7 +115,7 @@ static void luaWarningNVA( Script *pScript, string szFuncName, int nArg )
 	csSystem << str << endl;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-bool Script::CheckArgs( const char *szArgList, string sFuncName, vector<SLuaParams> *pParams )
+bool Script::CheckArgs( const char *szArgList, string sFuncName, vector<SLuaParams> *pParams, bool bMakeLog )
 {
 	pParams->clear();
 	const char *pCurChar = szArgList;
@@ -150,10 +150,12 @@ bool Script::CheckArgs( const char *szArgList, string sFuncName, vector<SLuaPara
 			{
 				case 'n':
 					isOK = o.IsNumber();
-					if ( isOK )			
+					if ( isOK )
 					{
 						param.f = o.GetNumber();
 						param.n = param.f;
+						if ( bMakeLog )
+							param.s = o.GetString();	// retail @0x3e6020: lua_tostring of the number
 					}
 					break;
 				case 's':
@@ -172,6 +174,8 @@ bool Script::CheckArgs( const char *szArgList, string sFuncName, vector<SLuaPara
 					break;
 				case 't':
 					isOK = o.IsTable();
+					if ( bMakeLog )
+						param.s = "[table]";
 					break;
 				case 'u':
 					// nil hardening: a NIL lua argument (e.g. the tutorial's ItemUnload(FindItem(25))
@@ -199,7 +203,11 @@ bool Script::CheckArgs( const char *szArgList, string sFuncName, vector<SLuaPara
 				case 'b':
 					isOK = o.IsNumber() || o.IsNil();
 					if ( isOK )
+					{
 						param.b = !o.IsNil();
+						if ( bMakeLog )
+							param.s = param.b ? "true" : "false";
+					}
 					break;
 				case '.':
 					return true;
@@ -213,7 +221,7 @@ bool Script::CheckArgs( const char *szArgList, string sFuncName, vector<SLuaPara
 		}
 		else if ( szDefaultValue != "" )
 		{
-			// ��������� �� ���������
+			// default values
 			switch( cTypeID )
 			{
 				case 'n':

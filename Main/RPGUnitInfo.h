@@ -155,6 +155,9 @@ public:
 
 	virtual bool IsHero() const = 0;
 	virtual bool IsHiding() const = 0;
+	// retail slot 25 (CUnitMission::IsAIPlayer @0x2c5b40 = getter for bIsAIUnit); CalcStructDmg
+	// @0x28f960 reads it to pick the difficulty's enemy-vs-our damage multiplier.
+	virtual bool IsAIPlayer() const = 0;
 
 	virtual void GetCriticalsList( list<CPtr<ICriticalInfo> > *pListCriticals ) const = 0;
 };

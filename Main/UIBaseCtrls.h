@@ -23,33 +23,14 @@ class CTextDraw;
 class CImageDraw;
 class CModelDraw;
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// CText
+// CText -- retail NUI::CText (UIBaseCtrls.obj, saveload id 0xB0241952). In retail this IS the
+// evolved CMLText: it owns the markup source text + one NUI::IML layout object + the <value>
+// substitution table, and no longer delegates to a CTextDraw. operator& @0x218720: 1=CWindow base,
+// 2=nSize, 3=wsText (string chunk), 4=pText (CObj<IML>), 5=valuesMap. Base of retail CEdit et al.
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CText: public CWindow
 {
 	OBJECT_NOCOPY_METHODS(CText);
-private:
-	ZDATA_(CWindow)
-	CObj<CTextDraw> pText;
-public:
-	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CWindow*)this); f.Add(2,&pText); return 0; }
-
-public:
-	CText() {}
-	CText( const SWindowInfo &sInfo );
-
-	const wstring& GetText() const;
-	void SetText( const wstring &wsText );
-
-	bool ProcessMessage( const SEvent &sEvent );
-	void Draw( const STime &sTime, NGScene::I2DGameView *pView );
-};
-////////////////////////////////////////////////////////////////////////////////////////////////////
-// CMLText
-////////////////////////////////////////////////////////////////////////////////////////////////////
-class CMLText: public CWindow
-{
-	OBJECT_NOCOPY_METHODS(CMLText);
 private:
 	ZDATA_(CWindow)
 	int nSize;
@@ -60,26 +41,26 @@ public:
 	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CWindow*)this); f.Add(2,&nSize); f.Add(3,&wsText); f.Add(4,&pText); f.Add(5,&valuesMap); return 0; }
 
 protected:
-	void UpdateText( NGScene::I2DGameView *pView );
+	void UpdateText( NGScene::I2DGameView *pView );   // retail @0x312480
 
 public:
-	CMLText() {}
-	CMLText( const SWindowInfo &sInfo );
+	CText() {}
+	CText( const SWindowInfo &sInfo );                // retail @0x312b60
 
-	const wstring& GetText() const;
-	void SetText( const wstring &wsText, bool bProcessTAGs = true );
+	const wstring& GetText() const;                   // retail @0x312390
+	void SetText( const wstring &wsText, bool bProcessTAGs = true );   // retail @0x3128d0
 
-	bool GetVal( const wstring &szID, wstring *pVal );
-	void SetVal( const wstring &szID, int nVal );
-	void SetVal( const wstring &szID, float fVal );
-	void SetVal( const wstring &szID, const wstring &wsVal );
+	bool GetVal( const wstring &szID, wstring *pVal );   // retail @0x312910
+	void SetVal( const wstring &szID, int nVal );        // retail @0x312c80
+	void SetVal( const wstring &szID, float fVal );      // retail @0x312cf0
+	void SetVal( const wstring &szID, const wstring &wsVal );   // retail @0x312d60
 
-	IML* GetIML();
-	void SetUpdated();
-	void GetRealSize( SPoint *pRes );
+	IML* GetIML();                                    // retail @0x312470
+	void SetUpdated();                                // retail @0x3123a0
+	void GetRealSize( SPoint *pRes );                 // retail @0x312760
 
-	bool ProcessMessage( const SEvent &sEvent );
-	void Draw( const STime &sTime, NGScene::I2DGameView *pView );
+	bool ProcessMessage( const SEvent &sEvent );      // retail @0x312950
+	void Draw( const STime &sTime, NGScene::I2DGameView *pView );   // retail @0x312820
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CImage
@@ -127,11 +108,7 @@ public:
 	NDb::CModel* GetModel() const;
 	void SetModel( NDb::CModel *pModel );
 
-	CFBTransform* GetTransform() const;
-	void SetTransform( CFBTransform *pBaseTransform );
-
-	// iSpecialView (release): thin forwarders into the owned CModelDraw over its
-	// already-present sModelTransform/sCameraTransform/p3DView/bParentScene fields.
+	// retail thin forwarders into the owned CModelDraw @0x312670/0x312680/0x312690
 	void SetScene( NGScene::IGameView *pView, bool bFast );
 	void SetModelTransform( const SHMatrix &sMatrix );
 	void SetCameraTransform( const SHMatrix &sMatrix );

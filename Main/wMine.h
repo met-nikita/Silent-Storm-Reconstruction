@@ -50,7 +50,8 @@ public:
 	virtual void Visit( IRenderVisitor* );
 	virtual void Visit( IAIVisitor* );
 	// implement IAttackable
-	virtual int ProcessAttack( int nUserID, NRPG::CAttackPortion *pAttack, NDb::CRPGArmor *pArmor );
+	virtual int ProcessAttack( NWorld::IWorld *pWorld, int nUserID, NRPG::CAttackPortion *pAttack,
+		const CVec3 &vDir, NDb::CRPGArmor *pArmor );
 	// IMine
 	virtual int GetMineDC() { return nDC; }
 	virtual CVec3 GetMinePos();

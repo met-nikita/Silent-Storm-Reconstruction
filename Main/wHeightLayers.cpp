@@ -1,7 +1,9 @@
 #include "StdAfx.h"
 #include "wHeightLayers.h"
 #include "TerrainInfo.h"   // STerrainInfo (heightMap) + CFuncBase<STerrainInfo>::GetValue
-#include "Grid.h"          // FP_TERRAIN_H_SCALE (1.0f/64.0f)
+#include "Grid.h"          // FP_TERRAIN_H_SCALE (1.0f/64.0f) + FP_INV_GRID_STEP
+#include "aiGrid.h"        // ComputeLayers step 3: CPathNetwork/CNodesLayer/CLayersGroup/STile + GetFHeight
+#include "BetaSpline.h"    // CBetaSpline::Value(CArray2D<float>&,int,int) @0xb94c0 -- the step-3 smoother
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 namespace NWorld
 {
@@ -15,10 +17,9 @@ int SHLayer::operator&( CStructureSaver &f )
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CHeightLayers::operator& -- terrainLayer + the two int-keyed floor hashes + the terrain flag.
-// (operator& was not in the lifted release set, so the retail chunk tags are unrecoverable; the class
-// is retail-new and absent from the dev game.db, so sequential tags are authored -- save/load is
-// symmetric, and no live dev structure stores a CHeightLayers, so this registrar is inert until
-// exercised.)
+// Tags VERIFIED against retail @0x35e5f0 (vtbl+0x0c): 2=terrainLayer, 3=layers, 4=desired2realFloor,
+// 5=bHasTerrain. A retail save's chunk reads {2:21338 3:128094 4:1224 5:1} -- tag 3 carries the real
+// per-floor layers, so CWorld tag 44 restores a populated cache.
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 int CHeightLayers::operator&( CStructureSaver &f )
 {
@@ -110,12 +111,96 @@ void CHeightLayers::ComputeLayers( int nXCells, int nYCells, CFuncBase<STerrainI
 				terrainLayer.heights[y][x] = (float)hm[y][x] * FP_TERRAIN_H_SCALE;
 	}
 
-	// 3. DEFERRED no-op: the retail path-network wall rasterization + per-floor beta-spline smoothing
-	//    reads a release NAI::CPathNetwork passage/geometry/cell substructure absent from the dev
-	//    predecessor (vector<CObj<CNodesLayer>> layers/groups, no passages). Landing it is a structural
-	//    rewrite, not a POD fill. Behaviour-neutral: `layers` stays empty so the per-floor cache
-	//    degrades to the shared terrainLayer. See decomp/src/s2_heightlayers.h SComputeLayersHooks.
-	(void)pPathNet;
+	// 3. @0x35d95a: rasterize every layer's tile grid into its floor's height field, carry the result
+	//    upward through the floors, then beta-spline-smooth each one. This is what makes the field
+	//    building-aware -- without it `layers` stays empty and GetLayer degrades to terrainLayer.
+	NAI::CPathNetwork *pNet = dynamic_cast<NAI::CPathNetwork*>( pPathNet );
+	if ( pNet == 0 || pNet->IsRefInvalid() )
+		return;
+
+	int nMinFloor = 100, nMaxFloor = -100;                    // @0x35d976 / @0x35d97e
+
+	const vector< CObj<NAI::CNodesLayer> > &netLayers = pNet->GetLayers();
+	for ( vector< CObj<NAI::CNodesLayer> >::const_iterator it = netLayers.begin(); it != netLayers.end(); ++it )
+	{
+		NAI::CNodesLayer *pLayer = *it;
+		if ( pLayer == 0 )
+			continue;
+		NAI::CLayersGroup *pGroup = pLayer->pGroup;           // CNodesLayer +0x5c
+		if ( pGroup == 0 )
+			continue;
+		// ptXDir is (cos,sin) * FP_GRID_STEP (aiGrid.cpp:1078); normalizing divides the 0.625 out, so
+		// FP_INV_GRID_STEP * FP_GRID_STEP == 1 -- one tile step IS one terrain cell.
+		float nc = pGroup->ptXDir.x, ns = pGroup->ptXDir.y;
+		const float fLen2 = nc * nc + ns * ns;
+		if ( fLen2 != 0.0f )
+		{
+			const float fK = 1.0f / sqrt( fLen2 );
+			nc *= fK;
+			ns *= fK;
+		}
+		const float fOrgX = FP_INV_GRID_STEP * pGroup->ptOrigin.x;
+		const float fOrgY = FP_INV_GRID_STEP * pGroup->ptOrigin.y;
+
+		for ( int i = 0; i < pLayer->tiles.GetXSize(); ++i )
+			for ( int j = 0; j < pLayer->tiles.GetYSize(); ++j )
+			{
+				const NAI::STile &tile = pLayer->tiles[j][i];
+				// Retail rotates by the TRANSPOSE of CLayersGroup::GetCPNoHeight (aiGrid.h:210) --
+				// both sin signs inverted. Identical while a group's theta is 0. Reproduced 1:1.
+				const float fx = (float)i, fy = (float)j, fx5 = fx + 0.5f, fy5 = fy + 0.5f;
+				const float fX1 = fOrgX + fx  * nc + fy  * ns, fY1 = fOrgY + fy  * nc - fx  * ns;
+				const float fX2 = fOrgX + fx5 * nc + fy5 * ns, fY2 = fOrgY + fy5 * nc - fx5 * ns;
+
+				SHLayer *pHL = GetCreateLayer( tile.nFloor );
+				if ( tile.nFloor <= nMinFloor ) nMinFloor = tile.nFloor;
+				if ( tile.nFloor >= nMaxFloor ) nMaxFloor = tile.nFloor;
+				const float fH = NAI::GetFHeight( tile.nHeight );
+
+				// Float2Int is fld/fistp (round-to-nearest-even) -- a C cast would truncate. Both
+				// bounds are strict at 0, so row/column 0 is never written.
+				int nX = Float2Int( fX1 ), nY = Float2Int( fY1 );
+				if ( nX > 0 && nX < pHL->heights.GetXSize() && nY > 0 && nY < pHL->heights.GetYSize() )
+					pHL->heights[nY][nX] = Max( pHL->heights[nY][nX], fH );
+				nX = Float2Int( fX2 );
+				nY = Float2Int( fY2 );
+				if ( nX > 0 && nX < pHL->heights.GetXSize() && nY > 0 && nY < pHL->heights.GetYSize() )
+					pHL->heights[nY][nX] = Max( pHL->heights[nY][nX], fH );
+			}
+	}
+
+	if ( layers.empty() )                                     // @0x35dc11 -- gates the merge AND the smooth
+		return;
+
+	// 3b @0x35dc0d: carry each real floor's field up into the next distinct one.
+	SHLayer *pPrev = &layers[ GetRealFloor( nMinFloor ) ];
+	for ( int f = nMinFloor + 1; f <= nMaxFloor; ++f )
+	{
+		SHLayer *pCur = &layers[ GetRealFloor( f ) ];
+		if ( pCur == pPrev )
+			continue;
+		for ( int x = 0; x < pCur->heights.GetXSize(); ++x )
+			for ( int y = 0; y < pCur->heights.GetYSize(); ++y )
+				pCur->heights[y][x] = Max( pCur->heights[y][x], pPrev->heights[y][x] );
+		pPrev = pCur;
+	}
+
+	// 3c @0x35dcd7: smooth each distinct real floor, double-buffered through a copy.
+	// (Retail emits Init(1,1) first @0x35dcea; Init re-derives every field, so (0.5,10) is the live shape.)
+	CBetaSpline spline;
+	spline.Init( 0.5f, 10.0f );
+	SHLayer *pDone = 0;
+	for ( int f = nMinFloor; f <= nMaxFloor; ++f )
+	{
+		SHLayer *pHL = &layers[ GetRealFloor( f ) ];
+		if ( pHL == pDone )
+			continue;
+		CArray2D<float> tmp = pHL->heights;
+		for ( int x = 0; x < pHL->heights.GetXSize(); ++x )
+			for ( int y = 0; y < pHL->heights.GetYSize(); ++y )
+				pHL->heights[y][x] = spline.Value( tmp, x, y );
+		pDone = pHL;
+	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CreateHeightLayers @0x35de90 -- factory: build a height-layer cache, return its IHeightLayers face.

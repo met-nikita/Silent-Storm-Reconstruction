@@ -17,11 +17,6 @@
 // that would populate these pointers are themselves still ASSERT/bCanDo=false stubs, so nothing creates
 // a real instance yet.
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-namespace NAI
-{
-class CAIFireArmsWeaponBase : public CObjectBase { OBJECT_BASIC_METHODS( CAIFireArmsWeaponBase ); };
-}
-//
-using namespace NAI;
-//
-BASIC_REGISTER_CLASS( CAIFireArmsWeaponBase )
+// (CAIFireArmsWeaponBase stub RETIRED -- the real base class now lives in aiWeapon.h with the retail
+//  member set + operator& tags 2-5, and its saveload registration 0x52642100 in aiWeapon.cpp;
+//  serialization-convergence Wave 2.)

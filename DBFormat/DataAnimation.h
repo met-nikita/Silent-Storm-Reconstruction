@@ -37,6 +37,11 @@ public:
 		WEAPON_KATANA = 0x100000,
 		WEAPON_PLAZMAGUN = 0x200000,
 		PK_WEAPON_PLAZMAGUN = 0x400000,
+		// retail v1.x additions (CAnimation::Import string table @0x3f81e0)
+		WEAPON_MACHETE = 0x800000,
+		PK_WEAPON_TERROR_GUN = 0x1000000,			// db column "PKTerrorGunSpecial" (WT_TERROR_SPECIAL_GUN)
+		PK_WEAPON_TERROR_SHOOTER = 0x2000000,		// db column "TerrorShooter"; CalculateAnimFlags remaps
+													// PK_WEAPON_SHOOTER onto it for TERROR_PK skeletons
 	};
 	enum EClassSexFlags
 	{
@@ -51,6 +56,10 @@ public:
 		MEDIC = 0x0100,
 		ENGINEER = 0x0200,
 		ENEMY = 0x0400,
+		// retail v1.x additions (CAnimation::Import @0x3f81e0); set into CUnitAnimator::nSpecialPKFlags
+		// by ChangeSkeleton @0x33c8a0 and ORed into the request by CalculateAnimFlags @0x33afb0
+		BOSS = 0x0800,			// db column "Boss": worn-PK pers named "Boss" (flying boss)
+		TERROR_PK = 0x1000,		// db column "TerrorPK": worn PK with bHasNoHead
 	};
 	enum EType
 	{

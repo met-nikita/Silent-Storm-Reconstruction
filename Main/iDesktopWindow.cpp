@@ -28,7 +28,13 @@ void CAckEvent::Set( const STime &sTime )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CAckEvent::Cancel()
 {
+	// retail @0x1d0d10 (disasm): sEndTime = 0, bReady = true, bComplete = true -- a cancelled ack
+	// COMPLETES immediately (IsComplete needs bReady && bComplete). Zeroing only sEndTime left a
+	// never-ready ack alive forever: the view never hid and the desktop's active-event slot stayed
+	// occupied, dropping every later same-priority bark.
 	sEndTime = 0;
+	bReady = true;
+	bComplete = true;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 const STime& CAckEvent::GetEndTime() const

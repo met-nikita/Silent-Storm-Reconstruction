@@ -7,17 +7,20 @@
 namespace NGScene
 {
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// release CalcDU<SVertex> (inlined into CMemObjectInfo::Recalc @0x539240): same
+// basis math, but the results are PACKED into the vertex's compact normal/texU/texV
+// slots via NGfx::CalcCompactVector (SVertex stores them as SCompactVector).
 template<class T>
 static void CalcDU( T *pRes, const CVec3 &vNormal )
 {
-	pRes->normal = vNormal;
+	NGfx::CalcCompactVector( &pRes->normal, vNormal );
 	CVec3 vTexU = vNormal ^ CVec3(0.3f,0.3f,0.3f);
 	if ( fabs2( vTexU ) < 0.01f )
 		vTexU = vNormal ^ CVec3(0,1,0);
 	Normalize( &vTexU );
 	CVec3 vTexV = vTexU ^ vNormal;
-	pRes->texU = vTexU;
-	pRes->texV = vTexV;
+	NGfx::CalcCompactVector( &pRes->texU, vTexU );
+	NGfx::CalcCompactVector( &pRes->texV, vTexV );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CMemGeometry

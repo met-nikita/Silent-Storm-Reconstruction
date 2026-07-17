@@ -103,19 +103,19 @@ bool IsObstacleRay( NAI::CFastRenderer::SResult *pList, float fMaxDist, CObjectB
 // CGame::ProcessThrowingAttackPortion. The release added the leading IWorld* and the
 // (unread) vPlace argument; the body is otherwise identical.
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-EAttackResult PerformThrowingAttackPortion( NWorld::IWorld * /*pWorld*/, CAttackPortion *pA,
-	const CVec3 & /*vPlace*/, IAttackable *pTarget, NDb::CRPGArmor *pArmor, int nUserID )
+EAttackResult PerformThrowingAttackPortion( NWorld::IWorld *pWorld, CAttackPortion *pA,
+	const CVec3 &vDir, IAttackable *pTarget, NDb::CRPGArmor *pArmor, int nUserID )
 {
 	if ( pArmor == NDb::GetArmor( NDb::N_HUMAN_BODY_ARMOR ) )
 	{
-		pTarget->ProcessAttack( nUserID, pA, pArmor );
+		pTarget->ProcessAttack( pWorld, nUserID, pA, vDir, pArmor );
 		return AR_BOUNCE_BODY;
 	}
 	if ( pArmor->pMaterial->nDR == 10 )
 		return AR_IGNORE;
 	if ( pArmor->pMaterial->nDR == 0 )
 	{
-		pTarget->ProcessAttack( nUserID, pA, pArmor );
+		pTarget->ProcessAttack( pWorld, nUserID, pA, vDir, pArmor );
 		return AR_IGNORE;
 	}
 	if ( pArmor->pMaterial->nDR == 1 || pArmor->pMaterial->nDR == 2 )
@@ -130,7 +130,7 @@ EAttackResult PerformThrowingAttackPortion( NWorld::IWorld * /*pWorld*/, CAttack
 // god-moded unit; the release only withholds it from the ignore list and still runs the
 // armor/damage path.
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void PerformMeleeAttackPortion( NWorld::IWorld * /*pWorld*/, NAI::IAIMap *pAIMap, const CAttackPortion &a,
+void PerformMeleeAttackPortion( NWorld::IWorld *pWorld, NAI::IAIMap *pAIMap, const CAttackPortion &a,
 	const CRay &ray, const vector<IAttackable*> &ignores, CObjectBase *pFilter )
 {
 	vector<NAI::SInterval> intersect;
@@ -161,7 +161,8 @@ void PerformMeleeAttackPortion( NWorld::IWorld * /*pWorld*/, NAI::IAIMap *pAIMap
 		if ( !tmp.IsArmorIgnored( pArmor ) && !tmp.CanDealDmg( pArmor ) )
 			return;
 		if ( ( !pFilter || pFilter == pUD ) && pCatcher && IsValid( pUD ) )
-			pCatcher->ProcessAttack( i->nUserID, &tmp, pArmor );
+			// retail @0x290f70 passes ray.ptDir, NOT the per-hit point ray.Get(i->enter.fT).
+			pCatcher->ProcessAttack( pWorld, i->nUserID, &tmp, ray.ptDir, pArmor );
 		tmp.nK -= GetAPASubstraction( i->enter.fT, i->exit.fT, pArmor );
 		if ( tmp.nK <= 0 )
 			return;

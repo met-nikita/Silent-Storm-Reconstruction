@@ -87,4 +87,4 @@ IAILogic* CreateAIScriptLogic( IAIUnit *pUnit )
 }
 //
 using namespace NAI;
-BASIC_REGISTER_CLASS( CAIScriptLogic )
+REGISTER_SAVELOAD_CLASS( 0x51253122, CAIScriptLogic )

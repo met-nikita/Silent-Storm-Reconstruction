@@ -55,9 +55,11 @@ NRPG::CClipItem* CAIFireArmsWeaponClip::GetItem() const
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CAIFireArmsWeapon
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CAIFireArmsWeapon::CAIFireArmsWeapon( IAIUnit *_pOwner, NRPG::CWeaponItem *_pWeaponItem ):
-	pOwner( _pOwner ), pWeaponItem( _pWeaponItem ), pCurrentClip( 0 )
+CAIFireArmsWeapon::CAIFireArmsWeapon( IAIUnit *_pOwner, NRPG::CWeaponItem *_pWeaponItem )
 {
+	pOwner = _pOwner;
+	pWeaponItem = _pWeaponItem;
+	pCurrentClip = 0;
 	ASSERT( IsValid( pWeaponItem ) );
 	ASSERT( IsValid( pOwner ) );
 	if ( IsValid( pWeaponItem ) )
@@ -68,7 +70,7 @@ CAIFireArmsWeapon::CAIFireArmsWeapon( IAIUnit *_pOwner, NRPG::CWeaponItem *_pWea
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-NRPG::IInventoryItem* CAIFireArmsWeapon::GetInventoryItem() const
+NRPG::IInventoryItem* CAIFireArmsWeaponBase::GetInventoryItem() const
 {
 	return CDynamicCast<NRPG::IInventoryItem>( GetItem() ).GetPtr();
 }
@@ -86,34 +88,34 @@ int CAIFireArmsWeapon::GetAnimType() const
 	return (int)pDB->pAnimWeaponType->type;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-int CAIFireArmsWeapon::GetClipCount() const 
+int CAIFireArmsWeaponBase::GetClipCount() const
 {
-	return clips.size(); 
+	return clips.size();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CAIFireArmsWeaponClip* CAIFireArmsWeapon::GetCurrentClip() const 
-{ 
-	return pCurrentClip; 
+CAIFireArmsWeaponClip* CAIFireArmsWeaponBase::GetCurrentClip() const
+{
+	return pCurrentClip;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CAIFireArmsWeapon::SetCurrentClip( CAIFireArmsWeaponClip *pClip ) 
-{ 
-	pCurrentClip = pClip; 
+void CAIFireArmsWeaponBase::SetCurrentClip( CAIFireArmsWeaponClip *pClip )
+{
+	pCurrentClip = pClip;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CAIFireArmsWeaponClip* CAIFireArmsWeapon::GetNextClip() const
+CAIFireArmsWeaponClip* CAIFireArmsWeaponBase::GetNextClip() const
 {
 	return clips.empty() ? 0 : clips.front();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CAIFireArmsWeapon::RemoveClip( CAIFireArmsWeaponClip *pClip )
+void CAIFireArmsWeaponBase::RemoveClip( CAIFireArmsWeaponClip *pClip )
 {
 	ASSERT( IsValid( pClip ) );
 	ASSERT( find( clips.begin(), clips.end(), pClip ) != clips.end() );
 	clips.erase( remove( clips.begin(), clips.end(), pClip ), clips.end() );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CAIFireArmsWeapon::AddClip( CAIFireArmsWeaponClip *pClip )
+void CAIFireArmsWeaponBase::AddClip( CAIFireArmsWeaponClip *pClip )
 {
 	ASSERT( IsValid( pClip ) );
 	if ( IsValid( pClip ) )
@@ -125,7 +127,7 @@ void CAIFireArmsWeapon::AddClip( CAIFireArmsWeaponClip *pClip )
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-bool CAIFireArmsWeapon::IsSuitableClip( CAIFireArmsWeaponClip *pClip ) const
+bool CAIFireArmsWeaponBase::IsSuitableClip( CAIFireArmsWeaponClip *pClip ) const
 {
 	ASSERT( IsValid( pClip ) );
 	if ( IsValid( pClip ) )
@@ -135,6 +137,15 @@ bool CAIFireArmsWeapon::IsSuitableClip( CAIFireArmsWeaponClip *pClip ) const
 			return pInnerClipItem->IsCompatible( pClip->GetItem(), false );
 	}
 	return false;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// @0xb5a60: compare by the DB AIRating ("+0xa8"), NOT nQuality. A null/dead candidate makes the
+// held weapon read as worse (retail returns true on the guard path).
+bool CAIFireArmsWeaponBase::IsWorseThen( NRPG::CWeaponItem *pCandidate ) const
+{
+	if ( !IsValid( pCandidate ) )
+		return true;
+	return pWeaponItem->GetDBWeapon()->nAIRating < pCandidate->GetDBWeapon()->nAIRating;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 #define GET_WEAPON_OPERATION_AP( Name, RPGName )									\
@@ -364,13 +375,9 @@ NRPG::IInventoryItem* CAIGrenadeWeapon::GetInventoryItem() const
 	return CDynamicCast<NRPG::IInventoryItem>( GetItem() ).GetPtr();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// CAIMeleeWeapon / CAIThrowingWeapon
+// CAIMeleeWeaponBase (CAIMeleeWeapon / CAIThrowingWeapon)
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-NRPG::IInventoryItem* CAIMeleeWeapon::GetInventoryItem() const
-{
-	return CDynamicCast<NRPG::IInventoryItem>( GetItem() ).GetPtr();
-}
-NRPG::IInventoryItem* CAIThrowingWeapon::GetInventoryItem() const
+NRPG::IInventoryItem* CAIMeleeWeaponBase::GetInventoryItem() const  // @0xb5940
 {
 	return CDynamicCast<NRPG::IInventoryItem>( GetItem() ).GetPtr();
 }
@@ -387,11 +394,29 @@ CAIFireArmsWeaponClip* CreateAIFireArmsWeaponClip( NRPG::CClipItem *pItem )
 	return new CAIFireArmsWeaponClip( pItem );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// @0xb67d0: item + owner must be live and the weapon must NOT be bazooka-logic (the factories are
+// symmetric -- retail returns 0 for a bazooka here and dispatches it to the rocket-launcher leaf).
 CAIFireArmsWeapon* CreateAIFireArmsWeapon( IAIUnit *pOwner, NRPG::CWeaponItem *pItem )
 {
 	ASSERT( IsValid( pItem ) );
 	ASSERT( IsValid( pOwner ) );
+	if ( !IsValid( pItem ) || !IsValid( pOwner ) )
+		return 0;
+	if ( pItem->GetDBWeapon()->bBazookaLogic )
+		return 0;
 	return new CAIFireArmsWeapon( pOwner, pItem );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// @0xb6880: item + owner must be live and the weapon MUST be bazooka-logic.
+CAIRocketLauncherWeapon* CreateAIRocketLauncherWeapon( IAIUnit *pOwner, NRPG::CWeaponItem *pItem )
+{
+	ASSERT( IsValid( pItem ) );
+	ASSERT( IsValid( pOwner ) );
+	if ( !IsValid( pItem ) || !IsValid( pOwner ) )
+		return 0;
+	if ( !pItem->GetDBWeapon()->bBazookaLogic )
+		return 0;
+	return new CAIRocketLauncherWeapon( pOwner, pItem );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CAIGrenadeWeapon* CreateAIGrenadeWeapon( NRPG::CGrenadeItem *pItem )
@@ -422,9 +447,12 @@ CAIFirstAid* CreateAIFirstAid( NRPG::CFirstAidItem *pItem )
 //
 using namespace NAI;
 //
-REGISTER_SAVELOAD_CLASS( 0x52642100, CAIFireArmsWeapon );
+REGISTER_SAVELOAD_CLASS( 0x52642100, CAIFireArmsWeaponBase );
+REGISTER_SAVELOAD_CLASS( 0x53133163, CAIFireArmsWeapon );
+REGISTER_SAVELOAD_CLASS( 0x53133162, CAIRocketLauncherWeapon );
 REGISTER_SAVELOAD_CLASS( 0x52942120, CAIFireArmsWeaponClip );
 REGISTER_SAVELOAD_CLASS( 0x52942121, CAIGrenadeWeapon );
-REGISTER_SAVELOAD_CLASS( 0x52942122, CAIMeleeWeapon );
-REGISTER_SAVELOAD_CLASS( 0x52942123, CAIThrowingWeapon );
-REGISTER_SAVELOAD_CLASS( 0x52942124, CAIFirstAid );
+REGISTER_SAVELOAD_CLASS( 0x53133160, CAIMeleeWeaponBase );
+REGISTER_SAVELOAD_CLASS( 0x52533160, CAIMeleeWeapon );
+REGISTER_SAVELOAD_CLASS( 0x53133161, CAIThrowingWeapon );
+REGISTER_SAVELOAD_CLASS( 0x53133150, CAIFirstAid );

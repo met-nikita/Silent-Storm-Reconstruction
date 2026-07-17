@@ -18,10 +18,11 @@ private:
 	// mission" button is enabled only when the menu was opened FROM A MISSION (the chapter/global
 	// map callers leave it disabled -- there restart.sav belongs to the previous mission).
 	bool bAllowRestart = false;
+	bool bAllowSave = true;   // retail: the mission's bCanSave, forwarded to every save/load screen this menu opens
 
 public:
 	CICInGameMenu() {}
-	CICInGameMenu( NRPG::CGlobalPlayer *pGlobalPlayer, bool bAllowRestart = false );
+	CICInGameMenu( NRPG::CGlobalPlayer *pGlobalPlayer, bool bAllowRestart = false, bool bAllowSave = true );   // retail threads the mission's bCanSave down to the save/load screen
 
 	virtual void Exec();
 };

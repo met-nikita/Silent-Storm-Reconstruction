@@ -19,10 +19,11 @@ class CICSaveLoadMenu: public NMainLoop::CInterfaceCommand
 private:
 	ESaveLoadType eType;
 	CObj<NGScene::CScreenshotTexture> pScreenShotTexture;
+	bool bAllowSave;   // retail ctor @0x2315f0 arg 3 -- roots in CMissionBase::bCanSave (tag 30)
 
 public:
-	CICSaveLoadMenu() {}
-	CICSaveLoadMenu( ESaveLoadType eType, NGScene::CScreenshotTexture *pScreenShotTexture = 0 );
+	CICSaveLoadMenu(): bAllowSave( true ) {}
+	CICSaveLoadMenu( ESaveLoadType eType, NGScene::CScreenshotTexture *pScreenShotTexture = 0, bool bAllowSave = true );
 
 	virtual void Exec();
 };

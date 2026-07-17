@@ -15,7 +15,7 @@
 #include "iMainMenu.h"         // NGame::CICMainMenu (final-credits -> rebuild the main menu)
 #include "iCreditsScreen.h"
 #include "UIInterface.h"       // NUI::CInterface / GetDBString / LoadTemplate
-#include "UIBaseCtrls.h"       // NUI::CMLText (the markup credits text)
+#include "UIBaseCtrls.h"       // NUI::CText (the markup credits text)
 #include "UICommCtrls.h"       // NUI::CVideoPlayer (the final-credits .bik)
 #include "iDesktopWindow.h"    // NUI::CDesktopWindow (CCreditsUI base)
 #include "Camera.h"            // ICamera::SCameraPos
@@ -52,7 +52,7 @@ const int
 const float F_CREDITS_SCROLL_SPEED = 0.02f;   // @Draw 0x3ca3d70a -- pixels per millisecond
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // "\n"/"\r"/0x85 -> markup, exactly as the dev iMissionUI.cpp file-local helper (kept file-local
-// here too -- the release inlines the same conversion before CMLText::SetText).
+// here too -- the release inlines the same conversion before CText::SetText).
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 static wstring ConvertLineBreaks( const wstring &szStr )
 {
@@ -94,7 +94,7 @@ private:
 	ZDATA_(CDesktopWindow)
 	float            fScroll;        // current scroll offset (px); starts -clipHeight so the roll enters from below
 	STime            sLastTime;      // last Draw time, for the per-frame delta
-	CObj<CMLText>    pText;          // the markup credits text (release CObj<CText>; this tree's markup text == CMLText)
+	CObj<CText>    pText;          // the markup credits text (release CObj<CText>)
 	CObj<CWindow>    pClip;          // the clip rect the text scrolls through
 	CObj<CVideoPlayer> pVideoPlayer; // the looping Credits.bik (final credits only)
 public:
@@ -114,7 +114,7 @@ CCreditsUI::CCreditsUI( const SWindowInfo &sInfo, bool bFinalCredits ):
 	// The clip rect (rows 128..640) masks the scroll; the text fills it and slides up through it.
 	pClip = new CWindow( SWindowInfo( this, SPoint( 0, 128 ), SPoint( 1024, 512 ), "text",
 	                     STYLE_VISIBLE | STYLE_ENABLED | STYLE_TOPMOST | STYLE_TRANSPARENT ) );
-	pText = new CMLText( SWindowInfo( pClip, SPoint( 0, 0 ), pClip->GetSize(), "text",
+	pText = new CText( SWindowInfo( pClip, SPoint( 0, 0 ), pClip->GetSize(), "text",
 	                     STYLE_VISIBLE | STYLE_ENABLED | STYLE_TOPMOST | STYLE_TRANSPARENT ) );
 	pVideoPlayer = new CVideoPlayer( SWindowInfo( this, SPoint( 0, 0 ), GetSize(), "video",
 	                     STYLE_ENABLED | STYLE_BOTTOMMOST | STYLE_TRANSPARENT ) );

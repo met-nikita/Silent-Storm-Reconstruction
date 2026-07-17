@@ -16,10 +16,17 @@
 static bool bStencilShadows = false;
 static bool bBlurSun = true;
 static bool bDrawSpecular = true;
+static bool bDrawPointSpecular = true;   // gfx_point_specular, retail GRenderLightInit (post-Jan03 var)
+static bool bBlurCL = true;              // gfx_cl_blur, retail GRenderLightInit (post-Jan03 var)
 namespace NGScene
 {
 bool bStaticShadowDepthRendered;
 const int N_GF3_TEMP_REG = 4;
+// retail globals: the depth-shadow source bound for the scene being drawn (@0x155730 preamble) --
+// a no-shadow scene gets the black texture, so an overlay scene never samples the world's shadow map
+static CObj<NGfx::CTexture> pCurrentDepthTexture;
+// retail @0x99e198: last light that wrote the shared depth map; another owner forces a static re-render
+static CDirectionalLight *pPrevDepthUpdate = 0;
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CDirectionalLight
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -35,6 +42,14 @@ CDirectionalLight::CDirectionalLight( CFuncBase<CVec3> *_pColor, CFuncBase<CVec3
 	pTopAmbient(_pTopAmbient), pBottomAmbient(_pBottomAmbient)
 {
 	vLightDir = ptLight;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail @0x150c00
+NGfx::CTexture* CDirectionalLight::GetDepthTexture()
+{
+	if ( pCLRender->GetLightingOptions() & 1 )
+		return GetBlackTexture();
+	return shadowMapsShare.GetDepthShadow();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CDirectionalLight::FinalPass( NGfx::CRenderContext *pRC, ERenderPath renderPath )
@@ -69,6 +84,7 @@ void CDirectionalLight::PrepareLightInfo( SLightInfo *pLightInfo )
 	pTopAmbient.Refresh();
 	pBottomAmbient.Refresh();
 	lightInfo.bNeedSet = true;
+	lightInfo.bIgnoreCL = ( pCLRender->GetLightingOptions() >> 1 ) & 1;   // retail @0x150c30
 	lightInfo.vGlossColor = pGlossColor->GetValue();
 	lightInfo.vLightColor = CVec4( pColor->GetValue(), 0 );
 	lightInfo.vLightPos = CVec4(-vLightDir, 0);
@@ -253,15 +269,16 @@ static void RenderShadowTest( SOpGenContext &op, const SMaterialInfo &info, cons
 {
 	if ( info.IsDecal() )
 		return;
+	// retail @0x151770 samples pCurrentDepthTexture (black for a no-shadow scene), never the share directly
 	if ( renderPath == RP_GF2 || renderPath == RP_GF2_CL )
 	{
-		op.AddOperation( RO_DIR_SHADOW_TEST, 10, ABM_ZERO|STM_LIGHT|DPM_EQUAL, 0,//, STM_LIGHT|ABM_ADD|DPM_EQUAL, 0, 
-			&depthInfo, shadowMapsShare.GetDepthShadow() );
+		op.AddOperation( RO_DIR_SHADOW_TEST, 10, ABM_ZERO|STM_LIGHT|DPM_EQUAL, 0,//, STM_LIGHT|ABM_ADD|DPM_EQUAL, 0,
+			&depthInfo, pCurrentDepthTexture.GetPtr() );
 	}
-	else if ( renderPath == RP_GF3_CL )
+	else if ( renderPath == RP_GF3_CL || renderPath == RP_UPDATE_CL )
 	{
 		op.AddOperation( RO_DIR_SHADOW_TEST_SMOOTHED, 10, info.bAlphaTest ? DPM_EQUAL : 0, bBlurSun ? N_GF3_TEMP_REG : 1,
-			&depthInfo, shadowMapsShare.GetDepthShadow(), 0.0f );
+			&depthInfo, pCurrentDepthTexture.GetPtr(), 0.0f );
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -269,12 +286,13 @@ static CVec3 vParticleLMShadowTestFullLight;
 static bool bUseSoftLMShadows;
 static void RenderParticleShadowTest( SOpGenContext &op, const SPerspDirectionalDepthInfo &depthInfo )
 {
+	// retail @0x151820: pCurrentDepthTexture, not the share
 	if ( bUseSoftLMShadows )
 		op.AddOperation( RO_DIR_PARTICLE_LM_SOFT_SHADOW_TEST, 10, ABM_ALPHA_BLEND|DPM_NONE, 0,
-			&depthInfo, shadowMapsShare.GetDepthShadow(), &vParticleLMShadowTestFullLight );
+			&depthInfo, pCurrentDepthTexture.GetPtr(), &vParticleLMShadowTestFullLight );
 	else
-		op.AddOperation( RO_DIR_PARTICLE_LM_SHADOW_TEST, 10, ABM_ZERO|STM_LIGHT|DPM_NONE, 0,//, STM_LIGHT|ABM_ADD|DPM_EQUAL, 0, 
-			&depthInfo, shadowMapsShare.GetDepthShadow() );
+		op.AddOperation( RO_DIR_PARTICLE_LM_SHADOW_TEST, 10, ABM_ZERO|STM_LIGHT|DPM_NONE, 0,//, STM_LIGHT|ABM_ADD|DPM_EQUAL, 0,
+			&depthInfo, pCurrentDepthTexture.GetPtr() );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 static void RenderAlphaTested( CTransformStack *pTS, NGfx::CRenderContext *pRC, 
@@ -295,13 +313,29 @@ static void RenderAlphaTested( CTransformStack *pTS, NGfx::CRenderContext *pRC,
 	Execute( pRender, pRC, *pTS, alphaTestOps, *pScene, SLightInfo() );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CDirectionalLight::RenderPPShadowOps( CTransformStack *pTS, CTransformStack *pClipTS, NGfx::CRenderContext *pRC, ERenderPath renderPath, 
-	IRender *pRender, CSceneFragments &scene, const SLightInfo &lightInfo, const SParticleLMRenderTargetInfo &particleLM )
+// retail @0x153900: depth-map refresh split out of RenderPPShadowOps; options bit 1 short-circuits
+// to constant depthInfo so the shared map (and the main scene's shadows) are never touched
+void CDirectionalLight::UpdateDepthTexture( CTransformStack *pTS, CTransformStack *pClipTS, IRender *pRender,
+	const SLightInfo &lightInfo, SPerspDirectionalDepthInfo *pDepthInfo )
 {
+	if ( pCLRender->GetLightingOptions() & 1 )
+	{
+		// @0x153934: identity matrix, red channel, constant depth -- the black texture always tests "lit"
+		Identity( &pDepthInfo->m );
+		pDepthInfo->vChannelSelect = CVec4(1,0,0,0);
+		pDepthInfo->vDepth = CVec4(0,0,0,1);
+		return;
+	}
 	bool bStaticUpdated = pStaticTracker.Refresh();
 	if ( memcmp( &pTS->Get().forward, &mPrevCamera, sizeof(mPrevCamera) ) != 0 )
 	{
 		mPrevCamera = pTS->Get().forward;
+		bStaticUpdated = true;
+	}
+	// @0x153a13: shared map last written by another light -> its content is foreign, re-render
+	if ( pPrevDepthUpdate != this )
+	{
+		pPrevDepthUpdate = this;
 		bStaticUpdated = true;
 	}
 
@@ -310,14 +344,13 @@ void CDirectionalLight::RenderPPShadowOps( CTransformStack *pTS, CTransformStack
 
 	int nDepthTexResolution = shadowMapsShare.GetDepthResolution();
 
-	SPerspDirectionalDepthInfo depthInfo;
-	depthInfo.vChannelSelect = CVec4(1,1,0,0);
-	depthInfo.vDepth = vDepth;
-	depthInfo.m = sts.Get().forward;
-	NGfx::GetTexMapFromProjection( &depthInfo.m, nDepthTexResolution );
+	pDepthInfo->vChannelSelect = CVec4(1,1,0,0);
+	pDepthInfo->vDepth = vDepth;
+	pDepthInfo->m = sts.Get().forward;
+	NGfx::GetTexMapFromProjection( &pDepthInfo->m, nDepthTexResolution );
 	{
 		NGfx::CRenderContext rc;
-		rc.SetTextureRT( shadowMapsShare.GetDepthShadow() );
+		rc.SetTextureRT( pCurrentDepthTexture );
 
 		if ( bStaticUpdated )
 		{
@@ -328,7 +361,7 @@ void CDirectionalLight::RenderPPShadowOps( CTransformStack *pTS, CTransformStack
 			CRenderCmdList res;
 			rc.SetColorWrite( NGfx::COLORWRITE_RED );
 			pRender->FormDepthList( &sts, vLightDir, &geom, IRender::DT_STATIC );//dt );
-			MakeSingleOp( &res, geom, true, RO_DIR_DEPTH, &depthInfo );
+			MakeSingleOp( &res, geom, true, RO_DIR_DEPTH, pDepthInfo );
 			Execute( pRender, &rc, sts, res, geom, lightInfo );
 		}
 		else
@@ -346,7 +379,7 @@ void CDirectionalLight::RenderPPShadowOps( CTransformStack *pTS, CTransformStack
 			CRenderCmdList res;
 			rc.SetColorWrite( NGfx::COLORWRITE_GREEN );
 			pRender->FormDepthList( &sts, vLightDir, &geom, IRender::DT_DYNAMIC );//dt );
-			MakeSingleOp( &res, geom, true, RO_DIR_DEPTH, &depthInfo );
+			MakeSingleOp( &res, geom, true, RO_DIR_DEPTH, pDepthInfo );
 			Execute( pRender, &rc, sts, res, geom, lightInfo );
 		}
 
@@ -354,6 +387,13 @@ void CDirectionalLight::RenderPPShadowOps( CTransformStack *pTS, CTransformStack
 		DrawBorder( &rc, nDepthTexResolution );
 	}
 	//NGfx::ShowTexture( shadowMapsShare.GetDepthShadow() );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CDirectionalLight::RenderPPShadowOps( CTransformStack *pTS, CTransformStack *pClipTS, NGfx::CRenderContext *pRC, ERenderPath renderPath,
+	IRender *pRender, CSceneFragments &scene, const SLightInfo &lightInfo, const SParticleLMRenderTargetInfo &particleLM )
+{
+	SPerspDirectionalDepthInfo depthInfo;
+	UpdateDepthTexture( pTS, pClipTS, pRender, lightInfo, &depthInfo );
 
 	if ( renderPath == RP_GF3_CL )
 	{
@@ -363,7 +403,8 @@ void CDirectionalLight::RenderPPShadowOps( CTransformStack *pTS, CTransformStack
 			RenderAlphaTested( pTS, pRC, pRender, &scene );
 			Render( pTS, pRC, renderPath, pRender, scene, lightInfo, RenderShadowTest, depthInfo );
 		}
-		pCLRender->RenderCL( pRC, pRender, pTS, &scene, pCLStaticTrack.Refresh() );
+		if ( !(pCLRender->GetLightingOptions() & 2) )   // retail gate in @0x153df0
+			pCLRender->RenderCL( pRC, pRender, pTS, &scene, pCLStaticTrack.Refresh() );
 		{
 			CSelectFragments filterLightmapped( &scene, SNonLightmappedFilter() );
 			RenderAlphaTested( pTS, pRC, pRender, &scene );
@@ -477,7 +518,8 @@ void CDirectionalLight::RenderAmbientLightmaps( CTransformStack *pTS, NGfx::CRen
 		Execute( pRender, pRC, *pTS, lightOps, scene, lightInfo );
 	}
 
-	pCLRender->RenderCL( pRC, pRender, pTS, &scene, pCLStaticTrack.Refresh() );
+	if ( !(pCLRender->GetLightingOptions() & 2) )   // retail @0x151b80 gate
+		pCLRender->RenderCL( pRC, pRender, pTS, &scene, pCLStaticTrack.Refresh() );
 	// multiply diffuse with lightmap
 	CTRect<float> regSize;
 	NGfx::GetRegisterSize( &regSize );
@@ -531,6 +573,7 @@ void CDirectionalLight::RenderInSinglePass( CTransformStack *pTS, CTransformStac
 {
 	ASSERT( NGfx::GetHardwareLevel() >= NGfx::HL_GFORCE3 );
 	const vector<SRenderFragmentInfo*> &fragments = scene.GetFragments();
+
 
 	RenderPPShadowOps( pTS, pClipTS, pRC, renderPath, pRender, scene, lightInfo, particleLM );
 	pRC->SetAlphaCombine( NGfx::COMBINE_NONE );
@@ -719,9 +762,22 @@ static void FillZBufferForLightmapped( NGfx::CRenderContext *pRC, IRender *_pRen
 	Execute( _pRender, pRC, *pTS, alphaTestOps, *pScene, SLightInfo() );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CDirectionalLight::Render( CTransformStack *pTS, CTransformStack *pClipTS, NGfx::CRenderContext *pRC, ERenderPath renderPath, 
+void CDirectionalLight::Render( CTransformStack *pTS, CTransformStack *pClipTS, NGfx::CRenderContext *pRC, ERenderPath renderPath,
 	IRender *pRender, CSceneFragments &scene, const SParticleLMRenderTargetInfo &particleLM )
 {
+	// retail @0x155730 preamble: bind this scene's depth-shadow source before any pass;
+	// options bit 1 -> black texture (the scene receives no shadows)
+	if ( renderPath == RP_FASTEST || renderPath == RP_TNL )
+		pCurrentDepthTexture = 0;
+	else if ( pCLRender->GetLightingOptions() & 1 )
+	{
+		pCurrentDepthTexture = GetBlackTexture();
+	}
+	else
+	{
+		pCurrentDepthTexture = shadowMapsShare.GetDepthShadow();
+	}
+
 	if ( renderPath == RP_SHOWOCCLUDERS )
 	{
 		RenderOccluders( pTS, pRC, pRender, scene );
@@ -747,7 +803,8 @@ void CDirectionalLight::Render( CTransformStack *pTS, CTransformStack *pClipTS, 
 			return;
 		case RP_UPDATE_CL:
 			FillZBufferForLightmapped( pRC, pRender, pTS, &scene );
-			pCLRender->RenderCL( pRC, pRender, pTS, &scene, pCLStaticTrack.Refresh() );
+			if ( !(pCLRender->GetLightingOptions() & 2) )   // retail gate in @0x155730 UPDATE_CL arm
+				pCLRender->RenderCL( pRC, pRender, pTS, &scene, pCLStaticTrack.Refresh() );
 			return;
 		case RP_GF2:
 		case RP_GF2_CL:
@@ -1432,10 +1489,13 @@ IRenderFactor* CSpotLight::CreateDiffuseFactor( CPtrFuncBase<NGfx::CTexture> *_p
 		bUseFastBump = false;
 }*/
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail GRenderLightInit registers FIVE vars (gfx_point_specular / gfx_cl_blur added post-Jan03)
 START_REGISTER(GRenderLight)
 	REGISTER_VAR_EX( "gfx_stencil_shadows", NGlobal::VarBoolHandler, &bStencilShadows, 0, true )
 	REGISTER_VAR_EX( "gfx_blur_sun", NGlobal::VarBoolHandler, &bBlurSun, 1, true )
 	REGISTER_VAR_EX( "gfx_specular", NGlobal::VarBoolHandler, &bDrawSpecular, 1, true )
+	REGISTER_VAR_EX( "gfx_point_specular", NGlobal::VarBoolHandler, &bDrawPointSpecular, 1, true )
+	REGISTER_VAR_EX( "gfx_cl_blur", NGlobal::VarBoolHandler, &bBlurCL, 1, true )
 FINISH_REGISTER
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 }

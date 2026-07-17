@@ -24,11 +24,11 @@ CBuildingGrid::CBuildingGrid() : seed( GetTickCount() )
 	bOnlyCutFloorVisible = false;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CBuildingGrid::Setup( int _nMaxX, int _nMaxY, int _nMinFloor, int _nMaxFloor, 
-	const CVec2 &ptMinXY, const SFBTransform &_pos )
+// retail @0xc3a90: no transform parameter -- the grid carries no placement; see operator& note in the header
+void CBuildingGrid::Setup( int _nMaxX, int _nMaxY, int _nMinFloor, int _nMaxFloor,
+	const CVec2 &ptMinXY )
 {
 	nBaseFloor = 0;
-	pos = _pos;
 	net.SetSizes( 2 + 2 * _nMaxX, 2 + 2 * _nMaxY, (_nMaxFloor - _nMinFloor + 1) * 4 + 1 );
 	nDZ = -_nMinFloor * 4;
 	ptBoxMin = CVec3( ptMinXY.x, ptMinXY.y, _nMinFloor * WALL_HEIGHT );
@@ -140,7 +140,8 @@ static inline int Power( int nPower, const CVec3 &ptCenter, float x, float y, fl
 	return nPower * (d < 1.f ? 1.f : 1.f / d);
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CBuildingGrid::Explode( const CVec3 &ptEpicentre, int nPower, float fRadius )
+// retail @0xc3680: `pos` is a parameter (the building's placement transform), not a member
+void CBuildingGrid::Explode( const SFBTransform &pos, const CVec3 &ptEpicentre, int nPower, float fRadius )
 {
 	if ( nPower <= MIN_ADDITIVE_DMG )
 		return;

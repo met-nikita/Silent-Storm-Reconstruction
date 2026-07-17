@@ -21,6 +21,9 @@ const float F_MAX_FORMATION_RADIUS2 = 4.0f;
 namespace NAI
 {
 ETransitionType GetTransitionType ( IPathNetwork *pNet, const SPathPlace &src, const SPathPlace &dst );
+// retail NAI::FindLadderUpperPt @0x3e7e0 (defined below, near CreateLaddersInternal)
+static bool FindLadderUpperPt( const CVec3 &upper, ELadderDirection eDir, CLayersGroup *pGroup,
+	CPathNetwork *pNet, IAIMap *pMap, SPathPlace *pRes );
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void Xor( CPointsContainer *pRes, const CPointsContainer &first, const CPointsContainer &second )
 {
@@ -154,27 +157,29 @@ public:
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CLayersGroup
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CLayersGroup::RefreshSpot( const SPathPlace &p, IAIMap *pMap, char cLevel )
+// retail @0x441c70: refreshes are suppressed while frozen OR a recolour job is pending, unless
+// forced; FINAL places (0x200) never refresh -- their 0xff sentinel coords would index a
+// nonexistent recalc square (degenerate region -> negative-size grids in CPassCalcer).
+bool CLayersGroup::RefreshSpot( const SPathPlace &p, IAIMap *pMap, char cLevel, bool bForce )
 {
-	if ( bFreeze )
-		return;
-	int nX, nY;
-	int nLayer = p.GetLayer();
-	if ( p.IsIntegral() )
-	{
-		nX = p.GetX() / N_RECALC_GRID_SIZE;
-		nY = p.GetY() / N_RECALC_GRID_SIZE;
-	}
-	else
+	if ( ( bFreeze || bHasRecolourJob ) && !bForce )
+		return false;
+	if ( p.IsFinal() )
+		return false;
+	if ( !p.IsIntegral() )
 	{
 		pNet->GetLayer( p.GetLayer() )->RefreshLadder( p.GetX(), pMap );
-		return;
+		return false;
 	}
+	int nX = p.GetX() / N_RECALC_GRID_SIZE;
+	int nY = p.GetY() / N_RECALC_GRID_SIZE;
 	if ( squareLevel[nY][nX] < cLevel )
 	{
 		RecalcSquare( nX, nY, pMap, cLevel );
 		squareLevel[nY][nX] = cLevel;
+		return true;
 	}
+	return false;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CLayersGroup::RegisterFloorLayer( CNodesLayer *pLayer, int nFloor )
@@ -239,6 +244,28 @@ CNodesLayer* CLayersGroup::GetRootFloorLayer( int nFloor )
 	return layers[nIndex];
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail @0x3e740: scan ALL layers for the one whose tile at (x,y) carries nFloor as its NATIVE
+// floor (per-tile STile::nFloor channel), is passable and has some move connectivity (lay, crouch
+// or half-crouch); fall back to the floor's root layer. Vertical-ladder placement keys on this --
+// the root layer's tile at the ladder foot may belong to another floor's surface entirely.
+CNodesLayer* CLayersGroup::GetLayerWithFloor( int nFloor, int nX, int nY )
+{
+	for ( int i = 0; i < layers.size(); ++i )
+	{
+		CNodesLayer *pL = layers[i];
+		if ( !IsValid( pL ) )
+			continue;
+		const CNodesLayer::STile &t = pL->tiles[nY][nX];
+		if ( t.nFloor != nFloor )
+			continue;
+		if ( t.nPassable == 0 )
+			continue;
+		if ( t.nMoveLay || t.nMoveCrouch || t.nMoveHC )
+			return pL;
+	}
+	return layers[ ( nFloor - nFirstFloor ) * N_MAX_LAYERS_PER_FLOOR ];
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 void CLayersGroup::RecalcSquare( int nX, int nY, IAIMap *pMap, char nLevel )
 {
 	ASSERT( pMap );
@@ -298,10 +325,11 @@ void CLayersGroup::RecalcSquare( int nX, int nY, IAIMap *pMap, char nLevel )
 			}				
 			if ( upX > region.minx && upY > region.miny && upX < region.maxx - 1 && upY < region.maxy - 1 )
 			{
-				char buf[128];
-				sprintf_s( buf, "Marking not created ladder %d at %d, %d\n", j, upX, upY );
-				OutputDebugString( buf );
-				passCalcer.MakeInactiveForLadder( x - region.minx, y - region.miny, upX - region.minx, upY - region.miny, 
+				// retail @0x3f710 log format
+				csSystem << CC_GREEN << "Marking not created ladder " << j << ": top at " << upX << ", " << upY
+					<< ", bottom at " << x << ", " << y << ". Floor " << ladder.nFloor
+					<< ". Height " << ladder.nHeight << " steps." << endl;
+				passCalcer.MakeInactiveForLadder( x - region.minx, y - region.miny, upX - region.minx, upY - region.miny,
 					ladder.nHeight * F_LADDER_STEP, ladder.nFloor );
 			}
 		}
@@ -452,6 +480,10 @@ void CLayersGroup::RecalcSquare( int nX, int nY, IAIMap *pMap, char nLevel )
 				CheckEverythingOK( pLayer->tiles, pLayer->nLayer, pLayer->transitions );
 		}
 	}
+	// retail @0x41010 tail: a rebaked square flags the network updated; CWorld::Segment
+	// read-and-clears it via CheckUpdated @0x4c9a0 (serialization-convergence W3 writer wiring).
+	if ( IsValid( pNet ) )
+		pNet->bUpdated = true;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CLayersGroup::TestSquare( int nX, int nY, char nLevel )
@@ -692,7 +724,7 @@ void CNodesLayer::BuildLayer( int nXSize, int nYSize, const CVec2 &_ptOrigin, co
 			tiles[y][x].nMoveLay = 0;
 			tiles[y][x].nMoveCrouch = 0;
 			tiles[y][x].nMoveStand = 0; // move flags by direction by pose
-			tiles[y][x].nFake = 0;
+			tiles[y][x].nFloor = 0;
 			tiles[y][x].nHeight = 0;
 			tiles[y][x].nMoveHC = 0;
 			tiles[y][x].nLocks = 0;
@@ -711,11 +743,12 @@ void CNodesLayer::BuildLayer( int nXSize, int nYSize, const CVec2 &_ptOrigin, co
 	}*/
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CNodesLayer::RefreshLadder( int nLadder, IAIMap *pMap )
+bool CNodesLayer::RefreshLadder( int nLadder, IAIMap *pMap )
 {
 	CNodesLayer::SLadder &ladder = ladders[ nLadder ];
-	if ( !ladder.bNeedRecalc ) 
-		return;
+	if ( !ladder.bNeedRecalc )
+		return false;
+	csSystem << CC_GREEN << "Ladder recalc" << endl;
 	CLadderCalcer calcer( this, pMap, &ladder, &ladder.pointPassable );
 	calcer.Calc();
 	ladder.bNeedRecalc = false;
@@ -728,28 +761,24 @@ void CNodesLayer::RefreshLadder( int nLadder, IAIMap *pMap )
 		if ( !ladder.pointPassable[i] )
 		{
 			ladder.bConsistent = false;
+			csSystem << CC_GREEN << "Ladder partially destroyed" << endl;
 			break;
 		}
 	}
-	CVec3 ptBottom = pGroup->pNet->GetCP( ladder.placeOnBottom );
-	CVec3 ptTop = pGroup->pNet->GetCP( ladder.placeOnTop );
-	float fDiffZ = ptTop.z - ptBottom.z;
-	float fNeedDiff = F_LADDER_STEP * nHeight;
-	bool bBadUpperPoint = fDiffZ < fNeedDiff - 1 || fDiffZ > fNeedDiff + 1;
-	if ( !bBadUpperPoint )
+	// retail @0x408b0: on every recalc of a still-consistent ladder the TOP landing place is
+	// RE-SEARCHED with FindLadderUpperPt (the rebake may have moved/killed the old landing tile;
+	// placeOnTop is updated in place) -- the Jan03 body only sanity-checked the stale placeOnTop.
+	if ( ladder.bConsistent )
 	{
-		CNodesLayer* pLayer = pGroup->pNet->GetLayer( ladder.placeOnTop.GetLayer() );
-		CNodesLayer::STile &t = pLayer->tiles[ ladder.placeOnTop.GetY() ][ ladder.placeOnTop.GetX() ];
-		if ( ( t.nPassable & CP_INACTIVE ) == 0 )
-			bBadUpperPoint = true;
-		if ( t.nMoveCrouch == 0 && t.nMoveHC == 0 )
-			bBadUpperPoint = true;
-	}
-	if ( bBadUpperPoint )
-	{
-		ladder.bConsistent = false;
-		for ( int i = 0; i < nHeight; ++i )
-			ladder.pointPassable[ i ] = false;
+		CVec3 upper = pGroup->pNet->GetCP( ladder.placeOnBottom );
+		upper.z += ( ladder.pointPassable.size() - 1 ) * F_LADDER_STEP;
+		if ( !FindLadderUpperPt( upper, ladder.eDir, pGroup, pGroup->pNet, pMap, &ladder.placeOnTop ) )
+		{
+			csSystem << CC_GREEN << "Ladder: now no good upper point" << endl;
+			ladder.bConsistent = false;
+			for ( int i = 0; i < nHeight; ++i )
+				ladder.pointPassable[ i ] = false;
+		}
 	}
 	if ( ladder.bConsistent ) // ladder is fully passable
 	{
@@ -760,6 +789,7 @@ void CNodesLayer::RefreshLadder( int nLadder, IAIMap *pMap )
 	}
 	else // ladder is partially broken
 	{
+		csSystem << CC_GREEN << "Ladder became inconsistent" << endl;
 		int i;
 		for ( i = 0; ladder.pointPassable[i]; ++i )
 			ladder.pointOnUpperHalf[ i ] = true;
@@ -788,6 +818,7 @@ void CNodesLayer::RefreshLadder( int nLadder, IAIMap *pMap )
 	pLayer->ladderEntrances[ ladder.placeOnTop ].bUpper = true;
 	pLayer->ladderEntrances[ ladder.placeOnTop ].nLayerGroup = nLayer;
 	pLayer->ladderEntrances[ ladder.placeOnTop ].nLadder = nLadder;
+	return true;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CNodesLayer::AddNearPoints( const SSphere &s, vector<SPathPlace> *pRes, bool bTakeAll )
@@ -908,22 +939,34 @@ void CNodesLayer::RemoveAllTransitions( const CTRect<int> &rect )
 // CPathNetwork
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CPathNetwork::CPathNetwork( IAIMap *_pMap, IAIJobManager *pManager )
-: pMap(_pMap), bFreeze(false), pJobManager(pManager) 
+: pMap(_pMap), bFreeze(false), pJobManager(pManager),
+  bDoNotFlipAnything(false), bHappySave(false), bUpdated(false)
 {
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail @0x3db60 -- the 'small save' switch: flag the net + every layer so the next save strips the
+// recolour caches (bColouringConstructed written false, layer colourers written as NULL chunks).
+// Land-dead until the save-path caller is wired (serialization-convergence W3).
+void CPathNetwork::SetSmallSaveSize( bool bSmall )
+{
+	bHappySave = bSmall;
+	for ( int i = 0; i < (int)layers.size(); ++i )
+		layers[i]->bHappySave = bSmall;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 EDirection CPathNetwork::GetClosestDir( const SPathPlace &from, const SPathPlace &to )
 {
 	CVec2 ptFrom = GetCPNoHeight( from );
 	CVec2 ptTo = GetCPNoHeight( to );
-	CLayersGroup *pGroup = layers[from.GetLayer()]->pGroup;
+	// retail @0x3eb50: a 3D/fly `from` reads its group off layer 0 (its layer field is the altitude)
+	CLayersGroup *pGroup = layers[ from.IsFinal() ? 0 : from.GetLayer() ]->pGroup;
 	float x = ptTo.x - ptFrom.x;
 	float y = ptTo.y - ptFrom.y;
 	CVec2 local;
 	local.x =   pGroup->ptXDir.x * x + pGroup->ptXDir.y * y;
 	local.y = - pGroup->ptXDir.y * x + pGroup->ptXDir.x * y;
 	if ( fabs(local.x) < 1e-5 && fabs(local.y) < 1e-5 )
-		return (EDirection)to.GetDirection();
+		return (EDirection)from.GetDirection();		// retail @0x3eb50 keeps FROM's direction
 	float fAngle = NormalizeAngleInRadian( atan2( local.y, local.x ) );//+ FP_PI8 );
 	int nDir = Float2Int( fAngle / FP_PI4 );
 	nDir &= 7;
@@ -995,18 +1038,15 @@ int CPathNetwork::GetFloor( const SPathPlace &src ) const
 			n = 0;
 		return n - 3;
 	}
-	vector<SPathPlace> res;
-	GetLayer( src.GetLayer() )->GetSamePoints( src, &res );
-	int nFloor = GetLayer( src.GetLayer() )->GetFloor();
-	//STile &t = GetLayer( src.GetLayer() )->tiles[ src.GetY() ][ src.GetX() ];
-	for ( unsigned int i = 0; i < res.size(); ++i )
-	{
-		CNodesLayer::STile &t2 = GetLayer( res[i].GetLayer() )->tiles[ res[i].GetY() ][ res[i].GetX() ];
-		int nF = GetLayer( res[i].GetLayer() )->GetFloor();
-		if ( nFloor > nF && ( t2.nMoveStand != 0 || t2.nMoveHC != 0 ) )
-			nFloor = nF;
-	}
-	return nFloor;
+	// retail @0x3df00: a ladder place derives its floor from the ladder's BOTTOM place plus one
+	// floor per 4 rungs; an integral place reads the PER-TILE native source floor the pass calcer
+	// stamped (a jump-landing tile on a building group's upper LAYER still reports the floor of
+	// the surface it lands on -- what the approximate-path fallback's same-floor test keys on).
+	// (The Jan03 GetSamePoints min-layer-floor scan returned the LAYER's floor instead, which is
+	// what silently killed click-descents of exactly one floor.)
+	if ( !src.IsIntegral() )
+		return GetFloor( layers[ src.GetLayer() ]->ladders[ src.GetX() ].placeOnBottom ) + ( src.GetY() >> 2 );
+	return GetLayer( src.GetLayer() )->tiles[ src.GetY() ][ src.GetX() ].nFloor;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // true while any layer group still has a pending recolour job -- the script-visible "pass calcer is
@@ -1146,7 +1186,8 @@ EDirection CPathNetwork::GetDir( const SPathPlace &src, const SPathPlace &dst )
 	{
 		return (EDirection)dst.GetDirection();
 	}
-	if ( src1.GetLayer() == dst.GetLayer() )
+	// retail @0x43e050: a final src or dst forces the GetClosestDir slow path
+	if ( src1.GetLayer() == dst.GetLayer() && !src1.IsFinal() && !dst.IsFinal() )
 	{
 		ASSERT( ( src1.GetX() - dst.GetX() + 1 ) <= 2 && ( src1.GetY() - dst.GetY() + 1 ) <= 2 );
 		return directionConvertTable[ (dst.GetY() - src1.GetY() + 1) * 3 + (dst.GetX() - src1.GetX() + 1) ];
@@ -1701,9 +1742,15 @@ void CPathNetwork::GetLockAreaInternal( vector<SPathPlace> *pRes, const SPathPla
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CPathNetwork::GetLockArea( vector<SPathPlace> *pRes, const SPathPlace &p, bool bBigUnit ) const
 {
+	// retail @0x3ffb0: a final/3D place (bit 25 -- flying/off-grid, e.g. CExecFly dst) locks
+	// NOTHING and returns before the ladder tail; its bits are not a tile address
+	if ( p.IsFinal() )
+		return;
 	bool bManyTiles = bBigUnit;
 	if ( p.GetPose() == CM_LAY )
 		bManyTiles = true;
+	if ( !p.IsIntegral() )	// retail expansion gate requires integral (ladder places never expand)
+		bManyTiles = false;
 	if ( bManyTiles )
 	{
 		int nDX = nMoveShift[p.GetDirection()][0], nDY = nMoveShift[p.GetDirection()][1];
@@ -1742,7 +1789,9 @@ bool CPathNetwork::IsLocked( const SPathPlace &p, bool bIgnoreBlockedDoors ) con
 		if ( !nFlipper )
 			return false;
 		const SFlipper *pFlipper = GetFlipper( nFlipper - 1 );
-		if ( pFlipper->nFixedFlags == 0 )
+		// retail @0x45520: with bDoNotFlipAnything set (door-free re-route in NAI::FindPath @0x8bd80),
+		// EVERY tile on a flipper counts as locked, fixed or not.
+		if ( !bDoNotFlipAnything && pFlipper->nFixedFlags == 0 )
 			return false;
 		return !IsNotOnDoor( p );
 	}
@@ -2254,25 +2303,117 @@ bool CPathNetwork::UpdateColouring( const vector<SPathPlace> &lockers )
 	return true;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CPathNetwork::CreateLadder( int _nX, int _nY, int _nHeight, int _nRotation, int _nLayersGroup, int _nFloor )
+// retail @0x40290: resolve a WORLD-space ladder record to its owning layers group -- the FIRST
+// group that contains the bottom point with a non-ignored tile there. Tile coords come from
+// rounding the group-local transform (ptXDir carries the grid pitch, hence /step^2); the rotation
+// from the tile delta towards the upper point: (-1,0)=LD_RIGHT (default), (1,0)=LD_LEFT,
+// (0,-1)=LD_FRONT, (0,1)=LD_BACK.
+void CPathNetwork::CreateLadder( const CVec2 &ptPos, const CVec2 &ptUpperPos, int nHeight, int nFloor )
 {
-	CLayersGroup::SNotYetCreatedLadder ladder;
-	ladder.nX = _nX;
-	ladder.nY = _nY;
-	ladder.nHeight = _nHeight;
-	ladder.nRotation = _nRotation;
-	ladder.nFloor = _nFloor;
-	CLayersGroup *pGroup = groups[ _nLayersGroup ];
-	pGroup->ladders.push_back( ladder );
+	const float fInvStep2 = 1.0f / ( FP_GRID_STEP * FP_GRID_STEP );
+	for ( int i = 0; i < groups.size(); ++i )
+	{
+		CLayersGroup *pGroup = groups[i];
+		CVec2 d( ptPos - pGroup->ptOrigin );
+		float fTX = ( d.x * pGroup->ptXDir.x + d.y * pGroup->ptXDir.y ) * fInvStep2;
+		float fTY = ( d.y * pGroup->ptXDir.x - d.x * pGroup->ptXDir.y ) * fInvStep2;
+		if ( !pGroup->IsInside( ptPos ) )
+			continue;
+		if ( pGroup->IsIgnored( fTX, fTY ) )
+			continue;
+		CVec2 dU( ptUpperPos - pGroup->ptOrigin );
+		float fUX = ( dU.x * pGroup->ptXDir.x + dU.y * pGroup->ptXDir.y ) * fInvStep2;
+		float fUY = ( dU.y * pGroup->ptXDir.x - dU.x * pGroup->ptXDir.y ) * fInvStep2;
+		int nDX = Float2Int( fUX - fTX ), nDY = Float2Int( fUY - fTY );
+		int nRotation = 0;   // (-1,0) and any degenerate delta
+		if ( nDX == 1 && nDY == 0 )
+			nRotation = 2;
+		else if ( nDX == 0 && nDY == -1 )
+			nRotation = 1;
+		else if ( nDX == 0 && nDY == 1 )
+			nRotation = 3;
+		CLayersGroup::SNotYetCreatedLadder ladder;
+		ladder.nX = Max( 0, Min( Float2Int( fTX ), pGroup->GetXSize() - 1 ) );
+		ladder.nY = Max( 0, Min( Float2Int( fTY ), pGroup->GetYSize() - 1 ) );
+		ladder.nHeight = nHeight;
+		ladder.nRotation = nRotation;
+		ladder.nFloor = nFloor;
+		pGroup->ladders.push_back( ladder );
+		return;
+	}
+	csSystem << CC_GREEN << "Found no group for ladder!" << endl;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail NAI::FindLadderUpperPt @0x3e7e0: locate the ladder's TOP landing place. The candidate
+// search sphere is centred a FULL tile (1.0) behind the ladder top in the climb direction (the
+// landing tile is on the roof/floor edge past the top rung -- a sphere around the top rung itself
+// misses it), radius F_LADDER_STEP*1.1; the nearest candidate to that same shifted point wins if
+// its tile is CP_INACTIVE with a crouch/half-crouch move INTO the climb direction. Success =
+// best squared distance < 100. (Retail signature takes the network; pMap is passed here because
+// the dev CPathNetwork keeps it private.)
+static bool FindLadderUpperPt( const CVec3 &upper, ELadderDirection eDir, CLayersGroup *pGroup,
+	CPathNetwork *pNet, IAIMap *pMap, SPathPlace *pRes )
+{
+	CVec2 shift2;
+	switch ( eDir )
+	{
+		case LD_RIGHT: shift2 = CVec2( -1.0f, 0 ); break;
+		case LD_FRONT: shift2 = CVec2( 0, -1.0f ); break;
+		case LD_LEFT: shift2 = CVec2( 1.0f, 0 ); break;
+		case LD_BACK: shift2 = CVec2( 0, 1.0f ); break;
+		default: ASSERT(0);
+	}
+	CVec2 ptXDir = pGroup->ptXDir;
+	CVec3 shift( shift2.x * ptXDir + shift2.y * CVec2( -ptXDir.y, ptXDir.x ), 0 );
+	CVec3 ptSearch = upper + shift;
+	char buf[128];
+	sprintf_s( buf, "ATTEMPTING TO PLACE A LADDER TO %f %f %f\n", upper.x, upper.y, upper.z );
+	OutputDebugString( buf );
+	sprintf_s( buf, "                 UPPER POINT TO %f %f %f\n", ptSearch.x, ptSearch.y, ptSearch.z );
+	OutputDebugString( buf );
+	vector<SPathPlace> places;
+	pNet->GetNearPlaces( SSphere( ptSearch, F_LADDER_STEP * 1.1f ), &places, true );
+	if ( places.empty() )
+	{
+		OutputDebugString("CANNOT EVEN FIND A PLACE TO PLACE A LADDER!\n");
+		return false;
+	}
+	float fBestDist = 500;
+	SPathPlace bestPlace( places[0] );
+	for ( int i = 0; i < places.size(); ++i )
+	{
+		float fCurrDist = fabs2( pNet->GetCP( places[i] ) - ptSearch );
+		if ( fCurrDist > fBestDist )
+			continue;
+		CNodesLayer *pL = pNet->GetLayer( places[i].GetLayer() );
+		SPathPlace test( places[i] );
+		pL->pGroup->RefreshSpot( test, pMap, 2 );
+		CNodesLayer::STile &t = pL->tiles[ places[i].GetY() ][ places[i].GetX() ];
+		int dir = ( eDir * 2 + 4 ) & 7;
+		bool canCr = t.nMoveCrouch & ( 1 << dir );
+		bool canJump = t.nMoveHC & ( 1 << dir );
+		if ( ( t.nPassable & CP_INACTIVE ) && ( canCr || canJump ) )
+		{
+			fBestDist = fCurrDist;
+			bestPlace = places[i];
+		}
+	}
+	*pRes = SPathPlace( bestPlace.GetX(), bestPlace.GetY(), bestPlace.GetLayer() );
+	return fBestDist < 100;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail @0x45650: resolve each queued ladder -- the BOTTOM layer comes from the per-tile
+// GetLayerWithFloor (NOT the floor's root layer: the ladder foot may sit on an additional layer),
+// the TOP from FindLadderUpperPt, and the ladder is filed on that same bottom layer.
 void CPathNetwork::CreateLaddersInternal( CLayersGroup *pGroup )
 {
+	if ( !pGroup->ladders.empty() )
+		csSystem << CC_GREEN << "Group attempts to create " << (int)pGroup->ladders.size() << " ladders" << endl;
 	for ( int i = 0; i < pGroup->ladders.size(); ++i )
 	{
 		CLayersGroup::SNotYetCreatedLadder &ladderNYC = pGroup->ladders[i];
 		CNodesLayer::SLadder ladder;
-		CNodesLayer *pFloorLayer = pGroup->GetRootFloorLayer( ladderNYC.nFloor );
+		CNodesLayer *pFloorLayer = pGroup->GetLayerWithFloor( ladderNYC.nFloor, ladderNYC.nX, ladderNYC.nY );
 		if ( !pFloorLayer )
 		{
 			OutputDebugString("Stale ladder!\n");
@@ -2286,53 +2427,9 @@ void CPathNetwork::CreateLaddersInternal( CLayersGroup *pGroup )
 		ladder.pointOnUpperHalf.resize( ladderNYC.nHeight + 1, false );
 		ladder.bNeedRecalc = true;
 
-		CVec2 shift2;
-		switch ( ladder.eDir )
-		{
-			case LD_RIGHT: shift2 = CVec2( - 0.5f, 0 ); break;
-			case LD_FRONT: shift2 = CVec2( 0, - 0.5f ); break;
-			case LD_LEFT: shift2 = CVec2( 0.5f, 0 ); break;
-			case LD_BACK: shift2 = CVec2( 0, 0.5f ); break;
-			default: ASSERT(0);
-		}
-		CVec2 ptXDir = pGroup->ptXDir;
-		CVec3 shift( shift2.x * ptXDir + shift2.y * CVec2( -ptXDir.y, ptXDir.x ), 0 );
 		CVec3 upper = GetCP( ladder.placeOnBottom );
 		upper.z += ladderNYC.nHeight * F_LADDER_STEP;
-		SSphere sphere( upper, F_LADDER_STEP * 1.1f );
-		vector<SPathPlace> places;
-		char buf[128];
-		sprintf_s( buf, "ATTEMPTING TO PLACE A LADDER TO %f %f %f\n", upper.x, upper.y, upper.z );
-		OutputDebugString( buf );
-		GetNearPlaces( sphere, &places, true );
-		float fBestDist = 500;
-		if ( !places.empty() ) 
-		{
-			float fCurrDist;
-			SPathPlace bestPlace( places[0] );
-			for ( int i = 0; i < places.size(); ++i )
-			{
-				SPathPlace test( places[i] );
-				fCurrDist = fabs2( GetCP( places[i] ) - upper - shift );
-				if ( fCurrDist > fBestDist )
-					continue;
-				CNodesLayer *pL = GetLayer( places[i].GetLayer() );
-				pL->pGroup->RefreshSpot( test, pMap, 2 );
-				CNodesLayer::STile &t = pL->tiles[ places[i].GetY() ][ places[i].GetX() ];
-				int dir = (ladder.eDir * 2 + 4) & 7;
-				bool canCr = t.nMoveCrouch & ( 1 << dir );
-				bool canJump = t.nMoveHC & ( 1 << dir );
-				if ( ( t.nPassable & CP_INACTIVE ) && ( canCr || canJump ) )
-				{
-					fBestDist = fCurrDist; 
-					bestPlace = places[i];
-				}
-			}
-			ladder.placeOnTop = SPathPlace( bestPlace.GetX(), bestPlace.GetY(), bestPlace.GetLayer() );
-		}
-		else
-			OutputDebugString("CANNOT EVEN FIND A PLACE TO PLACE A LADDER!\n");
-		if ( fBestDist < 100 )
+		if ( FindLadderUpperPt( upper, ladder.eDir, pGroup, this, pMap, &ladder.placeOnTop ) )
 		{
 			pFloorLayer->ladders.push_back( ladder );
 		}
@@ -2340,7 +2437,7 @@ void CPathNetwork::CreateLaddersInternal( CLayersGroup *pGroup )
 		{
 			//ASSERT(0);
 			csSystem << CC_RED << "Possible design ERROR: cannot place a vertical ladder on floor " << ladderNYC.nFloor << endl;
-			csSystem << "Ladder parameters: height " << ladderNYC.nHeight << " steps (one step = 0.625m), " << 
+			csSystem << "Ladder parameters: height " << ladderNYC.nHeight << " steps (one step = 0.625m), " <<
 				" tile X = " << ladderNYC.nX << ", tile Y = " << ladderNYC.nY << endl;
 			OutputDebugString("CANNOT PLACE A LADDER! \n");
 		}

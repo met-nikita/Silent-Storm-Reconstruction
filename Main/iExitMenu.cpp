@@ -84,7 +84,7 @@ private:
 	CObj<NUI::CExitMenuUI> pUI;
 	CObj<NUI::CScreenShot> pScreenShot;
 	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&bAllowSave); f.Add(3,&pCursor); f.Add(4,&pInterface); f.Add(5,&pUI); f.Add(6,&pScreenShot); return 0; }
-	bool bAllowSave = false;
+	bool bAllowSave = true;   // retail threads a CICExitMenu ctor arg; dev's only opener (iMain, the global Alt+F4 modal) allows saving
 
 public:
 	CExitMenuInterface();
@@ -152,7 +152,7 @@ bool CExitMenuInterface::ProcessEvent( const NInput::SEvent &sEvent )
 	}
 	else if ( bindSaveGame.ProcessEvent( sEvent ) )
 	{
-		NMainLoop::Command( new NGame::CICSaveLoadMenu( SAVE, pScreenShot->GetTexture() ) );
+		NMainLoop::Command( new NGame::CICSaveLoadMenu( SAVE, pScreenShot->GetTexture(), bAllowSave ) );   // retail @0x1d1310 forwards the screen's own gate
 		return true;
 	}
 	else if ( bindExitGame.ProcessEvent( sEvent ) )

@@ -30,9 +30,15 @@ bool bTnLDevice = false;
 bool b16BitTexturesNow = false;
 bool Is16BitTextures() { return b16BitTexturesNow; }   // @0x10ce10: return b16BitTexturesNow;
 static bool bForbidPS = false, bForceSWVP = false, bGammaIsSet = false;
-bool bNVHackNP2Cfg = false, bNVHackNP2, bUseAnisotropy = false, bBanNP2 = false, bStaticNooverwrite = true;
+bool bNVHackNP2Cfg = false, bNVHackNP2, bBanNP2 = false, bStaticNooverwrite = true;
+static bool bNoTexture = false;        // gfx_notexture, retail @0x99a73d (debug, unsaved)
+static bool b16BitTextures = false;    // gfx_16bit_textures, retail @0x99a746 (config-side flag; b16BitTexturesNow is the applied state)
+static int nFSAA = 0;                  // gfx_fsaa, retail @0x99a4b4
 bool bBan32BitIndices = true;
 bool bNoCubeMapMipLevels = false;
+int nUseAnisotropy = 1;         // retail NGfx::nUseAnisotropy @0x554ce4: LEVEL (1 = off), not a bool
+static int nMaxAnisotropicLevel = 1;   // retail global @0x59a53c, filled from devCaps.MaxAnisotropy
+int GetMaxAnisotropicLevel() { return nMaxAnisotropicLevel; }   // retail @0x10cee0
 int nVCacheSize = 10;
 static SVideoMode videoMode;
 static D3DPRESENT_PARAMETERS pp;
@@ -42,6 +48,9 @@ SRenderTargetsInfo rtInfo;
 static HWND hWnd;
 static vector<SVideoModeInfo> videoModes;
 HWND GetHWND() { return hWnd; }
+// retail Is16BitMode @0x10cde0 returns bUse16BitMode; this tree has no 16-bit mode plumbing --
+// report from the live mode (always 32-bit today).
+bool Is16BitMode() { return videoMode.nBpp == 16; }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // forward declarations
 static D3DFORMAT GetZBufferFormat( D3DFORMAT rTarget );
@@ -309,6 +318,13 @@ static bool FillPresent( const SVideoMode &m )
 		pp = ppOld;
 		return false;
 	}
+	// release NGfx::FillPresent @0x10d6a0 sets the present interval UNCONDITIONALLY here
+	// (@0x50d6eb `mov [esi+0x34], 0x80000000`), BEFORE the fullscreen/windowed split @0x50d6f2 -- so
+	// retail runs UNLOCKED in BOTH modes. Dev set it only inside the fullscreen branch; the windowed
+	// branch left the memset'd 0 = D3DPRESENT_INTERVAL_DEFAULT = VSYNC, so a windowed dev build was
+	// silently pinned to the monitor refresh (measured: dev 240 = refresh vs retail ~2000 windowed).
+	// Retail does NOT gate on devCaps.PresentationIntervals either -- IMMEDIATE is unconditional.
+	pp.PresentationInterval = D3DPRESENT_INTERVAL_IMMEDIATE;
 	if ( FULL_SCREEN == m.fullScreen )
 	{
 		// search through modes to find fitting
@@ -345,10 +361,6 @@ static bool FillPresent( const SVideoMode &m )
 		//pp.EnableAutoDepthStencil =	FALSE;
 
 		pp.FullScreen_RefreshRateInHz = best.RefreshRate;
-		if ( devCaps.PresentationIntervals & D3DPRESENT_INTERVAL_IMMEDIATE )
-			pp.PresentationInterval = D3DPRESENT_INTERVAL_IMMEDIATE;
-		else
-			pp.PresentationInterval = D3DPRESENT_INTERVAL_DEFAULT;
 		return true;
 	}
 	//
@@ -407,6 +419,7 @@ void CheckDeviceCaps()
 		bHardwarePixelShaders14 = true;
 	if ( (devCaps.TextureCaps & D3DPTEXTURECAPS_MIPCUBEMAP ) == 0 )
 		bNoCubeMapMipLevels = true;
+	nMaxAnisotropicLevel = devCaps.MaxAnisotropy;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 static void DetectModes( D3DFORMAT format, int nBpp )
@@ -674,17 +687,22 @@ void Done3D()
 // Commands/Vars
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail GfxInit @0x10e9b0 registers 12 vars; gfx_tnl_mode default is 0.0 there (GAutoDetect
+// presets write the -1 seen in shipped configs), gfx_notexture is the lone unsaved one.
 START_REGISTER(Gfx)
-	REGISTER_VAR( "gfx_tnl_mode", 0, -1, true )
+	REGISTER_VAR( "gfx_tnl_mode", 0, 0, true )
 	REGISTER_VAR( "gfx_gamma", 0, 1, true )
 	////
 	REGISTER_VAR_EX( "gfx_nopixelshaders", NGlobal::VarBoolHandler, &bForbidPS, 0, true )
 	REGISTER_VAR_EX( "gfx_swvertexprocess", NGlobal::VarBoolHandler, &bForceSWVP, 0, true )
 	REGISTER_VAR_EX( "gfx_validate", NGlobal::VarBoolHandler, &bDoValidateDevice, 0, true )
-	REGISTER_VAR_EX( "gfx_anisotropic_filter", NGlobal::VarBoolHandler, &bUseAnisotropy, 0, true )
+	REGISTER_VAR_EX( "gfx_anisotropic_filter", NGlobal::VarIntHandler, &nUseAnisotropy, 1, true )   // retail @0x50ebfc: INT level, default 1
 	REGISTER_VAR_EX( "gfx_fix_ban_np2", NGlobal::VarBoolHandler, &bBanNP2, 0, true )
 	REGISTER_VAR_EX( "gfx_fix_nv_np2_hack", NGlobal::VarBoolHandler, &bNVHackNP2Cfg, 0, true )
 	REGISTER_VAR_EX( "gfx_static_nooverwrite", NGlobal::VarBoolHandler, &bStaticNooverwrite, 1, true )
+	REGISTER_VAR_EX( "gfx_notexture", NGlobal::VarBoolHandler, &bNoTexture, 0, false )
+	REGISTER_VAR_EX( "gfx_16bit_textures", NGlobal::VarBoolHandler, &b16BitTextures, 0, true )
+	REGISTER_VAR_EX( "gfx_fsaa", NGlobal::VarIntHandler, &nFSAA, 0, true )
 FINISH_REGISTER
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 }

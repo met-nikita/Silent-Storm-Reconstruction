@@ -11,7 +11,7 @@
 #include "..\DBFormat\DataFormat.h"	// NDb::CTRndModel::CreateModel, NDb::CModel
 #include "..\DBFormat\DataInterface.h"	// NDb::GetUITexture
 #include "Interface.h"				// NUI::CInterface (GetInterface / SetCursorInfo / CreateMouseCapture)
-#include "UIBaseCtrls.h"			// CModel, CText, CImage, CMLText
+#include "UIBaseCtrls.h"			// CModel, CText, CImage
 #include "UICommCtrls.h"			// CListView, CButton
 #include "iCommonUI.h"				// CHoverButton, CHoverFlashButton, CScrollWindow
 #include "iMission.h"				// NGame::IMission::GetSelectedUnits
@@ -19,7 +19,7 @@
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // Release iMedalsPanel.obj convergence -- the "medals" tab of the merc character UI. Reconstructed 1:1
 // over the working dev siblings: CMedalsPanelItem mirrors CSaveLoadItem (iSaveLoad.cpp -- a CHoverButton
-// list row built from an "iml-text" CMLText + a "hilight" CImage per state); CMedalsPanelView mirrors
+// list row built from an "iml-text" CText + a "hilight" CImage per state); CMedalsPanelView mirrors
 // CEarthView (iSpecialView.cpp -- a CModel 3D-preview with a drag-to-spin state block and the canonical
 // "camera from SCameraParams" idiom); CMedalsPanel mirrors CBiographyPanel (the tab-strip panel). All
 // layouts + save tags are verbatim from the matched Game.exe + PDB. Retail RVAs noted per function
@@ -35,7 +35,7 @@ namespace NUI
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CMedalsPanelItem -- one CHoverButton row of the medals CListView, representing a single awarded medal.
 // Structurally identical to CSaveLoadItem (iSaveLoad.cpp): three text states (normal / hover / selected)
-// each a "iml-text" CMLText caption + a "hilight" CImage overlay, plus the pin-on-selection behaviour.
+// each a "iml-text" CText caption + a "hilight" CImage overlay, plus the pin-on-selection behaviour.
 // Layout (PDB NUI::CMedalsPanelItem, size 220, base CHoverButton): pMedal / bSelected / pHilight / pName.
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CMedalsPanelItem: public CHoverButton
@@ -78,7 +78,7 @@ CMedalsPanelItem::CMedalsPanelItem( const SWindowInfo &sInfo, NDb::CMedal *_pMed
 	AddTextState( STATE_SELECTED, GetDBString( pMedal->pName ) + GetDBString( 0x1D86 ), NGfx::SPixel8888( 0x87, 0x7D, 0x4D, 0xFF ) );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// CMedalsPanelItem::AddTextState @0x1f9780 -- add the empty state window, lay an "iml-text" CMLText over
+// CMedalsPanelItem::AddTextState @0x1f9780 -- add the empty state window, lay an "iml-text" CText over
 // it, size to {stateWidth, textHeight}, add a same-size "hilight" CImage tinted by sColor, then grow
 // self to enclose it. Byte-identical to CSaveLoadItem::AddTextState (iSaveLoad.cpp).
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -86,7 +86,7 @@ void CMedalsPanelItem::AddTextState( int nID, const wstring &wsText, const NGfx:
 {
 	CWindow *pWindow = AddState( nID );
 
-	CPtr<CMLText> pText = new CMLText( SWindowInfo( pWindow, SPoint( 0, 0 ), pWindow->GetSize(), "iml-text", STYLE_ENABLED | STYLE_VISIBLE ) );
+	CPtr<CText> pText = new CText( SWindowInfo( pWindow, SPoint( 0, 0 ), pWindow->GetSize(), "iml-text", STYLE_ENABLED | STYLE_VISIBLE ) );
 	pText->SetText( wsText );
 
 	SPoint sSize;
@@ -348,9 +348,8 @@ void CMedalsPanel::Draw( const STime &sTime, NGScene::I2DGameView *pView )
 // CMedalsPanel::ProcessMessage @0x1f9ff0 -- build the child controls on template load, forward the medals
 // list selection into SetSelected, and report the active mouse-button band as consumed.
 //
-// NOTE: the perks/biography/character tab icons reuse the sibling CBiographyPanel's GetUITexture ids
-// (430/948, 437, 383) -- the Game.exe decomp mangled these immediates (read as the SPixel8888 white) so
-// the exact ids for this compiland are not recoverable; only the structure is exact. Cosmetic only.
+// Tab icon ids recovered from raw disasm (@0x1f9ff0 `mov ecx, imm` before GetUITexture -- Ghidra
+// mangled them): perks 430/430/948, biography 381/381/429, character 383/383, close("medals") 437.
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CMedalsPanel::ProcessMessage( const SEvent &sEvent )
 {
@@ -372,9 +371,9 @@ bool CMedalsPanel::ProcessMessage( const SEvent &sEvent )
 			pPerks->AddImageState( 2, NDb::GetUITexture( 948 ) );
 
 			pBiography = new CHoverButton( sEvent.pLoader->GetControl( "biography" ) );
-			pBiography->AddImageState( 1, NDb::GetUITexture( 437 ) );
-			pBiography->AddImageState( 0, NDb::GetUITexture( 437 ) );
-			pBiography->AddImageState( 2, NDb::GetUITexture( 437 ) );
+			pBiography->AddImageState( 1, NDb::GetUITexture( 381 ) );
+			pBiography->AddImageState( 0, NDb::GetUITexture( 381 ) );
+			pBiography->AddImageState( 2, NDb::GetUITexture( 429 ) );
 
 			pCharacter = new CHoverButton( sEvent.pLoader->GetControl( "character" ) );
 			pCharacter->AddImageState( 1, NDb::GetUITexture( 383 ) );

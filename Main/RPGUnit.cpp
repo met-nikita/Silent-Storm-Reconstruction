@@ -31,40 +31,132 @@ float GetXPBySkill( int nCap, int nLvl )
 	return ( pow( 2.7296f, float(nLvl) / C ) - 1.f ) / 0.02f;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// CDynamicSkill
+// CDynamicSkill (retail modifier-list model; RPGUnit.obj)
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CDynamicSkill::SetNewMaxValue( int nNewValue ) 
-{ 
-	nValue += nNewValue - nMaxValue; 
-	nMaxValue = nNewValue; 
-}
+// x87 round-to-nearest for the skill math (retail Update/Upgrade fistp under the default CW).
+static inline int SkillRound( float f ) { return int( f + ( f < 0 ? -0.5f : 0.5f ) ); }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CDynamicSkill::SetNewBaseValue( int nNewValue ) 
-{ 
-	SetNewMaxValue( nMaxValue + nNewValue - nBaseValue );
-	nBaseValue = nNewValue; 
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-bool CDynamicSkill::Upgrade( float fAddToProgress )
+// retail @0x2bbb20: recompute the cap from base+XP and every live modifier, sweeping dead
+// (released) modifier entries out of the weak list, then clamp the live value DOWN to the cap.
+void CDynamicSkill::Update()
 {
-	fProgress += fAddToProgress;
-	int nModif = int(fProgress);
-	if ( nModif > 0 )
+	nMaxValue = nXPValue + nBaseValue;
+	float fMul = 1.0f;
+	float fAdd = 0.0f;
+	for ( int i = 0; i < modifiers.size(); )
 	{
-		fProgress -= float(nModif);
-		Modify( nModif );
-		if ( nValue > fMultiplier * nMaxValue )
-			nValue = fMultiplier * nMaxValue;
-		return true;
+		CSkillModifier *p = modifiers[i];
+		if ( !IsValid( p ) )
+		{
+			modifiers.erase( modifiers.begin() + i );  // compact, do not advance
+			continue;
+		}
+		fMul *= p->fMul;
+		fAdd += p->fAdd;
+		++i;
+	}
+	nMaxValue = SkillRound( float( nMaxValue ) * fMul + fAdd );
+	if ( nMaxValue <= nValue )
+		nValue = nMaxValue;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail @0x2bc6a0: attach a modifier; its flat bonus is applied to the live value immediately
+// (TRUNCATING cast, unlike Update's round-to-nearest -- faithful to the two fistp control words).
+void CDynamicSkill::AddModifier( CSkillModifier *p )
+{
+	modifiers.push_back( p );
+	if ( p && p->fAdd > 0.0f )
+		nValue = int( float( nValue ) + p->fAdd );
+	Update();
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail @0x2bbbe0: detach by pointer identity; not found -> no-op (and no Update).
+void CDynamicSkill::RemoveModifier( CSkillModifier *p )
+{
+	for ( int i = 0; i < modifiers.size(); ++i )
+	{
+		if ( modifiers[i].GetPtr() == p )
+		{
+			modifiers.erase( modifiers.begin() + i );
+			Update();
+			return;
+		}
+	}
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// dev-compat setters re-expressed over the retail members (retail inlines these flows): shift
+// the XP part so the derived cap lands on the requested figure, keeping the live value in step.
+void CDynamicSkill::SetNewMaxValue( int nNewValue )
+{
+	nXPValue += nNewValue - nMaxValue;
+	nValue += nNewValue - nMaxValue;
+	nMaxValue = nNewValue;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail CSkilledObject::SetNewBaseValue @0x2bbef0 shape: re-sync the live value off the new
+// base directly, then recompute the cap.
+void CDynamicSkill::SetNewBaseValue( int nNewValue )
+{
+	nValue += nNewValue - nBaseValue;
+	nBaseValue = nNewValue;
+	Update();
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail @0x2bd1a0: a clamped value-only shift (the Jan03 version bumped BOTH nValue and
+// nMaxValue with no clamp; retail reworked it).
+void CDynamicSkill::Modify( int nModif )
+{
+	int nBase = nMaxValue <= nValue ? nMaxValue : nValue;
+	int nSum = nBase + nModif;
+	nValue = nSum < nMaxValue ? nSum : nMaxValue;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail @0x2bbc30: accumulate progress toward the XP cap; whole points move into nXPValue
+// (clamped to ROUND(fCap)) and the cap is recomputed via Update().
+bool CDynamicSkill::Upgrade( float fAddToProgress, float fCap )
+{
+	if ( float( nXPValue ) + fProgress < fCap )
+	{
+		fProgress += fAddToProgress;
+		int nModif = SkillRound( fProgress );
+		if ( nModif > 0 )
+		{
+			nXPValue += nModif;
+			fProgress -= float( nModif );
+			int nCap = SkillRound( fCap );
+			if ( nXPValue > nCap )
+				nXPValue = nCap;
+			Update();
+			return true;
+		}
 	}
 	return false;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CDynamicSkill::Multiply( float fValue ) 
-{ 
-	fMultiplier *= fValue; 
-	if ( nValue > fMultiplier * nMaxValue )
-		nValue = fMultiplier * nMaxValue;
+// retail CWorld::CreateAIUnits @0x36b2b0 (inline): cap = ROUND(current * coeff); live value
+// clamped to the new cap (a direct write past Update -- faithful to the retail flow).
+void CDynamicSkill::ScaleForDifficulty( float fCoeff )
+{
+	int nScaled = SkillRound( float( int( *this ) ) * fCoeff );
+	nMaxValue = nScaled;
+	if ( nValue < nScaled )
+		nScaled = nValue;
+	nValue = nScaled;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// CSkillModifier -- retail @0x295e40 / @0x295ee0: RAII install/detach on the target cell.
+////////////////////////////////////////////////////////////////////////////////////////////////////
+CSkillModifier::CSkillModifier( CDynamicSkill *_pSkill, const SSkillModifyInfo &info )
+	: pSkill( _pSkill ), fMul( info.fMul ), fAdd( info.fAdd )
+{
+	if ( IsValid( pSkill ) )
+		pSkill->AddModifier( this );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+CSkillModifier::~CSkillModifier()
+{
+	if ( IsValid( pSkill ) )
+		pSkill->RemoveModifier( this );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CUnit
@@ -363,9 +455,12 @@ void CUnit::AddXP( float fXPToAdd )
 bool CUnit::UseSkill( int eSkill, const int nAddValue )
 {
 	CDynamicSkill &skill = Skills(eSkill);
-	float sSkillDiff = GetSkillCap( NDb::ESkillType(eSkill), fXP ) - ( skill.GetXPPart() - nAddValue );
+	float fCap = GetSkillCap( NDb::ESkillType(eSkill), fXP );
+	float sSkillDiff = fCap - ( skill.GetXPPart() - nAddValue );
 	float fAdd = Clamp( (1.f - skill.GetProgress()) * sSkillDiff / 20.f, 0.005f, 0.1f );
-	bool bRes = skill.Upgrade(fAdd);
+	// retail CSkilledObject::UseSkill @0x2bbf40 passes the XP cap into Upgrade (the amount
+	// formula there divides by the GetRPGBaseValue(0x3f) per-skill rate -- follow-up).
+	bool bRes = skill.Upgrade( fAdd, fCap );
 	if ( eSkill >= NDb::ST_STR )
 		UpdateSkills();
 	return bRes;
@@ -674,6 +769,25 @@ float CUnit::GetWeaponAdaptation( IInventoryItem *pItem ) const
 	if ( IsValid( pItem ) && pItem == pAdaptatedWeapon )
 		return fCurrentAdaptation;
 	return 0.f;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail CUnit::UseWeapon @0x2bba60 (disasm-verified): raise familiarity with the weapon in use,
+// decay it for any other weapon; a fully drained counter (<= 0) switches the adapted weapon.
+void CUnit::UseWeapon( IInventoryItem *pItem, float fRate, int nMaxAdaptation, float fOtherRate )
+{
+	if ( pItem == pAdaptatedWeapon )
+	{
+		fAdaptationCounter = Min( (float)nMaxAdaptation, fAdaptationCounter + fRate );
+		fCurrentAdaptation = fRate * fAdaptationCounter;
+		return;
+	}
+	fAdaptationCounter -= fRate;
+	if ( fAdaptationCounter <= 0 )
+	{
+		pAdaptatedWeapon = pItem;
+		fAdaptationCounter = 0;
+	}
+	fCurrentAdaptation = fOtherRate * fAdaptationCounter;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 } // namespace

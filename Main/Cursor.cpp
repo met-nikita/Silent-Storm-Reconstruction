@@ -8,6 +8,8 @@
 #include "Interface.h"
 #include "UIWrap.h"
 #include "UIML.h"     // BUG 8: NUI::IML / CreateML -- retail draws the cursor caption through the CML engine (outline + pt-size)
+#include "..\MiscDll\Commands.h"      // REGISTER_VAR_EX (ui_hwcursor)
+#include "..\FileIO\BasicChunk1.h"    // START_REGISTER / FINISH_REGISTER
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 namespace NGfx
 {
@@ -28,22 +30,28 @@ class CCursor: public ICursor
 	OBJECT_BASIC_METHODS(CCursor);
 protected:
 	NInput::CBind bindX, bindY;
-	ZDATA
-	bool bShow;
+	// transient (retail v1.2 deleted the Jan03 mouse-easing members; ctor re-seeds them)
 	float fThreshold1, fThreshold2, fAcceleration;
-	STime sLastUpdateTime, sTransitionTime;
-	SCursorInfo sInfo;
-	SCursorInfo sOldInfo;
+	STime sLastUpdateTime;
 	CTimeCounter sTimer;
 	CDGPtr<CCTime> pTimer;
-	CObj<CTextDraw> pText;
 	// BUG 8: retail draws the cursor ToHit/AP caption through the CML markup engine (IML), NOT the legacy
 	// GText CTextDraw -- so it renders the DB-string markup (Courier, 16pt, colour, 1px outline) like retail.
 	// The shared CTextDraw stays GText (14 other consumers); only the cursor gets its own IML. Transient.
 	CObj<IML> pTextML;
+	ZDATA
+	int nDisableCount; // retail Enable/Disable nesting counter (gates ProcessEvent @0xd60a0); serialized first
+	bool bShow;
+	STime sTransitionTime;
+	SCursorInfo sInfo;
+	SCursorInfo sOldInfo;
+	CObj<CTextDraw> pText;
 	CObj<CImageDraw> pImage;
 	CObj<CImageDraw> pOldImage;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&bShow); f.Add(3,&fThreshold1); f.Add(4,&fThreshold2); f.Add(5,&fAcceleration); f.Add(6,&sLastUpdateTime); f.Add(7,&sTransitionTime); f.Add(8,&sInfo); f.Add(9,&sOldInfo); f.Add(10,&sTimer); f.Add(11,&pTimer); f.Add(12,&pText); f.Add(13,&pImage); f.Add(14,&pOldImage); return 0; }
+	// retail v1.2 wire @0xd7550: {2 nDisableCount, 3 bShow, 4 sTransitionTime, 5 sInfo, 6 sOldInfo,
+	// 7 pText, 8 pImage, 9 pOldImage}. The old Jan03 table put bShow@2 -> it read retail's
+	// nDisableCount low byte (0) -> cursor permanently hidden after loading a retail save.
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&nDisableCount); f.Add(3,&bShow); f.Add(4,&sTransitionTime); f.Add(5,&sInfo); f.Add(6,&sOldInfo); f.Add(7,&pText); f.Add(8,&pImage); f.Add(9,&pOldImage); return 0; }
 
 protected:
 	float AccelerateAxis( float fDelta, const STime &sDelta );
@@ -75,8 +83,8 @@ ICursor* ICursor::Create( bool bShowCursor, CVec2 vBegPos )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CCursor
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CCursor::CCursor( bool _bShow ): 
-	bindX( "cursor_x" ), bindY( "cursor_y" ), bShow(_bShow)
+CCursor::CCursor( bool _bShow ):
+	bindX( "cursor_x" ), bindY( "cursor_y" ), nDisableCount(0), bShow(_bShow)
 {
 	pText = new CTextDraw();
 	pTextML = CreateML();   // BUG 8: the cursor's own CML markup text (renders the DB-string font/colour/outline)
@@ -113,7 +121,7 @@ const SCursorInfo& CCursor::GetCursor() const
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CCursor::SetCursor( const SCursorInfo &_sInfo )
 {
-	if ( sInfo.pTexture != _sInfo.pTexture )
+	if ( sInfo.pCursor != _sInfo.pCursor )
 	{
 		sOldInfo = sInfo;
 		sTransitionTime = 0;
@@ -168,16 +176,19 @@ void CCursor::Draw( const STime &sTime, NGScene::I2DGameView *pView )
 		if ( fCoeff > 1.0f )
 		{
 			fCoeff = 1.0f;
-			sOldInfo.pTexture = 0;
+			sOldInfo.pCursor = 0;
 		}
 
 		CVec2 vVirtCursorPos( vCursorPos.x * 1024.0f / pView->GetViewportSize().x, vCursorPos.y * 768.0f / pView->GetViewportSize().y );
 
-		if ( IsValid( sInfo.pTexture ) )
+		// retail draws from the UICursors RECORD: texture = pCursor->pUITexture, anchor = retail
+		// CalcCursorPos @0xd6200: sPos = (int)( vVirt - texSize * nCenter ), nCenterX/Y from the record.
+		if ( IsValid( sInfo.pCursor ) && IsValid( sInfo.pCursor->pUITexture ) )
 		{
-			SPoint sPos( vVirtCursorPos.x - sInfo.vCenter.x * sInfo.pTexture->nWidth, vVirtCursorPos.y - sInfo.vCenter.y * sInfo.pTexture->nHeight );
-			pImage->SetWindow( SRect( sPos.x, sPos.y, sPos.x + sInfo.pTexture->nWidth, sPos.y + sInfo.pTexture->nHeight ) );
-			pImage->SetImage( sInfo.pTexture );
+			NDb::CUITexture *pTex = sInfo.pCursor->pUITexture;
+			SPoint sPos( vVirtCursorPos.x - float( pTex->nWidth ) * float( sInfo.pCursor->nCenterX ), vVirtCursorPos.y - float( pTex->nHeight ) * float( sInfo.pCursor->nCenterY ) );
+			pImage->SetWindow( SRect( sPos.x, sPos.y, sPos.x + pTex->nWidth, sPos.y + pTex->nHeight ) );
+			pImage->SetImage( pTex );
 			pImage->SetColor( NGfx::SPixel8888( 0xFF, 0xFF, 0xFF, 0xFF * fCoeff ) );
 			pImage->Draw( 0, sTime, pView );
 
@@ -188,18 +199,19 @@ void CCursor::Draw( const STime &sTime, NGScene::I2DGameView *pView )
 			if ( IsValid( pTextML ) )
 			{
 				CVec2 vScr = pView->GetViewportSize();
-				SPoint sTextVirt( sPos.x + sInfo.pTexture->nWidth, sPos.y );
+				SPoint sTextVirt( sPos.x + pTex->nWidth, sPos.y );
 				SPoint sScrPos( (int)( sTextVirt.x * vScr.x / 1024.0f ), (int)( sTextVirt.y * vScr.y / 768.0f ) );
 				pTextML->Generate( pView, (int)vScr.x );
 				SRect sScrWindow( sScrPos.x, sScrPos.y, (int)vScr.x, (int)vScr.y );
 				pTextML->Render( pView, sScrPos, sScrWindow );
 			}
 		}
-		if ( IsValid( sOldInfo.pTexture ) )
+		if ( IsValid( sOldInfo.pCursor ) && IsValid( sOldInfo.pCursor->pUITexture ) )
 		{
-			SPoint sPos( vVirtCursorPos.x - sOldInfo.vCenter.x * sOldInfo.pTexture->nWidth, vVirtCursorPos.y - sOldInfo.vCenter.y * sOldInfo.pTexture->nHeight );
-			pOldImage->SetWindow( SRect( sPos.x, sPos.y, sPos.x + sOldInfo.pTexture->nWidth, sPos.y + sOldInfo.pTexture->nHeight ) );
-			pOldImage->SetImage( sOldInfo.pTexture );
+			NDb::CUITexture *pTex = sOldInfo.pCursor->pUITexture;
+			SPoint sPos( vVirtCursorPos.x - float( pTex->nWidth ) * float( sOldInfo.pCursor->nCenterX ), vVirtCursorPos.y - float( pTex->nHeight ) * float( sOldInfo.pCursor->nCenterY ) );
+			pOldImage->SetWindow( SRect( sPos.x, sPos.y, sPos.x + pTex->nWidth, sPos.y + pTex->nHeight ) );
+			pOldImage->SetImage( pTex );
 			pOldImage->SetColor( NGfx::SPixel8888( 0xFF, 0xFF, 0xFF, 0xFF * ( 1.0f - fCoeff ) ) );
 			pOldImage->Draw( 0, sTime, pView );
 		}
@@ -238,6 +250,13 @@ ICursor* ICursor::CreateEditorCursor()
 {
 	return new CEditorCursor;
 }
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail Cursor.obj registrar: single var, VarBoolHandler -> bHWCursor @0x98db60, default 0, saved
+// (the software cursor path stays the renderer; the flag feeds the options checkbox + saved config)
+static bool bHWCursor = false;
+START_REGISTER(Cursor)
+	REGISTER_VAR_EX( "ui_hwcursor", NGlobal::VarBoolHandler, &bHWCursor, 0, true )
+FINISH_REGISTER
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 } // namespace
 ////////////////////////////////////////////////////////////////////////////////////////////////////

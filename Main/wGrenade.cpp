@@ -11,6 +11,7 @@
 #include "..\DBFormat\DataRPG.h"
 #include "aiMap.h"
 #include "RPGAttackMech.h"
+#include "wUnitServer.h"    // complete CUnitServer: the thrower->CObjectBase cast (CASphereSet pIgnore) needs the real bases
 
 namespace NWorld
 {
@@ -98,11 +99,12 @@ void CGrenadeServer::InitGrenade( const CVec3 &vFrom, const CVec3 &vSpeed, STime
 	CVec3 massCenter;
 	NAI::GetSpheres( pModel, &spheres, &massCenter );
 
-	NAnimation::CASphereSet *pSphereSet = new NAnimation::CASphereSet( -100 );
+	// retail @0x75c946: pIgnore = the thrower -- the grenade's physics step collides units
+	// (TS_UNITS added to the mask) but skips the thrower's own hull until the first real bounce
+	NAnimation::CASphereSet *pSphereSet = new NAnimation::CASphereSet( spheres,
+		pModel->pGeometry->boundCenter, pModel->pGeometry->boundSize, (CObjectBase*)pUnitServer.GetPtr(), -100 );
 	pSphereSet->pTime = pWorld->GetTime();
 	pSphereSet->pMap = pWorld->GetAIMap();
-	pSphereSet->InitSpheres( spheres );
-	pSphereSet->InitBound( pModel->pGeometry->boundCenter, pModel->pGeometry->boundSize );
 	// Never start the ballistic arc in the FUTURE: when a throw clip's release label sits at/after
 	// the clip's natural end (tLabel1 > tEnd), CUnitServer::Segment fires the throw via its
 	// animation-end fallback while tThrow (= tLabel1) is still ahead of the world clock --
@@ -111,7 +113,8 @@ void CGrenadeServer::InitGrenade( const CVec3 &vFrom, const CVec3 &vSpeed, STime
 	// for well-formed clips (tLabel1 <= now at fire time) and only corrects the fallback case.
 	// The fuse below stays keyed to the raw tThrow (release label), as retail computes it.
 	STime tFlightStart = Min( tThrow, pWorld->GetTime()->GetValue() );
-	pSphereSet->Init( tFlightStart, vFrom, QNULL, vSpeed, true );
+	// retail @0x75c9cd: bMassCenter=true, PH_GRENADE_ATTACK, no item (the case name is fixed)
+	pSphereSet->Init( tFlightStart, vFrom, QNULL, vSpeed, true, NAnimation::PH_GRENADE_ATTACK, 0 );
 
 	pRealAnimator = pSphereSet;
 
@@ -189,7 +192,7 @@ bool CClickOfDeath::Segment()
 	{
 		CDynamicCast<NRPG::IAttackable> pT(pTarget);
 		if (pT)
-			pT->ProcessAttack( nUserID, &atk, NDb::GetArmor( NDb::N_DEFAULT_ARMOR ) );
+			pT->ProcessAttack( pWorld, nUserID, &atk, ray.ptDir, NDb::GetArmor( NDb::N_DEFAULT_ARMOR ) );
 	}
 	return true; // = erase
 }

@@ -49,9 +49,22 @@ int Round( float f ) { return int( f + 0.5f ); }
 struct SCriticalsHolder
 {
 	ZDATA
-	vector<CPtr<CCritical> > criticals;
+	vector<CObj<CCritical> > criticals;   // retail @0x2c7d80: DoVector<CObj<CCritical>> -- OWNING refs
 	int nTimeLeft;
 	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&criticals); f.Add(3,&nTimeLeft); return 0; }
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail NRPG::SModifierHolder (@0x2c7960 operator&, PDB sizeof 16): a postponed skill modifier --
+// after nTimeLeft turns SegmentCriticals rebuilds a CSkillModifier(pTarget, info) and installs it
+// into the mission's temporaryModifiers. `info` is a raw 8-byte chunk (tag 3), matching retail.
+struct SModifierHolder
+{
+	ZDATA
+	CPtr<CDynamicSkill> pTarget;
+	SSkillModifyInfo info;
+	int nTimeLeft;
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&pTarget); f.Add(3,&info); f.Add(4,&nTimeLeft); return 0; }
+	SModifierHolder(): nTimeLeft( 0 ) {}
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CUnitMission
@@ -64,8 +77,8 @@ class CUnitMission: public IUnitMission
 	friend class CRLauncherToHitCalcer;
 	// release migration: the free-fn to-hit dispatch reaches GetToHitWeaponType / GetSnipeAP /
 	// GetMeleeToHit / bLogActive (all private) -- befriend it (no visibility change to the class).
-	friend int GetToHit( const NWorld::CUnit*, NAI::EPose, int, const CVec3&, const NAI::SPosition&, NAI::EHitLocation, int, const NWorld::CUnit*, const vector<int>&, int, bool, const CVec3&, bool );
-	friend int GetTileToHit( const NWorld::CUnit*, NAI::EPose, int, const CVec3&, CVec3, NAI::ETileHitLocation, int, int, bool, const CVec3& );
+	friend int GetToHit( const NWorld::CUnit*, NAI::EPose, int, const CVec3&, const NAI::SPosition&, NAI::EHitLocation, int, const NWorld::CUnit*, const vector<int>&, int, bool, const CVec3&, bool, int );
+	friend int GetTileToHit( const NWorld::CUnit*, NAI::EPose, int, const CVec3&, CVec3, NAI::ETileHitLocation, int, int, bool, const CVec3&, int );
 	friend int GetGrenadeToHit( const NWorld::CUnit*, NAI::EPose, int, const CVec3&, bool, CVec3, const CVec3& );
 	friend int GetRLauncherToHit( const NWorld::CUnit*, NAI::EPose, int, const CVec3&, CVec3, NAI::ETileHitLocation, int, bool, const CVec3& );
 	friend EToHitType GetToHitType( const NWorld::CUnit* );
@@ -81,6 +94,10 @@ private:
 	int GetMeleeToHit( const CVec3 &ptAttacker, const NAI::SPosition &posTarget, 
 		IUnitMissionInfo *pTarget, NAI::EHitLocation hl, const vector<int> &accessibleHLs, bool bBackStab ) const;
 	int CalcInterruptProbability( const IUnitMission *pEnemy,	bool bIsMutual, bool bWasShot );
+	// retail @0x2bea70: the "unaware target" (backstab) critical scale -- perk 74, crit x(Param1+1)
+	// capped at 100, critical difficulty scaled by the same capped factor. Called by both CreateAttack
+	// branches with bBackStab.
+	void ModifyUnawareCritical( CAttackPortion &a, bool bApply ) const;
 
 	virtual int GetHealedVP() const { return pRPGUnit->nHealedVP; }
 	virtual int GetTotalVP() const { return pRPGUnit->Skills( NDb::ST_VP ) + GetHealedVP(); }
@@ -94,7 +111,10 @@ private:
 	int GetSnipeAP( IUnitMissionInfo *pTarget ) const;
 	int GetUnconsciousProbability( IUnitMissionInfo *pAttacker, 
 		IUnitMissionInfo *pTarget, int nBaseProbability ) const;
-	int ProcessAttackForPK( int nUserID, CAttackPortion *pAttack, NDb::CRPGArmor *pArmor, bool bApplyToVP );
+	// retail @0x2bf9c0 (PDB: private CReceivedDmg ProcessAttackForPK(IWorld*,int,CAttackPortion*,
+	// CRPGArmor*,bool)) -- pWorld added for CalcStructDmg's difficulty multipliers.
+	int ProcessAttackForPK( NWorld::IWorld *pWorld, int nUserID, CAttackPortion *pAttack,
+		NDb::CRPGArmor *pArmor, bool bApplyToVP );
 
 	float GetPanzerkleinAddCoverIgnore() { if ( pPanzerklein ) return pPanzerklein->fAddCoverIgnore; return 0; }
 	void WearBrokenPK();
@@ -104,22 +124,24 @@ private:
 	int nMoveInLastTurn;
 	EAction eLastAction;
 	int nLastActionTimes;
-	vector<CPtr<CCritical> > criticals;
+	vector<CObj<CCritical> > criticals;   // retail tag 5: DoVector<CObj<CCritical>> (owning)
 	int _nShameOnEpik;
 	bool bLogActive;
-	bool bSitting;
-	int  nBullet;
+	// retail +116 (tag 8, int): Apply/ReleaseMotionless ref-count -- replaces the Jan03 bSitting
+	// bool (several motionless sources may overlap). Jan03 nBullet (dev tag 9) and the perception
+	// pair (dev tags 14/15) do NOT exist in retail (PDB-confirmed); retail leaves tags 9/14/15
+	// as permanent gaps in the table -- reproduced below.
+	int  nMotionless;
 	SSnipeAP savedSnipeAP;
 	float fLastToHit; // for Burst ToHit
 	vector<NDb::ECritical> lastCriticals;
 	bool bUseTwoHanded;
-	float fLightPerception;
-	float fSoundPerception;
 	NDb::SToHitConstants tohit;
 	NDb::SAISoundConstants sAISoundConstants; // AI sound constants
 	NDb::SInterruptsConstants SInterruptsConstants; // Interrupt constants
 	CVec3 ptLastCP;
 	vector<ECriticalState> criticalsState; // affects only the roll of new criticals
+	vector<CObj<CSkillModifier> > pkModifiers; // retail +340 (tag 21): worn-Panzerklein skill modifiers (SetPanzerklein @0x2c3b00)
 public:
 	CPtr<NDb::CModel> pModel;
 	CObj<CUnit> pRPGUnit;
@@ -134,21 +156,49 @@ private:
 	CPtr<CDynamicSkill> pPanzerkleinVP;
 	bool bHiding;
 	CDBPtr<NDb::CDBMinesConstants> pMinesConstants;
-	list<SCriticalsHolder> suspendedCriticals;
+	list<SCriticalsHolder> suspendedCriticals;   // retail tag 34 (the dev pGlobalGame@34 collided with this!)
+	int nBleedingStopAmount;                      // retail +412 (tag 35)
+	list<SModifierHolder> postponedModifiers;     // retail +416 (tag 36): delayed skill modifiers (SegmentCriticals @0x2c46a0)
+	vector<CObj<CSkillModifier> > temporaryModifiers; // retail +420 (tag 37): VP drug boosts etc. (AddVPBoost @0x2c3400)
+	vector<int> vpBoostDurations;                 // retail +432 (tag 38): parallel boost lifetimes
+	int nTurnCounter;                             // retail +444 (tag 39): ++ per StartNewTurn @0x2bf8c0
+	// the mission-side adaptation trio (retail +448..456, tags 40/41/42). The LIVE adaptation state
+	// lives on CUnit (tags 23/24/25, landed a883652); retail keeps this serialized mirror on the
+	// mission -- retail GetWeaponAdaptation @0x2c0b40 delegates to the CUnit copy, so the mirror is
+	// format-only here as in retail.
+	CPtr<IInventoryItem> pAdaptatedWeapon;
+	float fAdaptationCounter;
+	float fCurrentAdaptation;
+	float fAuraPerkICModifier;                    // retail +460 (tag 43): SetAuraPerkICModifier @0x2c5b90
+	int nScenarioPlayerID;                        // retail +464 (tag 44): SetScenarioPlayerID @0x2c5ba0
 public:
-	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&nMoveInLastTurn); f.Add(3,&eLastAction); f.Add(4,&nLastActionTimes); f.Add(5,&criticals); f.Add(6,&_nShameOnEpik); f.Add(7,&bLogActive); f.Add(8,&bSitting); f.Add(9,&nBullet); f.Add(10,&savedSnipeAP); f.Add(11,&fLastToHit); f.Add(12,&lastCriticals); f.Add(13,&bUseTwoHanded); f.Add(14,&fLightPerception); f.Add(15,&fSoundPerception); f.Add(16,&tohit); f.Add(17,&sAISoundConstants); f.Add(18,&SInterruptsConstants); f.Add(19,&ptLastCP); f.Add(20,&criticalsState); f.Add(21,&pModel); f.Add(22,&pRPGUnit); f.Add(23,&sID); f.Add(24,&nBulletHitThisTurn); f.Add(25,&AckAttackers); f.Add(26,&AckIDs); f.Add(27,&diplomacy); f.Add(28,&bUnconscious); f.Add(29,&pPanzerklein); f.Add(30,&pPanzerkleinVP); f.Add(31,&bHiding); f.Add(32,&pMinesConstants); f.Add(33,&suspendedCriticals); f.Add(34,&pGlobalGame); return 0; }
+	// retail table @0x2c6b10, member-by-member; tags 9/14/15 are retail's own permanent gaps.
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&nMoveInLastTurn); f.Add(3,&eLastAction); f.Add(4,&nLastActionTimes); f.Add(5,&criticals); f.Add(6,&_nShameOnEpik); f.Add(7,&bLogActive); f.Add(8,&nMotionless); f.Add(10,&savedSnipeAP); f.Add(11,&fLastToHit); f.Add(12,&lastCriticals); f.Add(13,&bUseTwoHanded); f.Add(16,&tohit); f.Add(17,&sAISoundConstants); f.Add(18,&SInterruptsConstants); f.Add(19,&ptLastCP); f.Add(20,&criticalsState); f.Add(21,&pkModifiers); f.Add(22,&pModel); f.Add(23,&pRPGUnit); f.Add(24,&sID); f.Add(25,&nBulletHitThisTurn); f.Add(26,&AckAttackers); f.Add(27,&AckIDs); f.Add(28,&diplomacy); f.Add(29,&bUnconscious); f.Add(30,&pPanzerklein); f.Add(31,&pPanzerkleinVP); f.Add(32,&bHiding); f.Add(33,&pMinesConstants); f.Add(34,&suspendedCriticals); f.Add(35,&nBleedingStopAmount); f.Add(36,&postponedModifiers); f.Add(37,&temporaryModifiers); f.Add(38,&vpBoostDurations); f.Add(39,&nTurnCounter); f.Add(40,&pAdaptatedWeapon); f.Add(41,&fAdaptationCounter); f.Add(42,&fCurrentAdaptation); f.Add(43,&fAuraPerkICModifier); f.Add(44,&nScenarioPlayerID); f.Add(45,&pGame); f.Add(46,&bIsAIUnit); f.Add(47,&pGlobalGame); return 0; }
 
-	// transient (NOT serialized): the per-mission RPG game, pushed in by the owning unit-server before each
-	// attack so the combat critical clamp can honor CGame::nMaxCriticalSeverity (retail cached this game on
-	// the mission via its ctor; this dev fork dropped that ctor arg).
+	// retail +468 (tag 45): the per-mission RPG game, pushed in by the owning unit-server (retail
+	// threads it through the ctor); the combat critical clamp honors CGame::nMaxCriticalSeverity.
 	CPtr<IGame> pGame;
 	virtual void SetGame( IGame *p ) { pGame = p; }
-	// retail CUnitMission+0x1dc pGlobalGame (serialize tag 0x2c @0x2c6b10): the campaign game -- carries
-	// pDifficulty, read by CreateAttack's backstab-damage multipliers. Retail threads it through the ctor
-	// (CreateUnit @0x2c4f50); this fork binds it in the CUnitServer ctor (SetGlobalGame). Serialized at
-	// dev tag 34 so a mid-mission load restores it even for units built before the bind.
+	// retail +472 (tag 46): SetIsAIPlayer @0x2c5b50; the ctor clears it.
+	bool bIsAIUnit;
+	// retail +476 pGlobalGame -- serialize tag 0x2f(47) @0x2c6b10, NOT 0x2c as the older comment
+	// claimed (0x2c(44) is nScenarioPlayerID; the dev tag 34 it used to sit on is retail's
+	// suspendedCriticals). Carries pDifficulty, read by CreateAttack's backstab-damage multipliers.
+	// Retail threads it through the ctor (CreateUnit @0x2c4f50); this fork binds it in the
+	// CUnitServer ctor (SetGlobalGame).
 	CPtr<CGlobalGame> pGlobalGame;
 	virtual void SetGlobalGame( CGlobalGame *p ) { pGlobalGame = p; }
+	virtual CGlobalGame* GetGlobalGame() const { return pGlobalGame; }
+	// retail @0x2c5b40/@0x2c5b50/@0x2c5b90/@0x2c5ba0/@0x2c5bb0 -- plain setters/getters.
+	bool IsAIPlayer() const { return bIsAIUnit; }
+	void SetIsAIPlayer( bool b ) { bIsAIUnit = b; }
+	void SetAuraPerkICModifier( float f ) { fAuraPerkICModifier = f; }
+	void SetScenarioPlayerID( int n ) { nScenarioPlayerID = n; }
+	int GetScenarioPlayerID() const { return nScenarioPlayerID; }
+	// retail AddVPBoost @0x2c3400: install a temporary VP modifier (fAdd = 1% of the VP base per
+	// unit of strength) + record its lifetime. (Retail tails into CheckOverdose @0x2c0a50, whose
+	// overdose metric the oracle left unresolved -- deferred with it.)
+	void AddVPBoost( float fStrength, int nDuration );
 	//
 	CUnitMission();
 	//
@@ -166,9 +216,10 @@ public:
 	virtual float GetSightDistance( NAI::EPose pose ) const;
 	virtual void StartNewTurn( const CVec3 &ptCP );
 
-	virtual bool CreateAttack( vector<CAttackPortion> *pRes, bool bSpendAmmo, 
-		bool bAnonymous, IUnitMissionInfo *pTarget, bool bBackStab );
-	virtual int ProcessAttack( int nUserID, CAttackPortion *pAttack, NDb::CRPGArmor *pArmor );
+	virtual bool CreateAttack( vector<CAttackPortion> *pRes, bool bSpendAmmo,
+		bool bAnonymous, IUnitMissionInfo *pTarget, bool bBackStab, bool bAdaptWeapon );
+	virtual int ProcessAttack( NWorld::IWorld *pWorld, int nUserID, CAttackPortion *pAttack,
+		NDb::CRPGArmor *pArmor );
 
 	// GetToHit/GetTileToHit/GetObjectToHit/GetGrenadeToHit/GetRLauncherToHit moved to free fns
 	// (NRPG::Get*ToHit, RPGUnitMission.h) -- the release migrated the to-hit dispatch out of the
@@ -194,21 +245,16 @@ public:
 	virtual float GetSkillProgress( NDb::ESkillType skill ) const { return pRPGUnit->Skills( skill ).GetProgress(); }
 	virtual void DumpStats() const;
 	virtual void PrintLog( bool bPrint ) { bLogActive = bPrint; }
-	virtual void Seat() { bSitting = true; }
-	virtual void Stand() { bSitting = false; }
-	virtual bool CanMove() const { return !bSitting; }
+	virtual void ApplyMotionless() { ++nMotionless; }      // retail @0x2c5a70
+	virtual void ReleaseMotionless() { --nMotionless; }    // retail @0x2c5a80
+	virtual bool CanMove() const { return nMotionless == 0; }
 	virtual void Reload();
 	virtual bool LoadWeapon( IWeaponItemInfo *pWeapon, IClipItem *pClip );
 	virtual bool UnloadWeapon( IWeaponItemInfo *pWeapon );
-	virtual void StartAttack() { nBullet = 0; }
-	virtual void NextBullet() { ++nBullet; }
-	virtual int  GetNBullets() const { return nBullet; }
 	virtual void AddLastCritical( NDb::ECritical eCA ) { lastCriticals.push_back( eCA ); }
 	virtual void GetLastCriticals( vector<NDb::ECritical> *pResCritical ) { *pResCritical = lastCriticals; lastCriticals.clear(); }
 	virtual void UseTwoHanded( bool bUse ) { bUseTwoHanded = bUse;}
 	virtual bool CanUseTwoHanded() const { return bUseTwoHanded; }
-	virtual void Blind( bool bBlind ) { bBlind ? fLightPerception = 0 : fLightPerception = 1; }
-	virtual void Deaf( bool bDeaf ) { bDeaf ? fSoundPerception = 0 : fSoundPerception = 1; }
 	virtual int GetRPGPersID() const { return pRPGUnit->GetRPGPersID(); }
 	virtual void SetCannonItem( IWeaponItem *pItem );
 	virtual IWeaponItem* GetCannonItem() const { return pRPGUnit->GetCannonItem(); }
@@ -243,7 +289,8 @@ public:
 	virtual void InitAsCorpse( bool bDead );
 	virtual int GetFallDamage( float fHDiff );
 	virtual NDb::CPanzerklein *GetPanzerklein() { return pPanzerklein; }
-	virtual void SetPanzerklein( NDb::CPanzerklein *pPK, CDynamicSkill *_pPanzerkleinVP, IInventory *_pPKInventory ); 
+	virtual void SetPanzerklein( NDb::CPanzerklein *pPK, CDynamicSkill *_pPanzerkleinVP, IInventory *_pPKInventory );
+	void InitAsPanzerklein( NDb::CPanzerklein *pPK );   // retail @0x2c4f50 tail (CreateUnit PK-pers VP init)
 	virtual void DoRegenerations();
 	virtual bool IsHero() const;
 	virtual bool IsHiding() const { return bHiding; }
@@ -296,11 +343,13 @@ static void InitializeCriticals()
 		RangeCriticals( &criticalBar[i] );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CUnitMission::CUnitMission() 
-	: nMoveInLastTurn(0), nLastActionTimes(0), bLogActive(true), 
-		bSitting(false), nBullet(-1), fLastToHit(0),
-		bUseTwoHanded(true), fLightPerception(1), fSoundPerception(1), nBulletHitThisTurn(0),
-		bUnconscious( false ), bHiding( false )
+CUnitMission::CUnitMission()
+	: nMoveInLastTurn(0), nLastActionTimes(0), bLogActive(true),
+		nMotionless(0), fLastToHit(0),
+		bUseTwoHanded(true), nBulletHitThisTurn(0),
+		bUnconscious( false ), bHiding( false ),
+		nBleedingStopAmount( 0 ), nTurnCounter( 0 ), fAdaptationCounter( 0 ), fCurrentAdaptation( 0 ),
+		fAuraPerkICModifier( 0 ), nScenarioPlayerID( 0 ), bIsAIUnit( false )   // retail ctor @0x2c57c0 zero-inits + clears the AI flag
 {
 	pMinesConstants = NDb::GetDBMinesConstants();
 	ASSERT( IsValid( pMinesConstants ) );
@@ -501,6 +550,7 @@ void CUnitMission::ResetUnitParameters()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CUnitMission::StartNewTurn( const CVec3 &ptCP )
 {
+	++nTurnCounter;               // retail @0x2bf8c0 head
 	ResetUnitParameters();
 	ProcessCriticalsOnNewTurnFor();
 	ptLastCP = ptCP;
@@ -721,9 +771,12 @@ int CUnitMission::GetUnconsciousProbability( IUnitMissionInfo *pAttacker,
 	return ( - 1.f / ( 2.f * nMaxHits ) * nHits + 1 ) * nBaseProbability;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// Returns true if the whole shot is finished (during a burst it may not finish at once)
-bool CUnitMission::CreateAttack( vector<CAttackPortion> *pRes, bool bSpendAmmo, 
-	bool bAnonymous, IUnitMissionInfo *pTarget, bool bBackStab )
+// retail @0x2c2100: returns whether an attack was created (melee branch: always true). The Jan03
+// "burst not finished -> false" ShootMode switch is GONE in retail -- burst pacing lives entirely
+// in the shoot exec's timed-bullet schedule (nBulletGone / tNextBullet*), and no live caller reads
+// the return on the shoot path.
+bool CUnitMission::CreateAttack( vector<CAttackPortion> *pRes, bool bSpendAmmo,
+	bool bAnonymous, IUnitMissionInfo *pTarget, bool bBackStab, bool bAdaptWeapon )
 {
 	IUnitMissionInfo *pAttacker = bAnonymous ? 0 : this;
 	bool bRet = true;
@@ -733,6 +786,8 @@ bool CUnitMission::CreateAttack( vector<CAttackPortion> *pRes, bool bSpendAmmo,
 	// portion's nCrticalDifficulty (both ranged and melee) by its Param1 (=1.25). Fetched once here.
 	float fCritDiffCoeff = 1.f;
 	HasPerk( N_PERK_BETTER_CRIT_DIFFICULTY, &fCritDiffCoeff );
+	// the item whose familiarity the adaptation tail updates (retail pIVar17: the branch's weapon)
+	IInventoryItem *pUsedItem = 0;
 	//
 	if ( IsValid( pWeapon ) )
 	{
@@ -741,21 +796,17 @@ bool CUnitMission::CreateAttack( vector<CAttackPortion> *pRes, bool bSpendAmmo,
 			// we currently cannot use a two-handed weapon
 			return true;
 		}
-		switch ( pWeapon->GetShootMode() )
-		{
-		case NDb::SM_ShortBurst:
-				{
-					float fPerkBullets = 0;
-					HasPerk( NRPG::N_PERK_LONGER_SHORT_BURST, &fPerkBullets );
-					const int nShoots = ( int )( pWeapon->GetDBWeapon()->nRoF / 6.f + fPerkBullets );
-					if ( nBullet < nShoots )
-						bRet = false;
-				}
-				break;
-		case NDb::SM_LongBurst:
-				bRet = false;
-				break;
-		}
+		// retail @0x6c21cc/@0x6c221b (weapon-branch head): "+ N Ranged Dmg" (perk 26, flat add applied
+		// below when damage lands) and "Better critical chance" (perk 36, nCrtical x(Param1+1)).
+		int nRangedDmgAdd = 0;
+		float fPerkDmg = 0;
+		if ( HasPerk( N_PERK_RANGED_DMG_ADD, &fPerkDmg ) )
+			nRangedDmgAdd = (int)fPerkDmg;
+		float fCritChanceMult = 1.f;
+		float fPerkCrit = 0;
+		if ( HasPerk( N_PERK_BETTER_CRIT_CHANCE, &fPerkCrit ) )
+			fCritChanceMult = fPerkCrit + 1.f;
+		//
 		pWeapon->CreateNewAttackPortion( pRes, bSpendAmmo );
 		for ( int i = 0; i < pRes->size(); ++i )
 		{
@@ -763,29 +814,54 @@ bool CUnitMission::CreateAttack( vector<CAttackPortion> *pRes, bool bSpendAmmo,
 			CAttackPortion &a = (*pRes)[i];
 			a.pAttacker = pAttacker;
 			a.pTarget = pTarget;
-			a.nCrtical = 10.f * ( nBulletHitThisTurn + 1 );
-			a.nCrticalDifficulty = nSnipeSkill / 10.f;
-			a.nUnconsciousProbability = GetUnconsciousProbability( pAttacker, 
+			// retail @0x6c22d8..0x6c2354: the crit chance is keyed on the TARGET's bullet-hits-this-turn
+			// counter (repeat hits open him up), falling back to a flat 10 for a non-mission target; the
+			// crit difficulty base is 0.25 * snipe skill (dev had the attacker's counter and 0.1 * snipe).
+			CUnitMission *pTargetMission = CDynamicCast<CUnitMission>( pTarget );
+			if ( IsValid( pTargetMission ) )
+				a.nCrtical = (int)( ( pTargetMission->nBulletHitThisTurn + 1 ) * 10.f );
+			else
+				a.nCrtical = 10;
+			a.nCrticalDifficulty = (int)( nSnipeSkill * 0.25f );
+			a.nUnconsciousProbability = GetUnconsciousProbability( pAttacker,
 				pTarget, pWeapon->GetInnerClip()->GetDBAmmo()->nUnconsciousProbability );
 			a.bBackStab = bBackStab;
 			//
 			if ( IsValid(savedSnipeAP.pTarget) && pTarget == savedSnipeAP.pTarget )
 			{
-				// sniper shot
-				a.nCrtical += savedSnipeAP.nAP / 5.f * 3;
-				a.nCrticalDifficulty += savedSnipeAP.nAP / 5.f * 3;
+				// sniper shot: retail @0x6c2405..0x6c24ef -- crit += snipe*AP*0.02, crit difficulty += AP
+				// (dev had AP*0.6 on both), then the "Master Sniper" perk (54) boosts both.
+				a.nCrticalDifficulty += savedSnipeAP.nAP;
+				a.nCrtical = (int)( nSnipeSkill * savedSnipeAP.nAP * 0.02f + a.nCrtical );
 				if ( bSpendAmmo )
 					pRPGUnit->UseSkill( NDb::ST_SNIPE, GetSkillAddValue( NDb::ST_SNIPE ) );
+				float fSniperCrit = 0, fSniperCritDiff = 0;
+				if ( HasPerk( N_PERK_MASTER_SNIPER, &fSniperCrit, &fSniperCritDiff ) )
+				{
+					a.nCrtical = (int)( ( fSniperCrit + 1.f ) * a.nCrtical );
+					a.nCrticalDifficulty = (int)( a.nCrticalDifficulty * fSniperCritDiff );
+				}
 			}
 			else
 			{
-				// ordinary shot
-				a.nCrtical += nSnipeSkill / 10;
+				// ordinary shot: retail @0x6c24f1 -- 0.4 * snipe skill (dev had /10)
+				a.nCrtical = (int)( nSnipeSkill * 0.4f + a.nCrtical );
 			}
-			// retail @0x6c2566: the same "Better critical difficulty" perk factor scales the ranged
-			// portion's nCrticalDifficulty as the last step (dev dropped it here too).
-			a.nCrticalDifficulty *= fCritDiffCoeff;
+			// retail @0x6c252b/@0x6c2566: the perk-36 crit-chance factor, then the perk-44 factor.
+			a.nCrtical = (int)( a.nCrtical * fCritChanceMult );
+			a.nCrticalDifficulty = (int)( a.nCrticalDifficulty * fCritDiffCoeff );
+			// retail @0x6c2583..0x6c25c3: only when the portion actually deals damage -- the flat
+			// perk-26 add on both bounds and "Always critical" (perk 38).
+			if ( a.nDmgMin > 0 && a.nDmgMax > 0 )
+			{
+				a.nDmgMin += nRangedDmgAdd;
+				a.nDmgMax += nRangedDmgAdd;
+				if ( HasPerk( N_PERK_ALWAYS_CRITICAL ) )
+					a.nCrtical = 100;
+			}
+			ModifyUnawareCritical( a, bBackStab );
 		}
+		pUsedItem = pWeapon;
 	}
 	else if ( pMW )
 	{
@@ -807,6 +883,17 @@ bool CUnitMission::CreateAttack( vector<CAttackPortion> *pRes, bool bSpendAmmo,
 		//
 		a.nDmgMin = pW->nDmgMin + nStr + nMelee * (pW->nDmgMax - pW->nDmgMin) / (N_MAX_SKILL * 2);
 		a.nDmgMax = pW->nDmgMax + nStr;
+		// retail @0x6c2750: the backstab DAMAGE boost -- the (multiplied) melee skill scaled by the
+		// difficulty record, halved for bare fists (melee record id 1), times 5/7, added to BOTH bounds.
+		// ORIGINAL BUG (confirmed @0x6c2795/@0x6c27cd): retail reads fBackstabMinDamageMult for BOTH
+		// bounds -- fBackstabMaxDamageMult is never read.
+		if ( bBackStab && IsValid( pGlobalGame ) && IsValid( pGlobalGame->pDifficulty ) )
+		{
+			const float fFists = ( pW->GetRecordID() == 1 ) ? 0.5f : 1.0f;
+			const float fBoost = nMelee * pGlobalGame->pDifficulty->fBackstabMinDamageMult * fFists * ( 5.f / 7.f );
+			a.nDmgMin = (int)( fBoost + a.nDmgMin );
+			a.nDmgMax = (int)( fBoost + a.nDmgMax );
+		}
 		// retail nK ladder @0x6c2802..0x6c2858: bare fists (melee record id 1) hit at
 		// 160 + 10*STR; a real melee weapon doubles that; a Panzerklein pilot's strike is a
 		// flat 1600 (0x640); a throwing knife swung in melee is a flat 40 (0x28).
@@ -822,11 +909,75 @@ bool CUnitMission::CreateAttack( vector<CAttackPortion> *pRes, bool bSpendAmmo,
 		a.nCrticalDifficulty = a.nCrtical * fCritDiffCoeff * 0.5f;
 		a.pAttacker = pAttacker;
 		a.pTarget = pTarget;
-		a.nUnconsciousProbability = GetUnconsciousProbability( pAttacker, 
+		a.nUnconsciousProbability = GetUnconsciousProbability( pAttacker,
 			pTarget, pMW->GetDBMeleeWeapon()->nUnconsciousProbability );
 		a.bBackStab = bBackStab;
+		// retail @0x6c2971: "Always melee critical" (perk 37).
+		if ( HasPerk( N_PERK_ALWAYS_MELEE_CRITICAL ) )
+			a.nCrtical = 100;
+		// retail @0x6c2988..0x6c2a58: "Rage" (perk 45) -- when the unit's total VP (current + bandaged)
+		// ratio drops below Param1 (0.5), both damage bounds scale by Param2 (1.5).
+		float fRageThreshold = 0, fRageMult = 0;
+		if ( HasPerk( N_PERK_RAGE, &fRageThreshold, &fRageMult ) )
+		{
+			const int nMaxVP = pRPGUnit->Skills( NDb::ST_VP ).GetMaxValue();
+			if ( nMaxVP > 0 && GetTotalVP() / (float)nMaxVP < fRageThreshold )
+			{
+				a.nDmgMin = (int)( a.nDmgMin * fRageMult );
+				a.nDmgMax = (int)( a.nDmgMax * fRageMult );
+			}
+		}
+		// retail @0x6c2a58: "+ N Melee Dmg" (perk 55) -- flat Param1 add on both bounds.
+		float fMeleeDmgAdd = 0;
+		if ( HasPerk( N_PERK_MELEE_DMG_ADD, &fMeleeDmgAdd ) )
+		{
+			a.nDmgMin = (int)( a.nDmgMin + fMeleeDmgAdd );
+			a.nDmgMax = (int)( a.nDmgMax + fMeleeDmgAdd );
+		}
+		// retail @0x6c2ad0
+		ModifyUnawareCritical( a, bBackStab );
+		pUsedItem = pMW;
+	}
+	// retail @0x6c2ae8 (adaptation tail): on a real, ammo-spending attack (once per shot -- the shoot
+	// execs pass bAdaptWeapon = nBulletGone==0, melee always true) update the weapon familiarity.
+	// Perk 6 "SpeedUP adaptation" replaces the base rate (1.0) with its Param1; perk 71 "Slow
+	// Adaptation bonus" divides the rate by its Param2 and (below) scales the cap by its Param1;
+	// perk 87 "Adaptation bonus" scales the cap by its Param1. Cap/mult come from the RPGToHit
+	// constants record (MaxWeaponAdaptation / WeaponAdaptationMultiplyer).
+	if ( bSpendAmmo && bAdaptWeapon && pUsedItem )
+	{
+		float fRate = 1.0f;
+		float fFastRate = 0;
+		if ( HasPerk( N_PERK_FAST_WEAPON_ADAPTATION, &fFastRate ) )
+			fRate = fFastRate;
+		float fSlowCapMult = 0, fSlowRateDiv = 0;
+		const bool bSlowAdaptation = HasPerk( N_PERK_SLOW_ADAPTATION_BONUS, &fSlowCapMult, &fSlowRateDiv );
+		if ( bSlowAdaptation )
+			fRate /= fSlowRateDiv;
+		int nCap = tohit.nMaxWeaponAdaptation;
+		float fCapMult = 0;
+		if ( HasPerk( N_PERK_ADAPTATION_BONUS, &fCapMult ) )
+			nCap = (int)( nCap * fCapMult );
+		if ( bSlowAdaptation ) // retail re-queries perk 71 here; same Param1
+			nCap = (int)( nCap * fSlowCapMult );
+		pRPGUnit->UseWeapon( pUsedItem, fRate, nCap, tohit.fWeaponAdaptationMult );
 	}
 	return bRet;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail CUnitMission::ModifyUnawareCritical @0x2bea70: perk 74 "Unaware critical difficulty" --
+// on a backstab, the crit chance scales by (Param1+1) capped at 100, and the crit difficulty by
+// that same capped chance value.
+void CUnitMission::ModifyUnawareCritical( CAttackPortion &a, bool bApply ) const
+{
+	if ( !bApply )
+		return;
+	float fBonus = 0;
+	if ( !HasPerk( N_PERK_UNAWARE_CRITICAL, &fBonus ) )
+		return;
+	const float fCapped = Min( 100.0f, ( fBonus + 1.0f ) * a.nCrtical );
+	a.nCrtical = Round( fCapped );
+	a.nCrticalDifficulty = Round( a.nCrticalDifficulty * fCapped );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 NDb::CRPGArmor* CUnitMission::GetRPGArmor() const 
@@ -844,7 +995,8 @@ float CUnitMission::GetXP( int nHowManyPerson ) const
 	return ( fXPDiff / float(nHowManyPerson) ) / 8.1f;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-int CUnitMission::ProcessAttackForPK( int nUserID, CAttackPortion *pAttack, NDb::CRPGArmor *pArmor, bool bApplyToVP )
+int CUnitMission::ProcessAttackForPK( NWorld::IWorld *pWorld, int nUserID, CAttackPortion *pAttack,
+	NDb::CRPGArmor *pArmor, bool bApplyToVP )
 {
 	if ( pAttack->CanRicochet() && random.Check( pPanzerklein->nRicochetProb ) )
 	{
@@ -873,7 +1025,7 @@ int CUnitMission::ProcessAttackForPK( int nUserID, CAttackPortion *pAttack, NDb:
 			return -1;
 /*		pAttack->nK = nDmg = Max( pAttack->nK - 1000, 0 );
 		nDmg *= pAttack->fDamageCoeff;*/
-		nDmg = pAttack->CalcStructDmg(pArmor);
+		nDmg = pAttack->CalcStructDmg( pWorld, pArmor, 0 );
 		if ( nDmg <= 0 )
 			return -1;
 		pAttack->nK -= pArmor->pMaterial->nThreshold * 10;
@@ -899,18 +1051,22 @@ void CUnitMission::WearBrokenPK()
 	ApplyCritical( cr );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-int CUnitMission::ProcessAttack( int nUserID, CAttackPortion *pAttack, NDb::CRPGArmor *pRealArmor )
+// retail @0x2c3d00. On the int return see the IAttackable banner in RPGAttackMech.h: retail keeps
+// this exact int (including the -1 "rejected" sentinel) as CReceivedDmg::nDmg and adds a `type`
+// alongside it (RD_UNKNOW on the reject paths, RD_HUMAN otherwise, RD_PK from ProcessAttackForPK).
+int CUnitMission::ProcessAttack( NWorld::IWorld *pWorld, int nUserID, CAttackPortion *pAttack,
+	NDb::CRPGArmor *pRealArmor )
 {
 	if ( GetRPGPers()->pPanzerklein ) // this is a PK on the zone and not on the pers, i.e. this pers is itself a PK
 	{
 		if ( !pPanzerklein )
 			pPanzerklein =  GetRPGPers()->pPanzerklein;
-		return ProcessAttackForPK( nUserID, pAttack, pRealArmor, true );
+		return ProcessAttackForPK( pWorld, nUserID, pAttack, pRealArmor, true );
 	}
 	NDb::CRPGArmor *pArmor = NDb::GetArmor( NDb::N_HUMAN_BODY_ARMOR );
 
 	if ( GetPanzerklein() ) 
-		if ( ProcessAttackForPK( nUserID, pAttack, pRealArmor, false ) == -1 )
+		if ( ProcessAttackForPK( pWorld, nUserID, pAttack, pRealArmor, false ) == -1 )
 			return -1;
 
 	int nTotalDmg = 0;
@@ -924,7 +1080,7 @@ int CUnitMission::ProcessAttack( int nUserID, CAttackPortion *pAttack, NDb::CRPG
 			csRPG << CC_RED << " damage avoided!" << endl;
 			return -1;
 		}
-		int nDmg = pAttack->CalcStructDmg(pArmor);
+		int nDmg = pAttack->CalcStructDmg( pWorld, pArmor, 0 );
 		//	Get
 		float fDmgModifier = 0;
 		switch ( nUserID )
@@ -1120,7 +1276,8 @@ EToHitType GetToHitType( const NWorld::CUnit *pAttacker )
 // CUnitServer*). bNight is wired false (CWorld::IsNight absent in this tree -- documented elision).
 int GetToHit( const NWorld::CUnit *pAttacker, NAI::EPose curPose, int nDistance, const CVec3 &ptAttacker,
 	const NAI::SPosition &posTarget, NAI::EHitLocation hl, int nExtraAP, const NWorld::CUnit *pTarget,
-	const vector<int> &accessibleHLs, int nHitCover, bool bFirstRound, const CVec3 &ptIllumination, bool bBackstab )
+	const vector<int> &accessibleHLs, int nHitCover, bool bFirstRound, const CVec3 &ptIllumination, bool bBackstab,
+	int nBullet )   // retail @0x2b4ae0 param: the burst bullet index (Jan03 read the mission's cursor)
 {
 	CDynamicCast<NWorld::CUnitServer> pUS( const_cast<NWorld::CUnit*>( pAttacker ) );
 	// retail RPGUnitGetToHit @0x2b4ae0 head gate: a script-forced to-hit (UnitSetToHit, -1 = off)
@@ -1146,7 +1303,7 @@ int GetToHit( const NWorld::CUnit *pAttacker, NAI::EPose curPose, int nDistance,
 			pToHitCalcer = new CUnitToHitCalcer(
 				pUS, curPose, nDistance, ptAttacker,
 				posTarget, nExtraAP, pMission->GetSnipeAP( pTargetRPG ), (float)nHitCover,
-				bFirstRound, bNight, ptIllumination, hl, pUSTarget, pMission->GetNBullets(), bBackstab );
+				bFirstRound, bNight, ptIllumination, hl, pUSTarget, nBullet, bBackstab );
 			break;
 		case TH_RLAUNCHER:
 			pToHitCalcer = new CRLauncherToHitCalcer(
@@ -1166,7 +1323,7 @@ int GetToHit( const NWorld::CUnit *pAttacker, NAI::EPose curPose, int nDistance,
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 int GetTileToHit( const NWorld::CUnit *pAttacker, NAI::EPose curPose, int nDistance, const CVec3 &ptAttacker,
 	CVec3 ptTilePos, NAI::ETileHitLocation eHitLocation, int nExtraAP, int nHitCover, bool bFirstRound,
-	const CVec3 &ptIllumination )
+	const CVec3 &ptIllumination, int nBullet )   // retail @0x2b4df0 param (see GetToHit)
 {
 	CDynamicCast<NWorld::CUnitServer> pUS( const_cast<NWorld::CUnit*>( pAttacker ) );
 	// retail RPGUnitGetTileToHit @0x2b4df0: same script-forced to-hit head gate as the unit-target
@@ -1198,7 +1355,7 @@ int GetTileToHit( const NWorld::CUnit *pAttacker, NAI::EPose curPose, int nDista
 		case TH_SHOOT:
 			pToHitCalcer = new CTileToHitCalcer(
 				pUS, curPose, nDistance, ptAttacker, nExtraAP, (float)nHitCover, bFirstRound,
-				bNight, ptIllumination, ptTilePos, pMission->GetNBullets() );
+				bNight, ptIllumination, ptTilePos, nBullet );
 			break;
 		case TH_RLAUNCHER:
 			pToHitCalcer = new CRLauncherToHitCalcer(
@@ -1309,7 +1466,12 @@ static float GetAccessibleHLsPenalty( const vector<int> &hls )
 	return 0.01f * (100 - nInvisible);
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-int CUnitMission::GetMeleeToHit( const CVec3 &ptAttacker, const NAI::SPosition &posTarget, 
+// retail NRPG::RPGUnitGetMeleeToHit @0x2b3990 (disasm-verified) -- the release melee to-hit:
+// base 70 + 0.5*(skill diff), the TARGET's held-weapon fMeleePenalty softens his defence skill,
+// backstab is a flat x1.5 on the FINAL value (not the old F_BACKSTAB_MELEE_COEFF on the skill),
+// the called-shot weighting is gated on the difficulty's bHeadshotShouldKill, and the result is
+// clamped to [2, 100].
+int CUnitMission::GetMeleeToHit( const CVec3 &ptAttacker, const NAI::SPosition &posTarget,
 	IUnitMissionInfo *pTarget, NAI::EHitLocation hl, const vector<int> &accessibleHLs, bool bBackStab ) const
 {
 	CMeleeWeaponItem *pW = pRPGUnit->GetMeleeWeaponItem();
@@ -1318,24 +1480,39 @@ int CUnitMission::GetMeleeToHit( const CVec3 &ptAttacker, const NAI::SPosition &
 	NDb::CRPGMeleeWeapon *pDBW = pW->GetDBMeleeWeapon();
 	if ( !pDBW )
 		return 0;
-	int nSkill = GetSkillValue( NDb::ST_MELEE );
-	if ( bBackStab )
-		nSkill *= F_BACKSTAB_MELEE_COEFF;
-	//
-	const int   nTargetSkill = pTarget->GetSkillValue( NDb::ST_MELEE );
+	const int nSkill = GetSkillValue( NDb::ST_MELEE );
+	int nTargetSkill = pTarget->GetSkillValue( NDb::ST_MELEE );
+	// retail @0x6b39f8..0x6b3a63: the target's held item hampers his melee defence -- his weapon
+	// type's fMeleePenalty scales the skill down (a melee weapon in hand wins over a gun).
+	if ( CUnit *pTargetUnit = pTarget->GetRPGUnit() )
+	{
+		NDb::CRPGWeaponType *pTargetType = 0;
+		if ( CWeaponItem *pTW = pTargetUnit->GetWeaponItem() )
+			pTargetType = pTW->GetDBWeapon()->pWeaponType;
+		if ( CMeleeWeaponItem *pTMW = pTargetUnit->GetMeleeWeaponItem() )
+			pTargetType = pTMW->GetDBMeleeWeapon()->pWeaponType;
+		if ( pTargetType )
+			nTargetSkill = (int)( ( 1.f - pTargetType->fMeleePenalty ) * nTargetSkill );
+	}
 	const float nWBonus = pDBW->nToHitBonus;
 	const float fMovePenalty = nMoveInLastTurn * pDBW->pWeaponType->fMovePenalty;
 	const float fVPPenalty = GetVPPenalty( pRPGUnit->Skills(NDb::ST_VP), pRPGUnit->nHealedVP, pRPGUnit->Skills(NDb::ST_VP).GetMaxValue() );
 	const float fAccessibleHLsPenalty = GetAccessibleHLsPenalty( accessibleHLs );
 	//
-	float fToHit = 50.0f + 0.4f * (nSkill - nTargetSkill) + nWBonus + fMovePenalty;
-	fToHit *= fAccessibleHLsPenalty;
-	fToHit *= fVPPenalty;
+	float fToHit = ( 0.5f * ( nSkill - nTargetSkill ) + fMovePenalty + nWBonus + 70.f )
+		* fAccessibleHLsPenalty * fVPPenalty;
+	if ( bBackStab )
+		fToHit *= 1.5f;
+	// retail @0x6b3ae9: the called-shot weighting, live only when the difficulty says headshots kill
+	if ( IsValid( pGlobalGame ) && IsValid( pGlobalGame->pDifficulty ) && pGlobalGame->pDifficulty->bHeadshotShouldKill )
+		fToHit = GetHeadshotMultiplier( hl ) * fToHit;
+	fToHit = Max( 2.0f, Min( fToHit, 100.0f ) );
 	if ( bLogActive )
 	{
 		csRPG << "<font size=16pt>";
 		csRPG << CC_GREEN << " \tToHit: ";
 		csRPG << CC_ORANGE << " \tSkill=" << CC_GREY << nSkill;
+		csRPG << CC_ORANGE << " \tbBackStab=" << CC_GREY << bBackStab;
 		csRPG << CC_ORANGE << " \tTarget skill=" << CC_GREY << nTargetSkill;
 		csRPG << CC_ORANGE << " \tMove bonus=" << CC_GREY << (int)fMovePenalty;
 		csRPG << CC_ORANGE << " \tWeapon bonus=" << CC_GREY << (int)nWBonus;
@@ -1421,7 +1598,7 @@ void CUnitMission::Kill()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CUnitMission::RemoveCritical( NDb::ECritical eCritical )
 {
-	for ( vector<CPtr<CCritical> >::iterator i = criticals.begin(); i != criticals.end(); )
+	for ( vector<CObj<CCritical> >::iterator i = criticals.begin(); i != criticals.end(); )
 	{
 		if ( (*i)->GetCritical().eCritical == eCritical )
 		{
@@ -1436,7 +1613,7 @@ bool CUnitMission::RemoveCritical( NDb::ECritical eCritical )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CUnitMission::ApplyCritical( CCritical *p )
 {
-	for ( vector<CPtr<CCritical> >::iterator i = criticals.begin(); i != criticals.end(); ++i )
+	for ( vector<CObj<CCritical> >::iterator i = criticals.begin(); i != criticals.end(); ++i )
 	{
 		if ( !(*i)->CanBeMerged() )
 			continue;
@@ -1489,7 +1666,7 @@ void CUnitMission::SuspendCriticals( int nTurns )
 		return;
 	SCriticalsHolder &h = *suspendedCriticals.insert( suspendedCriticals.end(), SCriticalsHolder());
 	h.nTimeLeft = nTurns;
-	for ( vector<CPtr<CCritical> >::iterator i = criticals.begin(); i != criticals.end();  )
+	for ( vector<CObj<CCritical> >::iterator i = criticals.begin(); i != criticals.end();  )
 	{
 		CCritical *p = *i;
 		if ( p->CanBeSuspended() )
@@ -1503,9 +1680,9 @@ void CUnitMission::SuspendCriticals( int nTurns )
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-static void SegmentCriticals( vector<CPtr<CCritical> > *pRes )
+static void SegmentCriticals( vector<CObj<CCritical> > *pRes )
 {
-	for ( vector<CPtr<CCritical> >::iterator i = pRes->begin(); i != pRes->end();  )
+	for ( vector<CObj<CCritical> >::iterator i = pRes->begin(); i != pRes->end();  )
 	{
 		if ( !(*i)->NextTurn() )
 			i = pRes->erase( i );
@@ -1514,6 +1691,9 @@ static void SegmentCriticals( vector<CPtr<CCritical> > *pRes )
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail CUnitMission::SegmentCriticals @0x2c46a0: tick active criticals, tick/expire the
+// suspended-criticals holders, then the retail addition -- tick/expire the POSTPONED skill
+// modifiers, rebuilding a live CSkillModifier from each expired holder into temporaryModifiers.
 void CUnitMission::ProcessCriticalsOnNewTurnFor()
 {
 	SegmentCriticals( &criticals );
@@ -1527,8 +1707,19 @@ void CUnitMission::ProcessCriticalsOnNewTurnFor()
 		else
 		{
 			for ( int k = 0; k < i->criticals.size(); ++k )
-				ApplyCritical( i->criticals[k] );		
+				ApplyCritical( i->criticals[k] );
 			i = suspendedCriticals.erase( i );
+		}
+	}
+	for ( list<SModifierHolder>::iterator m = postponedModifiers.begin(); m != postponedModifiers.end(); )
+	{
+		if ( --m->nTimeLeft > 0 )
+			++m;
+		else
+		{
+			if ( IsValid( m->pTarget ) )
+				temporaryModifiers.push_back( new CSkillModifier( m->pTarget, m->info ) );
+			m = postponedModifiers.erase( m );   // releases m->pTarget
 		}
 	}
 }
@@ -1666,7 +1857,7 @@ void CUnitMission::HealVP( const SFirstAid &fa )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CUnitMission::HealCriticals( int nDC )
 {
-	for ( vector<CPtr<CCritical> >::iterator i = criticals.begin(); i != criticals.end(); )
+	for ( vector<CObj<CCritical> >::iterator i = criticals.begin(); i != criticals.end(); )
 	{
 		const SCritical &c = (*i)->GetCritical();
 		if ( c.nDC <= nDC && c.eCritical <	NDb::C_PANZERKLEIN_AXIS )
@@ -1825,7 +2016,7 @@ NDb::CComplexHead* CUnitMission::GetRPGPersHead() const
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CUnitMission::HasCritical( NDb::ECritical eCritical, CCritical** ppCritical ) const
 {
-	for ( vector<CPtr<CCritical> >::const_iterator i = criticals.begin(); i != criticals.end(); ++i )
+	for ( vector<CObj<CCritical> >::const_iterator i = criticals.begin(); i != criticals.end(); ++i )
 		if ( (*i)->GetCriticalType() == eCritical )
 		{
 			if ( ppCritical != 0 )
@@ -1855,28 +2046,55 @@ void CUnitMission::DisableCritical( NDb::ECritical eC, ECriticalState eState  )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CUnitMission::GetCriticalsList( list<CPtr<ICriticalInfo> > *pListCriticals ) const
 {
-	for ( vector<CPtr<CCritical> >::const_iterator i = criticals.begin(); i != criticals.end(); ++i )
+	for ( vector<CObj<CCritical> >::const_iterator i = criticals.begin(); i != criticals.end(); ++i )
 		pListCriticals->push_back( i->GetPtr() );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CUnitMission::SetPanzerklein( NDb::CPanzerklein *pPK, CDynamicSkill *_pPanzerkleinVP, IInventory *_pPKInventory ) 
-{ 
+// retail @0x2c3b00: the Jan03 Skills().Modify(delta) flow became explicit CSkillModifier objects
+// in the pkModifiers vector (clearing it drops the OLD suit's modifiers -- retail does NOT
+// subtract the old PK's changes). A PK with no VP left wears broken (retail tests < 1, not < 0);
+// perk 0x1d lets the wearer IGNORE negative skill penalties from the suit.
+void CUnitMission::SetPanzerklein( NDb::CPanzerklein *pPK, CDynamicSkill *_pPanzerkleinVP, IInventory *_pPKInventory )
+{
 	pPanzerkleinVP = _pPanzerkleinVP;
-	if ( pPanzerkleinVP && ( *pPanzerkleinVP < 0 ) )
+	if ( pPanzerkleinVP && ( *pPanzerkleinVP < 1 ) )
 		WearBrokenPK();
+	pkModifiers.clear();   // each CObj releases -> the skill Update() sweeps the dead weak refs
+	bool bAdaptPerk = HasPerk( 0x1d );
 	for ( int skill = NDb::ST_MELEE; skill < NDb::SKILL_TYPE_NUMBERS; ++skill )
 	{
 		if ( skill == NDb::ST_VP )
 			continue;
 		int nChange = 0;
 		if ( pPK && pPK->pChangeValues )
-			nChange += pPK->pChangeValues->skills[ skill ];
-		if ( pPanzerklein && pPanzerklein->pChangeValues )
-			nChange -= pPanzerklein->pChangeValues->skills[ skill ];
-		pRPGUnit->Skills( skill ).Modify( nChange );
+			nChange = pPK->pChangeValues->skills[ skill ];
+		if ( ( !bAdaptPerk || nChange >= 0 ) && nChange != 0 )
+			pkModifiers.push_back( new CSkillModifier( &pRPGUnit->Skills( skill ), SSkillModifyInfo( 1.0f, float( nChange ) ) ) );
 	}
-	pPanzerklein = pPK; 
-	GetInventory()->SetPanzerklein( pPK, _pPKInventory ); 
+	pPanzerklein = pPK;
+	GetInventory()->SetPanzerklein( pPK, _pPKInventory );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail @0x2c4f50 tail: a unit whose pers IS a Panzerklein wears itself -- SetPanzerklein over its
+// own VP skill, then a modifier lifts VP to the PK record's nMaxVP (AddModifier bumps the live value).
+void CUnitMission::InitAsPanzerklein( NDb::CPanzerklein *pPK )
+{
+	CDynamicSkill &vp = pRPGUnit->Skills( NDb::ST_VP );
+	SetPanzerklein( pPK, &vp, GetInventory() );
+	int nModif = pPK->nMaxVP - (int)vp;
+	if ( nModif != 0 )
+		pkModifiers.push_back( new CSkillModifier( &vp, SSkillModifyInfo( 1.0f, float( nModif ) ) ) );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail @0x2c3400: a VP drug boost -- fAdd = (VP base) * strength * 1%, installed as a temporary
+// modifier with a recorded lifetime. (Retail tails into CheckOverdose @0x2c0a50; its overdose
+// metric is unresolved in the oracle and deferred with the drug-use wiring.)
+void CUnitMission::AddVPBoost( float fStrength, int nDuration )
+{
+	CDynamicSkill &vp = pRPGUnit->Skills( NDb::ST_VP );
+	SSkillModifyInfo info( 1.0f, float( vp.GetTheoreticalMax() ) * fStrength * 0.01f );
+	temporaryModifiers.push_back( new CSkillModifier( &vp, info ) );
+	vpBoostDurations.push_back( nDuration );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CUnitMission::DoRegenerations()
@@ -1980,8 +2198,10 @@ IUnitMission* CreateUnit( NDb::CRPGPers *pSrc, NDb::CRPGItem *pInHandItem, NDb::
 		pRes->GetRPGUnit()->pPanzerklein = pSrc->pDefaultWearsPanzerklein;
 	NStr::ToDotString( &pRes->sID, ++nUnitN );
 	pRes->sID = L"Enemy#" + pRes->sID;
-	if ( IsValid( pRes->GetPanzerklein() ) )
-		pRes->GetRPGUnit()->Skills(NDb::ST_VP).SetConst( pRes->GetPanzerklein()->nMaxVP );
+	// retail @0x2c4f50: gate on the pers's OWN Panzerklein backlink (this pers IS a PK), not the
+	// mission pPanzerklein (unset here); lift VP to nMaxVP via a modifier
+	if ( IsValid( pSrc->pPanzerklein ) )
+		pRes->InitAsPanzerklein( pSrc->pPanzerklein );
 	return pRes;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////

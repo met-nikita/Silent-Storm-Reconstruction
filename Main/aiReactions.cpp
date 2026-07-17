@@ -366,6 +366,6 @@ CAIReaction* CreateAINormalReaction( IAIUnit *pUnit )
 //
 using namespace NAI;
 //
-BASIC_REGISTER_CLASS( CAIEmptyReaction )
-BASIC_REGISTER_CLASS( CAINormalReaction )
-BASIC_REGISTER_CLASS( CAIRetreatReaction )
+REGISTER_SAVELOAD_CLASS( 0x51253120, CAIEmptyReaction )
+REGISTER_SAVELOAD_CLASS( 0x51943160, CAINormalReaction )
+REGISTER_SAVELOAD_CLASS( 0x52443150, CAIRetreatReaction )

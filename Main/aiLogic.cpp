@@ -168,13 +168,21 @@ bool CAILogic::IsEndOfTurn()
 	return IsValid( pUnit ) && pUnit->GetAP() <= 0;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// @0x418350 -- retail wire (byte-walk-confirmed on slot-1 CAIRouteLogic instances): {2 nPause int4,
+// 3 pUnit CPtr, 4 commands, 5 bFinished 1B, 6 cyclingTracker NESTED CHUNK, 7 bHasPointOfInterest 1B,
+// 8 vPointOfInterest CVec3 raw12}. Tag 6 is ONE SCyclingTracker chunk (operator& @0x18410:
+// {2 SPlaceWithAP{2 SUnitPosition{2 SPosition{1 place4,2 pNet4}, 4 bRun1}, 3 nUnitAP4}, 3 nSame4} --
+// 33 bytes). The old dev double-write `Add(6,&place); Add(6,&nSame)` flattened one nesting level, so
+// loading a retail save misread the whole subtree (wire-audit family: route logic 2.6 / combat
+// logics 2.2.6 -- SIZE 33v4, RAWSZ 12v4, UNREAD bRun/nUnitAP, MISS place/pNet) and dev saves carried
+// two tag-6 chunks retail never wrote.
 int CAILogic::operator&( CStructureSaver &f )         // @0x00418350 / 0x00433820
 {
 	f.Add( 2, &nPause );
 	f.Add( 3, &pUnit );
 	f.Add( 4, &commands );
 	f.Add( 5, &bFinished );
-	f.Add( 6, &cyclingTracker.place );  f.Add( 6, &cyclingTracker.nSame );
+	f.Add( 6, &cyclingTracker );
 	f.Add( 7, &bHasPointOfInterest );
 	f.Add( 8, &vPointOfInterest );
 	return 0;

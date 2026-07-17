@@ -34,8 +34,12 @@ private:
 	CObj<CInfoPanelSingleUnit> pInfoPanelSingleUnit;
 	CObj<CInfoPanelMultipleUnits> pInfoPanelMultipleUnits;
 public:
-	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CWindow*)this); f.Add(2,&pMission); f.Add(3,&pEndOfTurn); f.Add(4,&pStartOfTurn); f.Add(5,&pUnitIconsBar); f.Add(6,&pLevelSwitchBar); f.Add(7,&pBackgroundSingleUnit); f.Add(8,&pBackgroundMultipleUnits); f.Add(9,&pUnitsTabBar); f.Add(10,&pInfoPanelSingleUnit); f.Add(11,&pInfoPanelMultipleUnits); f.Add(12,&pBackgroundEmpty); return 0; }
+	// retail @0x25c380: operator& tail-calls OnSerialize (the pBackgroundEmpty post-load re-resolve)
+	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CWindow*)this); f.Add(2,&pMission); f.Add(3,&pEndOfTurn); f.Add(4,&pStartOfTurn); f.Add(5,&pUnitIconsBar); f.Add(6,&pLevelSwitchBar); f.Add(7,&pBackgroundSingleUnit); f.Add(8,&pBackgroundMultipleUnits); f.Add(9,&pUnitsTabBar); f.Add(10,&pInfoPanelSingleUnit); f.Add(11,&pInfoPanelMultipleUnits); f.Add(12,&pBackgroundEmpty); OnSerialize( f ); return 0; }
 	CPtr<CImage> pBackgroundEmpty;
+
+protected:
+	void OnSerialize( CStructureSaver &f );		// retail @0x259220
 
 public:
 	CUnitPanel() {}

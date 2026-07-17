@@ -14,14 +14,15 @@
 //
 // iBase.obj's principal content is the release mission base class NGame::CMissionBase (the per-frame
 // mission pump: ProcessEvent/Step/InternalStep/ExecWorldCommand/RenderFrame/SetLightMode/CreateCamera/
-// GetCamera, the in-game save/load/menu dispatch, plus ~30 trivial virtual accessors). That class does
-// NOT exist in the dev tree: the dev keeps the PREDECESSOR MONOLITH `class CMission: public IMission`
-// (iMissionInternal.h:68) which reproduces all of CMissionBase-derived behaviour inline. Splitting
-// CMissionBase back out would re-parent CMission and migrate its FLAT operator& save format (tags 2..68,
-// iMissionInternal.h:208) to a base/derived split -- i.e. it would change the member layout + operator&
-// tag set of a LIVE save/load class read from the running game.db. That is a forbidden hard-constraint
-// crossing, so the CMissionBase mission-pump core is DEFERRED (already covered, behaviourally, by the dev
-// CMission monolith). This file lands only iBase's standalone, behaviour-neutral free-function helpers.
+// GetCamera, the in-game save/load/menu dispatch, plus ~30 trivial virtual accessors).
+// UPDATE (serialization-convergence W4.2): the STRUCTURAL split has now been done -- NGame::CMissionBase
+// exists (iMission.h / iMissionBase.cpp) with the retail member set, the retail 34-tag operator&
+// (@0x19f3f0) and the trivial-accessor/player/desktop/light/camera-focus/RenderFrame bodies; CMission /
+// CRenderBaseInterface / CMultiPlayerInterface serialize it as their tag-1 base chunk per retail. The
+// old dev flat CMission format (tags 2..71) is gone; old dev saves break (accepted). STILL DEFERRED to
+// a behaviour leg: moving the mission PUMP (Step/InternalStep/ProcessEvent/ExecWorldCommand @0x1a3ad0/
+// @0x1a29f0/@0x1a2010/@0x1a30c0) and the exit/save/load bind dispatch from the dev CMission down to the
+// base. This file lands only iBase's standalone, behaviour-neutral free-function helpers.
 //
 // LANDED here (faithful ports against verified dev seams; VA = RVA + 0x400000):
 //   NGame::WriteHQShot( CArray2D<NGfx::SPixel8888>* )        @0x1a17a0

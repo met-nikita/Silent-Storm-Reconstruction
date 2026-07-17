@@ -11,6 +11,8 @@
 #include "GMaterial.h"
 #include "GScene.h"
 #include "Gfx.h"
+#include "..\MiscDll\Commands.h"      // REGISTER_VAR (gfx_cl_use_bump*)
+#include "..\FileIO\BasicChunk1.h"    // START_REGISTER / FINISH_REGISTER
 
 // number of sky directions used for dynamic lightmaps
 const int N_SKY_DIRECTIONS = 12;
@@ -21,8 +23,8 @@ const float F_MAX_SCENE_HEIGHT = 20; // CRAP need to store max height in single 
 const int N_POINT_LIGHT_RECALC_STEPS = 4;
 //! brightness in the darkest area, max is 255
 const int N_DARKEST_AREA = 16;
-//!!! максимальная протяженность треугольника, нужна чтобы избегать проблем 
-//!!! с насыщением D3DColor на 0 или 1 при использовании последнего как глубины
+//!!! maximal triangle extent, needed to avoid problems
+//!!! with D3DColor saturating to 0 or 1 when it is used as depth
 const float F_MAXIMAL_ELEMENT_SIZE = 4;
 
 static NGfx::EColorWriteMask depthChannels[3] = 
@@ -887,7 +889,7 @@ void CLightmapTracker::CatchUp( NGfx::CRenderContext *_pRC, IRender *_pRender, C
 	bool bRecalcAllDepth = false;
 	if ( _gs != groupSelect )
 	{
-		// этаж сменили - надо все пересчитать
+		// floor changed - everything must be recalculated
 		bRecalcAllDepth = true;
 		groupSelect = _gs;
 		bHasNewLightmaps = true;
@@ -978,6 +980,12 @@ void CLightmapTracker::SetNewIllumination( const SGlobalIlluminationInfo &gl )
 	SLightStateCalcSeed seed( ambientLightSeed );
 	lightState.CreateSimple( &seed, globalIllumination );
 }
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail GLightmapCalcInit: two plain value vars (no handler), both default 1.0, saved
+START_REGISTER(GLightmapCalc)
+	REGISTER_VAR( "gfx_cl_use_bump_always", 0, 1, true )
+	REGISTER_VAR( "gfx_cl_use_bump", 0, 1, true )
+FINISH_REGISTER
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 }
 using namespace NGScene;

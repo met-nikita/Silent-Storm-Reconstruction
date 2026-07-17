@@ -22,7 +22,7 @@ void CTVoxelRenderer<TFinal,TRes>::Init( const CVec3 &_vCenter, float _fCubeSize
 template <class TFinal, class TRes>
 void CTVoxelRenderer<TFinal,TRes>::RealTraceEntity( const SConvexHull &e )
 {
-	// находим проекцию в CameraSpace
+	// пїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅ CameraSpace
 	static vector<CVec3> flatProjected;
 	if ( e.points.size() > flatProjected.size() )
 		flatProjected.resize( e.points.size() );
@@ -35,7 +35,7 @@ void CTVoxelRenderer<TFinal,TRes>::RealTraceEntity( const SConvexHull &e )
 		CVec3 &dst = flatProjected[i];
 		xform.RotateHVector( &dst, src );
 	}
-	// rasterize каждый треугольник ConvexHull-а
+	// rasterize пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ ConvexHull-пїЅ
 	const vector<SEdge> &edges = e.tris.edges;
 	const vector<STriangle> &mesh = e.tris.mesh;
 	for ( int i = 0; i < mesh.size(); ++i )
@@ -77,7 +77,7 @@ void CExplVoxelRenderer::Init( const CVec3 &_vCenter,
 	pnObjectsEnd = _nObjectsEnd;
 	nCurrentObjectID = 0;
 	pObjects = _pObjects;
-	voxels.FillEvery( SExplVoxel( 0, 0 ) );
+	voxels.FillEvery( SExplVoxel( 0 ) );   // retail SExplVoxel = {ushort nObject} (2 bytes)
 	if ( pObjects->empty() )
 	{
 		ASSERT( *pnObjectsEnd == 0 );

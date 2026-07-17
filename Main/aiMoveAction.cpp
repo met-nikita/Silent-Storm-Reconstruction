@@ -220,4 +220,4 @@ void CAIChoosePlaceForActionsJob::GetPlace( CAIAction *pAction, SPlaceWithAP *pP
 using namespace NAI;
 //
 REGISTER_SAVELOAD_CLASS( 0x51313140, CAIFindGoodPlacesJob );
-REGISTER_SAVELOAD_CLASS( 0x51313170, CAIChoosePlaceForActionsJob );
+REGISTER_SAVELOAD_CLASS( 0x51313171, CAIChoosePlaceForActionsJob );

@@ -47,43 +47,39 @@ const int
 const int
 	N_HITPTRACKER_TTL		= 2000;
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// CAckIcon
+// CAckIcon -- retail NUI::CAckView (saveload id 0xB0241940; ctor @0x210050): the ack subtitle view,
+// a CFrame in retail (the band is the frame's own nine-slice skin). operator& matches retail
+// @0x219ef0: {1 CFrame base, 2 pMission, 3 bPlayAck (1-byte chunk), 4 pText, 5 pEvent, 6 pSound}.
+// Retail overrides ONLY Update (vftable @0x8be960 slot 11 = @0x2110e0; slot 10 ProcessMessage =
+// CWindow's, slot 12 Draw = CFrame::Draw) -- the frame ages the ack in Update and CFrame::Draw
+// paints the band. pText is created IN CODE by the SWindowInfo ctor ("acktext", style 0xe); the
+// default (load-path) ctor @0x217500 leaves it null -- tag 4 restores it from the save, so the
+// subtitle survives save-load with NO post-load rebuild step.
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-class CAckIcon: public CWindow
+class CAckIcon: public CFrame
 {
 	OBJECT_NOCOPY_METHODS(CAckIcon);
 private:
-	ZDATA_(CWindow)
+	ZDATA_(CFrame)
 	CPtr<NGame::IMission> pMission;
-	////
+	bool bPlayAck = false;	// retail CAckView +bPlayAck: latched in Set, consumed by Update once bReady flips
+	CObj<CText> pText;
 	CPtr<CAckEvent> pEvent;
-	////
-	CPtr<CMLText> pText;
-	CPtr<CUnitHead> pHead;
-	CPtr<CImage> pStrip;	// the dark subtitle band the text sits on (retail: CAckView's own frame skin)
-	bool bPlayAck = false;	// retail CAckView +bPlayAck: latched in Set, consumed by Draw once bReady flips
-	CObj<NSound::ISound2D> pSound;	// the deferred 2D voice handle (retail CAckView::pSound, transient)
-	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CWindow*)this); f.Add(2,&pMission); f.Add(3,&pEvent); f.Add(4,&pText); f.Add(5,&pHead); f.Add(6,&pStrip); f.Add(7,&bPlayAck); return 0; }
-	// retail CMissionUI::Update @0x211d60 (disasm @0x612176..0x6121f7) repositions the ack view EVERY
-	// frame: x = clientRect.x1 + 100, width = (clientRect.x2 - 100) - (clientRect.x1 + 100), and the
-	// BOTTOM anchor = the inventory button's bottom edge (pInventory pos.y + size.y, desktop coords).
-	// CMissionUI::Update pushes those three numbers here each frame (runtime-only -- recomputed per
-	// frame, so kept OUT of operator& to preserve the save format); Draw's reflow consumes them.
-	int nStripX = 0;
-	int nStripWidth = 0;
-	int nStripBottom = 0;
+	CObj<NSound::ISound2D> pSound;	// the deferred 2D voice handle (retail CAckView::pSound)
+	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CFrame*)this); f.Add(2,&pMission); f.Add(3,&bPlayAck); f.Add(4,&pText); f.Add(5,&pEvent); f.Add(6,&pSound); return 0; }
 
 public:
 	CAckIcon() {}
-	CAckIcon( const SWindowInfo &sInfo, NGame::IMission *_pMission ): CWindow( sInfo ), pMission( _pMission ) {}
+	// retail @0x210050: chain CFrame(sInfo) (fills the nine skin slices), then create the subtitle
+	// text in code -- "acktext", style 0xe = VISIBLE|ENABLED|TOPMOST, pos/size {0,0}, child of this.
+	CAckIcon( const SWindowInfo &sInfo, NGame::IMission *_pMission ): CFrame( sInfo ), pMission( _pMission )
+	{
+		pText = new CText( SWindowInfo( this, SPoint( 0, 0 ), SPoint( 0, 0 ), "acktext", STYLE_VISIBLE | STYLE_ENABLED | STYLE_TOPMOST ) );
+	}
 
 	void Set( CAckEvent *pEvent );
 	void PlayAck();	// retail CAckView::PlayAck @0x210ff0 -- deferred voice + heads-controller lipsync
-	// retail ack reposition (CMissionUI::Update @0x211d60 tail): the subtitle band sits between the
-	// clue-icon column and the inventory button, bottom-anchored to the inventory button's bottom.
-	void SetStripPlacement( int nX, int nWidth, int nBottom ) { nStripX = nX; nStripWidth = nWidth; nStripBottom = nBottom; }
-	bool ProcessMessage( const SEvent &sEvent );
-	void Draw( const STime &sTime, NGScene::I2DGameView *pView );
+	void Update( const STime &sTime, NGScene::I2DGameView *pView );	// retail @0x2110e0
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 inline wstring ConvertLineBreaks( const wstring &szStr )
@@ -116,48 +112,36 @@ inline wstring ConvertLineBreaks( const wstring &szStr )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CAckIcon::Set( CAckEvent *_pEvent )
 {
-	pEvent = _pEvent;
-
-	NWorld::CAckEvent *pAckEvent = pEvent->GetAckEvent();
-	if ( !IsValid( pAckEvent->pAckInfo ) )
+	// retail CAckView::Set @0x210e10: accept the ack ONLY when both the ack row and the speaker are
+	// live (an invalid ack must NOT displace the current pEvent); latch bPlayAck (voice + lipsync
+	// DEFER to PlayAck, fired from Update once the bReady handshake flips, so the mouth moves in
+	// lock-step with the portrait turning to camera). Subtitle text + show are gated on the
+	// "ui_charresponsessubtitles" option (retail bShowAcksSubtitles, registered @0x215b90, default on).
+	NWorld::CAckEvent *pAckEvent = _pEvent->GetAckEvent();
+	if ( !IsValid( pAckEvent->pAckInfo ) || !IsValid( pAckEvent->pUnit ) )
 		return;
 
-	if ( pAckEvent->pUnit )
-	{
-		// retail CAckView::Set @0x210e10: bind the head + latch bPlayAck here, but DEFER the voice +
-		// lipsync to PlayAck (fired from Draw once the ack's bReady handshake flips) so the mouth
-		// moves in lock-step with the portrait turning to camera. The immediate PlaySound + SetSequence
-		// were removed -- they fired before the speaker's face was on screen.
-		pHead->SetUnit( pAckEvent->pUnit );
-		bPlayAck = true;
-	}
+	pEvent = _pEvent;
+	bPlayAck = true;
 
-	// retail CAckView::Set @0x210e10 (disasm @0x610ea3..0x610f4f): the subtitle is FIVE pieces --
-	//   L"<minfontsize size=16>"                                (static literal @VA 0x8be9d8)
-	//   + GetDBString( 19329 )   "EnemyTooltip Name Format"  =  "<font face=Courier size=16pt><color=yellow>"
-	//   + <speaker name>
-	//   + GetDBString( 20257 )   "Ack Format"                =  "<color=beige>: "
-	//   + ConvertLineBreaks( <ack body text> )
-	// -> Courier 16pt, LEFT-aligned, YELLOW name, beige ": " + body. (The old 11209 dialog prefix
-	// carried "<font face=Impact size=24pt>...<center>" -- that's what made the dev line huge and
-	// centered with no yellow name.)
-	wstring wsSubtitle = wstring( L"<minfontsize size=16>" ) + GetDBString( 19329 );
-	if ( pAckEvent->pUnit && IsValid( pAckEvent->pUnit->GetRPG() ) )
+	if ( NGlobal::GetVar( "ui_charresponsessubtitles" ).GetFloat() != 0 )
+	{
+		// disasm @0x610ea3..0x610f4f: the subtitle is FIVE pieces --
+		//   L"<minfontsize size=16>"                                (static literal @VA 0x8be9d8)
+		//   + GetDBString( 19329 )   "EnemyTooltip Name Format"  =  "<font face=Courier size=16pt><color=yellow>"
+		//   + <speaker name>
+		//   + GetDBString( 20257 )   "Ack Format"                =  "<color=beige>: "
+		//   + ConvertLineBreaks( <ack body text> )
+		wstring wsSubtitle = wstring( L"<minfontsize size=16>" ) + GetDBString( 19329 );
 		wsSubtitle += pAckEvent->pUnit->GetRPG()->GetRPGUnit()->GetName();
-	wsSubtitle += GetDBString( 20257 );
-	wsSubtitle += ConvertLineBreaks( GetDBString( pAckEvent->pAckInfo->pText ) );
-	if ( IsValid( pText ) )
-	{
+		wsSubtitle += GetDBString( 20257 );
+		wsSubtitle += ConvertLineBreaks( GetDBString( pAckEvent->pAckInfo->pText ) );
 		pText->SetText( wsSubtitle );
-		pText->SetStyle( STYLE_VISIBLE, true );
+		SetStyle( STYLE_VISIBLE, true );
 	}
-	if ( IsValid( pStrip ) )
-		pStrip->SetStyle( STYLE_VISIBLE, true );
-
-	SetStyle( STYLE_VISIBLE, true );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// retail NUI::CAckView::PlayAck @0x210ff0: fired from Draw once the ack is bReady. Start the 2D voice
+// retail NUI::CAckView::PlayAck @0x210ff0: fired from Update once the ack is bReady. Start the 2D voice
 // and route the phrase's face SEQUENCE through the SHARED heads controller (retail
 // CRenderGame::PlaySequence @0x2cb150 -> NLSHead::CHeadsController::PlaySequence, LSController.cpp:67)
 // -- the SAME controller that blinks the portrait -- so the bottom-left 3D head MOVES ITS MOUTH in
@@ -171,52 +155,16 @@ void CAckIcon::PlayAck()
 
 	const NDb::SAckVoice &voice = pAckEvent->pAckInfo->GetVoice( pAckEvent->pUnit->GetRPG()->GetRPGUnit()->GetVoice() );
 	pSound = GetInterface()->GetSound()->Add2DSound( voice.pSound );
-	pHead->SetSequence( voice.pSequence );
 	if ( IsValid( pMission ) )
-		pMission->GetRenderGame()->GetHeadController()->PlaySequence( pAckEvent->pUnit, voice.pSequence, NDb::GetSequenceByExpression( voice.eExpression ), false );
+		// controller records are keyed by the unit's per-unit CHeadInfo (retail PlaySequence @0x25df90)
+		pMission->GetRenderGame()->GetHeadController()->PlaySequence( pAckEvent->pUnit->GetHeadInfo(), voice.pSequence, NDb::GetSequenceByExpression( voice.eExpression ), false );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-bool CAckIcon::ProcessMessage( const SEvent &sEvent )
+// retail NUI::CAckView::Update @0x2110e0 (the ONLY behaviour override CAckView has: vftable
+// @0x8be960 slot 11; slot 10 ProcessMessage = CWindow's, slot 12 Draw = CFrame::Draw): age the
+// ack, run the DEFERRED voice/lipsync, reflow the band; release + hide once the event completes.
+void CAckIcon::Update( const STime &sTime, NGScene::I2DGameView *pView )
 {
-	switch( sEvent.nEvent )
-	{
-		case EVENT_LBUTTONDOWN:
-			return true;
-		case EVENT_LBUTTONUP:
-			pEvent->Cancel();
-			return true;
-		case EVENT_MOUSEMOVE:
-			GetInterface()->SetCursorInfo( SCursorInfo() );
-			break;
-		case EVENT_TEMPLATELOAD:
-			pHead = new CUnitHead( sEvent.pLoader->GetControl( "face" ), pMission->GetRenderGame(), 1.8f );
-			break;
-		case EVENT_TEMPLATELOADCOMPLETE:
-			{
-				// retail CAckView ctor @0x210050 creates its subtitle text IN CODE ("acktext", the
-				// IML/markup CText, style 0xe, pos/size {0,0}) -- the game.db "ack" container has NO
-				// "text" child. Retail's view itself is a CFrame ("ackview", style 0x2e, pos/size
-				// {0,0}) parented DIRECTLY to CMissionUI (@0x214d40) and repositioned every frame by
-				// CMissionUI::Update; the dark band is that frame's skin. Here it is a translucent
-				// black CImage on the SAME parent (the mission desktop, so the retail desktop-space
-				// coords apply verbatim); geometry is all zero at creation -- the per-frame
-				// SetStripPlacement + the Draw reflow (retail LAB_006111a9) lay it out.
-				pStrip = new CImage( SWindowInfo( GetParent(), SPoint( 0, 0 ), SPoint( 0, 0 ), "ackstrip", STYLE_ENABLED | STYLE_TOPMOST ) );
-				pStrip->SetColor( NGfx::SPixel8888( 0, 0, 0, 0xA0 ) );
-				pStrip->SetStyle( STYLE_VISIBLE, false );
-				pText = new CMLText( SWindowInfo( pStrip, SPoint( 4, 4 ), SPoint( 0, 0 ), "acktext", STYLE_ENABLED | STYLE_TRANSPARENT | STYLE_TOPMOST ) );
-				pText->SetStyle( STYLE_VISIBLE, false );
-			}
-			break;
-	}
-
-	return CWindow::ProcessMessage( sEvent );
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-void CAckIcon::Draw( const STime &sTime, NGScene::I2DGameView *pView )
-{
-	// retail NUI::CAckView::Update @0x2110e0: run the DEFERRED voice/lipsync, then age the ack out.
-	bool bAlive = false;
 	if ( IsValid( pEvent ) && !pEvent->IsComplete( sTime ) )
 	{
 		NWorld::CAckEvent *pAckEvent = pEvent->GetAckEvent();
@@ -225,7 +173,7 @@ void CAckIcon::Draw( const STime &sTime, NGScene::I2DGameView *pView )
 
 		// bReady flips when the single-unit face turns to camera (CUnitFace ACK_WAIT) or when its
 		// fallback fires -- only THEN start the voice and route the mouth/gesture through the heads
-		// controller. (retail CAckView::Update: bPlayAck && pEvent->bReady -> PlayAck.)
+		// controller. (retail: bPlayAck && pEvent->bReady -> PlayAck.)
 		if ( bPlayAck && pEvent->IsReady() )
 		{
 			bPlayAck = false;
@@ -235,39 +183,27 @@ void CAckIcon::Draw( const STime &sTime, NGScene::I2DGameView *pView )
 		if ( !bPlayAck && pEvent->IsTTLComplete( sTime ) && ( !IsValid( pSound ) || !pSound->IsPlaying() ) )
 			pEvent->SetComplete( true );
 
-		bAlive = !pEvent->IsComplete( sTime );
+		// reflow (disasm @0x6111a9..0x611255): wrap width = own width - 8, measure, band height =
+		// text height + 8, grow UPWARD from the bottom anchor CMissionUI::Update just pushed into
+		// this window's position (@0x612176..0x6121f7); text sits at (4,4) inside the band.
+		pText->SetSize( SPoint( GetSize().x - 8, 0 ) );
+		SPoint sReal( 0, 0 );
+		pText->GetRealSize( &sReal );
+		int nBandH = sReal.y + 8;
+		SetSize( SPoint( GetSize().x, nBandH ) );
+		SetPosition( SPoint( GetPosition().x, GetPosition().y - nBandH ) );
+		pText->SetSize( SPoint( GetSize().x - 8, sReal.y ) );
+		pText->SetPosition( SPoint( 4, 4 ) );
 	}
-	if ( !bAlive )
+	else
 	{
-		// retail Update tail: release the completed event + its voice handle.
+		// retail tail: release the completed event + its voice handle, hide the band.
 		pEvent = 0;
 		pSound = 0;
+		SetStyle( STYLE_VISIBLE, false );
 	}
 
-	SetStyle( STYLE_VISIBLE, bAlive );
-	if ( IsValid( pText ) )
-		pText->SetStyle( STYLE_VISIBLE, bAlive );	// subtitle lives exactly as long as the ack
-	if ( IsValid( pStrip ) )
-	{
-		pStrip->SetStyle( STYLE_VISIBLE, bAlive );
-		if ( bAlive && IsValid( pText ) && nStripWidth > 0 )
-		{
-			// retail CAckView re-flow (CAckView::Update @0x2110e0, LAB_006111a9): wrap width = band
-			// width - 8, measure, band height = text height + 8, grow UPWARD from the bottom anchor.
-			// Band x/width and the bottom anchor (the inventory button's bottom edge) come from
-			// CMissionUI::Update via SetStripPlacement -- the retail per-frame reposition
-			// (@0x612176..0x6121f7: x = clientRect.x1+100, width = clientWidth-200, y = inv bottom).
-			pText->SetSize( SPoint( nStripWidth - 8, 0 ) );
-			SPoint sReal( 0, 0 );
-			pText->GetRealSize( &sReal );
-			int nBandH = sReal.y + 8;
-			pStrip->SetSize( SPoint( nStripWidth, nBandH ) );
-			pStrip->SetPosition( SPoint( nStripX, nStripBottom - nBandH ) );
-			pText->SetSize( SPoint( nStripWidth - 8, sReal.y ) );
-			pText->SetPosition( SPoint( 4, 4 ) );
-		}
-	}
-	CWindow::Draw( sTime, pView );
+	CWindow::Update( sTime, pView );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CItemText
@@ -385,22 +321,44 @@ void CItemText::Draw( const STime &sTime, NGScene::I2DGameView *pView )
 	pText->Draw( this, sTime, pView );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// CItemText
+// CProjectedIcon -- retail NUI::CProjectedIcon (ctor @0x2112d0, operator& @0x21a290: 1=CActionDecorator
+// <CImage> base, 2=pMission): the common serialized base of every projected in-world marker (the
+// unit/enemy, ear, clue, hint and trap icons all chain it as tag 1). Retail also hosts the shared
+// projection helpers here (ClampPosition @0x20f580, UpdatePosition @0x20f370, GetPositionInfo
+// @0x20f610); the dev icons keep their own per-class Draw clamps, so only the serialized shape lives
+// here. NOT save-registered (retail registers no factory for it -- base subobject only). Note the
+// pMission member sits ON TOP of the decorator's private pMission, exactly like retail's layout.
+class CProjectedIcon: public CActionDecorator<CImage>
+{
+protected:
+	ZDATA_(TBaseClass)
+	CPtr<NGame::IMission> pMission;		// retail +0x8c (tag 2)
+public:
+	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(TBaseClass*)this); f.Add(2,&pMission); return 0; }
+
+	CProjectedIcon() {}
+	CProjectedIcon( const SWindowInfo &sInfo, NGame::IMission *_pMission ):
+		TBaseClass( sInfo, _pMission ), pMission( _pMission ) {}
+};
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-class CEnemyIcon: public CActionDecorator<CImage>
+// CEnemyIcon -- retail renamed it CUnitIcon (same saveload id 0xB0241948; operator& @0x21a2d0:
+// 1=CProjectedIcon base, 2=pUnit -- dev pEnemy). Everything else (owner flag, angle, texture pick)
+// is rebuilt every CMissionUI update pass, so those members are transient like retail.
+////////////////////////////////////////////////////////////////////////////////////////////////////
+class CEnemyIcon: public CProjectedIcon
 {
 	OBJECT_BASIC_METHODS(CEnemyIcon)
 private:
-	ZDATA_(TBaseClass)
+	ZDATA_(CProjectedIcon)
+	CPtr<NWorld::CUnit> pEnemy;				// retail CUnitIcon::pUnit (tag 2)
+	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CProjectedIcon*)this); f.Add(2,&pEnemy); return 0; }
+	// transient presentation state (rebuilt by CMissionUI::UpdateEnemies each pass; retail
+	// serializes none of these -- the old dev tags 2..6/8 are format violations, dropped):
 	CPtr<CMissionUI> pMissionUI;
-	CPtr<NGame::IMission> pMission;
-	////
 	bool bOwner;
 	float fAngle;
 	CPtr<CImage> pImage;
-	CPtr<NWorld::CUnit> pEnemy;
 	CDBPtr<NDb::CUITexture> pTexture;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(TBaseClass*)this); f.Add(2,&pMissionUI); f.Add(3,&pMission); f.Add(4,&bOwner); f.Add(5,&fAngle); f.Add(6,&pImage); f.Add(7,&pEnemy); f.Add(8,&pTexture); return 0; }
 
 public:
 	CEnemyIcon() {}
@@ -419,7 +377,7 @@ public:
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CEnemyIcon::CEnemyIcon( const SWindowInfo &sInfo, NGame::IMission *_pMission, CMissionUI *_pMissionUI ):
-	TBaseClass( sInfo, _pMission ), pMission( _pMission ), pMissionUI( _pMissionUI )
+	CProjectedIcon( sInfo, _pMission ), pMissionUI( _pMissionUI ), bOwner( false ), fAngle( 0 )
 {
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -484,12 +442,15 @@ bool CEnemyIcon::ProcessMessage( const SEvent &sEvent )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CEnemyIcon::Draw( const STime &sTime, NGScene::I2DGameView *pView )
 {
+	// transient pTexture (set in the update pass); a restored icon Drawn before Set() has it null -> skip.
+	if ( !IsValid( pTexture ) )
+		return;
 	SPoint sNewSize( pTexture->nWidth, pTexture->nHeight );
 	SPoint sSize = GetSize();
 	SPoint sPosition = GetPosition();
 
 	// position/clamp are CLIENT-window-local now (icons are view children, retail @0x213e70)
-	const SPoint &sParentSize = pMissionUI->GetClientWindow()->GetSize();
+	const SPoint &sParentSize = GetParent()->GetSize();	// the client window (serialized pParent; the transient pMissionUI is NULL on a loaded icon)
 	SRect sViewRect( 0, 0, sParentSize.x, sParentSize.y );
 	sPosition.x = min( max( sViewRect.x1 + sNewSize.x / 2, sPosition.x ), sViewRect.x2 - sNewSize.x / 2 );
 	sPosition.y = min( max( sViewRect.y1 + sNewSize.y / 2, sPosition.y ), sViewRect.y2 - sNewSize.y / 2 );
@@ -508,19 +469,21 @@ void CEnemyIcon::Draw( const STime &sTime, NGScene::I2DGameView *pView )
 // clue-ITEM marker, now ported below.) The icon anchors on the SOUND MARKER (CDMesh) position -- never on the
 // live unit -- and its action target is THE MARKER (retail CSoundIcon::GetTarget @0x2165a0), so
 // hovering/attacking through the icon can't spoil the hidden unit's identity or movement.
-class CSoundIcon: public CActionDecorator<CImage>
+class CSoundIcon: public CProjectedIcon
 {
 	OBJECT_BASIC_METHODS(CSoundIcon)
 private:
-	ZDATA_(TBaseClass)
+	ZDATA_(CProjectedIcon)
+	// retail operator& @0x21a470: 1=CProjectedIcon base, 2=pSound (CPtr<NWorld::IVisObj> -- the
+	// heard-noise sound marker). This fork's pMarker IS that member (kept as CPtr<CObjectBase>,
+	// wire-identical object ref); everything else is transient per-pass presentation state.
+	CPtr<CObjectBase> pMarker;	// retail CSoundIcon::pSound (tag 2) -- the heard-noise CDMesh / sound marker (the action target)
+	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CProjectedIcon*)this); f.Add(2,&pMarker); return 0; }
+	// transient (rebuilt by the CMissionUI update pass each frame; retail serializes none of these):
 	CPtr<CMissionUI> pMissionUI;
-	CPtr<NGame::IMission> pMission;
-	////
 	float fAngle;
 	CPtr<NWorld::CUnit> pUnit;
 	CDBPtr<NDb::CUITexture> pTexture;
-	CPtr<CObjectBase> pMarker;	// the heard-noise CDMesh this ear sits over (the action target)
-	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(TBaseClass*)this); f.Add(2,&pMissionUI); f.Add(3,&pMission); f.Add(4,&fAngle); f.Add(5,&pUnit); f.Add(6,&pTexture); f.Add(7,&pMarker); return 0; }
 
 public:
 	CSoundIcon() {}
@@ -538,7 +501,7 @@ public:
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CSoundIcon::CSoundIcon( const SWindowInfo &sInfo, NGame::IMission *_pMission, CMissionUI *_pMissionUI ):
-	TBaseClass( sInfo, _pMission ), pMission( _pMission ), pMissionUI( _pMissionUI )
+	CProjectedIcon( sInfo, _pMission ), pMissionUI( _pMissionUI ), fAngle( 0 )
 {
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -597,12 +560,15 @@ bool CSoundIcon::ProcessMessage( const SEvent &sEvent )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CSoundIcon::Draw( const STime &sTime, NGScene::I2DGameView *pView )
 {
+	// transient pTexture (set in the update pass); a restored icon Drawn before Set() has it null -> skip.
+	if ( !IsValid( pTexture ) )
+		return;
 	SPoint sNewSize( pTexture->nWidth, pTexture->nHeight );
 	SPoint sSize = GetSize();
 	SPoint sPosition = GetPosition();
 
 	// position/clamp are CLIENT-window-local now (icons are view children, retail @0x213e70)
-	const SPoint &sParentSize = pMissionUI->GetClientWindow()->GetSize();
+	const SPoint &sParentSize = GetParent()->GetSize();	// the client window (serialized pParent; the transient pMissionUI is NULL on a loaded icon)
 	SRect sViewRect( 0, 0, sParentSize.x, sParentSize.y );
 	sPosition.x = min( max( sViewRect.x1 + sNewSize.x / 2, sPosition.x ), sViewRect.x2 - sNewSize.x / 2 );
 	sPosition.y = min( max( sViewRect.y1 + sNewSize.y / 2, sPosition.y ), sViewRect.y2 - sNewSize.y / 2 );
@@ -625,18 +591,20 @@ void CSoundIcon::Draw( const STime &sTime, NGScene::I2DGameView *pView )
 // Retail also builds these icons over heard-not-seen UNITS (@0x211390, clueUnitIconsList) -- that
 // role is covered in this fork by the CSoundIcon ear markers above, so the unit flavor is carried
 // for shape parity but never constructed here.
-class CClueIcon: public CActionDecorator<CImage>
+class CClueIcon: public CProjectedIcon
 {
 	OBJECT_BASIC_METHODS(CClueIcon)
 private:
-	ZDATA_(TBaseClass)
-	CPtr<NGame::IMission> pMission;
-	CPtr<NWorld::IItem> pWorldItem;			// retail +0x90
-	CPtr<NWorld::CUnit> pWorldUnit;			// retail +0x94 (heard-unit flavor; unused in this fork)
-	CPtr<NRPG::IInventoryItem> pInvItem;	// retail +0x98 -- the UpdateHash reuse key (@0x217220)
+	ZDATA_(CProjectedIcon)
+	// retail operator& @0x21a370: 1=CProjectedIcon base (carries pMission), 2=pWorldItem,
+	// 3=pWorldUnit, 4=pInvItem. pTexture/pMissionUI are transient per-pass state.
+	CPtr<NWorld::IItem> pWorldItem;			// retail +0x90 (tag 2)
+	CPtr<NWorld::CUnit> pWorldUnit;			// retail +0x94 (tag 3; heard-unit flavor -- unused in this fork)
+	CPtr<NRPG::IInventoryItem> pInvItem;	// retail +0x98 (tag 4) -- the UpdateHash reuse key (@0x217220)
+	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CProjectedIcon*)this); f.Add(2,&pWorldItem); f.Add(3,&pWorldUnit); f.Add(4,&pInvItem); return 0; }
+	// transient:
 	CDBPtr<NDb::CUITexture> pTexture;
 	CPtr<CMissionUI> pMissionUI;			// dev icon pattern: client-rect clamp in Draw
-	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(TBaseClass*)this); f.Add(2,&pMission); f.Add(3,&pWorldItem); f.Add(4,&pWorldUnit); f.Add(5,&pInvItem); f.Add(6,&pTexture); f.Add(7,&pMissionUI); return 0; }
 
 public:
 	CClueIcon() {}
@@ -654,7 +622,7 @@ public:
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CClueIcon::CClueIcon( const SWindowInfo &sInfo, NGame::IMission *_pMission, NWorld::IItem *pWItem, NRPG::IInventoryItem *pInv, CMissionUI *_pMissionUI ):
-	TBaseClass( sInfo, _pMission ), pMission( _pMission ), pWorldItem( pWItem ), pInvItem( pInv ), pMissionUI( _pMissionUI )
+	CProjectedIcon( sInfo, _pMission ), pWorldItem( pWItem ), pInvItem( pInv ), pMissionUI( _pMissionUI )
 {
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -709,12 +677,16 @@ bool CClueIcon::ProcessMessage( const SEvent &sEvent )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CClueIcon::Draw( const STime &sTime, NGScene::I2DGameView *pView )
 {
+	// pTexture is transient per-pass state (Set() picks it in the mission-UI update, retail folds the pick
+	// into Draw). A restored icon Drawn before its update-pass Set() runs has a null pTexture -> skip until set.
+	if ( !IsValid( pTexture ) )
+		return;
 	SPoint sNewSize( pTexture->nWidth, pTexture->nHeight );
 	SPoint sSize = GetSize();
 	SPoint sPosition = GetPosition();
 
 	// position/clamp are CLIENT-window-local (icons are view children, like the ear/enemy icons)
-	const SPoint &sParentSize = pMissionUI->GetClientWindow()->GetSize();
+	const SPoint &sParentSize = GetParent()->GetSize();	// the client window (serialized pParent; the transient pMissionUI is NULL on a loaded icon)
 	SRect sViewRect( 0, 0, sParentSize.x, sParentSize.y );
 	sPosition.x = min( max( sViewRect.x1 + sNewSize.x / 2, sPosition.x ), sViewRect.x2 - sNewSize.x / 2 );
 	sPosition.y = min( max( sViewRect.y1 + sNewSize.y / 2, sPosition.y ), sViewRect.y2 - sNewSize.y / 2 );
@@ -733,17 +705,18 @@ void CClueIcon::Draw( const STime &sTime, NGScene::I2DGameView *pView )
 // Draw @0x210550 (disasm): anchor = pWorldItem->GetPos, z += 0.6 (fadd [0x8b1fe8] @0x61058a);
 // ON-screen -> texture 0x321 (801, @0x610670); OFF-screen -> sequential arrows 0x322..0x329
 // (802..809, @0x6105c3..0x610609) by Clamp(round(angle/45),0,7).
-class CHintIcon: public CActionDecorator<CImage>
+class CHintIcon: public CProjectedIcon
 {
 	OBJECT_BASIC_METHODS(CHintIcon)
 private:
-	ZDATA_(TBaseClass)
-	CPtr<NGame::IMission> pMission;
-	CPtr<NWorld::IItem> pWorldItem;			// retail +0x90
-	CPtr<NRPG::IInventoryItem> pInvItem;	// retail +0x94 -- the UpdateHash reuse key (@0x217170)
+	ZDATA_(CProjectedIcon)
+	// retail operator& @0x21a3e0: 1=CProjectedIcon base (carries pMission), 2=pWorldItem, 3=pInvItem.
+	CPtr<NWorld::IItem> pWorldItem;			// retail +0x90 (tag 2)
+	CPtr<NRPG::IInventoryItem> pInvItem;	// retail +0x94 (tag 3) -- the UpdateHash reuse key (@0x217170)
+	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CProjectedIcon*)this); f.Add(2,&pWorldItem); f.Add(3,&pInvItem); return 0; }
+	// transient:
 	CDBPtr<NDb::CUITexture> pTexture;
 	CPtr<CMissionUI> pMissionUI;			// dev icon pattern: client-rect clamp in Draw
-	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(TBaseClass*)this); f.Add(2,&pMission); f.Add(3,&pWorldItem); f.Add(4,&pInvItem); f.Add(5,&pTexture); f.Add(6,&pMissionUI); return 0; }
 
 public:
 	CHintIcon() {}
@@ -761,7 +734,7 @@ public:
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CHintIcon::CHintIcon( const SWindowInfo &sInfo, NGame::IMission *_pMission, NWorld::IItem *pWItem, NRPG::IInventoryItem *pInv, CMissionUI *_pMissionUI ):
-	TBaseClass( sInfo, _pMission ), pMission( _pMission ), pWorldItem( pWItem ), pInvItem( pInv ), pMissionUI( _pMissionUI )
+	CProjectedIcon( sInfo, _pMission ), pWorldItem( pWItem ), pInvItem( pInv ), pMissionUI( _pMissionUI )
 {
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -812,12 +785,15 @@ bool CHintIcon::ProcessMessage( const SEvent &sEvent )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CHintIcon::Draw( const STime &sTime, NGScene::I2DGameView *pView )
 {
+	// transient pTexture (set in the update pass); a restored icon Drawn before Set() has it null -> skip.
+	if ( !IsValid( pTexture ) )
+		return;
 	SPoint sNewSize( pTexture->nWidth, pTexture->nHeight );
 	SPoint sSize = GetSize();
 	SPoint sPosition = GetPosition();
 
 	// position/clamp are CLIENT-window-local (icons are view children, like the ear/enemy icons)
-	const SPoint &sParentSize = pMissionUI->GetClientWindow()->GetSize();
+	const SPoint &sParentSize = GetParent()->GetSize();	// the client window (serialized pParent; the transient pMissionUI is NULL on a loaded icon)
 	SRect sViewRect( 0, 0, sParentSize.x, sParentSize.y );
 	sPosition.x = min( max( sViewRect.x1 + sNewSize.x / 2, sPosition.x ), sViewRect.x2 - sNewSize.x / 2 );
 	sPosition.y = min( max( sViewRect.y1 + sNewSize.y / 2, sPosition.y ), sViewRect.y2 - sNewSize.y / 2 );
@@ -836,16 +812,17 @@ void CHintIcon::Draw( const STime &sTime, NGScene::I2DGameView *pView )
 // object's position, z += 0.6 (fadd [0x8b1fe8]); drawn ONLY while on-screen -- unlike the clue/hint
 // icons there is NO off-screen arrow set. ProcessMessage @0x210700: 0x6000034 (dev EVENT_RBUTTONUP)
 // -> focus the camera on the trap position; 0x6000035 (RBUTTONDOWN) swallowed; else base decorator.
-class CTrapIcon: public CActionDecorator<CImage>
+class CTrapIcon: public CProjectedIcon
 {
 	OBJECT_BASIC_METHODS(CTrapIcon)
 private:
-	ZDATA_(TBaseClass)
-	CPtr<NGame::IMission> pMission;
-	CPtr<CObjectBase> pItem;				// retail +0x90 -- the trapped object (door / mine); the UpdateHash reuse key
+	ZDATA_(CProjectedIcon)
+	// retail operator& @0x21a430: 1=CProjectedIcon base (carries pMission), 2=pItem.
+	CPtr<CObjectBase> pItem;				// retail +0x90 (tag 2) -- the trapped object (door / mine); the UpdateHash reuse key
+	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CProjectedIcon*)this); f.Add(2,&pItem); return 0; }
+	// transient:
 	CDBPtr<NDb::CUITexture> pTexture;
 	CPtr<CMissionUI> pMissionUI;			// dev icon pattern: client-rect clamp in Draw
-	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(TBaseClass*)this); f.Add(2,&pMission); f.Add(3,&pItem); f.Add(4,&pTexture); f.Add(5,&pMissionUI); return 0; }
 	bool bOnScreen;							// transient draw gate (retail folds GetPositionInfo into Draw; not serialized)
 
 public:
@@ -864,7 +841,7 @@ public:
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CTrapIcon::CTrapIcon( const SWindowInfo &sInfo, NGame::IMission *_pMission, CObjectBase *_pItem, CMissionUI *_pMissionUI ):
-	TBaseClass( sInfo, _pMission ), pMission( _pMission ), pItem( _pItem ), pMissionUI( _pMissionUI ), bOnScreen( false )
+	CProjectedIcon( sInfo, _pMission ), pItem( _pItem ), pMissionUI( _pMissionUI ), bOnScreen( false )
 {
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -930,7 +907,7 @@ void CTrapIcon::Draw( const STime &sTime, NGScene::I2DGameView *pView )
 	SPoint sPosition = GetPosition();
 
 	// position/clamp are CLIENT-window-local (icons are view children, like the ear/enemy icons)
-	const SPoint &sParentSize = pMissionUI->GetClientWindow()->GetSize();
+	const SPoint &sParentSize = GetParent()->GetSize();	// the client window (serialized pParent; the transient pMissionUI is NULL on a loaded icon)
 	SRect sViewRect( 0, 0, sParentSize.x, sParentSize.y );
 	sPosition.x = min( max( sViewRect.x1 + sNewSize.x / 2, sPosition.x ), sViewRect.x2 - sNewSize.x / 2 );
 	sPosition.y = min( max( sViewRect.y1 + sNewSize.y / 2, sPosition.y ), sViewRect.y2 - sNewSize.y / 2 );
@@ -946,17 +923,21 @@ class CHitTracker: public CText
 	OBJECT_BASIC_METHODS(CHitTracker);
 private:
 	ZDATA_(CText)
-	CPtr<CWindow> pClientWindow;
 	CPtr<NGame::IMission> pMission;
 	////
 	int nHitValue;
-	bool bComplete;
+	// retail NUI::CHitText member (same saveload id 0xB0241949): PK hits draw ORANGE
+	// (R=243,G=191,B=0 -- CHitText draw colour packing @0x6117c0) instead of the normal colour.
+	bool bPK;
 	CVec3 vBegPoint;
 	STime sBegTime;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CText*)this); f.Add(2,&pClientWindow); f.Add(3,&pMission); f.Add(4,&nHitValue); f.Add(5,&bComplete); f.Add(6,&vBegPoint); f.Add(7,&sBegTime); return 0; }
+	bool bComplete;   // dev-only draw bookkeeping -- NOT in the retail stream, dropped from operator&
+	// retail CHitText::operator& @0x219f90: 1=CText 2=pMission 3=nHitValue 4=bPK 5=vBegPoint 6=sBegTime
+	// (dev wrote a DEAD pClientWindow at tag 2 -- never assigned -- and bComplete at tag 5; W3 convergence)
+	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CText*)this); f.Add(2,&pMission); f.Add(3,&nHitValue); f.Add(4,&bPK); f.Add(5,&vBegPoint); f.Add(6,&sBegTime); return 0; }
 
 public:
-	CHitTracker() {}
+	CHitTracker(): bComplete( false ) {}	// bComplete is a format hole now -- the load path must seed it
 	CHitTracker( const SWindowInfo &sInfo, NGame::IMission *pMission, NWorld::CHitLocator *pLocator, const STime &sTime );
 
 	bool IsComplete() const;
@@ -965,7 +946,7 @@ public:
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CHitTracker::CHitTracker( const SWindowInfo &sInfo, NGame::IMission *_pMission, NWorld::CHitLocator *pLocator, const STime &sTime ):
-	CText( sInfo ), pMission( _pMission ), sBegTime( sTime ), nHitValue( pLocator->nHitValue ), vBegPoint( pLocator->vPosition ), bComplete( false )
+	CText( sInfo ), pMission( _pMission ), sBegTime( sTime ), nHitValue( pLocator->nHitValue ), bPK( pLocator->bPK ), vBegPoint( pLocator->vPosition ), bComplete( false )
 {
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1002,7 +983,12 @@ void CHitTracker::Draw( const STime &sTime, NGScene::I2DGameView *pView )
 
 	WCHAR wsText[256];
 	int nAlpha = ( 1 - fWeight ) * 0xFF;
-	swprintf( wsText, L"<color=%.2xff0000>%d", nAlpha, nHitValue );
+	// retail CHitText colour packing @0x6117c0: a PK hit fades the ORANGE R=243(f3),G=191(bf),B=0
+	// channels; a normal hit keeps the dev damage colour.
+	if ( bPK )
+		swprintf( wsText, L"<color=%.2x%.2x%.2x00>%d", nAlpha, int( ( 1 - fWeight ) * 243 ), int( ( 1 - fWeight ) * 191 ), nHitValue );
+	else
+		swprintf( wsText, L"<color=%.2xff0000>%d", nAlpha, nHitValue );
 
 	SetPosition( sPosition );
 	SetText( wsText );
@@ -1013,6 +999,15 @@ void CHitTracker::Draw( const STime &sTime, NGScene::I2DGameView *pView )
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CMissionUI
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail NUI::CMissionUI::OnSerialize @0x219e60 -- post-serialize fixup called at the tail of
+// operator& (@0x218dc0): when pPause is null/dead (an older save without tag 27, or a fresh load),
+// re-resolve the HUD "pause" text control by id.
+void CMissionUI::OnSerialize( CStructureSaver &f )
+{
+	if ( !IsValid( pPause ) )
+		pPause = GetUIWindow<CText>( this, "pause" );
+}
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CMissionUI::CMissionUI():
 	bindCancel( "cancel" ),	bindShowItems( "showitems" ),
@@ -1133,7 +1128,9 @@ bool CMissionUI::ProcessMessage( const SEvent &sEvent )
 		{
 			pLogPanel = new CLogPanel( SWindowInfo( this, SPoint( 0, 0 ), SPoint( 0, 0 ), "logpanel", STYLE_ENABLED | STYLE_VISIBLE | STYLE_TOPMOST | STYLE_TRANSPARENT ), STREAM_GAME );
 
-			pAck = new CAckIcon( sEvent.pLoader->GetControl( "ack" ), pMission );
+			// retail @0x214d40: the ack view is built IN CODE (no game.db control) -- "ackview",
+			// style 0x2e = VISIBLE|ENABLED|TOPMOST|TRANSPARENT, pos/size {0,0}, parented to this.
+			pAck = new CAckIcon( SWindowInfo( this, SPoint( 0, 0 ), SPoint( 0, 0 ), "ackview", STYLE_VISIBLE | STYLE_ENABLED | STYLE_TOPMOST | STYLE_TRANSPARENT ), pMission );
 
 			pTopBar = new CTopBar( sEvent.pLoader->GetControl( "topbar" ), pMission );
 			pUnitPanel = new CUnitPanel( sEvent.pLoader->GetControl( "unitpanel" ), pMission );
@@ -1156,6 +1153,11 @@ bool CMissionUI::ProcessMessage( const SEvent &sEvent )
 			pCharacter->AddImageState( CHoverButton::STATE_NORMAL, NDb::GetUITexture( 383 ) );
 			pCharacter->AddImageState( CHoverButton::STATE_DISABLED, NDb::GetUITexture( 428 ) );
 			pCharacter->SetCursorInfo( GetInterface()->GetDefaultCursorInfo() );
+
+			// retail @0x214d40 TEMPLATELOAD: the auto player-switch banner from the "playerswitch"
+			// control (its nested container brings the "text"/"ok" children -- CPlayerSwitchUI builds
+			// them in its own TEMPLATELOAD arm). Serialized as CMissionUI tag 25.
+			pPlayerSwitchUI = new CPlayerSwitchUI( sEvent.pLoader->GetControl( "playerswitch" ), pMission );
 			break;
 		}
 	case EVENT_TEMPLATELOADCOMPLETE:
@@ -1175,7 +1177,7 @@ bool CMissionUI::ProcessMessage( const SEvent &sEvent )
 			if ( ( pState->GetType() == NGame::IState::FORCED ) || ( pState->GetType() == NGame::IState::TEMPORARY ) )
 			{
 				SCursorInfo sStateCursor = pState->GetCursorInfo();
-				if ( sStateCursor.pTexture != GetInterface()->GetCursorInfo().pTexture )
+				if ( sStateCursor.pCursor != GetInterface()->GetCursorInfo().pCursor )
 				{
 					sStateCursor.wsText = L"";
 					GetInterface()->SetCursorInfo( sStateCursor );
@@ -1235,13 +1237,11 @@ void CMissionUI::Update( const STime &sTime, NGScene::I2DGameView *pView )
 	pBiographyPanel->SetStyle( STYLE_VISIBLE, ( pMission->GetPanelState( nCharacterFamily ) == NGame::PANEL_BIOGRAPHY ) );
 
 	// retail Update @0x211d60 tail (disasm @0x612176..0x6121f7): reposition the ack subtitle band
-	// every frame -- x = clientRect.x1 + 100, width = (clientRect.x2 - 100) - (clientRect.x1 + 100)
-	// (i.e. 100px inset from BOTH client edges: between the clue-icon column and the inventory
-	// button), bottom anchor = the inventory button's bottom edge (pos.y + size.y, desktop coords).
-	// CAckIcon::Draw's reflow grows the band upward from that anchor (retail CAckView::Update).
-	if ( IsValid( pAck ) && IsValid( pInventory ) )
-		pAck->SetStripPlacement( sClientRect.x1 + 100, ( sClientRect.x2 - 100 ) - ( sClientRect.x1 + 100 ),
-			pInventory->GetPosition().y + pInventory->GetSize().y );
+	// every frame -- SetSize({(clientRect.x2-100)-(clientRect.x1+100), 0}) then
+	// SetPosition({clientRect.x1+100, inventory-button bottom edge}); CAckIcon::Update's reflow
+	// then measures the text and grows the band UPWARD from that bottom anchor.
+	pAck->SetSize( SPoint( ( sClientRect.x2 - 100 ) - ( sClientRect.x1 + 100 ), 0 ) );
+	pAck->SetPosition( SPoint( sClientRect.x1 + 100, pInventory->GetPosition().y + pInventory->GetSize().y ) );
 
 	SRect sLogRect( sClientRect );
 	sLogRect.x1 += N_LOGPANEL_PAD;
@@ -1577,9 +1577,25 @@ void CMissionUI::UpdateItems( NGScene::I2DGameView *pView )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CMissionUI::UpdateHits( const STime &sTime )
 {
+	// retail UpdateHits @0x6129b0: GetActivePlayer()->GetPlayer()->GetVisible() once up front;
+	// a hit on a unit NOT in that list spawns no damage number (unit-less hits always spawn)
+	NWorld::IPlayer *pPlayer = 0;
+	list< CPtr<NWorld::CUnit> > visibleList;
+	if ( pMission->GetActivePlayer() )
+	{
+		pPlayer = pMission->GetActivePlayer()->GetPlayer();
+		if ( pPlayer )
+			pPlayer->GetVisible( &visibleList );
+	}
+
 	CPtr<NWorld::CHitLocator> pTempLocator;
 	while( pTempLocator = pMission->GetWorld()->GetHitEvent() )
+	{
+		if ( pTempLocator->pUnit != 0 && pPlayer != 0 &&
+			 find( visibleList.begin(), visibleList.end(), pTempLocator->pUnit ) == visibleList.end() )
+			continue;
 		hitsList.push_back( new CHitTracker( SWindowInfo( GetClientWindow(), SPoint( 0, 0 ), SPoint( 120, 20 ), "hit", STYLE_ENABLED | STYLE_TRANSPARENT | STYLE_TOPMOST | STYLE_VISIBLE ), pMission, pTempLocator, sTime ) );
+	}
 
 	for ( list<CObj<CHitTracker> >::iterator iTemp = hitsList.begin(); iTemp != hitsList.end(); )
 	{
@@ -1908,15 +1924,18 @@ CAckEvent* CMissionUI::PlayAckEvent( const STime &sTime, NWorld::CAckEvent *pEve
 	// so the deferred voice/lipsync only fire once the speaker's face is on screen.
 	CAckEvent *pAckEvent = new CAckEvent( pEvent );
 
-	// (a) the on-screen subtitle bubble (dev CAckIcon: head-in-bubble + subtitle text + voice)
+	// (a) the on-screen subtitle band (CAckIcon == retail CAckView: subtitle text + voice)
 	pAck->Set( pAckEvent );
 
 	// (b) release CMissionUI::PlayAckEvent @0x211930 also drives the bottom-LEFT single-unit face: the
 	// 3D portrait turns to the camera to deliver the line, temporarily swapping in a non-selected (or
-	// enemy) speaker's head. (Retail gates this on the bShowAcks setting; the dev has no such toggle, so
-	// it is always on, matching the retail default.)
-	if ( IsValid( pUnitPanel ) )
+	// enemy) speaker's head. Retail gates this on bShowAcks ("ui_charresponses", default on); with the
+	// face path off there is no ACK_WAIT handshake, so retail arms the event DIRECTLY here
+	// (CAckEvent::Set @0x1d0cf0: bReady=true, TTL = now + 3000ms) -- the voice/subtitle still play.
+	if ( NGlobal::GetVar( "ui_charresponses" ).GetFloat() != 0 )
 		pUnitPanel->PlayAckEvent( sTime, pAckEvent );
+	else
+		pAckEvent->Set( sTime );
 
 	return pAckEvent;
 }
@@ -1929,7 +1948,7 @@ REGISTER_SAVELOAD_CLASS( 0xB0241942, CMissionUI );
 REGISTER_SAVELOAD_CLASS( 0xB0241947, CItemText );
 REGISTER_SAVELOAD_CLASS( 0xB0241948, CEnemyIcon );
 REGISTER_SAVELOAD_CLASS( 0xB0241949, CHitTracker );
-REGISTER_SAVELOAD_CLASS( 0xB024194A, CSoundIcon );	// dev-established id (class formerly named CClueIcon here)
+REGISTER_SAVELOAD_CLASS( 0xB3131150, CSoundIcon );	// dev-established id (class formerly named CClueIcon here)
 REGISTER_SAVELOAD_CLASS( 0xB3123180, CClueIcon );	// retail NUI::CClueIcon id (gen/classreg.json)
 REGISTER_SAVELOAD_CLASS( 0xB3212140, CHintIcon );	// retail NUI::CHintIcon id (gen/classreg.json)
 REGISTER_SAVELOAD_CLASS( 0xB3618130, CTrapIcon );	// retail NUI::CTrapIcon id (register thunk @0x4a07b0)

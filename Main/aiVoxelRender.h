@@ -142,30 +142,39 @@ public:
 	friend class CRasterizer<TFinal>;
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail layout (PDB: NAI::SVoxelObjectKey, 8 bytes): pUser is a CPtr<CObjectBase> (a real reference,
+// serialized), NOT a raw pointer -- the objects hash is part of the save format (retail operator&
+// @0x1072f0: tag 2 = the pUser CPtr, tag 3 = nUserID). The old raw-pointer key serialized 8 raw bytes
+// (a dangling address) through the DoHashMap POD fallback; W4 serialization-convergence retails it.
 struct SVoxelObjectKey
 {
-	CObjectBase *pUser;
+	ZDATA
+	CPtr<CObjectBase> pUser;
 	int nUserID;
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&pUser); f.Add(3,&nUserID); return 0; }   // retail @0x1072f0
 	SVoxelObjectKey() : pUser(0), nUserID(0) {}
 	SVoxelObjectKey( CObjectBase *_pUser, int _nUserID ) : pUser(_pUser), nUserID(_nUserID) {}
-	bool operator==( const SVoxelObjectKey &a ) const { return pUser == a.pUser && nUserID == a.nUserID; }
+	bool operator==( const SVoxelObjectKey &a ) const { return pUser.GetPtr() == a.pUser.GetPtr() && nUserID == a.nUserID; }
 };
 struct SVoxelObjectHash
 {
-	int operator()( const SVoxelObjectKey &k ) const { return ((int)k.pUser) ^ k.nUserID; }
+	int operator()( const SVoxelObjectKey &k ) const { return ((int)(size_t)k.pUser.GetPtr()) ^ k.nUserID; }
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 typedef unsigned short ushort;
 struct SExplVoxel
 {
-	ZDATA
 	ushort nObject;
-	ushort nIndex;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&nObject); f.Add(3,&nIndex); return 0; }
+	// retail NAI::SExplVoxel (PDB) is 2 BYTES -- nObject ONLY. The dev nIndex per-voxel wavefront
+	// marker died with CExplCube (W5 serialization-convergence: the retail flood-fill keeps its
+	// visited marks in the per-blast CIndexCube instead), and the size is ON-WIRE:
+	// CExplosionCube::rvoxels tag 4 is a raw DoDataVector<SExplVoxel> blob (operator& @0x359e00,
+	// 0x1000 voxels = 0x2000 bytes) and C3DLookupTable::GetObject @0x358d60 indexes rvoxels with a
+	// 2-byte stride. NO member serializer -- a member operator& would flip CStructureSaver to the
+	// per-element chunk path and diverge the save format.
 	//
 	SExplVoxel() {}
-	SExplVoxel( unsigned short _nObject, unsigned short _nIndex ):
-	nObject( _nObject ), nIndex( _nIndex ) {}
+	SExplVoxel( unsigned short _nObject ): nObject( _nObject ) {}
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CExplVoxelRenderer : public CTVoxelRenderer<CExplVoxelRenderer, SExplVoxel>
@@ -192,7 +201,7 @@ public:
 
 private:
 	int nCurrentObjectID;
-	CObjectsHash *pObjects; // объект с индексом 0 - зарезервирован, 1 - terrain
+	CObjectsHash *pObjects; // пїЅпїЅпїЅпїЅпїЅпїЅ пїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ 0 - пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ, 1 - terrain
 	int *pnObjectsEnd;
 	//
 	void AddObject( const SExplObject &object );

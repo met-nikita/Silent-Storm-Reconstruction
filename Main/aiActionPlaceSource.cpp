@@ -35,10 +35,12 @@ namespace NAI
 {
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CUnitArea - reachable-set "area" (see aiActionPlaceSource.h). Prepare floods places within nAPRadius AP
-// of the centre (NWorld::PrepareAllPaths, as aiTaskCommander does) and keeps their sorted GetData() keys;
-// IsInArea is a binary search. (Release IsInArea uses a packed hash set; a sorted key set is equivalent
-// for the lookup and avoids a hash functor. The release Prepare's wishPose temporary pose override IS
-// applied here -- see Prepare below, which forces the server into wishPose around the flood.)
+// of the centre (NWorld::PrepareAllPaths, as aiTaskCommander does) and keeps the normalized GetHash key of
+// every kept place in the `places` hash set (release Prepare @0x74880: `places[GetHash(*i)] = 1`);
+// IsInArea is the hash lookup @0x73e30. The set is SERIALIZED (release operator& @0x74e60 tag 6 =
+// DoHashMap), so an area restored from a save gates exactly like the saved one without a re-flood.
+// (The release Prepare's wishPose temporary pose override IS applied here -- see Prepare below, which
+// forces the server into wishPose around the flood.)
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CUnitArea::CUnitArea( NWorld::CUnitServer *_pUS, const SPathPlace &_place, int _nAPRadius, int _wishPose ): // @0x747f0
 	pUS( _pUS ), place( _place ), nAPRadius( _nAPRadius ), wishPose( _wishPose )
@@ -46,29 +48,32 @@ CUnitArea::CUnitArea( NWorld::CUnitServer *_pUS, const SPathPlace &_place, int _
 	// @0x747f0 -- the release ctor does NOT flood here; the owner Prepares explicitly
 	// (CAIGuardReaction::Update: `new CUnitArea(...); if ( !pNew->Prepare() ) pArea = 0;`). Flooding in the
 	// ctor double-builds the set and (with the wishPose override below) would mutate the server pose during
-	// construction. Leave `keys` empty; the caller calls Prepare().
+	// construction. Leave `places` empty; the caller calls Prepare().
 }
 int CUnitArea::operator&( CStructureSaver &f )
 {
+	// release @0x74e60: 2 pUS, 3 place (raw 4), 4 nAPRadius, 5 wishPose, 6 places (DoHashMap<ulong,int>)
 	f.Add( 2, &pUS ); f.Add( 3, &place ); f.Add( 4, &nAPRadius ); f.Add( 5, &wishPose );
-	return 0;   // keys are transient: rebuilt by Prepare on use
+	f.Add( 6, &places );
+	return 0;
 }
 // CUnitArea::GetHash @0x73d60 -- the normalized place key (pose<<24 | layer<<16 | y<<8 | x). It strips the
 // direction / moving / integral / final bits, so the SAME tile reached from any direction maps to ONE key.
-// (NOT a real hash -- the release hash_map hashes it again; for this sorted-key port it is the compare key.)
+// (NOT a real hash -- the release hash_map<ulong,int> hashes it again; it is the map key.)
 // MISSING in the a5dll -- the old port keyed on raw GetData(), which kept those extra bits and fragmented the
 // set so an in-area tile queried with a different direction wrongly missed the gate.
-static inline int AreaHash( const SPathPlace &p )
+static inline unsigned long AreaHash( const SPathPlace &p )
 {
 	unsigned h = (unsigned)p.GetPose();
 	h = ( h << 8 ) | (unsigned)p.GetLayer();
 	h = ( h << 8 ) | (unsigned)p.GetY();
 	h = ( h << 8 ) | (unsigned)p.GetX();
-	return (int)h;
+	return (unsigned long)h;
 }
 bool CUnitArea::Prepare()                                                    // @0x74880
 {
-	keys.clear();
+	// @0x74880 -- the release does NOT clear `places` on the early-outs below: the clear happens only
+	// after the flood, right before the fill loop (a failed re-Prepare keeps the previous set).
 	if ( !IsValid( pUS ) || !IsValid( pUS->GetWorld() ) )
 		return false;
 	IPathNetwork *pNet = pUS->GetWorld()->GetPathNetwork();
@@ -89,27 +94,28 @@ bool CUnitArea::Prepare()                                                    // 
 	list<SPathPlace>  reach;
 	NWorld::PrepareAllPaths( pNet, &movesTable, &reach, pUS, place, nAPRadius, pUS, true );
 	pUS->SetWishPose( nOldWish );
-	// @0x74880 -- keep every reachable place that is passable and whose pose is neither CM_INACTIVE(3) nor
-	// CM_LAY(0); key on the normalized GetHash so direction/moving bits do not fragment the set.
+	// @0x74880 -- clear, then keep every reachable place that is passable and whose pose is neither
+	// CM_INACTIVE(3) nor CM_LAY(0); key on the normalized GetHash so direction/moving bits do not
+	// fragment the set (release: `places[GetHash(*i)] = 1`).
+	places.clear();
 	for ( list<SPathPlace>::const_iterator i = reach.begin(); i != reach.end(); ++i )
 	{
 		if ( !pNet->IsPassable( *i ) )
 			continue;
 		if ( (*i).GetPose() == CM_INACTIVE || (*i).GetPose() == CM_LAY )
 			continue;
-		keys.push_back( AreaHash( *i ) );
+		places[ AreaHash( *i ) ] = 1;
 	}
-	sort( keys.begin(), keys.end() );
-	return !keys.empty();
+	return !places.empty();
 }
 bool CUnitArea::IsInArea( const SPathPlace &p ) const                        // @0x73e30
 {
-	if ( keys.empty() )
-		return true;   // DELIBERATE a5dll deviation: release find() on an empty set returns false; returning
-		               // true keeps an un-prepared / empty area from gating the unit out of every place
-	// @0x73e30 -- key on the normalized GetHash (pose|layer|y|x), NOT raw GetData(): the release hashes the
-	// same normalized key, so a tile queried with a different direction/moving bit still matches its area entry.
-	return binary_search( keys.begin(), keys.end(), AreaHash( p ) );
+	// @0x73e30 -- a plain hash lookup, NO empty-set special case: an empty/un-prepared area matches
+	// nothing (owners drop an area whose Prepare failed, and a loaded area restores its set from
+	// operator& tag 6, so a live area is never empty). Key on the normalized GetHash (pose|layer|y|x),
+	// NOT raw GetData(): the release hashes the same normalized key, so a tile queried with a different
+	// direction/moving bit still matches its area entry.
+	return places.find( AreaHash( p ) ) != places.end();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // Local path-AP accumulator - sums the move AP along a path (GetMoveActionType per step -> GetActionAP).
@@ -635,9 +641,9 @@ IAIActionPlaceSource* CreateOnePlacePlaceSource( IAIUnit *pUnit, const SPathPlac
 //
 using namespace NAI;
 //
-BASIC_REGISTER_CLASS( CUnitArea )
-BASIC_REGISTER_CLASS( CAIAttackPlaceSource )
-BASIC_REGISTER_CLASS( CAICurrentPlaceSource )
-BASIC_REGISTER_CLASS( CAINearEnemyPlaceSource )
-BASIC_REGISTER_CLASS( CAIToPlacePlaceSource )
-BASIC_REGISTER_CLASS( CAIOnePlacePlaceSource )
+REGISTER_SAVELOAD_CLASS( 0x50843120, CUnitArea )
+REGISTER_SAVELOAD_CLASS( 0x51833130, CAIAttackPlaceSource )
+REGISTER_SAVELOAD_CLASS( 0x51833131, CAICurrentPlaceSource )
+REGISTER_SAVELOAD_CLASS( 0x52533190, CAINearEnemyPlaceSource )
+REGISTER_SAVELOAD_CLASS( 0x52443140, CAIToPlacePlaceSource )
+REGISTER_SAVELOAD_CLASS( 0x2306BC80, CAIOnePlacePlaceSource )

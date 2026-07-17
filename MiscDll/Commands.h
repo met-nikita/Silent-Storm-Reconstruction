@@ -47,6 +47,8 @@ void LoadConfig( const string &szFileName );
 void SaveConfig( const string &szFileName );
 ////
 void VarBoolHandler( const string &szID, const NGlobal::CValue &sValue, void *pContext );
+void VarIntHandler( const string &szID, const NGlobal::CValue &sValue, void *pContext );   // retail @0x3d4350
+void VarFloatHandler( const string &szID, const NGlobal::CValue &sValue, void *pContext ); // retail @0x3d4370
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CCmd
 {

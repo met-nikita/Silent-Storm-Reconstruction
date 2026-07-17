@@ -75,7 +75,8 @@ public:
 	int GetFloor() const { return nFloor; }
 	const SItemRenderInfo& GetModel() const { return model; }
 	NRPG::IInventoryItem* GetInvItem() const { return pInvItem; }
-	virtual int ProcessAttack( int nUserID, NRPG::CAttackPortion *pAttack, NDb::CRPGArmor *pArmor );
+	virtual int ProcessAttack( NWorld::IWorld *pWorld, int nUserID, NRPG::CAttackPortion *pAttack,
+		const CVec3 &vDir, NDb::CRPGArmor *pArmor );
 	virtual void Visit( IRenderVisitor *p );
 	virtual void Visit( IAIVisitor *p );
 	// retail IVisible triple (see wVision.h): probe points @0x349e50 (mass-sphere centres through the
@@ -141,16 +142,20 @@ private:
 	list<CObj<CDItem> > showItems;
 	CObj<CDebrisControllerTrash> pTrash;
 	list<CPtr<CDFrozenItem> > visibleItems;
+	// retail CDebrisController +0x30 (PDB), save tag 8: every frozen item whose inventory item is an
+	// NRPG::IClueItem (AddFrozenItem tail @0x34b100 pushes under the RTDynamicCast). Consumed by
+	// GetClueObjects @0x34a870 (CWorld::GetClueItems @0x361520 forwards) which prunes dead entries.
+	list<CPtr<CDFrozenItem> > clueItems;
 	// retail CDebrisController +0x38 (PDB), save tag 10 (operator& @0x37ab30): the in-flight items
 	// published as vision candidates (AddDebris @0x74b04a pushes here under the fog gate). Walked by
 	// GetVisibleDynamicItems @0x34a420 for UpdateVisible's dynamic-items loop.
-	// (Retail also carries clueItems @+0x30 tag 8, showFrozenItems tag 9 -- NOT ported: dev's clue
-	// lookup lives in nameToObj; dev keeps showFrozenItems at its historical tag 8.)
 	list<CPtr<CDItem> > visibleDynamicItems;
 protected:
 	list<CObj<CDFrozenItem> > showFrozenItems;
 public:
-	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&items); f.Add(3,&pDebrisAction); f.Add(4,&bc); f.Add(5,&showItems); f.Add(6,&pTrash); f.Add(7,&visibleItems); f.Add(8,&showFrozenItems); f.Add(10,&visibleDynamicItems); return 0; }
+	// retail @0x37ab30: 7=visibleItems, 8=clueItems, 9=showFrozenItems, 10=visibleDynamicItems
+	// (dev historically wrote showFrozenItems at tag 8 and lacked clueItems -- W3 convergence)
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&items); f.Add(3,&pDebrisAction); f.Add(4,&bc); f.Add(5,&showItems); f.Add(6,&pTrash); f.Add(7,&visibleItems); f.Add(8,&clueItems); f.Add(9,&showFrozenItems); f.Add(10,&visibleDynamicItems); return 0; }
 private:
 	void Add( CDItem *pD, NAnimation::CASphereSet *pAnim );
 	void InnerSegment( list<STrackItem> *pRes );
@@ -165,6 +170,9 @@ private:
 	// CDFrozenItem::Visit; pMap feeds the STABILITY registration -- the same branch registers the
 	// frozen item with pMap->GetStabilityTrackers()->AddDebris @0x74b1xx.)
 	CDFrozenItem* AddFrozenItem( NAI::IAIMap *pMap, const SHMatrix &m, NRPG::IInventoryItem *pInvItem, const SItemRenderInfo &_model, int nFloor, bool bTemporaryVisible = false, bool bVisibleGated = false );
+public:
+	// retail GetClueObjects @0x34a870: prune dead clueItems entries in place, copy the live ones out
+	void GetClueObjects( list<CPtr<CObjectBase> > *pRes );
 protected:
 	bool Segment( NAI::IAIMap *pMap, SSphere *pInvalidate );
 	bool HasDynamicItems() { return !items.empty(); }
@@ -176,14 +184,15 @@ protected:
 	virtual STime GetWorldTime() = 0;
 public:
 	CDebrisController() { pTrash = new CDebrisControllerTrash(); }
-	//! add new piece of debris. pVisibilityParent: retail AddDebris @0x34ade0 carries a CObjectBase*
-	//! visibility-parent (the dying unit, DropItems @0x3502c0 passes its this-adjusted CObjectBase for
-	//! every drop) SEPARATE from the inventory item -- the uniform CAP has no IInventoryItem but must
-	//! still bind to the fog-gated list on an unseen death (the `pItem != 0` test alone let it leak).
-	//! The parent is STORED on the CDItem (+0x2c, save tag 7) so Segment can re-derive the gate at
-	//! physics-settle and route the frozen form to the fog-gated list + vision-candidate visibleItems.
+	//! add new piece of debris -- retail signature @0x34ade0 (10 args, retail order).
+	//! bFallFromBody: Init phase = PH_THROW_OUT + bFallFromBody (true for items dropped off a body:
+	//! DropItems @0x3502c0 / LostWeapon @0x3b5c80; false for throw-out/knife/blast debris).
+	//! pVisibilityParent: fog-gate parent (the dying unit), STORED on the CDItem (+0x2c, save tag 7)
+	//! so Segment re-derives the gate at physics-settle; also the sole visibleDynamicItems publish
+	//! gate (@0x74b04a `test ebp,ebp`). nFloor: the CDItem floor (roof-cut culling) -- callers pass
+	//! GetFloor(unit) / the hit surface floor / -2 for anonymous blast debris.
 	void AddDebris( const SItemRenderInfo &_model, NAI::IAIMap *pMap, const CVec3 &ptCenter, const CQuat &q, const CVec3 &velocity,
-		CFuncBase<STime> *pTime, NRPG::IInventoryItem *pItem = 0, CObjectBase *pVisibilityParent = 0 );
+		CFuncBase<STime> *pTime, bool bFallFromBody, CObjectBase *pVisibilityParent, NRPG::IInventoryItem *pItem, int nFloor );
 	//! turn in radius frozen items into alive ones
 	void ActivateDebris( const SSphere &b, NAI::IAIMap *pAIMap, CFuncBase<STime> *pTime );
 	//! turn ONE frozen item into an alive one (retail @0x34a240, ctrl vtbl+4): the stability

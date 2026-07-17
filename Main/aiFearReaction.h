@@ -32,6 +32,7 @@ class CAIFearReaction: public CAIReaction
 	bool bUseCover;   // +0x10  prefer a hidden place (GetSafePosition) before the run-away place when fleeing
 	bool bRoaming;    // +0x11  when calm, wander nRadius rather than just looking round (civilians)
 	int  nRadius;     // +0x14  the roam radius
+	int operator&( CStructureSaver &f ) { f.Add( 2, (CAIReaction*)this ); f.Add( 3, &bUseCover ); f.Add( 4, &bRoaming ); f.Add( 5, &nRadius ); return 0; }   // retail @0x3d080
 public:
 	CAIFearReaction(): bUseCover( false ), bRoaming( false ), nRadius( 0 ) {}
 	CAIFearReaction( IAIUnit *pUnit, bool _bUseCover, bool _bRoaming, int _nRadius )

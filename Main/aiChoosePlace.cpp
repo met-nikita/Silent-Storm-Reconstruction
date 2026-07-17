@@ -35,7 +35,7 @@ void FilterPlacesByAP( vector<SPlaceWithAP> *pPlaces, int nAPToReserve )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CAIChoosePlaceJob::CAIChoosePlaceJob( IAIJob *_pParentJob, int _nAPToReserve ):   // @0x00475550
 	IAIChoosePlaceJob( _pParentJob ),
-	bChoosingFinished( false ), nCurrentAction( 0 ), info( 10 ), nAPToReserve( _nAPToReserve )
+	nCurrentAction( 0 ), info( 10 ), nAPToReserve( _nAPToReserve )
 {
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -45,7 +45,7 @@ void CAIChoosePlaceJob::DoJob()
 {
 	if ( nCurrentAction >= (int)actions.size() )
 	{
-		bChoosingFinished = true;
+		Finish();   // retail @0x4753f0: sets the base CAIJob finished byte (+0xc) directly
 		return;
 	}
 	CPtr<CAIAction> pAction = actions[ nCurrentAction ];
@@ -86,7 +86,7 @@ void CAIChoosePlaceJob::DoJob()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CAIChoosePlaceJob::Reset()
 {
-	bChoosingFinished = false;
+	ReArm();    // retail @0x475210: clears the base CAIJob finished byte (+0xc)
 	nCurrentAction = 0;
 	for ( unordered_map< CPtr<CAIAction>, SPlaceSourceInfo, SPtrHash >::iterator i = info.begin(); i != info.end(); ++i )
 	{
@@ -136,13 +136,30 @@ bool CAIChoosePlaceJob::GetPlaceForAction( CAIAction *pAction, SPlaceWithAP *pPl
 	return true;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-int CAIChoosePlaceJob::operator&( CStructureSaver &f )                  // @0x00476c80
+// retail @0x475ea0: the interface level serializes only the CAIJob base at tag 2, giving the release
+// wire its 2.2.2 nesting (byte-walked: 2.2 = 11-byte chunk holding ONLY the 9-byte CAIJob chunk
+// {2 pParentJob CPtr4, 3 bJobFinished 1B}).
+int IAIChoosePlaceJob::operator&( CStructureSaver &f )                  // @0x00475ea0
 {
 	f.Add( 2, (CAIJob*)this );
-	f.Add( 3, &nAPToReserve );
+	return 0;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// @0x476c80 -- retail wire (byte-walk-confirmed, slot with 4 attack + 2 retreat jobs):
+// {2 IAIChoosePlaceJob{2 CAIJob{2 pParentJob, 3 bJobFinished}}, 3 nCurrentAction int4,
+//  4 actions DoVector<CPtr<CAIAction>>, 5 info DoHashMap<CPtr<CAIAction>,SPlaceSourceInfo,SPtrHash>,
+//  6 nAPToReserve int4}.
+// The old dev wire was {2 CAIJob DIRECT, 3 nAPToReserve, 4, 5, 6 bChoosingFinished 1B}: the missing
+// interface level shifted the base subtree (wire-audit RAWSZ 2.2.2.2 9v4 + MISS 2.2.3), tag 3 loaded
+// retail's nCurrentAction into nAPToReserve, and tag 6 read retail's 4-byte nAPToReserve as a 1-byte
+// bool (SIZE 2.6 4v1). nCurrentAction is now serialized like retail, so a mid-scan chooser resumes.
+int CAIChoosePlaceJob::operator&( CStructureSaver &f )                  // @0x00476c80
+{
+	f.Add( 2, (IAIChoosePlaceJob*)this );
+	f.Add( 3, &nCurrentAction );
 	f.Add( 4, &actions );
 	f.Add( 5, &info );
-	f.Add( 6, &bChoosingFinished );
+	f.Add( 6, &nAPToReserve );
 	return 0;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -198,5 +215,5 @@ IAIChoosePlaceJob* CreateAIChoosePlaceForRetreatJob( IAIJob *pParentJob )       
 //
 using namespace NAI;
 //
-BASIC_REGISTER_CLASS( CAIChoosePlaceForAttackJob )
-BASIC_REGISTER_CLASS( CAIChoosePlaceForRetreatJob )
+REGISTER_SAVELOAD_CLASS( 0x51313170, CAIChoosePlaceForAttackJob )
+REGISTER_SAVELOAD_CLASS( 0x52443130, CAIChoosePlaceForRetreatJob )

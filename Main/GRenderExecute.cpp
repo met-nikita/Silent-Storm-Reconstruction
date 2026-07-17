@@ -34,6 +34,15 @@ struct SCompareOps
 	}
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail @0x14a2b0: the CL-register bind for the FULL_LIT op family; a no-CL scene (SLightInfo
+// bIgnoreCL, lighting-options bit 2) gets the default lightmap instead of the world's CL register
+static NGfx::CTexture* GetCLTexture( const SLightInfo &lightInfo )
+{
+	if ( lightInfo.bIgnoreCL )
+		return GetDefaultLightmap();
+	return NGfx::GetRegisterTexture( 3 );   // N_CL_TARGET_REGISTER
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 static CVec4 GetNormalized( const CVec4 &v, float _f )
 {
 	float f = _f / sqrt( sqr(v.x) + sqr(v.y) + sqr(v.z) );
@@ -495,7 +504,7 @@ static void ExecOps( NGfx::CRenderContext *pRC, const vector<CRenderCmdList::SOp
 			pRC->SetVSConst( 17, lightInfo.vUpDifColor * 2 );
 			pRC->SetTexture( 0, op.p1.pTex );
 			pRC->SetTexture( 1, GetNormalizeTexture() );
-			pRC->SetTexture( 2, NGfx::GetRegisterTexture(3), true );//op.p2.pTex );
+			pRC->SetTexture( 2, GetCLTexture( lightInfo ), true );   // retail @0x14c03d: never the raw CL register
 			pRC->SetTexture( 3, NGfx::GetRegisterTexture(1), true );
 			triListType = TLT_GEOM;
 			break;
@@ -507,7 +516,7 @@ static void ExecOps( NGfx::CRenderContext *pRC, const vector<CRenderCmdList::SOp
 			pRC->SetPSConst( 3, lightInfo.vLightColor );
 			pRC->SetTexture( 0, op.p2.pTex );
 			pRC->SetTexture( 1, op.p1.pTex );
-			pRC->SetTexture( 2, NGfx::GetRegisterTexture(3), true );//op.p3.pTex );
+			pRC->SetTexture( 2, GetCLTexture( lightInfo ), true );   // retail @0x14c03d
 			pRC->SetTexture( 3, NGfx::GetRegisterTexture(1), true );
 			triListType = TLT_GEOM;
 			break;
@@ -539,7 +548,7 @@ static void ExecOps( NGfx::CRenderContext *pRC, const vector<CRenderCmdList::SOp
 			pRC->SetVSConst( 16, lightInfo.vAmbientColor - lightInfo.vUpDifColor );
 			pRC->SetVSConst( 17, lightInfo.vUpDifColor * 2 );
 			pRC->SetTexture( 0, GetNormalizeTexture() );
-			pRC->SetTexture( 1, NGfx::GetRegisterTexture(3), true );//op.p2.pTex );
+			pRC->SetTexture( 1, GetCLTexture( lightInfo ), true );   // retail @0x14c364
 			pRC->SetTexture( 2, NGfx::GetRegisterTexture(1), true );
 			triListType = TLT_GEOM;
 			break;

@@ -20,8 +20,13 @@
 #include "..\Script\lstate.h"
 #include "wDebris.h"
 //
+// lua_showlog (retail @0x9c70f8, default 0, saved; registered in the A5Script block)
+bool bShowLuaLog = false;
+//
 namespace NScript
 {
+////////////////////////////////////////////////////////////////////////////////////////////////////
+static void ShowLuaLog( const string &szFuncName, int nThread, const vector<SLuaParams> &params, bool bOK );
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 int luaGetParamCount( lua_State* pState )
 {
@@ -43,8 +48,14 @@ bool luaPrepareData( lua_State* pState,
 	ASSERT( (*ppScript)->m_state == pState );
 	if ( (*ppScript)->m_state != pState )
 		return false;
-	if ( szParams != "" && !(*ppScript)->CheckArgs( szParams.c_str(), szFuncName.c_str(), pParams ) )
+	// retail @0x2e4c90: the arg check captures printable args when lua_showlog is on, and both
+	// outcomes are echoed through ShowLuaLog (the thread id is pState->pCT)
+	if ( szParams != "" && !(*ppScript)->CheckArgs( szParams.c_str(), szFuncName.c_str(), pParams, bShowLuaLog ) )
+	{
+		ShowLuaLog( szFuncName, (int)pState->pCT.GetPtr(), *pParams, false );
 		return false;
+	}
+	ShowLuaLog( szFuncName, (int)pState->pCT.GetPtr(), *pParams, true );
 	return true;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -60,13 +71,15 @@ static bool luaOutDBUserData( const Script::Object &o )
 	return false;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-static void luaOutUserData( void *pData )
+// retail NScript::luaOutUserData @0x2e3ef0: bPrint prints to csScript (the Out command); otherwise
+// a compact one-liner is RETURNED (the lua_showlog arg echo)
+static string luaOutUserData( void *pData, bool bPrint )
 {
 	if ( GetScript() == 0 )
-		return;
+		return "";
 	CPtr<NWorld::CWorld> pWorld = GetScript()->pWorld;
 	if ( !IsValid( pWorld ) )
-		return;
+		return "";
 	//
 	CObjectBase *pObject = ( CObjectBase * )pData;
 	CDynamicCast<NWorld::CUnitServer> pUS(pObject);
@@ -74,26 +87,50 @@ static void luaOutUserData( void *pData )
 	{
 		string szName;
 		pWorld->GetUnitName( pUS, &szName );
+		if ( !bPrint )
+			return "Unit[" + szName + "]";
 		csScript << CC_WHITE << "Unit [" << CC_YELLOW << szName << CC_WHITE << "]" << endl;
 	}
 	else {
 		CDynamicCast<NWorld::CUnitGroup> pGroup(pObject);
 		if (pGroup)
+		{
+			if ( !bPrint )
+			{
+				char szBuf[32];
+				sprintf( szBuf, "UnitGroup %d", pGroup->GetID() );
+				return szBuf;
+			}
 			csScript << "UnitGroup " << pGroup->GetID() << endl;
+		}
 		else {
 			CDynamicCast<NAI::CAIRoute> pRoute(pObject);
 			if (pRoute)
+			{
+				if ( !bPrint )
+					return "Route";
 				csScript << "Route " << endl;
+			}
 			else {
 				CDynamicCast<CLUAObjectPosition> pPos(pObject);
 				if (pPos)
+				{
+					if ( !bPrint )
+					{
+						char szBuf[96];
+						sprintf( szBuf, "Position[ %g, %g, %g ]", pPos->ptPos.x, pPos->ptPos.y, pPos->ptPos.z );
+						return szBuf;
+					}
 					csScript << "Position ( " << pPos->ptPos.x << ", " << pPos->ptPos.y << ", " << pPos->ptPos.z << " )" << endl;
+				}
 				else {
 					CDynamicCast<NWorld::CObjectServerBase> pOS(pObject);
 					if (pOS)
 					{
 						string szName;
 						pWorld->GetObjectName(pOS, &szName);
+						if ( !bPrint )
+							return "Object[" + szName + "]";
 						csScript << CC_WHITE << "Object [" << CC_YELLOW << szName << CC_WHITE << "]" << endl;
 					}
 					else {
@@ -102,17 +139,62 @@ static void luaOutUserData( void *pData )
 						{
 							string szName;
 							pWorld->GetItemName(pItem, &szName);
+							if ( !bPrint )
+								return "Item[" + szName + "]";
 							csScript << CC_WHITE << "Item [" << CC_YELLOW << szName << CC_WHITE << "]" << endl;
 						}
 						else
 						{
-							csScript << CC_RED << "[Script] error: Unregistered CPtr or CObj target" << endl;
+							CDynamicCast< CDBPtrWrapper<NDb::CDBCamera> > pDBCamera(pObject);
+							if (pDBCamera)
+							{
+								if ( !bPrint )
+									return "CDBCamera";
+								csScript << CC_WHITE << "CDBCamera" << endl;
+							}
+							else
+							{
+								if ( !bPrint )
+									return "Ptr[Unregistered CPtr or CObj target]";
+								csScript << CC_RED << "[Script] error: Unregistered CPtr or CObj target" << endl;
+							}
 						}
 					}
 				}
 			}
 		}
 	}
+	return "";
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail NScript::ShowLuaLog @0x2e49e0: lua_showlog echo of every script call --
+// "  LUA(<thread>):  fn(  args  )" (+" check failed" when the arg check rejected it)
+static void ShowLuaLog( const string &szFuncName, int nThread, const vector<SLuaParams> &params, bool bOK )
+{
+	if ( !bShowLuaLog )
+		return;
+	char szBuf[16];
+	sprintf( szBuf, "%x", nThread );
+	csScript << CC_GREY << "  LUA(" << szBuf << "):  " << CC_ORANGE << szFuncName.c_str();
+	csScript << "(  ";
+	string szArgs;
+	for ( vector<SLuaParams>::const_iterator i = params.begin(); i != params.end(); ++i )
+	{
+		if ( IsValid( i->p ) )
+			szArgs += luaOutUserData( i->p.GetPtr(), false ) + ", ";
+		else
+			szArgs += i->s + ", ";
+	}
+	if ( !params.empty() )
+	{
+		szArgs.resize( szArgs.size() - 2 );	// retail: the trailing ", " becomes a single space
+		szArgs += " ";
+	}
+	csScript << CC_WHITE << szArgs.c_str();
+	csScript << CC_ORANGE << " )";
+	if ( !bOK )
+		csScript << " check failed";
+	csScript << endl;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 int luaOut(lua_State* state)
@@ -135,7 +217,7 @@ int luaOut(lua_State* state)
 								csScript << " CPtr -> ";
 							else if ( o.Tag() == tagLuaCObj )
 								csScript << " CObj -> ";
-							luaOutUserData( luaGetPtr( o ) );
+							luaOutUserData( luaGetPtr( o ), true );
 						}
 					}
 					break;
@@ -294,7 +376,7 @@ void luaCallFunction( string szName, const vector< CObj<CLUACallParam> > &params
 	//
 	CLuaThread *pOld = pState->pCT;
 	ASSERT( pOld );
-	lua_setThread( pState, lua_newThread( pState ) );
+	lua_setThread( pState, lua_newThread( pState, szName.c_str() ) );   // retail @0x2e3c70: named after the called function
 	if ( luaPushCallParameters( szName, params, pState ) )
 		lua_startThread( pState, params.size() );
 	lua_setThread( pState, pOld );

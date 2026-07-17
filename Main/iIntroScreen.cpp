@@ -167,7 +167,12 @@ void NGame::CSequence::Initialize( NGame::IMission *_pMission, int _nEventID, co
 	{
 		csSystem << "Can't open " << szFile << endl;
 	}
+	// retail @0x1ed49c seeds -1 here (the ctor's 0 is never what ExecCommand starts from), so the
+	// first pre-increment lands on line 0; without it the first .seq line never runs.
+	nCounter = -1;
 	NStr::SplitString( (const char*)sStream.GetBuffer(), commandsSet, '\n' );
+	// retail @0x1ed4cb kicks the first command from Initialize rather than waiting for Step.
+	ExecCommand( false );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // ExecCommand @0x1ecc00 -- walk the script from the NEXT line, executing the first
@@ -177,6 +182,8 @@ void NGame::CSequence::Initialize( NGame::IMission *_pMission, int _nEventID, co
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void NGame::CSequence::ExecCommand( bool bForce )
 {
+	// retail @0x1ecc00: pre-increment. Initialize seeds nCounter = -1, so the first call lands on
+	// line 0.
 	++nCounter;
 	while ( nCounter < (int)commandsSet.size() )
 	{

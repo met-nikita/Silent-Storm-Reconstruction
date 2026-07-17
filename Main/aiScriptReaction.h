@@ -21,6 +21,7 @@ class IAIUnit;
 class CAIScriptReaction: public CAIReaction
 {
 	OBJECT_BASIC_METHODS( CAIScriptReaction );
+	int operator&( CStructureSaver &f ) { f.Add( 2, (CAIReaction*)this ); return 0; }   // retail @0x3b900 (base chunk only)
 public:
 	CAIScriptReaction() {}
 	CAIScriptReaction( IAIUnit *pUnit ): CAIReaction( pUnit ) {}

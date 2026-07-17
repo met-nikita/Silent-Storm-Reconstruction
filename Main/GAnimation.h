@@ -129,6 +129,8 @@ public:
 	void SetInventory( STime t, const CVec3 &pos, const CVec3 &angle );
 	
 	void SetInterval( STime _tStart, STime _tEnd );
+	// retail @0x4dac50: the DB record id of the played clip (0 when the record is gone)
+	int GetRecordID() const { return IsValid( pA ) ? pA->GetRecordID() : 0; }
 	void SetTimeFunction( CAFunction *_pFunc ) { pFunc = _pFunc; }
 	void SetCycle( bool _bCycle ) { bCycle = _bCycle; }
 	void SetMoveCycle( bool _bMoveCycle ) { bMoveCycle = _bMoveCycle; }

@@ -5,6 +5,9 @@
 #endif // _MSC_VER > 1000
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 #include "wUnitCommands.h"
+#include "RPGBullet.h"   // NRPG::SAttackRayInfo -- CExecShoot::rayInfo (retail save tag 8)
+#include "wMisc.h"       // NWorld::C3DSound -- CExecShoot::SLongBurstSnd slot (retail save tag 3)
+#include "RPGToHit.h"    // NRPG::STargetHLInfo -- CExecMeleeUnit::hlInfo (retail save tag 2)
 namespace NRPG
 {
 	class CGrenadeToHitCalcer;
@@ -51,7 +54,10 @@ public:
 	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CCommandExecute*)this); f.Add(2,&bAttackCanceled); return 0; }
 
 protected:
-	bool CreateAttack( vector<NRPG::CAttackPortion> *pAttack, CUnitServer *pUnitTarget, bool bSpendAmmo = true ) const;
+	// retail @0x3a3f30 takes a 4th bool: bAdaptWeapon, forwarded as the mission CreateAttack's 6th arg
+	// (weapon-familiarity tail). Shoot execs pass nBulletGone==0 (adapt once per shot); melee/knife true.
+	bool CreateAttack( vector<NRPG::CAttackPortion> *pAttack, CUnitServer *pUnitTarget, bool bSpendAmmo = true,
+		bool bAdaptWeapon = true ) const;
 
 public:
 	CExecAttack( CUnitServer *_pUS = 0 );
@@ -73,17 +79,28 @@ public:
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CExecShoot: public CExecAttack
 {
+public:
+	// retail nested SLongBurstSnd (PDB CExecShoot+0x20): the retained long-burst firing sound.
+	// Serialized as CExecShoot tag 3 (CallObjectSerialize<SLongBurstSnd> @0x3b0ef0, inner tag 2 =
+	// the CObj<C3DSound>). The dtor ends a still-held sound (retail SLongBurstSnd::~ @0x3a1010 area).
+	struct SLongBurstSnd
+	{
+		ZDATA
+		CObj<C3DSound> pLongBurstSnd;
+		ZEND int operator&( CStructureSaver &f ) { f.Add(2,&pLongBurstSnd); return 0; }
+		~SLongBurstSnd() { if ( IsValid( pLongBurstSnd ) ) pLongBurstSnd->EndSound(); }
+	};
 protected:
 	ZDATA_(CExecAttack)
 	int nExtraAP;
 	int nToHit;
 	bool bMissed;
 	// --- retail timed-bullet pipeline state (replaces the Jan03 bComplete/vector<CAttackPortion> Attack
-	//     synchronous-burst state). ALL transient (rebuilt per shot by SelectRay / driven by Segment);
-	//     deliberately NOT serialized -> a mid-shot save restores an IDLE executor (no phantom gunshot),
-	//     exactly the intent of the old "tag 9 DROPPED (transient Attack)" reconciliation. ---
-	NRPG::CAttackPortion attack;         // single per-bullet portion (was the vector Attack)
-	CRay ray;                            // firing ray (hit/miss baked in by PeekRay; CExecLaunchRocket also uses it)
+	//     synchronous-burst state). Rebuilt per shot by SelectRay / driven by Segment, and (W3
+	//     serialization convergence) saved 1:1 at the retail tags 3-8/13/14 @0x3b0ef0. ---
+	NRPG::CAttackPortion attack;         // single per-bullet portion (was the vector Attack), retail +0x30, tag 7
+	NRPG::SAttackRayInfo rayInfo;        // firing ray + solver carrier (retail +0x70, tag 8; was the dev CRay ray)
+	SLongBurstSnd longBurstSnd;          // retail +0x20, tag 3 -- retained long-burst SFX
 	CVec3 ptAnimTarget;
 	STime tNextBulletPrepare = 0;        // retail +0x24 -- 0 == no shot armed
 	STime tNextBulletGo = 0;             // retail +0x11c
@@ -93,12 +110,11 @@ protected:
 	bool  bOnlyPrepareToShoot = false;   // retail +0x115 -- aim-and-hold selector (dormant: not yet threaded from the cmd)
 	bool  bUpdateVision = true;          // retail +0x120 -- ctor default true
 public:
-	// save stream: DURABLE members only, kept at the retail tag numbers (CExecShoot::operator& @0x3b0ef0).
-	// The transient timed-bullet/attack/ray state (retail tags 3-8,d,e) is DROPPED -> a stale/mid-shot save
-	// loads as an idle executor (attack empty, tNext*=0 -> Segment early-returns): save-format-safe, and the
-	// deliberate no-phantom-shot design of the old dropped-Attack is preserved. (retail tag 3 longBurstSnd is
-	// elided: C3DSound is a wMisc.cpp-local class with no header surface / no EndSound in-tree.)
-	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CExecAttack*)this); f.Add(2,&nExtraAP); f.Add(9,&ptAnimTarget); f.Add(10,&nToHit); f.Add(11,&bMissed); f.Add(12,&bOnlyPrepareToShoot); f.Add(15,&bUpdateVision); return 0; }
+	// full retail tag table (CExecShoot::operator& @0x3b0ef0): 1=base, 2=nExtraAP, 3=longBurstSnd,
+	// 4=tNextBulletPrepare, 5=bShotInitiated, 6=nBulletPrepared, 7=attack, 8=rayInfo, 9=ptAnimTarget,
+	// 10=nToHit, 11=bMissed, 12=bOnlyPrepareToShoot, 13=nBulletGone, 14=tNextBulletGo, 15=bUpdateVision.
+	// (The former "DURABLE members only" hedge is REVERSED -- W3 serialization convergence.)
+	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CExecAttack*)this); f.Add(2,&nExtraAP); f.Add(3,&longBurstSnd); f.Add(4,&tNextBulletPrepare); f.Add(5,&bShotInitiated); f.Add(6,&nBulletPrepared); f.Add(7,&attack); f.Add(8,&rayInfo); f.Add(9,&ptAnimTarget); f.Add(10,&nToHit); f.Add(11,&bMissed); f.Add(12,&bOnlyPrepareToShoot); f.Add(13,&nBulletGone); f.Add(14,&tNextBulletGo); f.Add(15,&bUpdateVision); return 0; }
 
 private:
 	void Scream();
@@ -126,7 +142,7 @@ public:
 	virtual void Start();
 	virtual void Segment();                      // @0x3a8d20 -- per-tick timed-bullet driver (overrides CCommandExecute::Segment)
 	virtual bool CheckBurst( int nFired, bool bDoAction );   // @0x3a1fa0 -- may the burst keep firing (+ optionally spend burst AP)
-	virtual void PerformAttack();                // @0x3a4480 -- fire ONE ranged attack from `attack`/`ray`
+	virtual void PerformAttack();                // @0x3a4480 -- fire ONE ranged attack from `attack`/`rayInfo`
 	virtual void OnLabel();                      // @0x3a8b40 -- arm the timed schedule / end the shot (void)
 	virtual void SelectRay() {}                  // @0x3a4720/@0x3a49b0 -- pick the firing ray+portion (Jan03 PrepareShot renamed; Tile/Unit override)
 	virtual void CheckShotResult() {}
@@ -141,8 +157,9 @@ class CExecShootTile: public CExecShoot
 	OBJECT_BASIC_METHODS(CExecShootTile);
 private:
 	ZDATA_( CExecShoot )
-	NAI::ETileHitLocation eHL;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(1,( CExecShoot *)this); f.Add(2,&eHL); return 0; }
+	// retail @0x3b1120: CExecShootTile adds NO data members (sizeof == sizeof CExecShoot); the Jan03
+	// ETileHitLocation eHL member is GONE -- the tile to-hit always evaluates THL_LOWER (SelectRay).
+	ZEND int operator&( CStructureSaver &f ) { f.Add(1,( CExecShoot *)this); return 0; }
 
 public:
 	CExecShootTile() {}
@@ -217,15 +234,31 @@ class CExecMeleeUnit: public CExecMelee
 	OBJECT_BASIC_METHODS(CExecMeleeUnit);
 private:
 	ZDATA_(CExecMelee)
-	bool bIsHitLocationShot;
-	NAI::EHitLocation eHL;
+	// retail members (PDB: hlInfo @+0x2c, pTarget @+0x3c): the Jan03 pair {bool bIsHitLocationShot;
+	// NAI::EHitLocation eHL} was replaced by ONE NRPG::STargetHLInfo -- eHL plus the accessible-HL
+	// set SelectTargetHLs resolves at Start, serialized together so a mid-swing save restores the
+	// exact OnLabel to-hit inputs (no recompute after load).
+	NRPG::STargetHLInfo hlInfo;
 	CPtr<CUnitServer> pTarget;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CExecMelee*)this); f.Add(2,&bIsHitLocationShot); f.Add(3,&eHL); f.Add(4,&pTarget); return 0; }
+	// retail wire (operator& @0x3b0d90): 1 = CExecMelee base, 2 = hlInfo (CallObjectSerialize ->
+	// inner tags 2 eHL / 3 accessibleHLs @0x3b0e10), 3 = pTarget. (Jan03 had 2=bIsHitLocationShot,
+	// 3=eHL, 4=pTarget.)
+	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CExecMelee*)this); f.Add(2,&hlInfo); f.Add(3,&pTarget); return 0; }
+
+	// v1.2 @0x7a1840 -- the v1.1 Start prologue (@0x3a1640) factored into a bool helper, shared with
+	// the NEW v1.2 CanDoIt override: resolve *pInfo via NRPG::SelectTargetHLs (accessibility measured
+	// from `pos`), then the aim point on the target hull into *pRes. false = no accessible hit
+	// location resolves (or the target has no valid hull); *pRes is then left UNTOUCHED (v1.2 delta:
+	// v1.1 always overwrote ptTarget via GetUnitHLPos).
+	bool SelectTargetHLPos( const NAI::SUnitPosition &pos, CVec3 *pRes, NRPG::STargetHLInfo *pInfo ) const;
 
 public:
 	CExecMeleeUnit() {}
 	CExecMeleeUnit( CUnitServer *_pUS, CUnitServer *_pTarget, NAI::EHitLocation _eHL, int _nExtraAttackAP );
 
+	// v1.2 NEW override @0x7a2510 (base CExecMelee::CanDoIt @0x3a2180 unchanged): a valid target with
+	// no resolvable hit location is rejected UCR_TARGET_OUT_OF_RANGE up front.
+	virtual EUnitCommandResult CanDoIt( const NAI::SUnitPosition &from, bool bIgnoreTarget = false ) const;
 	virtual void Start();
 	virtual void OnLabel();
 };
@@ -328,7 +361,9 @@ private:
 
 public:
 	CExecCannon() {}
-	CExecCannon( CUnitServer *_pUS, IObject *_pCannon, bool _bEnter );
+	// retail ctor @0x3a5e50 takes the reserving command as the 4th arg (the CanDoIt lock gate
+	// @0x3a2360 needs it); the exit path (bEnter=false) passes none.
+	CExecCannon( CUnitServer *_pUS, IObject *_pCannon, bool _bEnter, CCmdCannon *_pCmd = 0 );
 
 	virtual EUnitCommandResult CanDoIt( const NAI::SUnitPosition &from, bool bIgnoreTarget = false ) const;
 	virtual int GetStartAP() const;
@@ -369,7 +404,9 @@ private:
 
 public:
 	CExecCorpse() {}
-	CExecCorpse( CUnitServer *_pUS, CUnitServer *_pCorpse, bool _bTake );
+	// retail ctor @0x3a6160 takes the reserving command as the 4th arg (the CanDoIt lock gate
+	// @0x3a61d0 needs it); the drop path (CCmdDropCorpse) passes none.
+	CExecCorpse( CUnitServer *_pUS, CUnitServer *_pCorpse, bool _bTake, CCmdTakeCorpse *_pCmd = 0 );
 
 	virtual EUnitCommandResult CanDoIt( const NAI::SUnitPosition &from, bool bIgnoreTarget = false ) const;
 	virtual int GetStartAP() const;
@@ -597,6 +634,11 @@ public:
 	}
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail NWorld::CreateInventoryItemForUnit @0x3ab3c0: SYNCHRONOUS backpack insert (no executor, no
+// unit command, no AP) -- lua UnitCreateItem @0x2fbfd0 calls it directly; CExecCreateInventoryItem::
+// Run @0x3ab770 delegates to it.
+void CreateInventoryItemForUnit( CUnitServer *pUS, CCmdCreateInventoryItem *pCmd );
+////////////////////////////////////////////////////////////////////////////////////////////////////
 // CExecMoveInventoryItem
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CExecCreateInventoryItem: public CCommandExecute
@@ -655,21 +697,8 @@ public:
 	virtual void Run();
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// CExecExchangeInventoryItems -- bring an item into a hand slot, displacing whatever is there
-////////////////////////////////////////////////////////////////////////////////////////////////////
-class CExecExchangeInventoryItems: public CCommandExecute
-{
-	OBJECT_BASIC_METHODS(CExecExchangeInventoryItems);
-	ZDATA_(CCommandExecute)
-	CObj<CCmdExchangeInventoryItems> pCmd;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CCommandExecute*)this); f.Add(2,&pCmd); return 0; }
-public:
-	CExecExchangeInventoryItems() {}
-	CExecExchangeInventoryItems( CUnitServer *_pUS, CCmdExchangeInventoryItems *_pCmd );
-
-	virtual EUnitCommandResult CanDoIt( const NAI::SUnitPosition &from, bool bIgnoreTarget = false );
-	virtual void Run();
-};
+// (CExecExchangeInventoryItems REMOVED -- retail-absent; retail CreateExecutor @0x3b37b0 composes
+//  the exchange from a CExecQueue of registered execs, so it serializes cleanly mid-exchange)
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CExecPlayAnimation
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -709,6 +738,24 @@ public:
 	//
 	virtual void Run();
 	virtual EUnitCommandResult CanDoIt( const NAI::SUnitPosition &from, bool bIgnoreTarget = false );
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// CExecNotHeroWantsToTalk
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail @0x3b56f0 -- one-shot executor issued when a NON-hero unit is told to talk to an NPC: it
+// throws CEventOnNotHeroWantsToTalk (which drives the CAckNPCInteraction voice bark) and finishes.
+class CExecNotHeroWantsToTalk: public CCommandExecute
+{
+	OBJECT_BASIC_METHODS( CExecNotHeroWantsToTalk );
+	ZDATA
+	ZPARENT( CCommandExecute );
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,(CCommandExecute *)this); return 0; }
+	//
+public:
+	CExecNotHeroWantsToTalk() {}
+	CExecNotHeroWantsToTalk( CUnitServer *_pUS ): CCommandExecute( _pUS ) {}
+	//
+	virtual void Run();
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 } // NAMESPACE

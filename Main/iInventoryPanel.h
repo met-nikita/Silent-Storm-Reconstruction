@@ -26,13 +26,17 @@ private:
 	CPtr<NGame::IMission> pMission;
 	CPtr<NGame::IUnitTracker> pUnit;
 	////
+	CPtr<CText> pName;
 	CPtr<CButton> pClose;
 	CPtr<CButton> pArrange;
 	CObj<CBackPackSlot> pBackPack;
 	CObj<CUnitModelShow> pUnitModelShow;
 	CPtr<CComplexButton> pUnload;
-	CPtr<CComplexButton> pRepair;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CWindow*)this); f.Add(2,&pMission); f.Add(3,&pUnit); f.Add(4,&pClose); f.Add(5,&pArrange); f.Add(6,&pBackPack); f.Add(7,&pUnitModelShow); f.Add(8,&pUnload); f.Add(9,&pRepair); return 0; }
+	// retail operator& @0x1f01c0: tag 4 = pName (CText), 5..9 = pClose/pArrange/pBackPack/
+	// pUnitModelShow/pUnload; the shipped binary has NO pRepair (v1.2 save record 0xB0521143
+	// carries exactly tags 1..9 in this order). The old dev map read every widget one tag
+	// early and pUnload got a CUnitModelShow ref -> null -> SetChecked crash on load.
+	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CWindow*)this); f.Add(2,&pMission); f.Add(3,&pUnit); f.Add(4,&pName); f.Add(5,&pClose); f.Add(6,&pArrange); f.Add(7,&pBackPack); f.Add(8,&pUnitModelShow); f.Add(9,&pUnload); return 0; }
 
 public:
 	CInventoryPanel() {}

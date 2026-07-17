@@ -42,7 +42,10 @@ public:
 	virtual IInventoryItem *TakeOff( NDb::ESlot where ) = 0;
 	virtual bool Activate( NDb::ESlot where ) = 0;
 
-	virtual void SetHandItem( IInventoryItem *pWhat ) = 0;
+	// retail IInventory has NO SetHandItem: the PDB vtable runs Take(13), Place(14), ArrangeItems(15),
+	// CanTakeOff(16), Equip(17), TakeOff(18), Activate(19), SetPanzerklein(20) -- corroborated by
+	// CExecLoadWeapon::LoadClip @0x3949a0 dispatching Take at +0x34 (slot 13) and TakeOff at +0x48
+	// (slot 18). Setting the hand goes through CUnitServer::SetHandItem @0x387b30 instead.
 	virtual void SetPanzerklein( NDb::CPanzerklein *pPK, IInventory *pPKInventory ) = 0;
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -68,6 +71,7 @@ IInventory *CreateInventory( CUnit *pOwner );
 IInventoryItem *CreateItem( CDBRecord *pItem );
 IInventoryItem *CreateClueItem( NDb::CRPGItem *pDBItem );
 IInventoryItem *CreateHintItem();	// retail @0x2a21a0: the fixed db item 0x1b6 wrapped in CSimpleItem<IHintItem>
+IInventoryItem *CreateDummyItem( NDb::CRPGItem *pDBItem );	// retail @0x2a2220: inert wrapper for a record with no live pSuccessor
 IWeaponItem *CreateWeaponItem( NDb::CRPGWeapon *pDBWeapon );
 IInventoryItem *CreateMeleeWeaponItem( NDb::CRPGMeleeWeapon *pDBMeleeWeapon );
 IInventoryItem *CreateClipItem( NDb::CRPGClip *pDBClip, NDb::CRPGAmmo *pDBAmmo = 0, int nAmmoQuantity = - 1 );

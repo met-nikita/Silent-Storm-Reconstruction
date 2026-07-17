@@ -2,6 +2,8 @@
 //#include "RPGGame.h"
 #include "RPGItemInfo.h"
 #include "RPGUnitInfo.h"
+#include "RPGUnit.h"	// NRPG::CUnit::pHeadInfo (retail cap-vs-hair gate @0x21db20)
+#include "LSHead.h"
 #include "..\DBFormat\DataRPG.h"
 #include "..\DBFormat\DataFormat.h"
 //#include "GAnimation.h"
@@ -133,29 +135,42 @@ const char* GetBoneName( NDb::ESlot slot, NRPG::IUnitMissionInfo *pRPG, bool bUn
 	return "";
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void GetItemsBindPlaces( vector<IRenderVisitor::SBoundMesh> *pRes, NRPG::IUnitMissionInfo *pRPG, 
-	bool bUndrawWeapon, NDb::CPanzerklein *pPanzerklein, bool bNoHeavyWeapon )
+void GetItemsBindPlaces( vector<IRenderVisitor::SBoundMesh> *pRes, NRPG::IUnitMissionInfo *pRPG,
+	bool bUndrawWeapon, NDb::CPanzerklein *pPanzerklein, bool bNoHeavyWeapon, bool bNoCap, bool bNoItems )
 {
 	pRes->clear();
 	SRand rnd;
 	bool bIsPK = IsValid( pPanzerklein );
 	CPtr<NRPG::IInventoryInfo> pInventory = pRPG->GetInventoryInfo();
 	NDb::CRPGUniform *pDBUniform = pInventory->GetUniform();
-	// cap & backpack
-	if ( pDBUniform )
+	// retail @0x21db20: a PK poses in ITS pers uniform (not the wearer's), and a headless PK
+	// showing items never wears the cap
+	if ( bIsPK )
 	{
-		if ( pDBUniform->pCapModel )
-			AttachItem( pRes, &rnd, UIT_CAP, pDBUniform->pCapModel, bIsPK );
-		if ( pDBUniform->pBackpackModel )
-			AttachItem( pRes, &rnd, UIT_BACKPACK, pDBUniform->pBackpackModel, bIsPK );
+		pDBUniform = pPanzerklein->pPers->pUniform;
+		if ( !bNoItems && pPanzerklein->bHasNoHead )
+			bNoCap = true;
 	}
+	// cap (retail: a live head with a hair model keeps the cap off)
+	if ( pDBUniform && !bNoCap )
+	{
+		NRPG::CUnit *pRPGUnit = pRPG->GetRPGUnit();
+		bool bHair = pRPGUnit && IsValid( pRPGUnit->pHeadInfo ) && IsValid( pRPGUnit->pHeadInfo->GetHair() );
+		if ( pDBUniform->pCapModel && !bHair )
+			AttachItem( pRes, &rnd, UIT_CAP, pDBUniform->pCapModel, bIsPK );
+	}
+	// retail: a body-mode pose (dialog/portrait) carries at most the cap
+	if ( bNoItems )
+		return;
+	if ( pDBUniform && pDBUniform->pBackpackModel )
+		AttachItem( pRes, &rnd, UIT_BACKPACK, pDBUniform->pBackpackModel, bIsPK );
 	if ( bIsPK )
 	{
 		NDb::CRPGItem *pLeftHandItem = pPanzerklein->pLeftHandItem;
 		AttachItem( pRes, &rnd, UIT_PK_LEFT_HAND, pLeftHandItem->pModel, bIsPK );
 	}
 	bool bHeavy = false;
-	unordered_map< int, int > slotItems; // номер слота либо -1 для активного оружия
+	unordered_map< int, int > slotItems; // пїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅ -1 пїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ
 	NRPG::IInventoryItem *pActiveIItem = pInventory->GetActive();
 	NDb::CRPGItem *pActiveItem = 0;
 	if ( pActiveIItem )

@@ -22,6 +22,7 @@
 #include "aiRoute.h"
 #include "rpgAttackMech.h"
 #include "wUnitCommands.h"
+#include "wUnitAttackExec.h"				// NWorld::CreateInventoryItemForUnit @0x3ab3c0 (UnitCreateItem direct insert)
 #include "wUnitAttack.h"					// NWorld::UnitThrowGrenade (UnitGrenadeToUnit / UnitGrenadeToWaypoint)
 #include "rpgPerk.h"
 #include "rpgGlobal.h"
@@ -301,7 +302,8 @@ BEGIN_SCRIPT_COMMAND( UnitSetDirection, "un" )
 		NAI::EDirection dir = ( NAI::EDirection )luaParams[ 1 ].n;
 		NAI::SPosition pos = pUS->GetPosition().pos;
 		pos.p.SetDirection( dir );
-		pUS->Do( new NWorld::CCmdSetCommand( pUS, new NWorld::CCmdPath( pos, NAI::PF_USE_DIR ) ) );
+		// retail @0x2f7600 queues a LOOK (turn in place), not a path
+		pUS->Do( new NWorld::CCmdSetCommand( pUS, new NWorld::CCmdLook( pos ) ) );
 		pUS->Do( new NWorld::CCmdSetCommand( pUS, new NWorld::CCmdContinue() ) );
 	}
 	return 0;
@@ -611,7 +613,9 @@ BEGIN_SCRIPT_COMMAND( UnitPlaceInPocket, "u" )
 	CDynamicCast<NWorld::CUnitServer> pUS(luaParams[0].p);
 	if (pUS)
 	{
-		if ( !pScript->pWorld->IsUnitInPocket( pUS ) )
+		// retail @0x2f9500: the binding only flips the STATE -- the pocketing itself happens in
+		// CUnitStateInPocket::OnStateStarted (@0x3c9fb0).
+		if ( !pScript->pWorld->GetPocket()->IsUnitInPocket( pUS ) )
 		{
 			pUS->SetState( new NWorld::CUnitStateInPocket( pUS ) );
 			pUS->Update();
@@ -624,7 +628,8 @@ BEGIN_SCRIPT_COMMAND( UnitRestoreFromPocket, "u" )
 	CDynamicCast<NWorld::CUnitServer> pUS(luaParams[0].p);
 	if (pUS)
 	{
-		if ( pScript->pWorld->IsUnitInPocket( pUS ) )
+		// retail @0x2f9650: mirror of the above -- the unpocketing runs in OnStateFinished (@0x3ca060).
+		if ( pScript->pWorld->GetPocket()->IsUnitInPocket( pUS ) )
 		{
 			pUS->SetState( new NWorld::CUnitStateNormal( pUS ) );
 			pUS->Update();
@@ -1028,9 +1033,10 @@ BEGIN_SCRIPT_COMMAND( UnitIsCarryingCorpse, "uu" )
 	return 1;
 END_SCRIPT_COMMAND
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// retail @0x2fbfd0: create the named DB item in the unit's inventory, or warn on a bad id.
-// NB: the dev CCmdCreateInventoryItem has no bEquip arg, so the spec's 3rd param is
-// accepted (compat) but not honored -- the predecessor command always creates unequipped.
+// retail @0x2fbfd0: create the named DB item in the unit's inventory, or warn on a bad id. The 3rd
+// "b" param is bClue (retail cmd tag 3 -> NRPG::CreateClueItem). Retail inserts SYNCHRONOUSLY via
+// NWorld::CreateInventoryItemForUnit @0x3ab3c0 -- NOT a unit command: the old Do(SetCommand) route
+// made back-to-back script grants cancel each other's executor (tutorial pistol + 3 clips -> 1 clip).
 BEGIN_SCRIPT_COMMAND( UnitCreateItem, "unb[false]" )
 	CDynamicCast<NWorld::CUnitServer> pUS( luaParams[ 0 ].p );
 	if ( IsValid( pUS ) )
@@ -1038,8 +1044,8 @@ BEGIN_SCRIPT_COMMAND( UnitCreateItem, "unb[false]" )
 		NDb::CRPGItem *pItem = NDb::GetRPGItem( luaParams[ 1 ].n );
 		if ( IsValid( pItem ) )
 		{
-			pUS->Do( new NWorld::CCmdSetCommand( pUS, new NWorld::CCmdCreateInventoryItem( pItem ) ) );
-			pUS->Do( new NWorld::CCmdSetCommand( pUS, new NWorld::CCmdContinue() ) );
+			CObj<NWorld::CCmdCreateInventoryItem> pCmd = new NWorld::CCmdCreateInventoryItem( pItem, luaParams[ 2 ].b );
+			NWorld::CreateInventoryItemForUnit( pUS, pCmd );
 		}
 		else
 			csSystem << CC_RED << "Script warning: Invalid rpgitem id: " << luaParams[ 1 ].n << endl;
@@ -1093,6 +1099,9 @@ BEGIN_SCRIPT_COMMAND( UnitSwitchToGrenade, "u" )
 END_SCRIPT_COMMAND
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // retail @0x2fa400 ("un"): create an item from a DB record id and slot it into the unit's active hand.
+// When the active hand already holds an item, retail queues a stash move first (bNeedMove=true,
+// moveSource = the occupied hand slot, moveTarget = backpack auto-place); the executor queue
+// (CreateExecutor @0x3b37b0) prepends the CExecMoveInventoryItem before the create+activate.
 BEGIN_SCRIPT_COMMAND( CreateAndActivateItem, "un" )
 	CDynamicCast<NWorld::CUnitServer> pUS( luaParams[ 0 ].p );
 	if ( IsValid( pUS ) )
@@ -1100,8 +1109,18 @@ BEGIN_SCRIPT_COMMAND( CreateAndActivateItem, "un" )
 		NDb::CRPGItem *pItem = NDb::GetRPGItem( luaParams[ 1 ].n );
 		if ( IsValid( pItem ) )
 		{
-			int nSlot = pUS->GetRPG()->GetInventoryInfo()->GetActiveSlot();
-			pUS->Do( new NWorld::CCmdSetCommand( pUS, new NWorld::CCmdCreateAndActivateInventoryItem( pItem, nSlot ) ) );
+			NRPG::IInventoryInfo *pInfo = pUS->GetRPG()->GetInventoryInfo();
+			int nSlot = pInfo->GetActiveSlot();
+			bool bNeedMove = false;
+			NWorld::SItem sMoveSource, sMoveTarget;
+			NRPG::IInventoryItem *pActive = pInfo->Get( (NDb::ESlot)nSlot );
+			if ( IsValid( pActive ) )
+			{
+				bNeedMove = true;
+				sMoveSource = NWorld::SItem( pUS, NWorld::SItem::SLOT, nSlot, pActive );
+				sMoveTarget = NWorld::SItem( pUS, NWorld::SItem::BACKPACK, CTPoint<int>( -1, -1 ) );
+			}
+			pUS->Do( new NWorld::CCmdSetCommand( pUS, new NWorld::CCmdCreateAndActivateInventoryItem( pItem, nSlot, bNeedMove, sMoveSource, sMoveTarget ) ) );
 			pUS->Do( new NWorld::CCmdSetCommand( pUS, new NWorld::CCmdContinue() ) );
 		}
 		else

@@ -337,10 +337,10 @@ static int parse_file (lua_State *L, const char *filename) {
 LUA_API void lua_startCall (lua_State *L, int nargs, int nresults);
 // defined in lapi.cpp
 
-LUA_API int lua_dofile (lua_State *L, const char *filename) 
+LUA_API int lua_dofile (lua_State *L, const char *filename)
 {
 	CObj<CLuaThread> pOld = L->pCT;
-	lua_setThread( L, lua_newThread( L ) );
+	lua_setThread( L, lua_newThread( L, filename ) );   // retail @0x3e4120: the thread is named after the file
   int status = parse_file(L, filename);
   if ( status == 0 )  // parse OK?
 		lua_startCall( L, 0, LUA_MULTRET );
@@ -366,10 +366,10 @@ LUA_API int lua_parsebuffer (lua_State *L, const char *buff, size_t size, const 
 	return parse_buffer(L, buff, size, name);
 }
 
-LUA_API int lua_dobuffer( lua_State *L, const char *buff, size_t size, const char *name ) 
+LUA_API int lua_dobuffer( lua_State *L, const char *buff, size_t size, const char *name )
 {
 	CObj<CLuaThread> pOld = L->pCT;
-	lua_setThread( L, lua_newThread( L ) );
+	lua_setThread( L, lua_newThread( L, "Buffer thread" ) );   // retail @0x3e41c0: literal 0x8cf1b4
   int status = parse_buffer( L, buff, size, name );
   if ( status == 0 )
 		lua_startCall( L, 0, LUA_MULTRET );
@@ -394,10 +394,10 @@ static void message( lua_State *L, const char *s )
   const TObject *em = luaH_getglobal( L, LUA_ERRORMESSAGE );
   if ( em->GetType() == LUA_TFUNCTION ) 
 	{
-		// выводим сообщение в новом thread-е
+		// deliver the message on a fresh thread
 		CObj<CLuaThread> pOld = L->pCT;
 		ASSERT( pOld );
-		lua_setThread( L, lua_newThread( L ) );
+		lua_setThread( L, lua_newThread( L, "Message thread" ) );   // retail @0x3e43f0: literal 0x8cf1cc
     *LObj(L, L->pCT->top) = *em;
     incr_top;
     lua_pushstring( L, s );

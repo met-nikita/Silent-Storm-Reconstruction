@@ -136,3 +136,16 @@ bool IsBeginTurnEvent( IAIEvent *pEvent )
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 }  // namespace NAI
+// retail saveload ids (serialization-convergence W1; s2_scratch docs/SERIALIZATION_CONVERGENCE.md)
+using namespace NAI;
+REGISTER_SAVELOAD_CLASS( 0x23062AC0, CAIEnemyEvent )
+REGISTER_SAVELOAD_CLASS( 0x23062AC1, CAILostEnemyEvent )
+REGISTER_SAVELOAD_CLASS( 0x23062AC2, CAIPossibleEnemyEvent )
+REGISTER_SAVELOAD_CLASS( 0x23062AC3, CAIEnemyDiedEvent )
+REGISTER_SAVELOAD_CLASS( 0x23062B00, CAIAllyNeedHelpEvent )
+REGISTER_SAVELOAD_CLASS( 0x23062B01, CAILostAllyEvent )
+REGISTER_SAVELOAD_CLASS( 0x23062B02, CAIBeginTurnEvent )
+REGISTER_SAVELOAD_CLASS( 0x23062B40, CAIHelpCalledEvent )
+REGISTER_SAVELOAD_CLASS( 0x23062B80, CAILostPossibleEnemyEvent )
+REGISTER_SAVELOAD_CLASS( 0x23068C00, CAICorpseEvent )
+REGISTER_SAVELOAD_CLASS( 0x23069B00, CAIUpdateEvent )

@@ -15,7 +15,13 @@
 namespace NAI
 {
 
-const bool B_3x3_RENDER = false;
+// retail ALWAYS bakes at 3x supersampling (InitParallel step 0.20833333 = FP_GRID_STEP/3,
+// disasm-verified) and always runs the MarkCandidatesToDisplace + CalcDisplacements rescue --
+// the ported retail bake pair ASSUMES this substrate (a steep hull's colliding CENTRE subsample
+// is rescued by the displacement search onto a clear neighbouring subsample; at 1x1 there is no
+// second chance and fire-escape flights bake dead). The Jan03 dual-mode plumbing has carried
+// both paths all along; this flips it to the retail mode.
+const bool B_3x3_RENDER = true;
 
 const char N_FLAG_NATIVE    = 1;
 const char N_FLAG_MUST_CALC = 2;
@@ -66,13 +72,13 @@ bool CPassCalcer::IsInactivePoint( int x, int y, float fH, const CArray2D<char> 
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-bool CPassCalcer::IsInactivePoint( int x, int y, const CArray2D<unsigned short> &tempH, const CArray2D<char> &flags )
+bool CPassCalcer::IsInactivePoint( int x, int y, const CArray2D<SPCHeight> &tempH, const CArray2D<char> &flags )
 {
 	if ( !IsInsideArray( x, y, tempH ) )
 		return false;
 	if ( flags[y][x] & N_FLAG_LADDER )
 		return true;
-	float fH = GetFHeight( tempH[ y ][ x ] );
+	float fH = GetFHeight( tempH[ y ][ x ].nHeight );
 	return IsInactivePoint( x, y, fH, flags );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -95,7 +101,7 @@ static void MarkNeighbors( CArray2D<char> *pRes, const CTPoint<int> &shift, bool
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CPassCalcer::MarkInactiveEnlargements( CArray2D<char> *pRes, const CTPoint<int> &shift, const CArray2D<unsigned short> &tempH,
+void CPassCalcer::MarkInactiveEnlargements( CArray2D<char> *pRes, const CTPoint<int> &shift, const CArray2D<SPCHeight> &tempH,
 	const CFastRenderer &render )
 {
 	CArray2D<char> &flags = *pRes;
@@ -313,9 +319,9 @@ void CPassCalcer::TestLayMovesInDirection( NAI::CCollider *pCollider, CArray2D<S
 			SDoorColliderAnalyzer analyzer;
 			if ( fDiffH > 0.05f )
 			{
-				// тут надо по идее строить перпендикуляр, чтобы правильно ставить сферы
-        // пока будет Crap, заключающийся просто в том, что мы их просто подымем повыше
-				// на ту высоту, на которой они уже не задевают исходные точки
+				// пїЅпїЅпїЅ пїЅпїЅпїЅпїЅ пїЅпїЅ пїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ, пїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅ
+        // пїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅ Crap, пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ пїЅ пїЅпїЅпїЅ, пїЅпїЅпїЅ пїЅпїЅ пїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ
+				// пїЅпїЅ пїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ, пїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅ пїЅпїЅпїЅ пїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅ
 				float fHypotenuse = fabs( vel );
 				float fCosInv = fHypotenuse / fStep;
 				ptCenter.z = fSrcHeight + F_CHECK_HEIGHT_MOVE * fCosInv + 0.15f;
@@ -408,7 +414,7 @@ int CPassCalcer::GetNFloor( CFastRenderer::SResult *p )
 int CPassCalcer::CalcColliderSize( int nFloor, int nLayer, float *pMinH, float *pMaxH, CVec2 *pPMin, CVec2 *pPMax )
 {
 	int nSpotsCount = 0;
-	CArray2D<unsigned short> &tempH = *tempHeights.GetArray( nFloor, nLayer );
+	CArray2D<SPCHeight> &tempH = *tempHeights.GetArray( nFloor, nLayer );
 	CArray2D<char> &flags = *tempFlags.GetArray( nFloor, nLayer );
 	float &fMinHeight = *pMinH, &fMaxHeight = *pMaxH;
 	CVec2 &ptMin = *pPMin, &ptMax = *pPMax;
@@ -423,7 +429,7 @@ int CPassCalcer::CalcColliderSize( int nFloor, int nLayer, float *pMinH, float *
 				cp = pGroup->GetCPNoHeight( x + region.minx, y + region.miny );
 			ptMin.Minimize( cp );
 			ptMax.Maximize( cp );
-			unsigned short &nHeight = tempH[y][x];
+			unsigned short nHeight = tempH[y][x].nHeight;
 			float fHeight = GetFHeight( nHeight );
 			fMinHeight = Min( fMinHeight, fHeight );
 			fMaxHeight = Max( fMaxHeight, fHeight );
@@ -435,19 +441,19 @@ int CPassCalcer::CalcColliderSize( int nFloor, int nLayer, float *pMinH, float *
 	return nSpotsCount;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-float CPassCalcer::InactivePointHeight( int x, int y, const CArray2D<unsigned short> &tempH )
+float CPassCalcer::InactivePointHeight( int x, int y, const CArray2D<SPCHeight> &tempH )
 {
 	if ( B_3x3_RENDER )
 	{
 		unsigned short nHeight = 0;
 		for ( int dX = -1; dX < 2; ++dX )
 			for ( int dY = -1; dY < 2; ++dY )
-				if ( tempH[ y + dY ][ x + dX ] > nHeight )
-					nHeight = tempH[ y + dY ][ x + dX ];
+				if ( tempH[ y + dY ][ x + dX ].nHeight > nHeight )
+					nHeight = tempH[ y + dY ][ x + dX ].nHeight;
 		return GetFHeight( nHeight );
 	}
 	else
-		return GetFHeight( tempH[y][x] );
+		return GetFHeight( tempH[y][x].nHeight );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 static bool HasFlag( int x, int y, const CArray2D<char> &flags, char flag )
@@ -502,8 +508,18 @@ CPassCalcer::STile &CPassCalcer::GetFlipperTile(
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-int CPassCalcer::CalcPoseInPoint( int x, int y, NAI::CCollider *pCollider, const CArray2D<unsigned short> &tempH, 
-		CArray2D<STile> *pTemp, const CArray2D<char> &flags, int nLayer, int nDis, bool bLastLayer )
+// retail @0x862e0 1:1 (oracle s2_passcalcer.h:427): classify one tile under a displacement code.
+// The three retail deltas vs the Jan03 body (they PAIR with the retail CreateAdditionalLayers
+// height fields -- unmerged Jan03 heights + this body, or merged retail heights + the Jan03 body,
+// both break stair/ledge bakes):
+//   - the inactive/special gate accepts NATIVE **or LADDER-LANDING** supersamples (0x21);
+//   - the special-point scan start is keyed on bTop (the last/top layer), not the collision state,
+//     and the Jan03 render-interval fLimitZ/"place same" machinery is GONE -- the scan runs to the
+//     flat 25 m cap with a degenerate flat-top fallback (one clear sphere at the cap -> a tile at
+//     25 m with sentinel floor 50, falling through to the pose probes);
+//   - the tile is stamped with the surface's native source floor (STile::nFloor).
+int CPassCalcer::CalcPoseInPoint( int x, int y, NAI::CCollider *pCollider, const CArray2D<SPCHeight> &tempH,
+		CArray2D<STile> *pTemp, const CArray2D<char> &flags, int nLayer, int nDis, bool bTop )
 {
 	NAI::CCollider &collider = *pCollider;
 	CArray2D<STile> &temp = *pTemp;
@@ -521,10 +537,11 @@ int CPassCalcer::CalcPoseInPoint( int x, int y, NAI::CCollider *pCollider, const
 	if ( !HasFlag( nX, nY, flags, N_FLAG_MUST_CALC ) )
 		return 0;
 	STile &tile = temp[y][x];
-	tile.nHeight = tempH[ nY ][ nX ];	
-	CVec2 cp = pGroup->GetCPNoHeight( x + region.minx, y + region.miny ) + 
+	tile.nHeight = tempH[ nY ][ nX ].nHeight;
+	tile.nFloor = tempH[ nY ][ nX ].nFloor;
+	CVec2 cp = pGroup->GetCPNoHeight( x + region.minx, y + region.miny ) +
 		CVec2( F_DISPLACEMENT_X[nDis], F_DISPLACEMENT_Y[nDis] );
-	CVec3 ptTest( cp.x, cp.y, GetFHeight( tempH[ nY ][ nX ] ) );
+	CVec3 ptTest( cp.x, cp.y, GetFHeight( tempH[ nY ][ nX ].nHeight ) );
 	ptTest.z += F_CHECK_HEIGHT;
 	SDoorColliderAnalyzer analyzer;
 	bool bWorkWithFlipperFinished = false;
@@ -537,63 +554,72 @@ int CPassCalcer::CalcPoseInPoint( int x, int y, NAI::CCollider *pCollider, const
 	}
 	if ( flags[ nY ][ nX ] & N_FLAG_LADDER )
 		tile.nFlags |= TF_IS_LADDER_UP;
-	if ( IsInactivePoint( nX, nY, tempH, flags ) || bCollides )
+	const bool bInactiveProbe = IsInactivePoint( nX, nY, tempH, flags );
+	if ( bInactiveProbe || bCollides )
 	{
-		if ( nDis )
+		// retail gate: centre subsample only; a collision on a non-top layer bails; the supersample
+		// must carry a surface OR a ladder landing (0x21)
+		if ( nDis != 0 || ( bCollides && !bTop ) ||
+				!HasFlag( nX, nY, flags, N_FLAG_NATIVE | N_FLAG_LADDER ) )
 			return 0;
-		if ( bCollides && !bLastLayer ) // над нами на данном этаже еще есть что-то, а значит считать инэктив здесь бесполезно
-			return 0;
-		if ( !HasFlag( nX, nY, flags, N_FLAG_NATIVE ) )
-			return 0;
-		float fTestZ = InactivePointHeight( nX, nY, tempH ), fDZ = 0, fLimitZ = F_MAX_HEIGHT, fHeightForZ = F_MAX_HEIGHT;
-		// find maximal height where it is reasonable to search for a place
-		for ( CFastRenderer::SResult *p = render.resGrid[ nY ][ nX ]; p; p = p->pNext )
+		float fBase = InactivePointHeight( nX, nY, tempH );
+		// retail @0x48650e (disasm-proven; the oracle's "flat 25 m cap" was a mis-decode): the
+		// ceiling limit, the landing surface and the landing FLOOR come from scanning ALL height
+		// slots at this supersample -- the surface above caps the special scan and is the
+		// place-same target (this is how retail stitches stacked fire-escape flights).
+		float fLimitZ = F_MAX_HEIGHT, fHeightForZ = F_MAX_HEIGHT;
+		short nFloorForZ = 50;
+		for ( int nF = 0; nF < N_MAX_FLOORS; ++nF )
 		{
-			//if ( p->fExit > fTestZ + F_TEST_SPHERE_RADIUS )
-			if ( p->fExit > ptTest.z )
+			for ( int nL = 0; nL < N_MAX_LAYERS_PER_FLOOR; ++nL )
 			{
-				fLimitZ = Min( fLimitZ, float( p->fExit - (F_CHECK_HEIGHT - F_TEST_SPHERE_RADIUS ) ) );
-				fHeightForZ = Min( fHeightForZ, p->fExit );
+				const SPCHeight &s = (*tempHeights.GetArray( nF, nL ))[ nY ][ nX ];
+				float fH = GetFHeight( s.nHeight );
+				if ( fH > ptTest.z )
+				{
+					fLimitZ = Min( fLimitZ, fH - ( F_CHECK_HEIGHT - F_TEST_SPHERE_RADIUS ) );
+					fHeightForZ = Min( fHeightForZ, fH );
+					if ( s.nFloor < nFloorForZ )
+						nFloorForZ = s.nFloor;
+				}
 			}
 		}
-		// do search for a place
-		if ( !bCollides )
-			fDZ -= F_SPECIAL_POINT_TEST_STEP;
-		bool bContinueCount = false;
+		// retail @0x48662c keys the scan start on the COLLISION state (the oracle's bTop claim
+		// was wrong; the Jan03 keying was correct)
+		float fDZ = bCollides ? 0.0f : -F_SPECIAL_POINT_TEST_STEP;
 		for(;;)
 		{
 			fDZ += F_SPECIAL_POINT_TEST_STEP;
-			ptTest.z = fTestZ + fDZ + F_TEST_SPHERE_RADIUS; 
 			if ( fDZ > F_MAX_SPECIAL_POINT_HEIGHT )
 				return 0;
+			ptTest.z = fBase + F_TEST_SPHERE_RADIUS + fDZ;
 			if ( ptTest.z >= fLimitZ )
-			{
-				ptTest.z = fHeightForZ + F_CHECK_HEIGHT;
-				analyzer.Clear();
-				bCollides = collider.DoesIntersect( ptTest, F_TEST_SPHERE_RADIUS, &analyzer );
-				if ( bCollides )
-					return 0;
-				// we can place "same", and we do not collide -> place same
-				tile.nHeight = GetIHeight( fHeightForZ );
-				bContinueCount = true;
-				break;
-			}
+				break;   // ceiling reached -> place-same onto the surface above
 			analyzer.Clear();
-			bool bCollidesNow = 
+			bool bCollidesNow =
 				collider.DoesIntersect( ptTest, F_TEST_SPHERE_RADIUS, &analyzer ) ||
 				collider.DoesIntersect( ptTest + CVec3( 0, 0, F_TEST_SPHERE_STEP ), F_TEST_SPHERE_RADIUS, &analyzer );
 			if ( bCollidesNow )
 				continue;
 			// Special point is found!
-			tile.nHeight = GetIHeight( fTestZ + fDZ );
+			tile.nHeight = GetIHeight( fBase + fDZ );
 			tile.nPassable = CP_INACTIVE;
-			break;
-		}
-		if ( !bContinueCount ) 
 			return 2;
+		}
+		// retail @0x48679c place-same: one clear sphere on the surface above -> the tile snaps to
+		// that surface's height AND floor, then falls through to the normal pose probes
+		ptTest.z = fHeightForZ + F_CHECK_HEIGHT;
+		analyzer.Clear();
+		if ( collider.DoesIntersect( ptTest, F_TEST_SPHERE_RADIUS, &analyzer ) )
+			return 0;
+		tile.nHeight = GetIHeight( fHeightForZ );
+		tile.nFloor = nFloorForZ;
+		bCollides = false;   // the place-same probe just verified clear
 	}
 	tile.nPassable = CP_LAY;
 	ptTest.z += F_TEST_SPHERE_STEP;
+	// retail accumulates ONE analyzer across the pose probes and ORs the collision state
+	// (no Clear here -- a door pSrc captured by the first probe still bans the flipper tile)
 	bCollides = bCollides || collider.DoesIntersect( ptTest, F_TEST_SPHERE_RADIUS, &analyzer );
 	if ( analyzer.pSrc && !bCollides && !bWorkWithFlipperFinished ) 
 	{
@@ -607,7 +633,7 @@ int CPassCalcer::CalcPoseInPoint( int x, int y, NAI::CCollider *pCollider, const
 	tile.nPassable |= CP_CROUCH;
 	ptTest.z += F_TEST_SPHERE_STEP;
 	bCollides = collider.DoesIntersect( ptTest, F_TEST_SPHERE_RADIUS, &analyzer );
-	if ( analyzer.pSrc && !bCollides && !bWorkWithFlipperFinished ) 
+	if ( analyzer.pSrc && !bCollides && !bWorkWithFlipperFinished )
 	{
 		STile &tileF = GetFlipperTile( x, y, nLayer, analyzer, tile, &tile.nFlipper );
 		tileF.nDisplacement = nDis;
@@ -637,6 +663,7 @@ static void MarkCandidatesToDisplace( CArray2D<char> *pSpH, const CArray2D<CPass
 				sphereHeight[y+1][x] = 3;
 				sphereHeight[y][x-1] = 3;
 				sphereHeight[y][x+1] = 3;
+				continue;   // retail @0x485240: the ladder anchor is FINAL (falling through wiped it)
 			}
 			sphereHeight[y][x] = 0;
 			bool b1 = tiles[y-1][x].nPassable & CP_CROUCH;
@@ -666,7 +693,7 @@ static void MarkCandidatesToDisplace( CArray2D<char> *pSpH, const CArray2D<CPass
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CPassCalcer::CalcDisplacements(
-	NAI::CCollider *pCollider, const CArray2D<unsigned short> &tempH, const CArray2D<unsigned short> *pTempPrevH,
+	NAI::CCollider *pCollider, const CArray2D<SPCHeight> &tempH, const CArray2D<SPCHeight> *pTempPrevH,
 	CArray2D<STile> *pTemp, const CArray2D<STile> *pTempPrev, const CArray2D<char> &flags,
 	const CArray2D<char> &sphereHeight, const CArray2D<char> *pSphereHeightPrev, int nLayer )
 {
@@ -687,12 +714,13 @@ void CPassCalcer::CalcDisplacements(
 				bSameAsPrevLayer = 0;
 			if ( bSameAsPrevLayer )
 			{
-				const CArray2D<unsigned short> &tempPrevH = *pTempPrevH;
+				const CArray2D<SPCHeight> &tempPrevH = *pTempPrevH;
 				for ( int i = 0; i < 3; ++i )
 				{
 					for ( int j = 0; j < 3; ++j )
 					{
-						if ( tempH[ y*3 +j ][ x*3 + i ] != tempPrevH[ y*3 +j ][ x*3 + i ] )
+						// retail compares the HEIGHT channel only here (oracle s2_passcalcer.h:682)
+						if ( tempH[ y*3 +j ][ x*3 + i ].nHeight != tempPrevH[ y*3 +j ][ x*3 + i ].nHeight )
 						{
 							bSameAsPrevLayer = false;
 							break;
@@ -705,22 +733,25 @@ void CPassCalcer::CalcDisplacements(
 					temp[y][x].nPassable = tempPrev[y][x].nPassable;
 					temp[y][x].nDisplacement = tempPrev[y][x].nDisplacement;
 					temp[y][x].nHeight = tempPrev[y][x].nHeight;
+					temp[y][x].nFloor = tempPrev[y][x].nFloor;   // retail copies the floor channel too
 					continue;
 				}
 			}
 			int nBestD = 0, nBestFlags = temp[y][x].nPassable;
 			unsigned short nBestHeight = temp[y][x].nHeight;
+			short nBestFloor = temp[y][x].nFloor;   // retail keeps/restores the floor with the height
 			for ( int nDisplacement = 1; nDisplacement < 9; ++nDisplacement )
 			{
 				temp[y][x].nPassable = 0;
-				int nH = CalcPoseInPoint( x, y, pCollider, tempH, pTemp, flags, nLayer, nDisplacement, false ) * 2 
+				int nH = CalcPoseInPoint( x, y, pCollider, tempH, pTemp, flags, nLayer, nDisplacement, false ) * 2
 					+ ( (nDisplacement < 5) ? 1 : 0 );
-				if ( nH > nBest )				
+				if ( nH > nBest )
 				{
 					nBestD = nDisplacement;
 					nBest = nH;
 					nBestFlags = temp[y][x].nPassable;
 					nBestHeight = temp[y][x].nHeight;
+					nBestFloor = temp[y][x].nFloor;
 				}
 				if ( nH >= 6 )
 					break;
@@ -729,6 +760,7 @@ void CPassCalcer::CalcDisplacements(
 			ASSERT( !( nBestFlags & CP_INACTIVE ) || !( nBestFlags & CP_LAY ) );
 			temp[y][x].nDisplacement = nBestD;
 			temp[y][x].nHeight = nBestHeight;
+			temp[y][x].nFloor = nBestFloor;
 		}
 	}
 }
@@ -736,6 +768,19 @@ void CPassCalcer::CalcDisplacements(
 static bool IsDoor( CFastRenderer::SResult *p )
 {
 	return ( p->pSrc->pSrc->nTSFlags & ( NWorld::TS_STATE_OPEN |  NWorld::TS_STATE_CLOSED ) ) != 0;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail NAI::GetHigher @0x84c90: the next interval whose top is at or above this one's -- the
+// outer iteration step of CreateAdditionalLayers (intervals fully below the current surface are
+// consumed by the inner merge walk and skipped here).
+static CFastRenderer::SResult* GetHigher( CFastRenderer::SResult *p )
+{
+	CFastRenderer::SResult *q = p->pNext;
+	// retail @0x484c97/@0x487055: <= -- co-planar tops (stair landings!) are CONSUMED by the
+	// current surface's merge walk, not re-processed as separate surfaces
+	while ( q && q->fExit <= p->fExit )
+		q = q->pNext;
+	return q;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CPassCalcer::CreateAdditionalLayers()
@@ -769,12 +814,14 @@ void CPassCalcer::CreateAdditionalLayers()
 			}
 			if ( bIgnore )
 				continue;
-			int nMaxH[ N_MAX_FLOORS * N_MAX_LAYERS_PER_FLOOR ];
-			for ( int nF = 0; nF < N_MAX_FLOORS * N_MAX_LAYERS_PER_FLOOR; ++nF )
-				nMaxH[ nF ] = 0;
-			for ( CFastRenderer::SResult *p = render.resGrid[ j ][ i ]; p; p = p->pNext )
+			// retail @0x86c50 (oracle s2_passcalcer.h:878): the per-slot record is SPCHeight
+			// {height, native source floor} (empty slot = {0,100}); the outer walk steps with
+			// GetHigher and each surface MERGES the overlapping non-door intervals above it (the
+			// merged top + ITS source floor win) before the head-room test.
+			SPCHeight table[ N_MAX_FLOORS * N_MAX_LAYERS_PER_FLOOR ];
+			for ( CFastRenderer::SResult *p = render.resGrid[ j ][ i ]; p; p = GetHigher( p ) )
 			{
-				//выясняем, "считается" ли это пересечение
+				// does this interval "count"? (a door's two state hulls pair up)
 				bool bHasIntersect = false;
 				if ( p->pSrc->pSrc->nTSFlags & NWorld::TS_STATE_OPEN )
 				{
@@ -788,25 +835,41 @@ void CPassCalcer::CreateAdditionalLayers()
 					if ( bHasOpen )
 						bHasIntersect = true;
 				}
-				else 
+				else
 					bHasIntersect = true;
 				if ( !bHasIntersect )
 					continue;
 
-				// это пересечение, выясняем, не слишком ли близко к следующему
-				CFastRenderer::SResult *pNext = p->pNext;
-				while ( pNext && pNext->fEnter < p->fExit )
-					pNext = pNext->pNext;
-
-				if ( pNext && !IsDoor( pNext ) )
+				// merge the surfaces above; skip when the first non-door gap has no head room
+				float fSurf = p->fExit;
+				short nId = p->pSrc->pSrc->pUserData ? (short)p->pSrc->pSrc->nFloor : (short)0;
+				// retail @0x486e69 (local_8c): CreateLayer receives the surface's OWN floor id,
+				// captured BEFORE the merge walk -- the walk below advances nId to the merged TOP's
+				// id (that one goes into the slot's .nFloor channel only). Passing the merged id
+				// created wrong-floor layers on stair columns whose merge climbs into upper floors
+				// (the "Something wrong with new passability system." spam + failed ladder placement).
+				const short nIdOwn = nId;
+				bool bSkip = false;
+				for ( CFastRenderer::SResult *q = p->pNext; q; q = q->pNext )
 				{
-					float fDiff = pNext->fEnter - p->fExit;
-					if ( fDiff < F_MIN_LAYER_WIDTH )
-						continue;
+					const bool bQDoor = IsDoor( q );
+					if ( fSurf < q->fEnter )
+					{
+						if ( !bQDoor && q->fEnter - fSurf < F_MIN_LAYER_WIDTH )
+							bSkip = true;   // no head room above the merged surface
+						break;
+					}
+					if ( !bQDoor && fSurf < q->fExit )
+					{
+						nId = (short)q->pSrc->pSrc->nFloor;
+						fSurf = q->fExit;
+					}
 				}
-						
-				// выбираем индекс этажа
-				int nFloorIndex = GetNFloor( p );		
+				if ( bSkip )
+					continue;
+
+				// the surface's floor slot
+				int nFloorIndex = GetNFloor( p );
 				if ( nFloorIndex < 0 )
 				{
 					bBadFloor = true;
@@ -817,7 +880,7 @@ void CPassCalcer::CreateAdditionalLayers()
 					bBadFloor = true;
 					nFloorIndex = 7;
 				}
-				// проверка на отрицательные высоты
+				// negative-height diagnostic (dev debug, kept)
 				if ( p->fExit < fBadHeight )
 				{
 					fBadHeight = p->fExit;
@@ -832,14 +895,22 @@ void CPassCalcer::CreateAdditionalLayers()
 						ptBadHeightCP.y = pGroup->ptOrigin.y + FP_GRID_STEP * ( j + region.y1 );
 					}
 				}
-				// заполнение массива высот в данной точке
+				// count the surface into its floor's slot: the MERGED top + its source floor.
+				// ORIGINAL BUG (retail @0x486f83, reproduced): the table write is UNGUARDED -- a
+				// 4th surface on a floor spills into the NEXT floor's slot 0. Only the table's very
+				// end is fenced here (retail overflows its stack table on floor 7's 4th surface;
+				// the fence is the one deliberate non-reproduction).
 				char &nLayerCur = nIntersectsOnFloor[ nFloorIndex ][j][i];
-				char &nLayerMax = nLayersMustHave[ nFloorIndex ];
-				int &fMaxH = nMaxH[ nFloorIndex * N_MAX_LAYERS_PER_FLOOR + nLayerCur ];
-				
-				fMaxH = GetIHeight( p->fExit );
+				const int nSlot = nFloorIndex * N_MAX_LAYERS_PER_FLOOR + nLayerCur;
 				++nLayerCur;
-				// при необходимости, создание нового слоя
+				if ( nSlot < N_MAX_FLOORS * N_MAX_LAYERS_PER_FLOOR )
+				{
+					table[ nSlot ].nHeight = GetIHeight( fSurf );
+					table[ nSlot ].nFloor = nId;
+				}
+				// create the layer the floor now needs (retail @0x486e69: the surface's OWN pre-merge
+				// floor id, NOT the merged top's)
+				char &nLayerMax = nLayersMustHave[ nFloorIndex ];
 				if ( nLayerCur > nLayerMax )
 				{
 					nLayerMax = nLayerCur;
@@ -847,35 +918,46 @@ void CPassCalcer::CreateAdditionalLayers()
 						continue;
 					if ( pGroup->layers[ nFloorIndex * N_MAX_LAYERS_PER_FLOOR + nLayerMax - 1 ] )
 						continue;
-					int nNewLayer = pNet->CreateLayer( pGroup->nXSize, pGroup->nYSize, pGroup->ptOrigin, pGroup->ptXDir, 
-						p->pSrc->pSrc->nFloor, pGroup );
+					int nNewLayer = pNet->CreateLayer( pGroup->nXSize, pGroup->nYSize, pGroup->ptOrigin, pGroup->ptXDir,
+						nIdOwn, pGroup );
 					if ( nNewLayer == -1 ) // layer cannot be created - too much layers?
 						break;
 					CNodesLayer *pNewLayer = pNet->GetLayer( nNewLayer );
 					pGroup->layers[ nFloorIndex * N_MAX_LAYERS_PER_FLOOR + nLayerMax - 1 ] = pNewLayer;
 				}
 			}
-			int nF, nFUp;
-			// "дописываем" те высоты, для которых не нашлось пересечения
-			for ( nFUp = 1; nFUp < N_MAX_FLOORS * N_MAX_LAYERS_PER_FLOOR; ++nFUp )
+			// retail @0x48707d (disasm-proven; the oracle header omitted it): propagate each
+			// occupied slot upward through empty/lower slots -- the FULL record (height + source
+			// floor) -- and count the floor as intersected. Propagated slots compare equal to the
+			// slot below, so the native write-back correctly leaves them NON-native; without this
+			// the bTop upgrade (next-slot height equality) never fires below the last layer and
+			// the (bCollides && !bTop) gate kills every colliding steep-stair tile.
+			for ( int k = 1; k < N_MAX_FLOORS * N_MAX_LAYERS_PER_FLOOR; ++k )
 			{
-				if ( nMaxH[nFUp] < nMaxH[nFUp-1] )
+				if ( table[k].nHeight < table[k-1].nHeight )
 				{
-					nMaxH[nFUp] = nMaxH[nFUp-1];
-					int nNowFloor = nFUp / N_MAX_LAYERS_PER_FLOOR;
-					if ( nIntersectsOnFloor[ nNowFloor ][j][i] == 0 )
-						nIntersectsOnFloor[ nNowFloor ][j][i] = 1;
+					table[k] = table[k-1];
+					char &nCur = nIntersectsOnFloor[ k / N_MAX_LAYERS_PER_FLOOR ][j][i];
+					if ( nCur == 0 )
+						nCur = 1;
 				}
 			}
-			// копируем массив высот в данной точке в таблицу высот
-			for ( nF = 0; nF < N_MAX_FLOORS ; ++nF )
+			// write the slots into the height fields; a supersample is NATIVE when its slot's
+			// height OR source floor differs from the slot below (slot 0: only when actually hit)
+			for ( int nF = 0; nF < N_MAX_FLOORS ; ++nF )
 			{
 				for ( int nL = 0; nL < N_MAX_LAYERS_PER_FLOOR; ++nL )
 				{
-					CArray2D<unsigned short> &tempH = *tempHeights.GetArray( nF, nL );
+					CArray2D<SPCHeight> &tempH = *tempHeights.GetArray( nF, nL );
 					int nIndex = nF * N_MAX_LAYERS_PER_FLOOR + nL;
-					tempH[j][i] = nMaxH[ nIndex ];			 
-					if ( nIndex == 0 || nMaxH[ nIndex ] != nMaxH[ nIndex - 1 ] )
+					tempH[j][i] = table[ nIndex ];
+					bool bSurface;
+					if ( nIndex == 0 )
+						bSurface = table[0].nFloor < 100;
+					else
+						bSurface = table[ nIndex ].nHeight != table[ nIndex - 1 ].nHeight ||
+						           table[ nIndex ].nFloor != table[ nIndex - 1 ].nFloor;
+					if ( bSurface )
 					{
 						CArray2D<char> &flags = *tempFlags.GetArray( nF, nL );
 						flags[j][i] |= N_FLAG_NATIVE;
@@ -901,12 +983,12 @@ void CPassCalcer::MarkLadderUps()
 	{
 		bool bMarked = false;
 		SLadderInfo &li = ladders[i];
-		CArray2D<unsigned short> &tempHLow = *tempHeights.GetArray( li.nNativeFloor - pGroup->nFirstFloor, 0 );
+		CArray2D<SPCHeight> &tempHLow = *tempHeights.GetArray( li.nNativeFloor - pGroup->nFirstFloor, 0 );
 		float fUpperH;
 		if ( B_3x3_RENDER )
-			fUpperH = li.fHeight + GetFHeight( tempHLow[ li.y * 3 + 1 ][ li.x * 3 + 1 ] );
+			fUpperH = li.fHeight + GetFHeight( tempHLow[ li.y * 3 + 1 ][ li.x * 3 + 1 ].nHeight );
 		else
-			fUpperH = li.fHeight + GetFHeight( tempHLow[ li.y ][ li.x ] );
+			fUpperH = li.fHeight + GetFHeight( tempHLow[ li.y ][ li.x ].nHeight );
 		for ( int nF = li.nNativeFloor - pGroup->nFirstFloor; nF < N_MAX_FLOORS; ++nF )
 		{
 			for ( int nL = 0; nL < N_MAX_LAYERS_PER_FLOOR; ++nL )
@@ -914,7 +996,7 @@ void CPassCalcer::MarkLadderUps()
 				CNodesLayer *pLayer = pGroup->layers[ nF * N_MAX_LAYERS_PER_FLOOR + nL ];
 				if ( !pLayer )
 					continue;
-				CArray2D<unsigned short> &tempH = *tempHeights.GetArray( nF, nL );
+				CArray2D<SPCHeight> &tempH = *tempHeights.GetArray( nF, nL );
 				bool bHas = false;
 				if ( B_3x3_RENDER )
 				{
@@ -922,7 +1004,7 @@ void CPassCalcer::MarkLadderUps()
 					{
 						for ( int dX = 0; dX < 3; ++dX )
 						{
-							float fH = GetFHeight( tempH[ li.upY * 3 + dY ][ li.upX * 3 + dX ] );
+							float fH = GetFHeight( tempH[ li.upY * 3 + dY ][ li.upX * 3 + dX ].nHeight );
 							float fDiff = fabs( fH - fUpperH );
 							if ( fDiff < F_LADDER_STEP )
 								bHas = true;
@@ -931,7 +1013,7 @@ void CPassCalcer::MarkLadderUps()
 				}
 				else
 				{
-					float fH = GetFHeight( tempH[ li.upY ][ li.upX ] );
+					float fH = GetFHeight( tempH[ li.upY ][ li.upX ].nHeight );
 					float fDiff = fabs( fH - fUpperH );
 					bHas = fDiff < F_LADDER_STEP;
 				}
@@ -999,8 +1081,10 @@ void CPassCalcer::Calc()
 	MarkLadderUps();
 	float fMinHeight = 1e10f, fMaxHeight = -1e10f;
 	CVec2 ptMin( 1e10f, 1e10f ), ptMax( -1e10f, -1e10f );
-	// for every layer 
-	bool bMustCalcAll = true;
+	// for every layer
+	// retail passes FALSE at all five MarkNeighbors sites (@0x487728 xor edi,edi) -- the Jan03
+	// bMustCalcAll flood forced the first slot fully NATIVE, which with the floor channel
+	// manufactured native height-0/floor-100 tiles wherever the slot was empty.
 	for ( int nFloor = 0; nFloor < N_MAX_FLOORS; ++nFloor )
 	{
 		for ( int nLayer = 0; nLayer < N_MAX_LAYERS_PER_FLOOR; ++nLayer )
@@ -1018,7 +1102,7 @@ void CPassCalcer::Calc()
 			CArray2D<char> &flags = *tempFlags.GetArray( nFloor, nLayer );
 
 			// mark all 4 neighbors of native knots as must calcs
-			MarkNeighbors( &flags, CTPoint<int>(  0,  0 ), bMustCalcAll );
+			MarkNeighbors( &flags, CTPoint<int>(  0,  0 ) );
 			for ( int y = 0; y < flags.GetYSize(); ++y )
 			{
 				for ( int x = 0; x < flags.GetXSize(); ++x )
@@ -1027,13 +1111,12 @@ void CPassCalcer::Calc()
 						flags[y][x] = 0;
 				}
 			}
-			bMustCalcAll = false; // calc only one total layer
 			int nShift = B_3x3_RENDER ? 3 : 1;
 			MarkNeighbors( &flags, CTPoint<int>(  nShift,  0 ) );
 			MarkNeighbors( &flags, CTPoint<int>(  0,  nShift ) );
 			MarkNeighbors( &flags, CTPoint<int>( -nShift,  0 ) );
 			MarkNeighbors( &flags, CTPoint<int>(  0, -nShift ) );
-			CArray2D<unsigned short> &tempH = *tempHeights.GetArray( nFloor, nLayer );
+			CArray2D<SPCHeight> &tempH = *tempHeights.GetArray( nFloor, nLayer );
 			MarkInactiveEnlargements( &flags, CTPoint<int>(  nShift,  0 ), tempH, render );
 			MarkInactiveEnlargements( &flags, CTPoint<int>(  -nShift,  0 ), tempH, render );
 			MarkInactiveEnlargements( &flags, CTPoint<int>(  0,  nShift ), tempH, render );
@@ -1071,9 +1154,9 @@ void CPassCalcer::Calc()
 			CArray2D<STile> &temp = *tempArrays.GetArray( nFloor, nLayer );
 			CArray2D<char> &flags = *tempFlags.GetArray( nFloor, nLayer );
 			CArray2D<char> &sphereHeight = *sphereHeights.GetArray( nFloor, nLayer );
-			CArray2D<unsigned short> &tempH = *tempHeights.GetArray( nFloor, nLayer );
+			CArray2D<SPCHeight> &tempH = *tempHeights.GetArray( nFloor, nLayer );
 			CArray2D<char> *pSphereHeightPrev = 0;
-			CArray2D<unsigned short> *pTempPrevH = 0;
+			CArray2D<SPCHeight> *pTempPrevH = 0;
 			CArray2D<STile> *pTempPrev = 0;
 
 			if ( nPrevFloor != -1 )
@@ -1101,8 +1184,9 @@ void CPassCalcer::Calc()
 					bool bLastLayer = (nLayer == N_MAX_LAYERS_PER_FLOOR - 1);
 					if ( !bLastLayer )
 					{
-						CArray2D<unsigned short> &tempHNext = *tempHeights.GetArray( nFloor, nLayer + 1 );
-						if ( tempHNext[ nY ][ nX ] == tempH[ nY ][ nX ] )
+						CArray2D<SPCHeight> &tempHNext = *tempHeights.GetArray( nFloor, nLayer + 1 );
+						// retail bTop test compares the HEIGHT channel only (oracle s2_passcalcer.h:1249)
+						if ( tempHNext[ nY ][ nX ].nHeight == tempH[ nY ][ nX ].nHeight )
 							bLastLayer = true;
 					}
 					//if ( ( nPrevFloor < 0 ) || 
@@ -1121,7 +1205,7 @@ void CPassCalcer::Calc()
 								{
 									if ( !mustCalc[ nSameFloor * N_MAX_LAYERS_PER_FLOOR + nSameLayer ] )
 										continue;
-									CArray2D<unsigned short> &tempSameH = *tempHeights.GetArray( nSameFloor, nSameLayer );
+									CArray2D<SPCHeight> &tempSameH = *tempHeights.GetArray( nSameFloor, nSameLayer );
 									if ( tempH[ nY ][ nX ] != tempSameH[ nY ][ nX ] )
 										continue;
 									CArray2D<STile> &tempSame = *tempArrays.GetArray( nSameFloor, nSameLayer );

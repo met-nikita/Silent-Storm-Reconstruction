@@ -14,6 +14,7 @@ namespace NAI
 namespace NDb
 {
 class CDBDifficulty;   // fwd for SItemAssign::pDifficulty (release save-format; CPtr needs only fwd-decl)
+class CMedal;          // fwd for CSide::medals (DataMisc.h; retail CSide save tag 11)
 class CSide;
 class CNationality;
 class CModel;
@@ -207,11 +208,14 @@ struct SCameraParams
 	float fFOV;
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+class CUIHint;       // DataMisc.h (Hints table) -- CRPGItem::pHint record ref
+class CRPGStoreItem; // defined below -- CRPGStoreItem::Import installs itself on pItem->pStoreItem
+////////////////////////////////////////////////////////////////////////////////////////////////////
 class CRPGItem: public CDBRecord
 {
 	OBJECT_BASIC_METHODS(CRPGItem);
 public:
-	int nWeight; //	� �������
+	int nWeight; // in grams
 	int nSubTypePriority;
 	EItemSubType subType;
 	CTPoint<int> sSize;
@@ -227,7 +231,12 @@ public:
 	CPtr<CDBRecord> pSuccessor;
 	CPtr<CRPGArmor> pRPGArmor;
 	CPtr<CTEffect> pDestructionEffect;
+	// retail CRPGItem::operator& @0x42a5d0 tags 0x12/0x13/0x15 (Import @0x42a800 columns per oracle
+	// s2_dbimport.h:2727-2729):
+	CPtr<CUIHint> pHint;			// tag 18, column "HintID" -- the item's UI hint record
+	CPtr<CRPGStoreItem> pStoreItem;	// tag 19, NOT column-fed: CRPGStoreItem::Import @0x428570 installs itself here
 	bool bPlaceInHand;   // retail CRPGItem @+0xc0 (operator& tag 20): whether the item is shown in-hand when active
+	int nCost = 0;					// tag 21, column "Cost" -- the item's store price
 	//
 	CTRndModel* GetItemModel( bool bActive, CRPGUniform *pUniform );
 	virtual void Import();
@@ -321,6 +330,12 @@ public:
 	virtual void Import();
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// Retail NDb::EWeaponType (Game.pdb, 15 values). The dev enum was MISSING WT_MACHETE (=6), which
+// shifted every following value down by one vs. the retail game.db ints (CAnimWeaponType::type is
+// loaded from the binary DB/saves as a raw int at tag 6): dev WT_MACHINE_GUN==6 matched retail
+// MACHETE records, dev WT_RLAUNCHER==7 matched retail MACHINE_GUN records, etc. Values now match
+// retail 1:1 (PDB: MACHETE=6, MACHINE_GUN=7, RLAUNCHER=8, MINE_DETECTOR=9, PLAZMAGUN=10,
+// PK_PLAZMAGUN=11, BOSS_PLAZMAGUN=12, TERROR_SHOOTER=13, TERROR_SPECIAL_GUN=14).
 enum EWeaponType
 {
 	WT_DEFAULT,
@@ -329,11 +344,15 @@ enum EWeaponType
 	WT_SUB_MACHINE_GUN,
 	WT_KNIFE,
 	WT_KATANA,
+	WT_MACHETE,
 	WT_MACHINE_GUN,
 	WT_RLAUNCHER,
 	WT_MINE_DETECTOR,
 	WT_PLAZMAGUN,
 	WT_PK_PLAZMAGUN,
+	WT_BOSS_PLAZMAGUN,
+	WT_TERROR_SHOOTER,
+	WT_TERROR_SPECIAL_GUN,
 };
 inline bool IsMeleeWeapon( EWeaponType type ) { return type == WT_DEFAULT || type == WT_KNIFE || type == WT_KATANA; }
 enum EShootMode
@@ -712,7 +731,11 @@ public:
 	// enemies/allies/NPCs) have their ack rows keyed ONLY via this link (e.g. every Germ_* soldier
 	// -> pers 911, which owns 20 Acks rows); without it those units have no barks at all.
 	CPtr<CRPGPers> pAcksHolder;			// "AckUnit" -- ack rows donor (NRPG::CUnit::GetAckHolder @0x2ba8f0 non-hero path)
-	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CDBRecord*)this); f.Add(2,&nRPGPersID); f.Add(3,&szUserName); f.Add(4,&pName); f.Add(5,&pSoundHit); f.Add(6,&pSoundDeath); f.Add(7,&pModel); f.Add(8,&pUniform); f.Add(9,&pHead); f.Add(10,&pPanzerklein); f.Add(11,&sFaceGenCamera); f.Add(12,&sPortraitCamera); f.Add(13,&pSide); f.Add(14,&pNationality); f.Add(15,&pDefaultWearsPanzerklein); f.Add(16,&pClass); f.Add(17,&pWeapon); f.Add(18,&items); f.Add(19,&pBaseValue); f.Add(20,&scripts); f.Add(21,&bIsFemale); f.Add(22,&nVoice); f.Add(0x17,&pPhoto); f.Add(0x18,&pBiography); f.Add(0x19,&pCharacteristics); f.Add(0x1a,&bCanHired); f.Add(0x1b,&bCanBeListed); f.Add(0x1c,&pHandWeapon); f.Add(0x1d,&pBackpackWeapon); f.Add(0x1f,&pAcksHolder); return 0; }	// retail (CRPGPers::operator& @0x41f490) tag map: pPhoto=0x17, pBiography=0x18, pCharacteristics=0x19, bCanHired=0x1a, bCanBeListed=0x1b (now all read; previously reading bCanBeListed at 23 decoded the pPhoto object-ref chunk as a bool); 0x1e = pLongName (not ported), 0x1f = pAcksHolder, 0x20 = pLongBurstSnd (not ported)
+	// retail CRPGPers +0xcc/+0xd4 (operator& @0x41f490 tags 0x1e/0x20; Import @0x429540 columns
+	// "LongNameID"/"LongBurstSnd", oracle s2_crpgpers.h:206-208):
+	CPtr<CString> pLongName;			// "LongNameID" -- the persona's long display name
+	CPtr<CSound> pLongBurstSnd;			// "LongBurstSnd" -- per-persona long-burst voice sound
+	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CDBRecord*)this); f.Add(2,&nRPGPersID); f.Add(3,&szUserName); f.Add(4,&pName); f.Add(5,&pSoundHit); f.Add(6,&pSoundDeath); f.Add(7,&pModel); f.Add(8,&pUniform); f.Add(9,&pHead); f.Add(10,&pPanzerklein); f.Add(11,&sFaceGenCamera); f.Add(12,&sPortraitCamera); f.Add(13,&pSide); f.Add(14,&pNationality); f.Add(15,&pDefaultWearsPanzerklein); f.Add(16,&pClass); f.Add(17,&pWeapon); f.Add(18,&items); f.Add(19,&pBaseValue); f.Add(20,&scripts); f.Add(21,&bIsFemale); f.Add(22,&nVoice); f.Add(0x17,&pPhoto); f.Add(0x18,&pBiography); f.Add(0x19,&pCharacteristics); f.Add(0x1a,&bCanHired); f.Add(0x1b,&bCanBeListed); f.Add(0x1c,&pHandWeapon); f.Add(0x1d,&pBackpackWeapon); f.Add(0x1e,&pLongName); f.Add(0x1f,&pAcksHolder); f.Add(0x20,&pLongBurstSnd); return 0; }	// retail (CRPGPers::operator& @0x41f490) tag map: pPhoto=0x17, pBiography=0x18, pCharacteristics=0x19, bCanHired=0x1a, bCanBeListed=0x1b (now all read; previously reading bCanBeListed at 23 decoded the pPhoto object-ref chunk as a bool); 0x1e=pLongName, 0x1f=pAcksHolder, 0x20=pLongBurstSnd -- FULL retail table now covered
 	virtual void Import();
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1006,8 +1029,13 @@ public:
 	vector<CPtr<CRPGPers> > malePersesSet;
 	vector<CPtr<CRPGPers> > femalePersesSet;
 	vector<CPtr<CRPGPers> > defaultPersesSet;
+	// retail CSide medals list (save tag 11): NOT column-fed on CSide -- each CMedal record installs
+	// itself here from CMedal::Import @0x42a110 (dedup push into its side's medals).
+	vector<CPtr<CMedal> > medals;
 	//// Interface
 	CPtr<CUITexture> pESCMenuBackground;
+	CPtr<CUITexture> pChapterMapInfoBackground;	// retail +0x54, save tag 13; Import column "UICMInfoBackgroundID" -- chapter-map info panel background
+	CPtr<CUITexture> pCluePaperBackground;		// retail +0x6c, save tag 19; Import column "UICluePaperBackgroundID" -- clue-paper background
 	//// GlobalView
 	CPtr<CUITexture> pBaseFlag;
 	CPtr<CUITexture> pBaseFlagActive;
@@ -1015,7 +1043,7 @@ public:
 	CPtr<CUIContainer> pMedalPaperContainer;	// release-new CSide field (retail +0x60, save tag 14): the "medal paper" UI template loaded by NGame::CShowMedalInterface::Initialize (iShowMedal convergence). Additive -- fills the previously-skipped tag 14 slot, existing 2..17 numbering undisturbed.
 	CPtr<CUIContainer> pKIAPaper;	// release-new CSide field (retail +0x70, save tag 18): the per-side "killed in action" name-plate template the recruit menu loads into its CKIAPanel (CTeamMngUI::ProcessMessage @0x2498f0 reads side+0x70). Not imported by retail CSide::Import @0x42a240 -- populated from the game.db chunk stream (tag 18) only. Additive.
 	vector<CPtr<CString> > defaultPersToolTipsSet;	// release-new CSide field (retail +0x78, save tag 0x14=20): the 6 per-preset (nationality x gender) class-description tooltips shown on the HeroMenu portraits. POPULATED FROM THE STEAM game.db BY Import() below (the v1 columnar DB binds by named column, NOT by operator& tags); the f.Add(20,..) tag is parity / savegame round-trip only.
-	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CDBRecord*)this); f.Add(2,&nGlobalMapID); f.Add(3,&nHeroSelectTemplate); f.Add(4,&pName); f.Add(5,&pNationality1); f.Add(6,&pNationality2); f.Add(7,&pNationality3); f.Add(8,&malePersesSet); f.Add(9,&femalePersesSet); f.Add(10,&defaultPersesSet); f.Add(12,&pESCMenuBackground); f.Add(14,&pMedalPaperContainer); f.Add(15,&pBaseFlag); f.Add(16,&pBaseFlagActive); f.Add(17,&pDialogHero); f.Add(18,&pKIAPaper); f.Add(20,&defaultPersToolTipsSet); return 0; }	// retail CSide (release @0x41dea0) puts a medals vector at 11 and shifts the UI textures: pESCMenuBackground=12, pBaseFlag=15, pBaseFlagActive=16, pDialogHero=17, pKIAPaper=18 (now read), and defaultPersToolTipsSet at tag 0x14=20 (last chunk). The dev had them at 11-14, so tag 11 decoded the medals vector as a texture objref and 12-14 were off-by-shift (wrong flag textures / type-confused dialog-hero). Retagged to match; dev-absent retail fields (medals@11, pChapterMapInfoBackground@13, pCluePaperBackground@19) are simply not read.
+	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CDBRecord*)this); f.Add(2,&nGlobalMapID); f.Add(3,&nHeroSelectTemplate); f.Add(4,&pName); f.Add(5,&pNationality1); f.Add(6,&pNationality2); f.Add(7,&pNationality3); f.Add(8,&malePersesSet); f.Add(9,&femalePersesSet); f.Add(10,&defaultPersesSet); f.Add(11,&medals); f.Add(12,&pESCMenuBackground); f.Add(13,&pChapterMapInfoBackground); f.Add(14,&pMedalPaperContainer); f.Add(15,&pBaseFlag); f.Add(16,&pBaseFlagActive); f.Add(17,&pDialogHero); f.Add(18,&pKIAPaper); f.Add(19,&pCluePaperBackground); f.Add(20,&defaultPersToolTipsSet); return 0; }	// FULL retail CSide tag table (release @0x41dea0): 2..10 record scalars/rosters, 11=medals, 12=pESCMenuBackground, 13=pChapterMapInfoBackground, 14=pMedalPaperContainer, 15=pBaseFlag, 16=pBaseFlagActive, 17=pDialogHero, 18=pKIAPaper, 19=pCluePaperBackground, 20=defaultPersToolTipsSet (last chunk).
 	//
 	virtual void Import();
 };

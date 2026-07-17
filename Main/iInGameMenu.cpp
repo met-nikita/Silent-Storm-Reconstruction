@@ -142,7 +142,7 @@ private:
 public:
 	CInGameMenuInterface();
 
-	void Initialize( NRPG::CGlobalPlayer *pPlayer, bool bAllowRestart );
+	void Initialize( NRPG::CGlobalPlayer *pPlayer, bool bAllowRestart, bool bAllowSave = true );
 
 	void Step();
 	void OnGetFocus();
@@ -156,10 +156,11 @@ CInGameMenuInterface::CInGameMenuInterface():
 {
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CInGameMenuInterface::Initialize( NRPG::CGlobalPlayer *_pPlayer, bool _bAllowRestart )
+void CInGameMenuInterface::Initialize( NRPG::CGlobalPlayer *_pPlayer, bool _bAllowRestart, bool _bAllowSave )
 {
 	pPlayer = _pPlayer;
 	bAllowRestart = _bAllowRestart;
+	bAllowSave = _bAllowSave;   // retail: forwarded into every CICSaveLoadMenu this screen opens
 
 	pCursor = NUI::ICursor::Create();
 	pInterface = new NUI::CInterface( pCursor );
@@ -209,12 +210,12 @@ bool CInGameMenuInterface::ProcessEvent( const NInput::SEvent &sEvent )
 	}
 	else if ( bindSaveGame.ProcessEvent( sEvent ) )
 	{
-		NMainLoop::Command( new CICSaveLoadMenu( SAVE, pScreenShot->GetTexture() ) );
+		NMainLoop::Command( new CICSaveLoadMenu( SAVE, pScreenShot->GetTexture(), bAllowSave ) );
 		return true;
 	}
 	else if ( bindLoadGame.ProcessEvent( sEvent ) )
 	{
-		NMainLoop::Command( new CICSaveLoadMenu( LOAD, pScreenShot->GetTexture() ) );
+		NMainLoop::Command( new CICSaveLoadMenu( LOAD, pScreenShot->GetTexture(), bAllowSave ) );
 		return true;
 	}
 	else if ( bindExitToMainMenu.ProcessEvent( sEvent ) )
@@ -241,15 +242,15 @@ void CInGameMenuInterface::RenderFrame()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CICMission
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CICInGameMenu::CICInGameMenu( NRPG::CGlobalPlayer *_pGlobalPlayer, bool _bAllowRestart ):
-	pGlobalPlayer( _pGlobalPlayer ), bAllowRestart( _bAllowRestart )
+CICInGameMenu::CICInGameMenu( NRPG::CGlobalPlayer *_pGlobalPlayer, bool _bAllowRestart, bool _bAllowSave ):
+	pGlobalPlayer( _pGlobalPlayer ), bAllowRestart( _bAllowRestart ), bAllowSave( _bAllowSave )
 {
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CICInGameMenu::Exec()
 {
 	CInGameMenuInterface *pRes = new CInGameMenuInterface();
-	pRes->Initialize( pGlobalPlayer, bAllowRestart );
+	pRes->Initialize( pGlobalPlayer, bAllowRestart, bAllowSave );
 	PushInterface( pRes );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////

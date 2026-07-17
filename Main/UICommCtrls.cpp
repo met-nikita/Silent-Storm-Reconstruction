@@ -26,8 +26,20 @@ const int
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CEdit
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail @0x319d10: chains CText::CText() and -- unlike the SWindowInfo ctor -- does NOT write
+// nSize/nCursor/eMode/bCursorVisible/sFlashTime; the saveload factory uses this ctor and the wire
+// (operator& @0x31b2d0) restores tags 2-9 over it. The off-wire dev render nodes must exist after
+// a bare deserialize too, so they are created here as well (Draw re-syncs their values every frame).
+CEdit::CEdit()
+{
+	pSize = new NGScene::CCTPoint;
+	pTextString = new NGScene::CCWString;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail @0x316f40: chains CText::CText(sInfo), then nSize=255, nCursor=0, eMode=NORMAL,
+// bCursorVisible=false, sFlashTime=0 (bActiveState/sTexRect were Jan03 fields retail deleted).
 CEdit::CEdit( const SWindowInfo &sInfo ):
-	CWindow( sInfo ), nSize( 255 ), nCursor( 0 ), eMode( NORMAL ), bActiveState( false ), bCursorVisible( false ), sFlashTime( 0 )
+	CText( sInfo ), nSize( 255 ), nCursor( 0 ), eMode( NORMAL ), bCursorVisible( false ), sFlashTime( 0 )
 {
 	pSize = new NGScene::CCTPoint;
 	pTextString = new NGScene::CCWString;
@@ -249,7 +261,7 @@ void CEdit::Draw( const STime &sTime, NGScene::I2DGameView *pView )
 		if ( nCursor < sText.charsSet.size() )
 		{
 			const CTRect<int> &sRect = sText.charsSet[nCursor].sRect;
-			sLayout.AddRect( sRect.x1, sRect.y1, CRectLayout::STextureCoord( CTRect<float>( 0, 0, 2, sRect.Height() ) ) );
+			sLayout.AddRect( sRect.x1, sRect.y1, 2, sRect.Height(), CRectLayout::STextureCoord( CTRect<float>( 0, 0, 2, sRect.Height() ) ) );
 		}
 		else
 		{
@@ -257,11 +269,14 @@ void CEdit::Draw( const STime &sTime, NGScene::I2DGameView *pView )
 			if ( !sText.charsSet.empty() )
 				sRect = sText.charsSet.back().sRect;
 
-			sLayout.AddRect( sRect.x2, sRect.y1, CRectLayout::STextureCoord( CTRect<float>( 0, 0, 2, sRect.Height() ) ) );
+			sLayout.AddRect( sRect.x2, sRect.y1, 2, sRect.Height(), CRectLayout::STextureCoord( CTRect<float>( 0, 0, 2, sRect.Height() ) ) );
 		}
 		pView->CreateDynamicRects( (NDb::CTexture*)0, sLayout, sPosition, sWindow );
 	}
 
+	// Deliberate post-rebase divergence: retail Draw @0x314bd0 pushes wsFormat+wsText into the
+	// CText base and ends with CText::Draw; dev paints through its own render nodes above, so it
+	// chains straight to CWindow::Draw (calling CText::Draw here would double-draw the text).
 	CWindow::Draw( sTime, pView );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -324,6 +339,12 @@ CWindow* CButton::AddTextState( int nID, const wstring &wsText )
 	CWindow* pState = AddState( nID );
 	CText* pText = new CText( SWindowInfo( pState, SPoint( 0, 0 ), pState->GetSize(), "", STYLE_ENABLED | STYLE_VISIBLE | STYLE_TRANSPARENT ) );
 	pText->SetText( wsText );
+
+	// v1.2 @VA 0x717b20 (v1.1 @0x317630 lacks this tail): vertically center the text in the button
+	SPoint sReal;
+	pText->GetRealSize( &sReal );
+	pText->SetPosition( SPoint( 0, ( GetSize().y - sReal.y ) / 2 ) );
+
 	return pState;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -548,6 +569,11 @@ void CPushButton::Draw( const STime &sTime, NGScene::I2DGameView *pView )
 	CButton::Draw( sTime, pView );
 
 	const SPoint &sSize = GetSize();
+	// retail @0x315650: bind the caption layout to the BUTTON width every draw (height stays
+	// auto). Vital under the IML-based CTextDraw: the standard button strings carry <center>,
+	// and an unbound (-1) width lays the line out over the whole viewport -- the centered word
+	// then falls outside the button's clip window ("buttons lost their text" regression).
+	pText->SetSize( SPoint( sSize.x, -1 ) );
 	const SPoint &sTextSize = pText->GetSize( pView );
 
 	pText->SetPosition( SPoint( ( sSize.x - sTextSize.x ) / 2, ( sSize.y - sTextSize.y ) / 2 ) );
@@ -612,19 +638,9 @@ static CImageDraw* CreateImage( NDb::CUITexture *pTexture )
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CToolTip::CToolTip( const SWindowInfo &sInfo ):
-	CWindow( sInfo )
+	CFrame( sInfo )   // retail @0x316510: chains CFrame(sInfo), which fills the nine border slices
 {
-	pText = new CMLText( SWindowInfo( this, SPoint( 0, 0 ), SPoint( N_TOOLTIP_DEFAULT_WIDTH, 0 ), "", STYLE_ENABLED | STYLE_VISIBLE | STYLE_TRANSPARENT ) );
-
-	pBackgroundUp = CreateImage( NDb::GetUITexture( 655 ) );
-	pBackgroundDown = CreateImage( NDb::GetUITexture( 661 ) );
-	pBackgroundLeft = CreateImage( NDb::GetUITexture( 657 ) );
-	pBackgroundRight = CreateImage( NDb::GetUITexture( 659 ) );
-	pBackgroundMiddle = CreateImage( NDb::GetUITexture( 658 ) );
-	pBackgroundUpLeft = CreateImage( NDb::GetUITexture( 654 ) );
-	pBackgroundUpRight = CreateImage( NDb::GetUITexture( 656 ) );
-	pBackgroundDownLeft = CreateImage( NDb::GetUITexture( 660 ) );
-	pBackgroundDownRight = CreateImage( NDb::GetUITexture( 662 ) );
+	pText = new CText( SWindowInfo( this, SPoint( 0, 0 ), SPoint( N_TOOLTIP_DEFAULT_WIDTH, 0 ), "", STYLE_ENABLED | STYLE_VISIBLE | STYLE_TRANSPARENT ) );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CToolTip::SetVal( const wstring &szID, int nVal )
@@ -679,19 +695,58 @@ void CToolTip::Draw( const STime &sTime, NGScene::I2DGameView *pView )
 	pText->SetSize( SPoint( N_TOOLTIP_DEFAULT_WIDTH, sRealSize.y ) );
 	pText->SetPosition( SPoint( N_TOOLTIP_BORDER_SIZE, N_TOOLTIP_BORDER_SIZE ) );
 
-	DrawBackground( sTime, pView );
-
-	CWindow::Draw( sTime, pView );
+	// retail: the nine border slices + children are drawn by the CFrame base (CFrame::Draw lays the
+	// slices out over the current window size, clamping bands when too small, then chains CWindow::Draw).
+	CFrame::Draw( sTime, pView );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CToolTip::DrawBackground( const STime &sTime, NGScene::I2DGameView *pView )
+// CFrame -- retail NUI::CFrame (convergence W4). The nine-slice border widget.
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail SWindowInfo ctor @0x316160: CWindow(info), then fill the nine slices with the engine's
+// standard frame skin -- CreateImage(NDb::GetUITexture(id)) for the fixed ids 654..662 (disasm-
+// recovered; identical to the Jan03 CToolTip skin).
+CFrame::CFrame( const SWindowInfo &sInfo ):
+	CWindow( sInfo )
+{
+	pBackgroundUp = CreateImage( NDb::GetUITexture( 655 ) );
+	pBackgroundDown = CreateImage( NDb::GetUITexture( 661 ) );
+	pBackgroundLeft = CreateImage( NDb::GetUITexture( 657 ) );
+	pBackgroundRight = CreateImage( NDb::GetUITexture( 659 ) );
+	pBackgroundMiddle = CreateImage( NDb::GetUITexture( 658 ) );
+	pBackgroundUpLeft = CreateImage( NDb::GetUITexture( 654 ) );
+	pBackgroundUpRight = CreateImage( NDb::GetUITexture( 656 ) );
+	pBackgroundDownLeft = CreateImage( NDb::GetUITexture( 660 ) );
+	pBackgroundDownRight = CreateImage( NDb::GetUITexture( 662 ) );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail CFrame::Draw @0x3135f0: lay the nine slices out over the current window size and draw
+// them, then chain CWindow::Draw (children on top of the border). Unlike the old dev CToolTip/
+// CTextFrame DrawBackground, retail CLAMPS the border bands when the window is too small for them
+// (each side falls back to half the window extent, collapsing the middle band).
+void CFrame::Draw( const STime &sTime, NGScene::I2DGameView *pView )
 {
 	SRect sRect( 0, 0, GetSize().x, GetSize().y );
 
-	sRect.y1 += pBackgroundUp->GetWindow().Height();
-	sRect.y2 -= pBackgroundDown->GetWindow().Height();
-	sRect.x1 += pBackgroundLeft->GetWindow().Width();
-	sRect.x2 -= pBackgroundRight->GetWindow().Width();
+	if ( pBackgroundUp->GetWindow().Height() + pBackgroundDown->GetWindow().Height() < GetSize().y )
+	{
+		sRect.y1 += pBackgroundUp->GetWindow().Height();
+		sRect.y2 -= pBackgroundDown->GetWindow().Height();
+	}
+	else
+	{
+		sRect.y1 += GetSize().y / 2;
+		sRect.y2 -= GetSize().y / 2;
+	}
+	if ( pBackgroundLeft->GetWindow().Width() + pBackgroundRight->GetWindow().Width() < GetSize().x )
+	{
+		sRect.x1 += pBackgroundLeft->GetWindow().Width();
+		sRect.x2 -= pBackgroundRight->GetWindow().Width();
+	}
+	else
+	{
+		sRect.x1 += GetSize().x / 2;
+		sRect.x2 -= GetSize().x / 2;
+	}
 
 	pBackgroundUp->SetWindow( SRect( sRect.x1, 0, sRect.x2, sRect.y1 ) );
 	pBackgroundDown->SetWindow( SRect( sRect.x1, sRect.y2, sRect.x2, GetSize().y ) );
@@ -701,7 +756,6 @@ void CToolTip::DrawBackground( const STime &sTime, NGScene::I2DGameView *pView )
 	pBackgroundUpRight->SetWindow( SRect( sRect.x2, 0, GetSize().x, sRect.y1 ) );
 	pBackgroundDownLeft->SetWindow( SRect( 0, sRect.y2, sRect.x1, GetSize().y ) );
 	pBackgroundDownRight->SetWindow( SRect( sRect.x2, sRect.y2, GetSize().x, GetSize().y ) );
-
 	pBackgroundMiddle->SetWindow( sRect );
 
 	pBackgroundUp->Draw( this, sTime, pView );
@@ -713,30 +767,24 @@ void CToolTip::DrawBackground( const STime &sTime, NGScene::I2DGameView *pView )
 	pBackgroundDownLeft->Draw( this, sTime, pView );
 	pBackgroundDownRight->Draw( this, sTime, pView );
 	pBackgroundMiddle->Draw( this, sTime, pView );
+
+	CWindow::Draw( sTime, pView );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CTextFrame -- retail NUI::CTextFrame (@0x3163c0 ctor / @0x313950 UpdateSize / @0x314160
-// UpdatePosition / @0x3143c0 SetText / @0x3143f0 Draw). A self-sizing bordered markup panel.
+// UpdatePosition / @0x3143c0 SetText / @0x3143f0 Draw). A self-sizing bordered markup panel;
+// the border lives in the CFrame base (convergence W4), the label is a retail CText.
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 const int
 	N_TEXTFRAME_WRAP_WIDTH = 512,   // retail default wrap width (0x200)
 	N_TEXTFRAME_BORDER = 4;         // retail one-border inset (label offset; +8 total on each axis)
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CTextFrame::CTextFrame( const SWindowInfo &sInfo ):
-	CWindow( sInfo )
+	CFrame( sInfo )   // retail chains CFrame(sInfo) -- the base fills the nine border slices
 {
-	// retail ctor: owned markup label at wrap width 512 (auto-grown by UpdateSize)
-	pText = new CMLText( SWindowInfo( this, SPoint( 0, 0 ), SPoint( N_TEXTFRAME_WRAP_WIDTH, 0 ), "", STYLE_ENABLED | STYLE_VISIBLE | STYLE_TRANSPARENT ) );
-	// the shared 9-image border set (CToolTip textures; retail's CFrame border comes from its container)
-	pBackgroundUp = CreateImage( NDb::GetUITexture( 655 ) );
-	pBackgroundDown = CreateImage( NDb::GetUITexture( 661 ) );
-	pBackgroundLeft = CreateImage( NDb::GetUITexture( 657 ) );
-	pBackgroundRight = CreateImage( NDb::GetUITexture( 659 ) );
-	pBackgroundMiddle = CreateImage( NDb::GetUITexture( 658 ) );
-	pBackgroundUpLeft = CreateImage( NDb::GetUITexture( 654 ) );
-	pBackgroundUpRight = CreateImage( NDb::GetUITexture( 656 ) );
-	pBackgroundDownLeft = CreateImage( NDb::GetUITexture( 660 ) );
-	pBackgroundDownRight = CreateImage( NDb::GetUITexture( 662 ) );
+	// retail ctor: owned markup label at wrap width 512 (auto-grown by UpdateSize); style 0x26 =
+	// ENABLED|VISIBLE|TRANSPARENT, empty id (disasm @0x7163c0).
+	pText = new CText( SWindowInfo( this, SPoint( 0, 0 ), SPoint( N_TEXTFRAME_WRAP_WIDTH, 0 ), "", STYLE_ENABLED | STYLE_VISIBLE | STYLE_TRANSPARENT ) );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // retail CTextFrame::UpdateSize @0x313950: fit the frame's own size around the wrapped label.
@@ -777,42 +825,13 @@ void CTextFrame::SetText( const wstring &wsText )
 	UpdatePosition();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// retail CTextFrame::Draw @0x3143f0: re-fit + re-clamp each frame, then draw the border + children.
+// retail CTextFrame::Draw @0x3143f0: re-fit + re-clamp each frame, then CFrame::Draw (which lays
+// out + draws the nine border slices and chains CWindow::Draw).
 void CTextFrame::Draw( const STime &sTime, NGScene::I2DGameView *pView )
 {
 	UpdateSize();
 	UpdatePosition();
-	DrawBackground( sTime, pView );
-	CWindow::Draw( sTime, pView );
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-void CTextFrame::DrawBackground( const STime &sTime, NGScene::I2DGameView *pView )
-{
-	SRect sRect( 0, 0, GetSize().x, GetSize().y );
-	sRect.y1 += pBackgroundUp->GetWindow().Height();
-	sRect.y2 -= pBackgroundDown->GetWindow().Height();
-	sRect.x1 += pBackgroundLeft->GetWindow().Width();
-	sRect.x2 -= pBackgroundRight->GetWindow().Width();
-
-	pBackgroundUp->SetWindow( SRect( sRect.x1, 0, sRect.x2, sRect.y1 ) );
-	pBackgroundDown->SetWindow( SRect( sRect.x1, sRect.y2, sRect.x2, GetSize().y ) );
-	pBackgroundLeft->SetWindow( SRect( 0, sRect.y1, sRect.x1, sRect.y2 ) );
-	pBackgroundRight->SetWindow( SRect( sRect.x2, sRect.y1, GetSize().x, sRect.y2 ) );
-	pBackgroundUpLeft->SetWindow( SRect( 0, 0, sRect.x1, sRect.y1 ) );
-	pBackgroundUpRight->SetWindow( SRect( sRect.x2, 0, GetSize().x, sRect.y1 ) );
-	pBackgroundDownLeft->SetWindow( SRect( 0, sRect.y2, sRect.x1, GetSize().y ) );
-	pBackgroundDownRight->SetWindow( SRect( sRect.x2, sRect.y2, GetSize().x, GetSize().y ) );
-	pBackgroundMiddle->SetWindow( sRect );
-
-	pBackgroundUp->Draw( this, sTime, pView );
-	pBackgroundDown->Draw( this, sTime, pView );
-	pBackgroundLeft->Draw( this, sTime, pView );
-	pBackgroundRight->Draw( this, sTime, pView );
-	pBackgroundUpLeft->Draw( this, sTime, pView );
-	pBackgroundUpRight->Draw( this, sTime, pView );
-	pBackgroundDownLeft->Draw( this, sTime, pView );
-	pBackgroundDownRight->Draw( this, sTime, pView );
-	pBackgroundMiddle->Draw( this, sTime, pView );
+	CFrame::Draw( sTime, pView );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CSlider
@@ -1074,6 +1093,12 @@ void CListView::AddItem( int nID, CWindow *pWindow )
 		SetSelectedItem( nID );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail @0x3179d0: append with the hidden flag; no SHOWSELALWAYS auto-select
+void CListView::AddHiddenItem( int nID, CWindow *pWindow )
+{
+	itemsList.push_back( SItem( nID, pWindow, true ) );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 void CListView::RemoveItem( int nID )
 {
 	if ( nID == nSelectedID )
@@ -1213,6 +1238,12 @@ void CListView::Update( const STime &sTime, NGScene::I2DGameView *pView )
 	int nY = 0, nX = 0;
 	for ( list<SItem>::iterator iTemp = itemsList.begin(); iTemp != itemsList.end(); iTemp++ )
 	{
+		// retail @0x714217: hidden rows are forced invisible and skipped in the stacking
+		if ( iTemp->bHidden )
+		{
+			iTemp->pWindow->SetStyle( STYLE_VISIBLE, false );
+			continue;
+		}
 		iTemp->pWindow->SetPosition( SPoint( iTemp->pWindow->GetPosition().x, nY ) );
 		nY += iTemp->pWindow->GetSize().y;
 	}
@@ -1462,6 +1493,18 @@ void CComboBox::AddItem( int nID, const SInfo &sItem, int nTemplate )
 		SetSelectedItem( pList->GetSelectedItem() );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail @0x318fa0: byte-identical to AddItem except the row is registered hidden
+void CComboBox::AddHiddenItem( int nID, const SInfo &sItem, int nTemplate )
+{
+	CPtr<CComboBoxItem> pItem = new CComboBoxItem( SWindowInfo( pList, SPoint( 0, 0 ), SPoint( 0, 0 ), "", STYLE_ENABLED | STYLE_VISIBLE ), nTemplate );
+	pItem->SetInfo( sItem, statesSet );
+
+	int nSelected = pList->GetSelectedItem();
+	pList->AddHiddenItem( nID, pItem );
+	if ( pList->GetSelectedItem() != nSelected )
+		SetSelectedItem( pList->GetSelectedItem() );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 void CComboBox::RemoveAllItems()
 {
 	pList->RemoveAllItems();
@@ -1503,6 +1546,10 @@ void CComboBox::SetSelectedItem( int nID )
 		CPtr<CComboBoxItem> pSelectedItem = new CComboBoxItem( SWindowInfo( pSelectedView, SPoint( 0, 0 ), SPoint( 0, 0 ), "", STYLE_ENABLED | STYLE_VISIBLE ) );
 		pSelectedItem->SetInfo( pComboBoxItem->GetInfo(), statesSet );
 		pSelected = pSelectedItem;
+
+		// retail @0x71845c: a (successful) selection notifies the parent with the combo's own id --
+		// the options screens key their immediate-apply on this
+		SendMessage( GetParent(), SEvent( EVENT_NOTIFY, GetWindowID() ) );
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1512,6 +1559,8 @@ bool CComboBox::ProcessMessage( const SEvent &sEvent )
 	{
 	case EVENT_NOTIFY:
 		{
+			if ( !GetStyle( STYLE_ENABLED ) )   // retail @0x71915b: a disabled combo ignores its controls
+				break;
 			if ( sEvent.szID == "list" )
 			{
 				pMouseCapture = 0;
@@ -1521,8 +1570,11 @@ bool CComboBox::ProcessMessage( const SEvent &sEvent )
 			}
 			else if ( sEvent.szID == "drop_list" )
 			{
-				pList->SetStyle( STYLE_VISIBLE, true );
-				pMouseCapture = GetInterface()->CreateMouseCapture( this );
+				if ( pList->GetItemsCount() > 1 )   // retail @0x7191f0: nothing to drop for a 1-row list
+				{
+					pList->SetStyle( STYLE_VISIBLE, true );
+					pMouseCapture = GetInterface()->CreateMouseCapture( this );
+				}
 				return true;
 			}
 
@@ -1702,9 +1754,9 @@ void CScreenShot::Draw( const STime &sTime, NGScene::I2DGameView *pView )
 		SPoint sSTSize;
 		pTexture->GetSize( &sSTSize );
 
+		// quad size = texture dims * (real/texture) scale = the real window size (baked; no layout scale)
 		CRectLayout sLayout;
-		sLayout.scale = CTPoint<float>( float( sRealSize.x ) / sSTSize.x, float( sRealSize.y ) / sSTSize.y );
-		sLayout.AddRect( 0, 0, CTRect<float>( 0, 0, sSTSize.x, sSTSize.y ) );
+		sLayout.AddRect( 0, 0, sRealSize.x, sRealSize.y, CTRect<float>( 0, 0, sSTSize.x, sSTSize.y ) );
 		pView->CreateDynamicRects( pTexture, sLayout, sScrPosition, sScrWindow );
 	}
 
@@ -1802,9 +1854,9 @@ void CVideoPlayer::Draw( const STime &sTime, NGScene::I2DGameView *pView )
 
 			if ( sVidSize.x > 0 && sVidSize.y > 0 )
 			{
+				// quad size = movie dims * (real/movie) scale = the real window size (baked)
 				CRectLayout sLayout;
-				sLayout.scale = CTPoint<float>( float( sRealSize.x ) / sVidSize.x, float( sRealSize.y ) / sVidSize.y );
-				sLayout.AddRect( 0, 0, CTRect<float>( 0, 0, sVidSize.x, sVidSize.y ) );
+				sLayout.AddRect( 0, 0, sRealSize.x, sRealSize.y, CTRect<float>( 0, 0, sVidSize.x, sVidSize.y ) );
 				pView->CreateDynamicRects( pTexture, sLayout, sScrPosition, sScrWindow );
 			}
 		}
@@ -1821,6 +1873,7 @@ using namespace NUI;
 REGISTER_SAVELOAD_CLASS( 0xB0241962, CPushButton );
 REGISTER_SAVELOAD_CLASS( 0xB0241963, CCheckButton );
 REGISTER_SAVELOAD_CLASS( 0xB0241964, CToolTip );
+REGISTER_SAVELOAD_CLASS( 0xB024196D, CFrame );       // retail NUI::CFrame id (gen/classreg.json)
 REGISTER_SAVELOAD_CLASS( 0xB024196E, CTextFrame );   // retail NUI::CTextFrame id (gen/classreg.json)
 REGISTER_SAVELOAD_CLASS( 0xB0241965, CSlider );
 REGISTER_SAVELOAD_CLASS( 0xB0241966, CScroll );

@@ -28,6 +28,45 @@ extern CBasicShare<int, CChapterInfoLoader> shareChapterInfo;
 namespace NUI
 {
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// CFrameText -- retail NUI::CFrameText (iGlobalMapUI.obj, saveload id 0xB0912171): a CFrame-derived
+// bordered panel that owns one auto-sizing CText caption, (re)built from the originating UI
+// control's DB string on EVENT_TEMPLATECREATE (ProcessMessage @0x1e4770; ctors @0x1e5ff0/@0x1e4740).
+// NOTE: retail defines NO operator& of its own -- serialization is the inherited CFrame table
+// (rel_tag_count 0 in the save-format audit); pText is deliberately NOT serialized (it is rebuilt
+// by the template-create event), so none is authored here either. Registered for save-graph
+// identity. Retail creation site: CZoneGlobalSector::pDescription (that retag is a separate
+// convergence leg; until it lands the class is registration+behaviour only).
+////////////////////////////////////////////////////////////////////////////////////////////////////
+class CFrameText: public CFrame
+{
+	OBJECT_NOCOPY_METHODS(CFrameText);
+private:
+	CObj<CText> pText;   // the caption child; NOT in the save format (see banner)
+
+public:
+	CFrameText() {}
+	CFrameText( const SWindowInfo &sInfo ): CFrame( sInfo ) {}   // retail @0x1e4740: CFrame(sInfo); pText = 0
+
+	// retail @0x1e4770: on TEMPLATECREATE build the caption from the control's DB string and
+	// auto-fit caption + frame heights (child inset {4,4}, width = frame width - 8, style 6 =
+	// VISIBLE|ENABLED; frame height = measured text height + 8). Everything else -> CWindow.
+	bool ProcessMessage( const SEvent &sEvent )
+	{
+		if ( sEvent.nEvent == EVENT_TEMPLATECREATE )
+		{
+			pText = new CText( SWindowInfo( this, SPoint( 4, 4 ), SPoint( GetSize().x - 8, 0 ), "", STYLE_VISIBLE | STYLE_ENABLED ) );
+			pText->SetText( GetDBString( sEvent.pControl->pString ), true );
+
+			SPoint sReal;
+			pText->GetRealSize( &sReal );
+			pText->SetSize( SPoint( pText->GetSize().x, sReal.y ) );   // caption: keep width, fit height
+			SetSize( SPoint( GetSize().x, sReal.y + 8 ) );             // frame: text height + 4+4 border
+		}
+
+		return CWindow::ProcessMessage( sEvent );
+	}
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
 // ISector
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CGlobalSector: public CWindow
@@ -91,8 +130,8 @@ private:
 	////
 	CPtr<CImage> pZoneNormal;
 	CPtr<CImage> pZoneDisabled;
-	CPtr<CMLText> pTextNormal;
-	CPtr<CMLText> pTextHilighted;
+	CPtr<CText> pTextNormal;
+	CPtr<CText> pTextHilighted;
 	CPtr<CWindow> pDescription;
 	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CGlobalSector*)this); f.Add(2,&pGlobal); f.Add(3,&bRecommended); f.Add(4,&fCoeff); f.Add(5,&sMorphTime); f.Add(6,&sFlashTime); f.Add(7,&pZoneNormal); f.Add(8,&pZoneDisabled); f.Add(9,&pTextNormal); f.Add(10,&pTextHilighted); f.Add(11,&pDescription); return 0; }
 
@@ -125,8 +164,8 @@ bool CZoneGlobalSector::ProcessMessage( const SEvent &sEvent )
 	{
 	case EVENT_TEMPLATELOAD:
 		{
-			pTextNormal = new CMLText( sEvent.pLoader->GetControl( "text_normal" ) );
-			pTextHilighted = new CMLText( sEvent.pLoader->GetControl( "text_hilighted" ) );
+			pTextNormal = new CText( sEvent.pLoader->GetControl( "text_normal" ) );
+			pTextHilighted = new CText( sEvent.pLoader->GetControl( "text_hilighted" ) );
 
 			break;
 		}
@@ -181,8 +220,7 @@ CGlobalMapUI::CGlobalMapUI( const SWindowInfo &sInfo, NGame::IGlobalMap *_pGloba
 {
 	// retail CGlobalMapUI ctor @0x1e4b20: disasm @0x5e4bfb `mov ecx,1` -> NDb::GetUICursor(1) =
 	// UICursors row 1 "xz" (UITexture 295, NormalPen.cur) -- the global-map default cursor.
-	// (492 was the pre-remap arbitrary id = HitLocationLeftArm.cur.)
-	sCursor = SCursorInfo( NDb::GetUITexture( 295 ) );
+	sCursor = SCursorInfo( NDb::GetUICursor( 1 ) );
 
 	CDGPtr<CPtrFuncBase<CGlobalInfo> > pGlobalInfo = pGlobal->GetGlobalInfo();
 	pGlobalInfo.Refresh();
@@ -333,4 +371,5 @@ void CGlobalMapUI::GetGlobalSectorInfo( const SGlobalSector &sSector, bool *pbVi
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 using namespace NUI;
 REGISTER_SAVELOAD_CLASS( 0xB0912170, CGlobalMapUI );
+REGISTER_SAVELOAD_CLASS( 0xB0912171, CFrameText );     // retail NUI::CFrameText id (gen/classreg.json)
 REGISTER_SAVELOAD_CLASS( 0xB0912172, CZoneGlobalSector );

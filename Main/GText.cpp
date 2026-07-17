@@ -340,7 +340,13 @@ void CTextFormater::GenerateLine()
 				value.charsSet.push_back( SText::SCharRect( iTemp->nIndex + nCount, CTRect<int>( (int)( fX ), nY, (int)( fX ) + sCharacter.nWidth * sFontInfo.scale.x, nY + fHeight ) ) );
 
 				fX += ( sCharacter.nA + sFontInfo.pInfo->GetKern( *iChar, wcLastChar ) ) * sFontInfo.scale.x;
-				pLayout->AddRect( fX - fShift, nY, CTRect<float>( sCharacter.x1, sCharacter.y1, sCharacter.x2, sCharacter.y2 ), iTemp->sState.sColor );
+				// retail SText::SFontLayout embeds the scale-less 12-byte CRectLayout (PDB) -- the
+				// glyph quad size (|texrect| * font scale) is baked per rect via the 6-arg AddRect.
+				const CTRect<float> sTexRect( sCharacter.x1, sCharacter.y1, sCharacter.x2, sCharacter.y2 );
+				pLayout->AddRect( fX - fShift, nY,
+					( sTexRect.x2 - sTexRect.x1 ) * sFontInfo.scale.x,
+					( sTexRect.y2 - sTexRect.y1 ) * sFontInfo.scale.y,
+					sTexRect, iTemp->sState.sColor );
 				fX += sCharacter.nBC * sFontInfo.scale.x;
 
 				wcLastChar = *iChar;
@@ -591,8 +597,7 @@ CRectLayout* CTextFormater::GetLayout( const SFont &sFont )
 	SText::SFontLayout *pLayout = &*value.rectLayouts.insert( value.rectLayouts.end(), SText::SFontLayout() );
 	pLayout->sFont = sFont;
 	pLayout->pFontInfo = sFontInfo.pFont;
-	pLayout->sLayout.scale.x = sFontInfo.scale.x;
-	pLayout->sLayout.scale.y = sFontInfo.scale.y;
+	// (no scale member on the retail CRectLayout -- GenerateLine bakes the size into every rect)
 
 	return &pLayout->sLayout;
 }

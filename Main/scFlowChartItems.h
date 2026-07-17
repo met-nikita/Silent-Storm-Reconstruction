@@ -20,21 +20,26 @@ enum ETaskState
 	TS_FAILED = 2,
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// CScenarioTask -- runtime wrapper over an NDb::CScenarioTask DB record + a completion state.
-// (The release CScenarioTask also carries clue-detection fields pParentClue/bDetected/bVisible,
-// omitted here: script tasks have no parent clue and detection is the clue system, not the script API.)
+// CScenarioTask -- runtime wrapper over an NDb::CScenarioTask DB record + a completion state +
+// the clue-detection fields (retail ctor @0x2dfbc0 takes (pDBTask, pParentClue)).
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CScenarioTask: public CObjectBase
 {
 	OBJECT_BASIC_METHODS( CScenarioTask );
 	ZDATA
-	CDBPtr<NDb::CScenarioTask> pDBTask;
-	ETaskState eState;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&pDBTask); f.Add(3,&eState); return 0; }
+	CDBPtr<NDb::CScenarioTask> pDBTask;   // retail +0x0c
+	CPtr<CScenarioClue> pParentClue;      // retail +0x10 (weak CPtr, exactly as retail)
+	ETaskState eState;                    // retail +0x18
+	bool bDetected;   // retail +0x14 (clue detection; consumers = the clue system, unwired -- W3)
+	bool bVisible;    // retail +0x1c
+	// retail @0x2e1560: 2=pDBTask, 3=pParentClue, 4=bDetected, 5=eState, 6=bVisible.
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&pDBTask); f.Add(3,&pParentClue); f.Add(4,&bDetected); f.Add(5,&eState); f.Add(6,&bVisible); return 0; }
 public:
-	CScenarioTask(): eState( TS_UNKNOWN ) {}
-	CScenarioTask( NDb::CScenarioTask *_pDBTask ): pDBTask( _pDBTask ), eState( TS_UNKNOWN ) {}
+	CScenarioTask(): eState( TS_UNKNOWN ), bDetected( false ), bVisible( true ) {}
+	// retail @0x2dfbc0: pParentClue = the owning clue's runtime object (null for script-created tasks)
+	CScenarioTask( NDb::CScenarioTask *_pDBTask, CScenarioClue *_pParentClue = 0 ): pDBTask( _pDBTask ), pParentClue( _pParentClue ), eState( TS_UNKNOWN ), bDetected( false ), bVisible( true ) {}
 	NDb::CScenarioTask* GetDBTask() const { return pDBTask; }
+	CScenarioClue* GetParentClue() const { return pParentClue; }
 	ETaskState GetState() const { return eState; }
 	void SetState( ETaskState _eState ) { eState = _eState; }
 };
@@ -53,7 +58,8 @@ class CScenarioGoal: public CObjectBase
 	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&pGoal); f.Add(3,&tasks); f.Add(4,&eState); return 0; }
 public:
 	CScenarioGoal(): eState( TS_UNKNOWN ) {}
-	CScenarioGoal( NDb::CScenarioGoal *_pGoal );
+	// retail @0x2e0550: the parent clue is threaded into each cloned task's pParentClue
+	CScenarioGoal( NDb::CScenarioGoal *_pGoal, CScenarioClue *pParentClue = 0 );
 	NDb::CScenarioGoal* GetDBGoal() const { return pGoal; }
 	const vector< CObj<CScenarioTask> >& GetTasks() const { return tasks; }
 	ETaskState GetState() const { return eState; }
@@ -163,10 +169,13 @@ class CScenarioClue: public CObjectBase
 	vector< CPtr<CScenarioObjective> > parentObjectives;
 	vector< CPtr<CScenarioZone> > parentZones;
 	bool bDestroyed;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&pDBClue); f.Add(3,&bPlaced); f.Add(4,&bCompound); f.Add(5,&bInaccessible); f.Add(6,&bJustFound); f.Add(7,&nOpenOrder); f.Add(8,&nInnerID); f.Add(9,&bInShortestPath); f.Add(10,&nTemplateID); f.Add(11,&objectives); f.Add(12,&parentObjectives); f.Add(13,&parentZones); f.Add(14,&bDestroyed); return 0; }
+	CObj<CScenarioGoal> pGoal;   // retail: runtime goal built from pDBClue->pGoal in the ctor @0x2e0770
+	bool bDetected;              // retail: clue-detection flag (consumers = the clue system, unwired -- W3)
+	// retail @0x2e2990: 2..14 as below + 15=pGoal (CObj), 16=bDetected
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&pDBClue); f.Add(3,&bPlaced); f.Add(4,&bCompound); f.Add(5,&bInaccessible); f.Add(6,&bJustFound); f.Add(7,&nOpenOrder); f.Add(8,&nInnerID); f.Add(9,&bInShortestPath); f.Add(10,&nTemplateID); f.Add(11,&objectives); f.Add(12,&parentObjectives); f.Add(13,&parentZones); f.Add(14,&bDestroyed); f.Add(15,&pGoal); f.Add(16,&bDetected); return 0; }
 public:
 	//
-	CScenarioClue() {}
+	CScenarioClue(): bDetected( false ) {}
 	CScenarioClue( NDb::CDBScenarioClue *_pDBClue, int _nInnerID );
 	//
 	bool CanPlaceObjective( CScenarioObjective *pObjective );
@@ -203,6 +212,9 @@ public:
 	int GetInnerID() { return nInnerID; }
 	bool IsDestroyed() { return bDestroyed; }
 	void SetDestroyed( bool _bDestroyed ) { bDestroyed = _bDestroyed;	}
+	CScenarioGoal* GetGoal() const { return pGoal; }
+	bool IsDetected() const { return bDetected; }
+	void SetDetected( bool _bDetected ) { bDetected = _bDetected; }
 	//
 	const vector< CPtr<CScenarioObjective> >& GetObjectives() { return objectives; }
 	const vector< CPtr<CScenarioObjective> >& GetParentObjectives() { return parentObjectives; }

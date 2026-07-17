@@ -51,17 +51,17 @@ int SPosition::operator&( CStructureSaver &f )
 	return 0;	
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// MakeFlyPos -- see aiPosition.h. Mirrors retail NAI::MakeFlyPos (@0x3d0e0 worker + @0x3d180 wrapper):
-// the network snaps *pOut onto layer 0 near *pSrc's world CP, then the altitude (pSrc.z - groundZ) is
-// quantised into nLayer (8 bits, 0..255), nFinal is set (the "3D" flag CPathNetwork::GetCP decodes),
-// and the pose is forced to WALK. nIntegral/nMoving/nDirection are preserved (mask 0x3c01).
-bool MakeFlyPos( SPosition *pSrc, SPosition *pOut )
+// MakeFlyPos -- see aiPosition.h. Retail @0x3d0e0 worker: the network snaps *pOut onto layer 0 near
+// the world point, then the altitude (pt.z - groundZ) is quantised into nLayer (8 bits, 0..255),
+// nFinal is set (the "3D" flag CPathNetwork::GetCP decodes), and the pose is forced to WALK.
+// nIntegral/nMoving/nDirection are preserved from *pOut's PRIOR content (mask 0x3c01) -- callers that
+// want retail's load-time fly waypoints must pass a default-constructed pos (retail @0x496000).
+bool MakeFlyPos( const CVec3 &pt, IPathNetwork *pNet, SPosition *pOut )
 {
-	IPathNetwork *pNet = pSrc->GetNetwork();
-	CVec3 cp = pSrc->GetCP();					// capture before SetOnLayer mutates *pOut (may alias *pSrc)
-	if ( !pNet->SetOnLayer( pOut, 0, cp ) )
+	if ( !pNet->SetOnLayer( pOut, 0, pt ) )
 		return false;
-	int nAlt = Float2Int( ( cp.z - pOut->GetCP().z ) * ( 1.0f / F_3D_STEP ) + 0.5f );
+	// retail @0x3d0e0 rounds toward zero (fistp with RC=truncate)
+	int nAlt = (int)( ( pt.z - pOut->GetCP().z ) * ( 1.0f / F_3D_STEP ) );
 	if ( nAlt > 0xff )
 		nAlt = 0xff;
 	else if ( nAlt < 0 )
@@ -70,6 +70,13 @@ bool MakeFlyPos( SPosition *pSrc, SPosition *pOut )
 	hi = (unsigned short)( ( ( ( 0xc100 | ( nAlt & 0xff ) ) << 1 ) | ( hi & 0x3c01 ) ) & 0xffff );
 	pOut->p = SPathPlace( ( pOut->p.GetData() & 0xffff ) | ( hi << 16 ) );
 	return true;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail @0x3d180 wrapper
+bool MakeFlyPos( SPosition *pSrc, SPosition *pOut )
+{
+	CVec3 cp = pSrc->GetCP();					// capture before SetOnLayer mutates *pOut (may alias *pSrc)
+	return MakeFlyPos( cp, pSrc->GetNetwork(), pOut );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // SObjectPosition

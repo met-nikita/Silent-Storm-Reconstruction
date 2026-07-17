@@ -51,7 +51,8 @@ public:
 	CBuilding() {}
 	CBuilding( CSyncSrc<IVisObj> *pShow, const SMapBuilding &info, IWorld *pWorld, bool bNoAI = false );
 	// implement IAttackable
-	virtual int ProcessAttack( int nUserID, NRPG::CAttackPortion *pAttack, NDb::CRPGArmor *pArmor );
+	virtual int ProcessAttack( NWorld::IWorld *pWorld, int nUserID, NRPG::CAttackPortion *pAttack,
+		const CVec3 &vDir, NDb::CRPGArmor *pArmor );
 	//NRPG::IAttackable* GetAttackable() { return pRPG; } /// for special purpose only!!!!
 	void Explode( const CVec3 &ptEpic, int nPower );
 	virtual const SMapBuilding& GetInfo() const { return info; }

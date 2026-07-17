@@ -33,6 +33,7 @@ class CAIDefenceReaction: public CAIReaction
 	int                 nPrevAP;          // +0x2c  anti-cycling: AP at the last defence-logic install
 	bool                bJustStarted;     // +0x30
 	CObj<CAIReaction>   pPrevReaction;    // +0x34  the reaction to fall back to when the plan dies
+	int operator&( CStructureSaver &f ) { f.Add( 2, (CAIReaction*)this ); f.Add( 3, &coveredPos ); f.Add( 4, &attackPos ); f.Add( 5, &nAPForTakeCover ); f.Add( 6, &nPrevAP ); f.Add( 7, &bJustStarted ); f.Add( 8, &pPrevReaction ); return 0; }   // retail @0x3b630
 public:
 	CAIDefenceReaction(): nAPForTakeCover( 0xffff ), nPrevAP( 0xffff ), bJustStarted( true ) {}
 	CAIDefenceReaction( IAIUnit *pUnit, CAIReaction *pPrevReaction );   // @0x3b4d0 (plans on construction)

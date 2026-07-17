@@ -372,6 +372,6 @@ void CICHeroMenu::Exec()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 using namespace NUI;
 REGISTER_SAVELOAD_CLASS( 0xB1112190, CHeroMenuUI );
-REGISTER_SAVELOAD_CLASS( 0xB1112191, CScriptButton );
+REGISTER_SAVELOAD_CLASS( 0xB3501010, CScriptButton );
 using namespace NGame;
 REGISTER_SAVELOAD_CLASS( 0xB111219A, CHeroMenuInterface );

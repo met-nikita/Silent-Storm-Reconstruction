@@ -273,12 +273,21 @@ static void TestRnd( const string &szID, const vector<wstring> &szParams, void *
   pScr->ExecuteThreads();
 }*/
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail ScriptInit registers two post-Jan03 log switches: lua_showlog -> bShowLuaLog @0x9c70f8
+// (consumers: ShowLuaLog/luaPrepareData @0x2e49e0/@0x2e4c90, scriptCommon.cpp), console_writelog ->
+// bConsoleWriteLog @0x9c986d (consumer: AddConsoleLine @0x3d71c0, LogStream.cpp)
+extern bool bShowLuaLog;        // defined in scriptCommon.cpp
+extern bool bConsoleWriteLog;   // defined in ..\MiscDll\LogStream.cpp
 START_REGISTER(A5Script)
 	REGISTER_CMD( "script_run", RunScriptFile )
 	REGISTER_CMD( "script_show", PrintScriptState )
 	REGISTER_CMD( "script_rnd", TestRnd )
 //	REGISTER_CMD( "continue", ExecuteScriptThreads )
+	REGISTER_VAR_EX( "lua_showlog", NGlobal::VarBoolHandler, &bShowLuaLog, 0, true )
+	REGISTER_VAR_EX( "console_writelog", NGlobal::VarBoolHandler, &bConsoleWriteLog, 0, true )
 FINISH_REGISTER
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 using namespace NScript;
 REGISTER_SAVELOAD_CLASS( 0x70652130, CScript );
+// (CWindow's pScript/eventsMap cast helpers come from REGISTER_SAVELOAD_CLASS(CScript) above --
+// it expands BASIC_REGISTER_CLASS; a second BASIC line would be a duplicate specialization.)

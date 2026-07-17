@@ -22,6 +22,7 @@ class CWindow;
 class CConsole;
 class CTextDraw;
 class CMouseCaptureHandler;
+class CToolTip;
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // Functions
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -64,26 +65,38 @@ private:
 
 	ZDATA_(CWindow)
 	STime sLastLButtonDownTime, sLastRButtonDownTime, sDoubleClickTime;
-	STime sLastTime;		// transient UI ms clock (retail CInterface sLastTime @+0xb8): set each Step(), read by NScript::luaGetUITime; NOT serialized (deliberately omitted from operator& below)
+	SPoint sLastLButtonClickPoint;	// last L-click in UI space; transient like the times (retail @0x31c090 dblclk gate)
+	STime sLastTime;		// transient UI ms clock (retail CInterface sLastTime @+0xb8): set each Step(), read by NScript::luaGetUITime; NOT serialized (retail op& @0x31fea0 skips it)
 	SPoint sCursorPoint;
 	SCursorInfo sCursor;
 	SCursorInfo sDefaultCursor;
-	CTimeCounter sTimer;
-	CDGPtr<CCTime> pTimer;
+	CTimeCounter sTimer;		// dev frame timer -- retail dropped it from the format (tag-8 hole @0x31fea0); kept as a transient member
+	CDGPtr<CCTime> pTimer;		// dev frame-time source -- retail tag-9 hole; transient
 	CPtr<ICursor> pCursor;
 	CPtr<CConsole> pConsole;
 	CPtr<NSound::ISoundScene> pSound;
 	CObj<NGScene::I2DGameView> pView;
 	CMObj<CMouseCaptureHandler> pMouseCapture;
 	////
-	CObj<CWindow> pToolTip;
-	CPtr<CWindow> pToolTipOwner;
+	CPtr<CWindow> pToolTipOwner;	// retail tags: 15=pToolTipOwner, 16=pToolTip (dev had the pair swapped)
+	CObj<CToolTip> pToolTip;		// retail type: typed CObj<NUI::CToolTip>
 	////
 	bool bShowFPSStats;
 	CObj<CTextDraw> pFPSText;
+	// retail tail members @0x31fea0 tags 20-23:
+	bool bToolTipSet;			// sticky "a window claimed the tooltip this frame" flag (retail Step/SetToolTipOwner)
+	float fMouseWheelDelta;		// mouse-wheel accumulator (retail ProcessEvent @0x31c090 step 11)
+	CTimeCounter sCounter;		// retail sound-listener counter (advanced in Draw when bOwnSoundScene)
+	bool bOwnSoundScene;		// this interface created its own sound scene (retail ctor @0x31dbd0)
 	///CRAP
-	CObj<CTextDraw> pNonPublicDemo;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CWindow*)this); f.Add(2,&sLastLButtonDownTime); f.Add(3,&sLastRButtonDownTime); f.Add(4,&sDoubleClickTime); f.Add(5,&sCursorPoint); f.Add(6,&sCursor); f.Add(7,&sDefaultCursor); f.Add(8,&sTimer); f.Add(9,&pTimer); f.Add(10,&pCursor); f.Add(11,&pConsole); f.Add(12,&pSound); f.Add(13,&pView); f.Add(14,&pMouseCapture); f.Add(15,&pToolTip); f.Add(16,&pToolTipOwner); f.Add(17,&bShowFPSStats); f.Add(18,&pFPSText); f.Add(19,&pNonPublicDemo); return 0; }
+	CObj<CTextDraw> pNonPublicDemo;	// dev-only overlay -- retail tag-19 hole @0x31fea0; kept as a transient member
+	// retail NUI::CInterface::operator& @0x31fea0: 1=CWindow base, 5=sCursorPoint, 6=sCursor,
+	// 7=sDefaultCursor, 10=pCursor, 11=pConsole, 12=pSound, 13=pView, 14=pMouseCapture,
+	// 15=pToolTipOwner, 16=pToolTip, 17=bShowFPSStats, 18=pFPSText, 20=bToolTipSet,
+	// 21=fMouseWheelDelta, 22=sCounter, 23=bOwnSoundScene. Tags 2,3,4,8,9,19 are format HOLES
+	// (retail stopped serializing the button/double-click times, the frame timer pair and the
+	// non-public-demo overlay -- the members above stay transient).
+	ZEND int operator&( CStructureSaver &f );	// defined in UIInterface.cpp (needs CToolTip complete)
 
 protected:
 	void UpdateFPSText();
@@ -101,6 +114,7 @@ public:
 
 	void SetToolTipOwner( CWindow *pOwner );
 	CObjectBase* CreateMouseCapture( CWindow *pWindow );
+	void ResetMouseCapture();		// retail @0x31c060
 
 	NSound::ISoundScene* GetSound();
 	NGScene::I2DGameView* GetView();

@@ -165,7 +165,7 @@ class CWysiwyg: public CIMapEditor
 	bool GetPointUnderCursor( CVec2 *pRes );
 	CObjectBase* GetObjectUnderCursor( int *pnUserID, CVec3 *pptCross, CVec3 *pptCrossFaceNormal, int nFlags = NWorld::TS_ALL );
 	void SortTracedObjects( vector<NAI::SInterval> *pIntervals );
-	bool Select( CObjectBase *pObject, int nUserID, const CVec3 &ptCrossFaceNormal ); // true, если тыкнулись в уже поселекченный объект
+	bool Select( CObjectBase *pObject, int nUserID, const CVec3 &ptCrossFaceNormal ); // true, пїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅ пїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ
 	void NewTexSpot( const CVec3 &ptCross, const CVec3 &ptNormal );
 	void NewTerrSpot();
 	void NewWaypoint();
@@ -295,7 +295,7 @@ inline void EraseSpot( vector<NBuilding::SBuildFragment> *pFrags, const vector<i
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CWysiwyg::HitTest( const CVec2 &ptHit )
 {
-	if ( ptHit.y <= 0 || ptHit.x <= 0 ) // похоже кликнули за пределами окна
+	if ( ptHit.y <= 0 || ptHit.x <= 0 ) // пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅ
 		return false;
 	CVec2 r = pScene->GetScreenRect();
 	if ( ptHit.y >= r.y || ptHit.x >= r.x )
@@ -389,7 +389,7 @@ bool CWysiwyg::ProcessEvent( const NInput::SEvent &eEvent )
 		if ( ::GetFocus() != hWnd || !bWYSIWYGActive )
 			return true;
 		CVec2 ptCursor = pCursor->GetPos();
-		if ( !HitTest( ptCursor ) ) // похоже кликнули за пределами окна
+		if ( !HitTest( ptCursor ) ) // пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅ
 			return true;
 		int nUserID, nTerrUserID;
 		CVec3 ptCross;
@@ -1002,11 +1002,11 @@ bool CWysiwyg::Select( CObjectBase *pObj, int nUserID, const CVec3 &ptCrossFaceN
 		pSelection->Clear();
 		return false;
 	}
-	// пытаемся выделить уже выделенный объект?
+	// пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ?
 	bool bCheck = pSelection->CheckSelection( pObj, nUserID );
 	if ( IsPressed( VK_CONTROL ) && !IsRotation() )
 	{
-		// нажат CTRL, добавляем его. Если объект уже выделен - снимается выделение
+		// пїЅпїЅпїЅпїЅпїЅ CTRL, пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅ. пїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ - пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ
 		pSelection->AddSelection( pObj, nUserID );
 	}
 	else if ( !bCheck )
@@ -1335,19 +1335,16 @@ void CWysiwyg::DrawMoviewFrame()
 	r.top = 0;
 	r.bottom = 111.0f * fScale;
 
+	// quad size = texture dims * (rw.Width()/texW, (bottom-top)/texH) = the frame band, baked
 	sLayout = CRectLayout();
-	sLayout.AddRect( r.left, r.top, CRectLayout::STextureCoord( CTRect<float>( 0, 0, pFrameTex->nWidth, pFrameTex->nHeight ) ) );
-	sLayout.scale.x = (float)rw.Width() / pFrameTex->nWidth;
-	sLayout.scale.y = (float)(r.bottom - r.top) / pFrameTex->nHeight;
+	sLayout.AddRect( r.left, r.top, rw.Width(), r.bottom - r.top, CRectLayout::STextureCoord( CTRect<float>( 0, 0, pFrameTex->nWidth, pFrameTex->nHeight ) ) );
 
 	p2DScene->CreateDynamicRects( pFrameTex, sLayout, CTPoint<int>( 0, 0), drect );
 
 	r.top = rw.Height() - 111.0f * fScale;
 	r.bottom = rw.Height();
 	sLayout = CRectLayout();
-	sLayout.AddRect( r.left, r.top, CRectLayout::STextureCoord( CTRect<float>( 0, 0, pFrameTex->nWidth, pFrameTex->nHeight ) ) );
-	sLayout.scale.x = (float)rw.Width() / pFrameTex->nWidth;
-	sLayout.scale.y = (float)(r.bottom - r.top) / pFrameTex->nHeight;
+	sLayout.AddRect( r.left, r.top, rw.Width(), r.bottom - r.top, CRectLayout::STextureCoord( CTRect<float>( 0, 0, pFrameTex->nWidth, pFrameTex->nHeight ) ) );
 
 	p2DScene->CreateDynamicRects( pFrameTex, sLayout, CTPoint<int>( 0, 0), drect );
 }

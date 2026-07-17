@@ -8,6 +8,7 @@
 #include "aiMap.h"
 #include "grid.h"
 #include "..\Misc\2darray.h"
+#include "..\Misc\HPTimer.h"
 
 const int N_HALFSIZE = 64;
 
@@ -33,15 +34,17 @@ public:
 	CPtr<CVisionTracker> pParent;
 	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&vCenter); f.Add(3,&pAIMap); f.Add(4,&solid); f.Add(5,&transp); f.Add(6,&pParent); return 0; }
 	bool bCalced;
+	bool bNeedRecalc;   // retail +0x41 (not serialized): once-calced cube changed -> UpdateVision recalcs it eagerly
 
-	CVisionCube() { Zero( bCalced ); }
+	CVisionCube() { Zero( bCalced ); Zero( bNeedRecalc ); }
 	CVisionCube( NAI::IAIMap *_pMap, CVisionTracker *_pTracker, const CVec3 &_vCenter ): pAIMap(_pMap), pParent(_pTracker), vCenter(_vCenter)
-	{ 
+	{
 		SBound b;
 		float f = F_VISION_CUBE_SIZE;
 		b.BoxExInit( vCenter, CVec3( f, f, f ) );
 		pAIMap->AddTracker( this, b, NWorld::TS_VISION|NWorld::TS_VISION_SOLID, true );
 		Zero( bCalced );
+		Zero( bNeedRecalc );
 	}
 	virtual void OnChange();
 	void Recalc();
@@ -105,6 +108,7 @@ public:
 	virtual bool IsPointVisible( const CVec3 &ptFrom, const CVec3 &ptTarget, const CVec3 &ptForward,
 		float fRange, float fCosHalfFOV );   // retail @0x2c9440
 	virtual bool IsWithinSightRange( const CVec3 &ptFrom, const CVec3 &ptTarget, float fRange );   // retail @0x2c7fa0
+	virtual bool UpdateVision( float fTime );   // retail @0x2c9510 (vision vtbl+0x2c)
 	virtual EVoxelVisionState GetVision( int x, int y, int z )
 	{
 		FlushCubeCache();
@@ -163,10 +167,13 @@ void CVisionCube::Recalc()
 		transp.Clear();
 	}
 	bCalced = true;
+	bNeedRecalc = false;   // retail @0x2c8490 tail
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CVisionCube::OnChange() 
-{ 
+void CVisionCube::OnChange()
+{
+	if ( bCalced )
+		bNeedRecalc = true;   // retail @0x2c8420: only a once-calced cube is queued for the eager recalc
 	Zero( bCalced );
 	if ( IsValid( pParent ) )
 		pParent->FlushVisionCache();
@@ -453,6 +460,29 @@ bool CVisionTracker::IsWithinSightRange( const CVec3 &ptFrom, const CVec3 &ptTar
 	float fCap = fVisionKoef * fRange + fVisionKoef * fRange;
 	float fEff = ( fEff2 <= fCap * fCap ) ? sqrtf( fEff2 ) : fCap;
 	return du * du + dv * dv + dq * dq < fEff * fEff;   // strict <
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail @0x2c9510: eagerly recalc every changed (once-calced) cube; bail out (false) as soon as one
+// step's GetTimePassed delta exceeds fTime -- the timer check runs per cube, recalced or skipped.
+bool CVisionTracker::UpdateVision( float fTime )
+{
+	NHPTimer::STime t;
+	NHPTimer::GetTime( &t );
+	for ( int z = 0; z < grid.GetZSize(); ++z )
+	{
+		for ( int y = 0; y < grid.GetYSize(); ++y )
+		{
+			for ( int x = 0; x < grid.GetXSize(); ++x )
+			{
+				CVisionCube *pCube = grid[z][y][x];
+				if ( pCube->bNeedRecalc )
+					pCube->Recalc();
+				if ( NHPTimer::GetTimePassed( &t ) > fTime )
+					return false;
+			}
+		}
+	}
+	return true;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // retail CVisionTracker::IsPointVisible @0x2c9440 == MakeVisionQuery @0x2c8040 (the range/FOV gates +

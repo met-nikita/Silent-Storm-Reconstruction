@@ -47,20 +47,22 @@ class CTexture: public CDBRecord
 {
 	OBJECT_BASIC_METHODS(CTexture);
 public:
+	// retail enum ORDER (PDB NDb::CTexture::EType): 2D=0, ORDINARY=1, TRANSPARENT=2 —
+	// raw-serialized in game.db records, so the order is part of the wire format
 	enum EType
 	{
-		REGULAR,
-		TEXTURE_2D,
-		TEXTURE_TRANSPARENT
+		TEXTURE_USAGE_2D,
+		TEXTURE_USAGE_ORDINARY,
+		TEXTURE_USAGE_TRANSPARENT
 	};
 	ZDATA_(CDBRecord)
 	int nWidth;
 	int nHeight;
 	float fGain;
-	EType type;
 	DWORD dwAverageColor;
 	bool bIsDXT, bInstantLoad;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CDBRecord*)this); f.Add(2,&nWidth); f.Add(3,&nHeight); f.Add(4,&fGain); f.Add(5,&type); f.Add(6,&dwAverageColor); f.Add(7,&bIsDXT); f.Add(8,&bInstantLoad); return 0; }
+	EType usage;
+	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CDBRecord*)this); f.Add(2,&nWidth); f.Add(3,&nHeight); f.Add(4,&fGain); f.Add(6,&dwAverageColor); f.Add(7,&bIsDXT); f.Add(8,&bInstantLoad); f.Add(9,&usage); return 0; } // retail @0x3ffcf0: usage@9, no tag 5
 
 	virtual void Import();
 };
@@ -137,6 +139,7 @@ class CRPGArmor;
 class CSkeleton;
 class CGeometry;
 class CAIGeometry;
+class CTRndModel;
 class CModel: public CObjectBase
 {
 	OBJECT_BASIC_METHODS(CModel);
@@ -145,6 +148,10 @@ public:
 	CDBPtr<CGeometry> pGeometry;
 	CDBPtr<CSkeleton> pSkeleton;
 	CDBPtr<CRPGArmor> pRPGArmor;
+	// retail CModel::operator& @0x3f9e60 tag 0xc=12: the CTRndModel template this model was rolled
+	// from (stowed by CRndModel::CreateModel @0x3f7670); NRender uses it to RE-ROLL materials.
+	// Without it a save/load loses the re-roll link. Not DB-column-fed.
+	CDBPtr<CTRndModel> pSrcRndModel;
 	//
 	int operator&( CStructureSaver &f );
 	//
@@ -193,6 +200,9 @@ public:
 	CPtr<CAIGeometry> pAIGeometry;
 	CPtr<CRPGArmor> pRPGArmor;
 	SBound bound;
+	// retail CParticle +0x34 (operator& @0x3fa050 tag 5, 8-byte DataChunk; Import @0x3f8d80 columns
+	// "WrapX"/"WrapY"): texture wrap size fed to the particle animator's value.vWrap.
+	CVec2 vWrapSize;
 	//
 	virtual void Import();
 	int operator&( CStructureSaver &f );
@@ -447,6 +457,8 @@ CUITexture* GetUITexture( int nID );
 CUIContainer* GetUIContainer( int nID );
 class CUIHint;
 CUIHint* GetUIHint( int nID );			// release Hints table (0x6d) lookup -- the ShowHint script binding
+class CUICursor;
+CUICursor* GetUICursor( int nID );		// retail UICursors table (0x71) lookup -- SCursorInfo carries the CUICursor record
 ///
 CModel* GetModel( int nModelID );
 CModel* GetModelVariant( int nModelVariantID, SRand *pRand );

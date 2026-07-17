@@ -14,13 +14,14 @@ namespace NGfx
 namespace NGScene
 {
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-class CRects;
+// I2DScene -- immediate-mode 2D quad scene, exactly the retail NGScene::C2DScene method set
+// (2DScene.obj: ctor @0xafb0, StartNewFrame @0xabf0, Flush @0xaca0, CreateDynamicRects @0xad40,
+// CreateDynamicClearRects @0xabc0). The dev-only retained path (CreateRects/CreateClearRects over
+// CRects/CPosNode nodes, ids 0xF2005175/0xF2005170) had no retail counterpart and no live caller;
+// removed in the W5 convergence wave.
 class I2DScene: public CObjectBase
 {
 public:
-	virtual CRects* CreateRects( CPtrFuncBase<NGfx::CTexture> *pTexture, CFuncBase<CRectLayout> *pLayout, CFuncBase< CTRect<int> > *pSize = 0 ) = 0;
-	virtual CRects* CreateClearRects( CFuncBase<CRectLayout> *pLayout, CFuncBase< CTRect<int> > *pSize = 0 ) = 0;
-
 	virtual void CreateDynamicRects( CPtrFuncBase<NGfx::CTexture> *pTexture, const CRectLayout &sLayout, const CTPoint<int> &sPosition, const CTRect<int> &sClipWindow ) = 0;
 	virtual void CreateDynamicClearRects( const CRectLayout &sLayout, const CTPoint<int> &sPosition, const CTRect<int> &sClipWindow, float fZ = 1.0f ) = 0;
 

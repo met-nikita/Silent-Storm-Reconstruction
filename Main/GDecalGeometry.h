@@ -46,7 +46,11 @@ class CPerPolyDecal : public CPtrFuncBase<CObjectInfo>
 	CObjectInfo::SData data;
 	vector<CVec3> srcPositions;
 public:
-	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&pPart); f.Add(3,&data); return 0; }
+	// release @0x50c780 also serializes srcPositions (tag 4, raw vector<CVec3> blob:
+	// count + count*12 bytes) -- the predecessor left it unserialized (wire-audit
+	// UNREAD @1.4 on both decal classes). Without it a loaded decal re-runs
+	// TransformPart on the first Recalc instead of reusing the saved positions.
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&pPart); f.Add(3,&data); f.Add(4,&srcPositions); return 0; }
 protected:
 	virtual void Recalc();
 	virtual void Recalc( CObjectInfo::SData *pRes, const CObjectInfo &info, const vector<CVec3> &positions ) = 0;

@@ -177,3 +177,13 @@ CSequence* GetSequenceByExpression( EFaceExpression eExpression )
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 }
+// retail saveload ids (serialization-convergence W1; s2_scratch docs/SERIALIZATION_CONVERGENCE.md)
+using namespace NDb;
+REGISTER_SAVELOAD_CLASS( 0xA1943140, CFaceTexture )
+REGISTER_SAVELOAD_CLASS( 0xA1943141, CHeadTextures )
+REGISTER_SAVELOAD_CLASS( 0xA1943142, CEyeTexture )
+REGISTER_SAVELOAD_CLASS( 0xA1943143, CEyelashTexture )
+REGISTER_SAVELOAD_CLASS( 0xA2243160, CFaceGenHeadHair )
+REGISTER_SAVELOAD_CLASS( 0xA2243161, CRace )
+REGISTER_SAVELOAD_CLASS( 0xA2443170, CFaceGenHeadGlasses )
+REGISTER_SAVELOAD_CLASS( 0xA3053150, CFaceExpression )

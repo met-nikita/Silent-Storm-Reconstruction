@@ -322,7 +322,7 @@ CAIAttackLogic::CAIAttackLogic( IAIUnit *pUnit ):
 	pReload           = AddAction( new CAIReloadAction( u ),       currentPlaceSource );
 	pThrowKnife       = AddAction( new CAIThrowKnifeAction( u ),   attackPlaceSource );
 	pMelee            = AddAction( new CAIMeleeAction( u ),        enemyPlaceSource );
-	pLoot             = AddAction( new CAILootAction( u ),         currentPlaceSource );
+	pLoot             = AddAction( new CAILootAction( u, RUN ),    currentPlaceSource );   // release ctor pose RUN (decomp @0x20f30: EVar26=RUN)
 	pHeal             = AddAction( new CAIHealAction( u ),         currentPlaceSource );
 	pGetRidOfInactive = AddAction( new CAIMoveToEnemyAction( u ),  currentPlaceSource );
 	pBeginSnipe       = AddAction( new CAIBeginSnipeAction( u ),   currentPlaceSource );
@@ -487,11 +487,37 @@ void CAIDefenceLogic::MakeDecision()
 		CAILogic::Finish();   // @0x439810 -- no live winner ends the whole LOGIC (CAILogic::Finish, NOT CAIJob::Finish)
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// operator& for the two instantiated logics. Parent-only like Guard/Retreat/AfterCombat: the action +
-// place-source repertoire is deterministically rebuilt by the ctor, so only the engine base state (and
-// Defence's commanded place) need persisting. build-settle: if save/load of in-combat logics must
-// preserve per-action SActionInfo caches, serialize the CObj members explicitly (tags 3..N).
-int CAIAttackLogic::operator&( CStructureSaver &f )  { f.Add( 2, (CAICombatLogic*)this ); return 0; }
+// @0x29240 -- retail serializes base(2) + ALL members in declaration order (3 place sources, then the
+// 19 actions, tags 3..24). The CObj members are the same objects referenced from the base's
+// pChoosePlace.actions / placeSources, so the framework writes them by ref-id and per-action SInfo
+// caches persist across save/load. (Was parent-only base(2) before serialization-convergence Wave 2.)
+int CAIAttackLogic::operator&( CStructureSaver &f )
+{
+	f.Add( 2, (CAICombatLogic*)this );
+	f.Add( 3, &attackPlaceSource );
+	f.Add( 4, &currentPlaceSource );
+	f.Add( 5, &enemyPlaceSource );
+	f.Add( 6, &pShoot );
+	f.Add( 7, &pThrowGrenade );
+	f.Add( 8, &pLaunchRocket );
+	f.Add( 9, &pReload );
+	f.Add( 10, &pThrowKnife );
+	f.Add( 11, &pMelee );
+	f.Add( 12, &pLoot );
+	f.Add( 13, &pHeal );
+	f.Add( 14, &pGetRidOfInactive );
+	f.Add( 15, &pBeginSnipe );
+	f.Add( 16, &pCollectSnipeAP );
+	f.Add( 17, &pSnipeShot );
+	f.Add( 18, &pCancelSnipe );
+	f.Add( 19, &pDockWithHG );
+	f.Add( 20, &pUndockFromHG );
+	f.Add( 21, &pShootFromHG );
+	f.Add( 22, &pTerrorPK );
+	f.Add( 23, &pWearPK );
+	f.Add( 24, &pLeavePK );
+	return 0;
+}
 // @0x43a1a0 -- SAVE-FORMAT (converging, mirrors CAIAfterCombatLogic::operator&): the release serializes the
 // FULL repertoire, NOT parent-only. tags: base(2), currentPlaceSource(3), pShoot(4), pThrowGrenade(5),
 // pLaunchRocket(6), pReload(7), attackPlace(8, 4-byte DataChunk). The CObj members are the SAME objects as in
@@ -531,7 +557,7 @@ CAIGuardLogic::CAIGuardLogic( IAIUnit *pUnit, CUnitArea *_pArea ):
 	pReload           = AddAction( new CAIReloadAction( u ),         currentPlaceSource );
 	pThrowKnife       = AddAction( new CAIThrowKnifeAction( u ),     attackPlaceSource );
 	pMelee            = AddAction( new CAIMeleeAction( u ),          attackPlaceSource );
-	pLoot             = AddAction( new CAILootAction( u ),           currentPlaceSource );   // release ctor passes pose RUN (EVar26=RUN @0x4e7ed); the dev CAILootAction is the predecessor with no pose param -> RUN elided (as the attack/after-combat loot)
+	pLoot             = AddAction( new CAILootAction( u, RUN ),      currentPlaceSource );   // release ctor passes pose RUN (EVar26=RUN @0x4e7ed)
 	pHeal             = AddAction( new CAIHealAction( u ),           currentPlaceSource );
 	pGetRidOfInactive = AddAction( new CAIMoveToEnemyAction( u ),    currentPlaceSource );
 	pDockWithHG       = AddAction( new CAIDockWithHGAction( u ),     currentPlaceSource );
@@ -544,7 +570,34 @@ CAIGuardLogic::CAIGuardLogic( IAIUnit *pUnit, CUnitArea *_pArea ):
 	pWearPK           = AddAction( new CAIWearPKAction( u ),         currentPlaceSource );
 	pLeavePK          = AddAction( new CAILeavePKAction( u ),        currentPlaceSource );
 }
-int  CAIGuardLogic::operator&( CStructureSaver &f ) { f.Add( 2, (CAICombatLogic*)this ); f.Add( 3, &pArea ); return 0; }
+// @0x50c70 -- retail-exact: base(2) + members in declaration order, pArea interleaved at tag 17 as a
+// WEAK CPtr (the guard reaction owns the area). (Was base(2)+pArea(3) before convergence Wave 2.)
+int  CAIGuardLogic::operator&( CStructureSaver &f )
+{
+	f.Add( 2, (CAICombatLogic*)this );
+	f.Add( 3, &attackPlaceSource );
+	f.Add( 4, &currentPlaceSource );
+	f.Add( 5, &pShoot );
+	f.Add( 6, &pThrowGrenade );
+	f.Add( 7, &pLaunchRocket );
+	f.Add( 8, &pReload );
+	f.Add( 9, &pThrowKnife );
+	f.Add( 10, &pMelee );
+	f.Add( 11, &pLoot );
+	f.Add( 12, &pHeal );
+	f.Add( 13, &pGetRidOfInactive );
+	f.Add( 14, &pDockWithHG );
+	f.Add( 15, &pUndockFromHG );
+	f.Add( 16, &pShootFromHG );
+	f.Add( 17, &pArea );
+	f.Add( 18, &pBeginSnipe );
+	f.Add( 19, &pCollectSnipeAP );
+	f.Add( 20, &pSnipeShot );
+	f.Add( 21, &pCancelSnipe );
+	f.Add( 22, &pWearPK );
+	f.Add( 23, &pLeavePK );
+	return 0;
+}
 // @0x0044ed00 - RELEASE-RECONCILED to the full 18-rule ladder (session 25; was the sess24 8-action
 // decision-only partial). With the repertoire now ctor-wired, the guard rules on all 18 actions. The order
 // DIFFERS from the attack ladder: the snipe state machine sits ABOVE the heavy guns, Shoot outranks the big
@@ -718,7 +771,7 @@ CAIAfterCombatLogic::CAIAfterCombatLogic( IAIUnit *pUnit, bool _bLoot ):
 	IAIUnit *u = GetUnit();
 	currentPlaceSource = AddPlaceSource( CreateCurrentPlaceSource( u ) );
 	pReload           = AddAction( new CAIReloadAction( u ),      currentPlaceSource );
-	pLoot             = AddAction( new CAILootAction( u ),        currentPlaceSource );   // release ctor pose WALK; dev CAILootAction is the no-pose predecessor (elided, as guard/attack loot)
+	pLoot             = AddAction( new CAILootAction( u, WALK ),  currentPlaceSource );   // release ctor pose WALK (after-combat walks to loot)
 	pHeal             = AddAction( new CAIHealAction( u ),        currentPlaceSource );
 	pGetRidOfInactive = AddAction( new CAIMoveToEnemyAction( u ), currentPlaceSource );
 }
@@ -809,8 +862,8 @@ bool IsDefenceLogic( IAILogic *pLogic )  { return CDynamicCast<CAIDefenceLogic>(
 //
 using namespace NAI;
 //
-BASIC_REGISTER_CLASS( CAIAttackLogic )
-BASIC_REGISTER_CLASS( CAIDefenceLogic )
-BASIC_REGISTER_CLASS( CAIGuardLogic )
-BASIC_REGISTER_CLASS( CAIRetreatLogic )
-BASIC_REGISTER_CLASS( CAIAfterCombatLogic )
+REGISTER_SAVELOAD_CLASS( 0x52443100, CAIAttackLogic )
+REGISTER_SAVELOAD_CLASS( 0x2306AC41, CAIDefenceLogic )
+REGISTER_SAVELOAD_CLASS( 0x52443101, CAIGuardLogic )
+REGISTER_SAVELOAD_CLASS( 0x52443105, CAIRetreatLogic )
+REGISTER_SAVELOAD_CLASS( 0x51653140, CAIAfterCombatLogic )

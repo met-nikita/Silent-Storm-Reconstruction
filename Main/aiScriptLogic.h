@@ -41,6 +41,11 @@ class CAIScriptLogic: public CAILogic
 	int  nCommandSegment;  // +0x78  the segment the "OnUnitNeedCommand" hook last fired on
 	bool bCommandGiven;    // +0x7c  the hook fired this window (re-armed every 5 segments)
 public:
+	// retail @0xa3710: 2=CAILogic base, 3=bEndOfTurn, 4=nSegment, 5=nCommandSegment, 6=bCommandGiven
+	// (PDB offsets +0x70/74/78/7c; Ghidra's shifted names resolved via layout). Convergence W2.
+	int operator&( CStructureSaver &f ) { f.Add( 2, (CAILogic*)this ); f.Add( 3, &bEndOfTurn ); f.Add( 4, &nSegment ); f.Add( 5, &nCommandSegment ); f.Add( 6, &bCommandGiven ); return 0; }
+private:
+public:
 	CAIScriptLogic();
 	CAIScriptLogic( IAIUnit *pUnit );
 	//

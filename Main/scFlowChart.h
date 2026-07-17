@@ -29,8 +29,14 @@ protected:
 	vector< CObj<CScenarioZone> > zones;
 	vector< CObj<CScenarioClue> > clues;
 	vector< CObj<CScenarioObjective> > objectives;
+	// retail +0x38/+0x4c (operator& @0x2ddb50 tags 7/8): the clues indexed by their DB carrier id.
+	// LoadItems (@0x2d7db0, branch @0x2d8175) files every created clue into exactly one map:
+	// nPersID != 0 -> persClues[nPersID], else -> itemClues[nItemID]. Retail never clears these
+	// (ClearItems @0x2d72a0 leaves them alone; LoadItems overwrites entries via operator[]).
+	unordered_map< int, CPtr<CScenarioClue> > itemClues;
+	unordered_map< int, CPtr<CScenarioClue> > persClues;
 public:
-	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&bFull); f.Add(3,&nScenarioID); f.Add(4,&zones); f.Add(5,&clues); f.Add(6,&objectives); return 0; }
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&bFull); f.Add(3,&nScenarioID); f.Add(4,&zones); f.Add(5,&clues); f.Add(6,&objectives); f.Add(7,&itemClues); f.Add(8,&persClues); return 0; }
 	//
 private:
 	void PlaceClue( CScenarioClue *pClue );

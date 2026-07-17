@@ -223,7 +223,8 @@ public:
 	void InitAsCorpse( const NAI::SUnitPosition &pos );
 	//
 	void IdleBan( char cBanSourceFlag, bool bBan ); 
-	void ChangeSkeleton( NDb::CSkeleton *_pSkeleton, bool bBecomePanzerklein );	// For PK
+	// retail @0x33c8a0: bBoss/bTerrorPK drive nSpecialPKFlags (BOSS/TERROR_PK), only while in a PK
+	void ChangeSkeleton( NDb::CSkeleton *_pSkeleton, bool bBecomePanzerklein, bool bBoss, bool bTerrorPK );	// For PK
 	void PlayCustomAnimation( const NAI::SUnitPosition &cmdPos, int nDBAnimationID );
 	bool IsInstableCorpse();
 	bool CalmCorpse();

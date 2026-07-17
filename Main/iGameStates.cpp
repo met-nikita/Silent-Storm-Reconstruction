@@ -27,6 +27,7 @@
 #include "..\DBFormat\DataFormat.h"
 #include "..\DBFormat\DataMap.h"
 #include "iMissionUI.h"
+#include "iCommonUI.h"			// NUI::CSlotInfo -- the drag-drop slot target descriptor (CStateDragItem::GetTargetCmd @0x1dc960)
 #include "UICommCtrls.h"		// NUI::CTextFrame -- the retail unit-hover tooltip window ("enemyToolTip")
 #include "UIInterface.h"		// NUI::CInterface / CWindow ScreenToClient
 #include "RPGUnitInfo.h"		// NRPG::SUnitInfo (feeds SEnemyInfo)
@@ -89,12 +90,51 @@ namespace NGame
 const float
 	F_MIN_SELECTION_DIST	= 20;
 const CVec4
-	V_SELECTIONCOLOR_TEAM					= CVec4( 0.1f, 0.1f, 1, 1 ),
-	V_SELECTIONCOLOR_TEAM_HILIGHT	= CVec4( 1, 1, 1, 0.5 ),
+	// v1.2 unified team/select: TEAM and TEAM_HILIGHT took the old UnitTracker SELECT/HILIGHT
+	// greens (v1.2 .data @0x97bb74/@0x97bb84; the v1.1 values were 0.1,0.1,1,1 / 1,1,1,0.5)
+	V_SELECTIONCOLOR_TEAM					= CVec4( 0.0431f, 0.2823f, 0, 1 ),
+	V_SELECTIONCOLOR_TEAM_HILIGHT	= CVec4( 0.0215f, 0.1411f, 0, 1 ),
 	V_SELECTIONCOLOR_ENEMY				= CVec4( 1, 0.1f, 0.1f, 0.5f ),
 	V_SELECTIONCOLOR_CORPSE				= CVec4( 0.1f, 1, 0.1f, 0.5f ),
 	V_SELECTIONCOLOR_OBJECT				= CVec4( 0.1f, 1, 0.1f, 0.5f ),
-	V_SELECTIONCOLOR_NEUTRAL			= CVec4( 0.1f, 1, 1, 0.5f );
+	V_SELECTIONCOLOR_NEUTRAL			= CVec4( 0.1f, 1, 1, 0.5f ),
+	// v1.2-only alternative-palette colors (@0x97bbd4/@0x97bbe4/@0x97bbf4)
+	V_SELECTIONCOLOR_ALT_HILIGHT	= CVec4( 1, 1, 1, 0.05f ),
+	V_SELECTIONCOLOR_SINGLE				= CVec4( 1, 1, 1, 0.3f ),
+	V_SELECTIONCOLOR_ALT_OBJECT		= CVec4( 0.0431f, 0.2823f, 0, 1 );
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// v1.2 selection palette dispatcher @0x5d6130: game_selectionmode remaps the palette.
+// Index: 0 team/selected, 1 team-hilight, 2 enemy, 3 corpse, 4 object, 5 neutral.
+const CVec4& GetSelectionColor( int nIndex )
+{
+	if ( NRender::nSelectionMode != 2 )
+	{
+		if ( NRender::nSelectionMode == 1 )
+		{
+			switch ( nIndex )
+			{
+				case 1: return V_SELECTIONCOLOR_ALT_HILIGHT;
+				case 2: return V_SELECTIONCOLOR_ENEMY;
+				case 3:
+				case 4: return V_SELECTIONCOLOR_ALT_OBJECT;
+				case 5: return V_SELECTIONCOLOR_NEUTRAL;
+			}
+		}
+		else
+		{
+			switch ( nIndex )
+			{
+				case 0: return V_SELECTIONCOLOR_TEAM;
+				case 1: return V_SELECTIONCOLOR_TEAM_HILIGHT;
+				case 2: return V_SELECTIONCOLOR_ENEMY;
+				case 3: return V_SELECTIONCOLOR_CORPSE;
+				case 4: return V_SELECTIONCOLOR_OBJECT;
+				case 5: return V_SELECTIONCOLOR_NEUTRAL;
+			}
+		}
+	}
+	return V_SELECTIONCOLOR_SINGLE;
+}
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // retail NGame::SayAckForAll @0x1d96d0: an ORDER handler pairs its ShowError/success with a
 // per-selected-unit NWorld::CCmdPlayAck dispatched on the ONE-ARG mission Command channel
@@ -176,6 +216,40 @@ void ShowError( IMission *pMission, NWorld::EUnitCommandResult eResult )
 	return;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail NGame::MakeCursorString @0x1d7990: the shared cursor AP caption. Appends
+//   <format/colour DB string> -- 20276 (GREEN) when the action is AP-affordable (sInfo.bEnoughAP),
+//                                19807 (RED) otherwise; appended in real time too (it re-issues the
+//                                <font> markup the ToHit line relies on),
+// then, in TURN-BASED only (mission vtbl+0x50 == false):
+//   <"AP: " 19808> + the folded AP -- "%d" when nMinAP == nMaxAP, "%d-%d" for a mixed selection,
+//                                     or <"N/A" 19810> when no unit reported an AP (nMaxAP == -1).
+// Used by every tactical state that shows an AP cursor caption (attack/use/pick/drag/untrap/
+// set-trap/set-mine/first-aid).
+static void MakeCursorString( IMission *pMission, const SActionInfo &sInfo, wstring *pRes )
+{
+	*pRes += NUI::GetDBString( sInfo.bEnoughAP ? 20276 : 19807 );	// AP line: green if affordable, else red
+
+	if ( !pMission->IsRealTime() )
+	{
+		*pRes += NUI::GetDBString( 19808 );					// "AP: "
+		if ( sInfo.nMaxAP >= 0 )
+		{
+			WCHAR wsAP[64];
+			if ( sInfo.nMinAP != sInfo.nMaxAP )
+				swprintf( wsAP, L"%d-%d", sInfo.nMinAP, sInfo.nMaxAP );
+			else
+				swprintf( wsAP, L"%d", sInfo.nMinAP );
+			*pRes += wsAP;
+		}
+		else
+			*pRes += NUI::GetDBString( 19810 );				// "N/A"
+	}
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail NGame::MakeUnitStateToolTip @0x1d7b10 (defined with the CStateFriend leg below); used by
+// CStateTeam/CStateFriend/CStateUse/CStateAttack for the "enemyToolTip" hover frame.
+static void MakeUnitStateToolTip( IMission *pMission, NWorld::CUnit *pUnit, NUI::CTextFrame *pFrame );
+////////////////////////////////////////////////////////////////////////////////////////////////////
 // CStateBase
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CStateBase::CStateBase( bool bNeedMouseInstantly ):
@@ -251,7 +325,7 @@ bool CStateWait::Initialize( IMission *pMission )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 NUI::SCursorInfo CStateWait::GetCursorInfo() const
 {
-	return NUI::SCursorInfo( NDb::GetUITexture( N_CURSOR_BUSY ) );
+	return NUI::SCursorInfo( NDb::GetUICursor( N_CURSOR_BUSY ) );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CStateTeam
@@ -283,6 +357,12 @@ bool CStateTeam::Initialize( IMission *pMission )
 
 			pUnitTracker = unitsSet[nTemp];
 			pUnitTracker->SetHilighted( true );
+
+			// retail CStateTeam::Initialize @0x1d97f0: build the "enemyToolTip" CTextFrame on the
+			// mission desktop's client window, then fill it from the hovered unit.
+			pUnitToolTip = new NUI::CTextFrame( NUI::SWindowInfo( GetMission()->GetDesktop()->GetClientWindow(),
+				NUI::SPoint( 0, 0 ), NUI::SPoint( 0, 0 ), "enemyToolTip", NUI::STYLE_ENABLED | NUI::STYLE_VISIBLE | NUI::STYLE_TRANSPARENT | NUI::STYLE_TOPMOST ) );
+			UpdateToolTipInfo();
 			return true;
 		}
 	}
@@ -290,9 +370,20 @@ bool CStateTeam::Initialize( IMission *pMission )
 	return false;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail CStateTeam::UpdateToolTipInfo @0x1d8230: refill the hover tooltip from the state target
+// (mission vtbl+0x94) when it is a live unit; a non-unit / dead hover leaves the frame untouched.
+void CStateTeam::UpdateToolTipInfo()
+{
+	CDynamicCast<NWorld::CUnit> pUnit( GetMission()->GetStateTarget() );
+	if ( IsValid( pUnit ) && IsValid( pUnitToolTip ) )
+		MakeUnitStateToolTip( GetMission(), pUnit, pUnitToolTip );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 void CStateTeam::Terminate()
 {
 	CStateBase::Terminate();
+	// retail CStateTeam::Terminate @0x1d6c00: release the tooltip frame FIRST, then un-highlight
+	pUnitToolTip = 0;
 	pUnitTracker->SetHilighted( false );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -423,14 +514,14 @@ bool CStateFriend::Initialize( IMission *pMission )
 		return false;
 
 	if ( eState == NDb::DS_ALLY )
-		pTraceSelection = GetMission()->GetRenderGame()->Select( pObject, V_SELECTIONCOLOR_TEAM );
+		pTraceSelection = GetMission()->GetRenderGame()->Select( pObject, GetSelectionColor( 0 ) );	// v1.2 @0x5d9c00: palette(team)
 	else
-		pTraceSelection = GetMission()->GetRenderGame()->Select( pObject, V_SELECTIONCOLOR_NEUTRAL );
+		pTraceSelection = GetMission()->GetRenderGame()->Select( pObject, GetSelectionColor( 5 ) );	// v1.2 @0x5d9c2a: palette(neutral)
 
 	if ( !pUnit->CanTalk() )
-		sCursorInfo = NUI::SCursorInfo( NDb::GetUITexture( N_CURSOR_NORMAL ) );
+		sCursorInfo = NUI::SCursorInfo( NDb::GetUICursor( N_CURSOR_NORMAL ) );
 	else
-		sCursorInfo = NUI::SCursorInfo( NDb::GetUITexture( N_CURSOR_TALK ) );	// retail @0x1d90c0: UICursors row 20 "talk" (Talk.cur), not open/close
+		sCursorInfo = NUI::SCursorInfo( NDb::GetUICursor( N_CURSOR_TALK ) );	// retail @0x1d90c0: UICursors row 20 "talk" (Talk.cur), not open/close
 
 	// retail CStateFriend::Initialize @0x1d90c0: the "enemyToolTip" CTextFrame, parented to the
 	// mission desktop's client window (NOT the interface/cursor), then filled by UpdateToolTipInfo.
@@ -460,16 +551,31 @@ bool CStateFriend::OnLButtonUp( int nX, int nY )
 {
 	vector< CPtr<NGame::IUnitTracker> > unitsSet;
 	GetMission()->GetSelectedUnits( &unitsSet );
-	if ( unitsSet.size() != 1 )
-		return false;
 
 	CObjectBase* pObject = GetMission()->GetStateTarget();
 	if ( !IsValid( pObject ) )
 		return false;
 
 	CDynamicCast<NWorld::CUnit> pUnit( pObject );
-	if ( IsValid( pUnit ) && pUnit->CanTalk() )
-		GetMission()->Command( unitsSet[0]->GetUnit(), new NWorld::CCmdTalk( pUnit ) );
+	if ( !IsValid( pUnit ) )
+		return true;
+
+	// retail CStateFriend::OnLButtonUp @0x1d9b70: probe whether a hero can talk to the target. On
+	// UCR_OK issue CCmdTalk to every selected unit (start the dialog); on UCR_NOT_HERO (0x13) issue
+	// CCmdNotHeroWantsToTalk to each instead -- that fires the CAckNPCInteraction bark rather than talk.
+	SActionInfo sInfo;
+	CObj<NWorld::CCmd> pProbe = new NWorld::CCmdTalk( pUnit );
+	GetMission()->CanDoCommand( pProbe, false, &sInfo );
+	if ( sInfo.eResult == NWorld::UCR_OK )
+	{
+		for ( vector< CPtr<NGame::IUnitTracker> >::iterator i = unitsSet.begin(); i != unitsSet.end(); ++i )
+			GetMission()->Command( (*i)->GetUnit(), new NWorld::CCmdTalk( pUnit ) );
+	}
+	else if ( sInfo.eResult == NWorld::UCR_NOT_HERO )
+	{
+		for ( vector< CPtr<NGame::IUnitTracker> >::iterator i = unitsSet.begin(); i != unitsSet.end(); ++i )
+			GetMission()->Command( (*i)->GetUnit(), new NWorld::CCmdNotHeroWantsToTalk() );
+	}
 
 	return true;
 }
@@ -519,6 +625,11 @@ IState::EType CStateMove::GetType() const
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CStateMove::OnLButtonUp( int nX, int nY )
 {
+	// retail @0x1dd170 drops the drag anchor FIRST -- without this, a click whose move FAILS (no
+	// state change happens) left bAnchorSet armed, so the next mouse move entered the drag-select
+	// band (CStateSelection) with the button already up.
+	bAnchorSet = false;
+
 	DoMove( GetType() == FORCED );
 
 	if ( GetType() == FORCED )
@@ -579,12 +690,27 @@ void CStateMove::DoMove( bool bInstant )
 
 	GetMission()->GetWorld()->GetPathNetwork()->FormationMoveTo( &unitPlaces, pos  );
 
+	// retail @0x1dbb10 result aggregation: first result seeds the aggregate, any DIFFERING later
+	// result degrades it to UCR_GENERAL_FAILURE; bark IA_CONFIRMATION only on uniform UCR_OK,
+	// anything else routes through ShowError ("Path not found" for an unreachable click).
+	// (dev's UCR_OK is 0, unlike retail's 1 -- seed with an explicit first-result flag, not 0)
+	NWorld::EUnitCommandResult eAgg = NWorld::UCR_OK;
+	bool bFirst = true;
 	for ( int nUnit = 0; nUnit < unitsSet.size(); ++nUnit )
-		unitsSet[nUnit]->SetTargetPosition( unitPlaces[nUnit], bInstant );
-
-	// retail barks only when the per-unit SetTargetPosition results aggregate to success; the
-	// unconditional bark is an accepted approximation (dev SetTargetPosition returns void)
-	SayAckForAll( GetMission(), NWorld::IA_CONFIRMATION );	// retail: "order acknowledged" on a move order
+	{
+		NWorld::EUnitCommandResult eResult = unitsSet[nUnit]->SetTargetPosition( unitPlaces[nUnit], bInstant );
+		if ( bFirst )
+		{
+			eAgg = eResult;
+			bFirst = false;
+		}
+		else if ( eAgg != eResult )
+			eAgg = NWorld::UCR_GENERAL_FAILURE;
+	}
+	if ( eAgg == NWorld::UCR_OK )
+		SayAckForAll( GetMission(), NWorld::IA_CONFIRMATION );	// retail: "order acknowledged" on a move order
+	else
+		ShowError( GetMission(), eAgg );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CStateMove::UpdateCursor()
@@ -592,16 +718,16 @@ void CStateMove::UpdateCursor()
 	NAI::SPosition pos;
 	if ( !GetMission()->GetTracePosition( &pos ) )
 	{
-		sCursorInfo = NUI::SCursorInfo( NDb::GetUITexture( N_CURSOR_BLOCK ) );
+		sCursorInfo = NUI::SCursorInfo( NDb::GetUICursor( N_CURSOR_BLOCK ) );
 		return;
 	}
 
 	NAI::SPathPlace p( pos.p );
 	p.SetPose( NAI::CM_CROUCH );
 	if ( GetMission()->GetWorld()->GetPathNetwork()->IsNativePassable( p ) )
-		sCursorInfo = NUI::SCursorInfo( NDb::GetUITexture( N_CURSOR_MOVE ) );
+		sCursorInfo = NUI::SCursorInfo( NDb::GetUICursor( N_CURSOR_MOVE ) );
 	else
-		sCursorInfo = NUI::SCursorInfo( NDb::GetUITexture( N_CURSOR_BLOCK ) );
+		sCursorInfo = NUI::SCursorInfo( NDb::GetUICursor( N_CURSOR_BLOCK ) );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CStateMove::Step()
@@ -617,15 +743,15 @@ void CStateMove::Step()
 // CStateAttack
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CStateAttack::CStateAttack():
-	eHitLocation( NAI::HL_ANY ), bEnoughAP( true ),
-	bindHitLocationHead( "hitlocation_head" ), bindHitLocationBody( "hitlocation_body" ), 
+	eHitLocation( NAI::HL_ANY ),
+	bindHitLocationHead( "hitlocation_head" ), bindHitLocationBody( "hitlocation_body" ),
 	bindHitLocationLArm( "hitlocation_larm" ), bindHitLocationRArm( "hitlocation_rarm" ), bindHitLocationLLeg( "hitlocation_lleg" ), bindHitLocationRLeg( "hitlocation_rleg" )
 {
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CStateAttack::CStateAttack( bool _bForced ):
-	bForced( _bForced ), eHitLocation( NAI::HL_ANY ), bEnoughAP( true ),
-	bindHitLocationHead( "hitlocation_head" ), bindHitLocationBody( "hitlocation_body" ), 
+	bForced( _bForced ), eHitLocation( NAI::HL_ANY ),
+	bindHitLocationHead( "hitlocation_head" ), bindHitLocationBody( "hitlocation_body" ),
 	bindHitLocationLArm( "hitlocation_larm" ), bindHitLocationRArm( "hitlocation_rarm" ), bindHitLocationLLeg( "hitlocation_lleg" ), bindHitLocationRLeg( "hitlocation_rleg" )
 {
 }
@@ -661,7 +787,7 @@ bool CStateAttack::Initialize( IMission *pMission )
 	}
 
 	UpdateTraceSelection();
-	UpdateBlockedState();
+	UpdateInfo();
 	UpdateCursorInfo();
 	UpdateCursor();
 
@@ -669,26 +795,28 @@ bool CStateAttack::Initialize( IMission *pMission )
 	// (only the non-FORCED aim-at-unit state has a real unit target).
 	if ( GetType() != FORCED )
 	{
-		pUnitToolTip = new NUI::CTextFrame( NUI::SWindowInfo( GetMission()->GetDesktop()->GetClientWindow(),
+		pEnemyToolTip = new NUI::CTextFrame( NUI::SWindowInfo( GetMission()->GetDesktop()->GetClientWindow(),
 			NUI::SPoint( 0, 0 ), NUI::SPoint( 0, 0 ), "enemyToolTip", NUI::STYLE_ENABLED | NUI::STYLE_VISIBLE | NUI::STYLE_TRANSPARENT | NUI::STYLE_TOPMOST ) );
-		UpdateToolTipInfo();
+		UpdateEnemyStateInfo();
 	}
 	return true;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// retail CStateAttack::UpdateToolTipInfo @0x1d8540: refill from the aimed (state-target) unit.
-void CStateAttack::UpdateToolTipInfo()
+// retail CStateAttack::UpdateEnemyStateInfo @0x1d8540 (PDB name): refill from the aimed
+// (state-target) unit.
+void CStateAttack::UpdateEnemyStateInfo()
 {
 	CDynamicCast<NWorld::CUnit> pUnit( GetMission()->GetStateTarget() );
-	if ( IsValid( pUnit ) && IsValid( pUnitToolTip ) )
-		MakeUnitStateToolTip( GetMission(), pUnit, pUnitToolTip );
+	if ( IsValid( pUnit ) && IsValid( pEnemyToolTip ) )
+		MakeUnitStateToolTip( GetMission(), pUnit, pEnemyToolTip );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CStateAttack::Terminate()
 {
 	CStateBase::Terminate();
+	// retail CStateAttack::Terminate @0x1d6f00 releases pEnemyToolTip BEFORE pTraceSelection
+	pEnemyToolTip = 0;
 	pTraceSelection = 0;
-	pUnitToolTip = 0;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 IState::EType CStateAttack::GetType() const
@@ -783,7 +911,12 @@ void CStateAttack::UpdateCursor()
 		UpdateCursorInfo();
 	}
 
-	if ( !bActionUnavailable )
+	// retail CStateAttack::UpdateCursor @0x1dc0b0 keys the cursor on the cached sInfo: an
+	// UCR_OK_RELOAD result shows the reload cursor (26), !bOk shows the block cursor, else the
+	// per-hit-location cursor. (The dev enum carries no UCR_OK_RELOAD -- its CanDo never emits it --
+	// so only the !bOk fork is portable; in the retail eResult switch bOk=true implies
+	// bAvailable=true, so this equals the old !bActionUnavailable gate exactly.)
+	if ( sInfo.bOk )
 	{
 		switch ( eHitLocation )
 		{
@@ -817,33 +950,33 @@ void CStateAttack::UpdateCursor()
 					}
 				}
 
-				sCursorInfo.pTexture = NDb::GetUITexture( nDefault );
+				sCursorInfo.pCursor = NDb::GetUICursor( nDefault );
 			}
 			break;
 		case NAI::HL_HEAD:
-			sCursorInfo.pTexture = NDb::GetUITexture( N_CURSOR_ATTACK_HEAD );
+			sCursorInfo.pCursor = NDb::GetUICursor( N_CURSOR_ATTACK_HEAD );
 			break;
 		case NAI::HL_BODY:
-			sCursorInfo.pTexture = NDb::GetUITexture( N_CURSOR_ATTACK_BODY );
+			sCursorInfo.pCursor = NDb::GetUICursor( N_CURSOR_ATTACK_BODY );
 			break;
 		case NAI::HL_LHAND:
-			sCursorInfo.pTexture = NDb::GetUITexture( N_CURSOR_ATTACK_LARM );
+			sCursorInfo.pCursor = NDb::GetUICursor( N_CURSOR_ATTACK_LARM );
 			break;
 		case NAI::HL_RHAND:
-			sCursorInfo.pTexture = NDb::GetUITexture( N_CURSOR_ATTACK_RARM );
+			sCursorInfo.pCursor = NDb::GetUICursor( N_CURSOR_ATTACK_RARM );
 			break;
 		case NAI::HL_LLEG:
-			sCursorInfo.pTexture = NDb::GetUITexture( N_CURSOR_ATTACK_LLEG );
+			sCursorInfo.pCursor = NDb::GetUICursor( N_CURSOR_ATTACK_LLEG );
 			break;
 		case NAI::HL_RLEG:
-			sCursorInfo.pTexture = NDb::GetUITexture( N_CURSOR_ATTACK_RLEG );
+			sCursorInfo.pCursor = NDb::GetUICursor( N_CURSOR_ATTACK_RLEG );
 			break;
 		default:
 			ASSERT( 0 );
 		}
 	}
 	else
-		sCursorInfo = NUI::SCursorInfo( NDb::GetUITexture( N_CURSOR_BLOCK ) );
+		sCursorInfo = NUI::SCursorInfo( NDb::GetUICursor( N_CURSOR_BLOCK ) );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CStateAttack::UpdateCursorInfo()
@@ -943,29 +1076,15 @@ void CStateAttack::UpdateCursorInfo()
 
 			// BUG 8: the retail cursor caption is built ENTIRELY from DB strings, in retail's order (retail
 			// MakeCursorString @0x1d7990 then CStateAttack::UpdateCursorInfo @0x1da200 append):
-			//   <format 19807>  then (turn-based only)  <"AP: " 19808> <AP | "N/A" 19810>  then
+			//   <format 19807/20276>  then (turn-based only)  <"AP: " 19808> <AP range | "N/A" 19810>  then
 			//   <"<br>ToHit: " 19809> <ToHit %>.
-			// The DB strings carry BOTH the localized labels ("AP: " / "Шанс: ") AND the font/colour markup.
-			// There are TWO full format strings, differing only in <color>: 19807 = RED (0xFFEA511C),
-			// 20276 = GREEN (0xFF9BD315). Retail colours each line DYNAMICALLY (MakeCursorString @0x1d7990 +
-			// UpdateCursorInfo @0x1da200): the AP line is green iff the unit can AFFORD the action
-			// (actionInfo+0xd == bEnoughAP; `cmp byte[edi+0xd],0; jne green`), and the ToHit line is green iff
-			// the to-hit chance is non-zero (`cmp nToHit,2; jge green`). Each format string re-issues the full
-			// <font ...> so re-appending only changes the colour of the text that follows.
+			// The DB strings carry BOTH the localized labels AND the font/colour markup. There are TWO full
+			// format strings, differing only in <color>: 19807 = RED (0xFFEA511C), 20276 = GREEN (0xFF9BD315).
+			// The AP line is green iff the action is affordable (sInfo.bEnoughAP), the ToHit line is green iff
+			// the hit chance is non-zero (`cmp nToHit,2; jge green`). The AP part is the shared
+			// MakeCursorString over the state's cached sInfo (nMinAP/nMaxAP fold across the selection).
 			wstring wsText;
-			if ( !GetMission()->IsRealTime() )                     // AP line only in turn-based (retail vtbl+0x50)
-			{
-				wsText += NUI::GetDBString( bEnoughAP ? 20276 : 19807 );   // AP line: green if affordable, else red
-				wsText += NUI::GetDBString( 19808 );               // "AP: "
-				if ( nActionAP >= 0 )
-				{
-					WCHAR wsAP[32];
-					swprintf( wsAP, L"%d", nActionAP );
-					wsText += wsAP;
-				}
-				else
-					wsText += NUI::GetDBString( 19810 );           // "N/A"
-			}
+			MakeCursorString( GetMission(), sInfo, &wsText );
 			wsText += NUI::GetDBString( nMin >= 2 ? 20276 : 19807 );       // ToHit line: green if hit chance > 0, else red
 			wsText += NUI::GetDBString( 19809 );                   // "<br>ToHit: " (localized label)
 			WCHAR wsToHit[32];
@@ -979,22 +1098,17 @@ void CStateAttack::UpdateCursorInfo()
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CStateAttack::UpdateBlockedState()
+// retail CStateAttack::UpdateInfo @0x1da140: reset the cached feasibility to its constructed
+// defaults, then refill it from CanDoCommand when the current target command is valid.
+void CStateAttack::UpdateInfo()
 {
-	nActionAP = 0;
-	bActionUnavailable = true;
-	bEnoughAP = true;
+	sInfo = SActionInfo();
 
-	SActionInfo sInfo;
 	CObj<NWorld::CCmd> pCmd = GetTargetCmd();
 	if ( !IsValid( pCmd ) )
 		return;
 
 	GetMission()->CanDoCommand( pCmd, false, &sInfo );
-
-	nActionAP = sInfo.nActionAP;
-	bActionUnavailable = !sInfo.bAvailable || !sInfo.bOk;
-	bEnoughAP = sInfo.bEnoughAP;   // BUG 8: retail actionInfo+0xd -- drives the AP line's green/red colour
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CStateAttack::UpdateTraceSelection()
@@ -1006,24 +1120,24 @@ void CStateAttack::UpdateTraceSelection()
 		return;
 
 	if ( pObject )
-		pTraceSelection = GetMission()->GetRenderGame()->Select( pObject, V_SELECTIONCOLOR_ENEMY );
+		pTraceSelection = GetMission()->GetRenderGame()->Select( pObject, GetSelectionColor( 2 ) );	// v1.2 @0x5d79ab: palette(enemy)
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CStateAttack::Step()
 {
 	CStateBase::Step();
 
+	// retail CStateAttack::Step @0x1dc540: the FORCED state refreshes feasibility, caption AND the
+	// enemy tooltip each frame; the non-forced hover state only re-picks the cursor (it is
+	// re-Initialized whenever the trace target changes).
 	if ( GetType() == FORCED )
 	{
-		UpdateBlockedState();
+		UpdateInfo();
 		UpdateCursorInfo();
+		UpdateEnemyStateInfo();
 	}
 
 	UpdateCursor();
-
-	// retail: refresh the aimed enemy's tooltip each frame (MakeUnitStateToolTip re-projects/positions
-	// it above the unit and hides it when the target dies or leaves the screen)
-	UpdateToolTipInfo();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CStateUse
@@ -1061,19 +1175,29 @@ bool CStateUse::Initialize( IMission *pMission )
 	// The dev tree instead showed UseTool.cur when manning a cannon/mounted gun and never showed
 	// the lockpick cursor on locked doors.
 	int nCursorID = N_CURSOR_USE;
-	CVec4 vHilightColor( V_SELECTIONCOLOR_OBJECT );
+	CVec4 vHilightColor( GetSelectionColor( 4 ) );	// v1.2 @0x5d9076: palette(object)
 	CDynamicCast<NWorld::CUnit> pDeadUnit(pObject);
 	if (pDeadUnit)
 	{
 		bRet = pDeadUnit->IsDead() || pDeadUnit->IsUnconscious();
-		vHilightColor = V_SELECTIONCOLOR_CORPSE;
+		vHilightColor = GetSelectionColor( 3 );	// v1.2 @0x5d90bf: palette(corpse)
 		nCursorID = N_CURSOR_USE;			// carry body -> Use.cur (hand): retail default branch, id 21
+
+		// retail CStateUse::Initialize @0x1d85a0: an UNCONSCIOUS unit under the cursor gets the
+		// "enemyToolTip" name+VP frame (built BEFORE the bRet gate, disasm order); released in
+		// Terminate (@0x1d6fc0).
+		if ( pDeadUnit->IsUnconscious() )
+		{
+			pUnitToolTip = new NUI::CTextFrame( NUI::SWindowInfo( GetMission()->GetDesktop()->GetClientWindow(),
+				NUI::SPoint( 0, 0 ), NUI::SPoint( 0, 0 ), "enemyToolTip", NUI::STYLE_ENABLED | NUI::STYLE_VISIBLE | NUI::STYLE_TRANSPARENT | NUI::STYLE_TOPMOST ) );
+			MakeUnitStateToolTip( GetMission(), pDeadUnit, pUnitToolTip );
+		}
 	}
 	else {
 		CDynamicCast<NWorld::IObject> pTempObject(pObject);
 		if (pTempObject)
 		{
-			vHilightColor = V_SELECTIONCOLOR_OBJECT;
+			vHilightColor = GetSelectionColor( 4 );	// v1.2 @0x5d9221: palette(object)
 			CDynamicCast<NWorld::ICannon> pCannon(pTempObject.GetPtr());
 			if (pCannon)
 			{
@@ -1112,13 +1236,13 @@ bool CStateUse::Initialize( IMission *pMission )
 
 	if ( sInfo.bOk )
 	{
-		WCHAR wsBuffer[1024] = L"";
-		if ( !GetMission()->IsRealTime() )
-			swprintf( wsBuffer, L"AP: %d", sInfo.nActionAP );
-		sCursorInfo = NUI::SCursorInfo( NDb::GetUITexture( nCursorID ), wsBuffer );
+		// retail @0x1d85a0: the caption is the shared MakeCursorString (@0x1d7990) AP line
+		wstring wsText;
+		MakeCursorString( GetMission(), sInfo, &wsText );
+		sCursorInfo = NUI::SCursorInfo( NDb::GetUICursor( nCursorID ), wsText.c_str() );
 	}
 	else
-		sCursorInfo = NUI::SCursorInfo( NDb::GetUITexture( N_CURSOR_BLOCK ) );
+		sCursorInfo = NUI::SCursorInfo( NDb::GetUICursor( N_CURSOR_BLOCK ) );
 
 	return true;
 }
@@ -1126,6 +1250,8 @@ bool CStateUse::Initialize( IMission *pMission )
 void CStateUse::Terminate()
 {
 	CStateBase::Terminate();
+	// retail CStateUse::Terminate @0x1d6fc0: release the tooltip frame first, then the selection
+	pUnitToolTip = 0;
 	pTraceSelection = 0;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1232,7 +1358,30 @@ bool CStatePickItem::Initialize( IMission *pMission )
 		if ( !IsValid( pItem->GetInvItem() ) )
 			return false;
 
-		pTraceSelection = GetMission()->GetRenderGame()->Select( pObject, V_SELECTIONCOLOR_OBJECT );
+		// v1.2 @0x5dd044: palette(object); bIgnoreFloorMask=true in BOTH retail links (v1.1 decomp
+		// @0x1dc570 `push 1`, v1.2 disasm @0x5dd03d) -- the dev used the default false
+		pTraceSelection = GetMission()->GetRenderGame()->Select( pObject, GetSelectionColor( 4 ), true );
+
+		// retail CStatePickItem::Initialize @0x1dc570: cache the cursor from the current move
+		// command's feasibility -- bOk -> pickitem cursor (GetUICursor(0x12) @0x5dc6e8) with the
+		// MakeCursorString AP caption; !bOk -> block cursor (GetUICursor(4) @0x5dc73f) with L"".
+		// A null command leaves the previous cached cursor untouched (retail returns true there).
+		CObj<NWorld::CCmd> pCmd = GetTargetCmd();
+		if ( !pCmd )
+			return true;
+		if ( IsValid( pCmd ) )
+		{
+			SActionInfo sInfo;
+			GetMission()->CanDoCommand( pCmd, false, &sInfo );
+			if ( sInfo.bOk )
+			{
+				wstring wsText;
+				MakeCursorString( GetMission(), sInfo, &wsText );
+				sCursorInfo = NUI::SCursorInfo( NDb::GetUICursor( N_CURSOR_PICKITEM ), wsText.c_str() );
+			}
+			else
+				sCursorInfo = NUI::SCursorInfo( NDb::GetUICursor( N_CURSOR_BLOCK ) );
+		}
 		return true;
 	}
 
@@ -1256,8 +1405,12 @@ bool CStatePickItem::OnLButtonUp( int nX, int nY )
 	if ( !sInfo.bAvailable || !sInfo.bOk )
 	{
 		ShowError( GetMission(), sInfo.eResult );
-		// retail CStatePickItem @0x1dc7b0 barks nothing here (its gated call passes the raw
-		// eResult, which falls outside PlayAck's 0..3 switch -- effectively silent; retail quirk)
+		// retail CStatePickItem::OnLButtonUp @0x5dc911 (cmp eResult,0x12 -> IA literal 3): a full
+		// inventory barks IA_NO_PLACE_IN_INVENTORY (drives CGlobalAck::OnNoPlaceInInventory).
+		if ( sInfo.eResult == NWorld::UCR_INVENTORY_NO_PLACE )
+			SayAckForAll( GetMission(), NWorld::IA_NO_PLACE_IN_INVENTORY );
+		// TODO: retail also barks IA_NO_PLACE_IN_INVENTORY from the CInfoPanelSlot inventory producers
+		// @0x258540 (secondary path -- not ported here).
 		return false;
 	}
 
@@ -1274,7 +1427,7 @@ bool CStatePickItem::OnLButtonUp( int nX, int nY )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 NUI::SCursorInfo CStatePickItem::GetCursorInfo() const
 {
-	return NUI::SCursorInfo( NDb::GetUITexture( N_CURSOR_PICKITEM ) );	// retail @0x1dc570: UICursors row 18 "pickitem"
+	return sCursorInfo;	// retail @0x1d6770: return the CACHED cursor (filled by Initialize @0x1dc570)
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 NWorld::CCmd* CStatePickItem::GetTargetCmd()
@@ -1320,7 +1473,7 @@ bool CStateDragItem::Initialize( IMission *pMission )
 	if ( !GetMission()->IsRealTime() && ( GetMission()->GetActivePlayer()->GetPlayer() != GetMission()->GetWorld()->GetCurrentPlayer() ) )
 		return false;
 
-	NWorld::IPlayer::SItemInfo sInfo;
+	NWorld::SItem sInfo;
 	if ( !GetMission()->GetActivePlayer()->GetPlayer()->GetInHandItem( &sInfo ) )
 		return false;
 
@@ -1341,12 +1494,18 @@ bool CStateDragItem::Initialize( IMission *pMission )
 		q.GetYAxis( &vForwardDir );
 
 		CVec3 vCP( sCamera.vAnchor - vForwardDir * sCamera.fDistance );
-		SFBTransform res;
+		// retail @0x1dd570: SHMatrix into CModel::SetCameraTransform (no CFBTransform side channel)
+		SHMatrix res;
 		MakeMatrix( &res, sCamera.fPitch, sCamera.fYaw, sCamera.fRoll, vCP );
 
 		pModel->SetModel( pRPGItem->pModel->CreateModel( &sRnd ) );
-		pModel->SetTransform( new CFBTransform( res ) );
+		pModel->SetCameraTransform( res );
 	}
+
+	// retail CStateDragItem::Initialize @0x1dd570 tail: prime the cached cursor (UpdateCursor
+	// @0x1dccf0), then snap the icon to the cursor (UpdatePosition @0x1d5d60). Step() is exactly
+	// that pair (retail Step @0x1dd940 == UpdateCursor + UpdatePosition).
+	Step();
 
 	return true;
 }
@@ -1356,8 +1515,108 @@ void CStateDragItem::Terminate()
 	pModel = 0;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail CStateDragItem::GetTargetCmd(bool bAllowSlot) @0x1dc960: build the "drop the in-hand item
+// onto whatever is under the cursor" move command. Decoded flow:
+//   (1) GetActivePlayer()->GetPlayer()->GetInHandItem(&src) -- nothing in hand -> null;
+//   (2) srcUnit = GetSourceUnit() (@0x1daa20: the in-hand item's live owner) -- dead/null -> null;
+//   (3) target = GetStateTarget();
+//       dyncast CUnit    -> same player as active? {UNIT_ANYPLACE, unit} : null;
+//       dyncast CSlotInfo (ONLY when bAllowSlot; the slot leg is published by the CSlot
+//                          CActionDecorator windows -- see iCommonUI.h CSlotInfo):
+//           pre-set sTarget.pUnit = info->GetUnit() when live (SLOT/BACKPACK carry the unit);
+//           SLOT(1)     -> {SLOT, nSlot = info->GetSlot(), pUnit}
+//           STORAGE(2)  -> {STORAGE, sPosition = (-1,-1), pPlayer = srcUnit->GetPlayer()}
+//           BACKPACK(3) -> {BACKPACK, pUnit}, gated on the backpack grid FindPlace(item, &sPosition)
+//           other kind / !bAllowSlot -> null;
+//       neither cast     -> {GROUND};
+//   (4) new CCmdMoveInventoryItem( SItem{HAND, srcUnit}, sTarget ).
+NWorld::CCmd* CStateDragItem::GetTargetCmd( bool bAllowSlot )
+{
+	NWorld::SItem sInfo;
+	if ( !GetMission()->GetActivePlayer()->GetPlayer()->GetInHandItem( &sInfo ) )
+		return 0;
+	if ( !IsValid( sInfo.pUnit ) )		// retail: the drag's source unit must be live (@0x1daa20)
+		return 0;
+
+	CObjectBase* pTargetObject = GetMission()->GetStateTarget();
+	NWorld::SItem sTarget;
+	CDynamicCast<NWorld::CUnit> pUnit(pTargetObject);
+	if (pUnit)
+	{
+		if ( pUnit->GetPlayer() != GetMission()->GetActivePlayer()->GetPlayer() )
+			return 0;					// retail: a foreign unit under the cursor -> no command
+		sTarget.eType = NWorld::SItem::UNIT_ANYPLACE;
+		sTarget.pUnit = pUnit;
+	}
+	else
+	{
+		CDynamicCast<NUI::CSlotInfo> pSlotInfo(pTargetObject);
+		if (pSlotInfo)
+		{
+			if ( !bAllowSlot )
+				return 0;				// peek-only caller never commits a slot drop
+
+			// retail @0x5dcbd6: the slot's owning unit is adopted only when live
+			if ( IsValid( pSlotInfo->GetUnit() ) )
+				sTarget.pUnit = pSlotInfo->GetUnit();
+
+			switch ( pSlotInfo->GetPlacement() )
+			{
+			case NUI::CSlotInfo::SLOT:
+				sTarget.eType = NWorld::SItem::SLOT;
+				sTarget.nSlot = pSlotInfo->GetSlot();
+				break;
+			case NUI::CSlotInfo::STORAGE:
+				sTarget.eType = NWorld::SItem::STORAGE;
+				sTarget.sPosition = CTPoint<int>( -1, -1 );
+				sTarget.pPlayer = sInfo.pUnit->GetPlayer();		// retail: the store of the dragging unit's player
+				break;
+			case NUI::CSlotInfo::BACKPACK:
+				sTarget.eType = NWorld::SItem::BACKPACK;
+				// retail: gate the drop on the backpack grid having a place for the item
+				if ( !sTarget.pUnit || !sTarget.pUnit->GetRPG()->GetInventoryInfo()->FindPlace( sInfo.pItem, &sTarget.sPosition ) )
+					return 0;
+				break;
+			default:
+				return 0;				// VACUUM / unknown placement -> no command
+			}
+		}
+		else
+		{
+			sTarget.eType = NWorld::SItem::GROUND;
+			sTarget.pUnit = sInfo.pUnit;
+		}
+	}
+
+	return new NWorld::CCmdMoveInventoryItem( NWorld::SItem( sInfo.pUnit, NWorld::SItem::HAND ), sTarget );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail CStateDragItem::UpdateCursor @0x1dccf0: probe the drop command, then cache the cursor --
+// bOk -> the "normal" cursor (GetUICursor(2) @0x5dcdbb) with the MakeCursorString AP caption when
+// the drop costs AP (nMaxAP > 0); !bOk -> the block cursor (GetUICursor(4) @0x5dce0c) with L"".
+void CStateDragItem::UpdateCursor()
+{
+	SActionInfo sInfo;
+	CObj<NWorld::CCmd> pCmd = GetTargetCmd( true );	// retail @0x5dcd11: the cursor peek allows slot targets
+	if ( IsValid( pCmd ) )
+		GetMission()->CanDoCommand( pCmd, false, &sInfo );
+
+	if ( sInfo.bOk )
+	{
+		wstring wsText;
+		if ( sInfo.nMaxAP > 0 )
+			MakeCursorString( GetMission(), sInfo, &wsText );
+		sCursorInfo = NUI::SCursorInfo( NDb::GetUICursor( N_CURSOR_NORMAL ), wsText.c_str() );
+	}
+	else
+		sCursorInfo = NUI::SCursorInfo( NDb::GetUICursor( N_CURSOR_BLOCK ) );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 void CStateDragItem::Step()
 {
+	// retail CStateDragItem::Step @0x1dd940: refresh the cursor art, then reposition the icon
+	UpdateCursor();
+
 	CVec2 vScreenRect = GetMission()->GetScene()->GetScreenRect();
 	const NUI::SPoint &sSize = pModel->GetSize();
 
@@ -1374,32 +1633,26 @@ bool CStateDragItem::OnLButtonUp( int nX, int nY )
 	return true;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+NUI::SCursorInfo CStateDragItem::GetCursorInfo() const
+{
+	return sCursorInfo;	// retail @0x1d6790: return the cached drag cursor
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CStateDragItem::OnLButtonDown( int nX, int nY )
 {
-	NWorld::IPlayer::SItemInfo sInfo;
+	// retail CStateDragItem::OnLButtonDown @0x1dd950: fetch the drop command WITHOUT the slot leg
+	// (GetTargetCmd(false) -- a click over an inventory slot falls through to the slot window's own
+	// drop handler); when it is live, dispatch it on the drag's SOURCE unit (the in-hand item's
+	// owner, GetSourceUnit @0x1daa20) -- NOT on the unit under the cursor.
+	CObj<NWorld::CCmd> pCmd = GetTargetCmd( false );
+	if ( !IsValid( pCmd ) )
+		return false;
+
+	NWorld::SItem sInfo;
 	if ( !GetMission()->GetActivePlayer()->GetPlayer()->GetInHandItem( &sInfo ) )
 		return false;
 
-	CObjectBase* pTargetObject = GetMission()->GetStateTarget();
-	CDynamicCast<NWorld::CUnit> pUnit(pTargetObject);
-	if (pUnit)
-	{
-		if ( pUnit->GetPlayer() != GetMission()->GetActivePlayer()->GetPlayer() )
-			return false;
-
-		NWorld::SItem sTarget;
-		sTarget.eType = NWorld::SItem::UNIT_ANYPLACE;
-		sTarget.pUnit = pUnit;
-		GetMission()->Command( pUnit, new NWorld::CCmdMoveInventoryItem( NWorld::SItem( sInfo.pUnit, NWorld::SItem::HAND ), sTarget ) );
-	}
-	else
-	{
-		NWorld::SItem sTarget;
-		sTarget.eType = NWorld::SItem::GROUND;
-		sTarget.pUnit = sInfo.pUnit;
-		GetMission()->Command( sInfo.pUnit, new NWorld::CCmdMoveInventoryItem( NWorld::SItem( sInfo.pUnit, NWorld::SItem::HAND ), sTarget ) );
-	}
-
+	GetMission()->Command( sInfo.pUnit, pCmd );
 	return true;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1434,10 +1687,10 @@ bool CStateUntrap::Initialize( IMission *pMission )
 	if ( !sInfo.bAvailable )
 		return false;
 
-	WCHAR wsBuffer[1024] = L"";
-	if ( !GetMission()->IsRealTime() )
-		swprintf( wsBuffer, L"AP: %d", sInfo.nActionAP );
-	sCursorInfo = NUI::SCursorInfo( NDb::GetUITexture( N_CURSOR_HEAL ), wsBuffer );
+	// retail caption: the shared MakeCursorString (@0x1d7990) AP line
+	wstring wsText;
+	MakeCursorString( GetMission(), sInfo, &wsText );
+	sCursorInfo = NUI::SCursorInfo( NDb::GetUICursor( N_CURSOR_HEAL ), wsText.c_str() );
 	return true;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1500,7 +1753,11 @@ bool CStateSelection::Initialize( IMission *pMission )
 {
 	CStateBase::Initialize( pMission );
 
-	GetMission()->FreezeCamera( true );
+	// retail @0x1d73b0: remember WHICH camera the mission selector returned (CObj pLockedCamera,
+	// serialized tag 4) and bump ITS scroll-lock count (ICamera vtbl+0x70 = CBaseCamera::Lock
+	// @0xcffa0) -- rubber-band drag-select mutes camera input without any pose pin.
+	pLockedCamera = GetMission()->GetCamera();
+	pLockedCamera->SetLock( true );
 	CVec2 vScreenRect = GetMission()->GetScene()->GetScreenRect();
 	NUI::SPoint sPoint( vAnchor.x * 1024 / vScreenRect.x, vAnchor.y * 768 / vScreenRect.y );
 	pSelection = new NUI::CSelectionWindow( NUI::SWindowInfo( GetMission()->GetDesktop()->GetClientWindow(), sPoint, NUI::SPoint( 0, 0 ), "selection", NUI::STYLE_ENABLED | NUI::STYLE_VISIBLE | NUI::STYLE_TRANSPARENT | NUI::STYLE_BOTTOMMOST ), this );
@@ -1509,7 +1766,9 @@ bool CStateSelection::Initialize( IMission *pMission )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CStateSelection::Terminate()
 {
-	GetMission()->FreezeCamera( false );
+	// retail @0x1d75c0: unlock exactly the camera Initialize locked (NOT whatever the selector
+	// returns now -- the active camera may have changed since).
+	pLockedCamera->SetLock( false );
 	pSelection = 0;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1612,7 +1871,7 @@ NWorld::CCmd* CStateUnloadItem::GetTargetCmd()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 NUI::SCursorInfo CStateUnloadItem::GetCursorInfo() const
 {
-	return NUI::SCursorInfo( NDb::GetUITexture( N_CURSOR_UNLOAD ) );
+	return NUI::SCursorInfo( NDb::GetUICursor( N_CURSOR_UNLOAD ) );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // FORCED STATES
@@ -1660,7 +1919,7 @@ bool CStateRotate::OnLButtonUp( int nX, int nY )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 NUI::SCursorInfo CStateRotate::GetCursorInfo() const
 {
-	return NUI::SCursorInfo( NDb::GetUITexture( N_CURSOR_ROTATE ) );
+	return NUI::SCursorInfo( NDb::GetUICursor( N_CURSOR_ROTATE ) );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CStateSetTrap
@@ -1677,23 +1936,44 @@ bool CStateSetTrap::Initialize( IMission *pMission )
 		return false;
 	}
 
+	// retail CStateSetTrap::Initialize @0x1d9590 tail: prime the cursor through the shared
+	// sLastPosition-gated refresh (the state has a per-frame Step/UpdateCursor like CStateSetMine).
+	UpdateCursor();
+	return true;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail CStateSetTrap::UpdateCursor (Step @0x1d8cc0 inlines it; mirrors CStateSetMine::UpdateCursor
+// @0x1d8cd0): rebuild the cached cursor only when the traced position moved (sLastPosition).
+void CStateSetTrap::UpdateCursor()
+{
 	SActionInfo sInfo;
-	CPtr<NWorld::CCmd> pCmd = GetTargetCmd();
-	if ( IsValid( pCmd ) )
-		GetMission()->CanDoCommand( pCmd, false, &sInfo );
+	NAI::SPosition pos;
+	if ( GetMission()->GetTracePosition( &pos ) )
+	{
+		if ( pos == sLastPosition )
+			return;
 
+		sLastPosition = pos;
+		CPtr<NWorld::CCmd> pCmd = GetTargetCmd();
+		if ( IsValid( pCmd ) )
+			GetMission()->CanDoCommand( pCmd, false, &sInfo );
+	}
 
 	if ( sInfo.bAvailable )
 	{
-		WCHAR wsBuffer[1024] = L"";
-		if ( !GetMission()->IsRealTime() )
-			swprintf( wsBuffer, L"AP: %d", sInfo.nActionAP );
-		sCursorInfo = NUI::SCursorInfo( NDb::GetUITexture( N_CURSOR_HEAL ), wsBuffer );
+		wstring wsText;
+		MakeCursorString( GetMission(), sInfo, &wsText );	// retail caption: shared MakeCursorString @0x1d7990
+		sCursorInfo = NUI::SCursorInfo( NDb::GetUICursor( N_CURSOR_HEAL ), wsText.c_str() );
 	}
 	else
-		sCursorInfo = NUI::SCursorInfo( NDb::GetUITexture( N_CURSOR_BLOCK ) );
-
-	return true;
+		sCursorInfo = NUI::SCursorInfo( NDb::GetUICursor( N_CURSOR_BLOCK ) );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CStateSetTrap::Step()
+{
+	// retail CStateSetTrap::Step @0x1d8cc0: per-frame cursor refresh (position-gated)
+	CStateBase::Step();
+	UpdateCursor();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CStateSetTrap::OnLButtonUp( int nX, int nY )
@@ -1817,13 +2097,12 @@ void CStateSetMine::UpdateCursor()
 
 	if ( sInfo.bAvailable )
 	{
-		WCHAR wsBuffer[1024] = L"";
-		if ( !GetMission()->IsRealTime() )
-			swprintf( wsBuffer, L"AP: %d", sInfo.nActionAP );
-		sCursorInfo = NUI::SCursorInfo( NDb::GetUITexture( N_CURSOR_HEAL ), wsBuffer );
+		wstring wsText;
+		MakeCursorString( GetMission(), sInfo, &wsText );	// retail caption: shared MakeCursorString @0x1d7990
+		sCursorInfo = NUI::SCursorInfo( NDb::GetUICursor( N_CURSOR_HEAL ), wsText.c_str() );
 	}
 	else
-		sCursorInfo = NUI::SCursorInfo( NDb::GetUITexture( N_CURSOR_BLOCK ) );
+		sCursorInfo = NUI::SCursorInfo( NDb::GetUICursor( N_CURSOR_BLOCK ) );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CStateSetMine::Step()
@@ -1854,13 +2133,12 @@ bool CStateFirstAid::Initialize( IMission *pMission )
 
 	if ( sInfo.bAvailable )
 	{
-		WCHAR wsBuffer[1024] = L"";
-		if ( !GetMission()->IsRealTime() )
-			swprintf( wsBuffer, L"AP: %d", sInfo.nActionAP );
-		sCursorInfo = NUI::SCursorInfo( NDb::GetUITexture( N_CURSOR_HEAL ), wsBuffer );
+		wstring wsText;
+		MakeCursorString( GetMission(), sInfo, &wsText );	// retail caption: shared MakeCursorString @0x1d7990
+		sCursorInfo = NUI::SCursorInfo( NDb::GetUICursor( N_CURSOR_HEAL ), wsText.c_str() );
 	}
 	else
-		sCursorInfo = NUI::SCursorInfo( NDb::GetUITexture( N_CURSOR_BLOCK ) );
+		sCursorInfo = NUI::SCursorInfo( NDb::GetUICursor( N_CURSOR_BLOCK ) );
 
 	return true;
 }
@@ -1966,7 +2244,9 @@ bool CStatePose::Initialize( IMission *pMission )
 	pMission->GetSelectedUnits( &unitsSet );
 	for ( vector< CPtr<NGame::IUnitTracker> >::iterator iTemp = unitsSet.begin(); iTemp != unitsSet.end(); iTemp++ )
 	{
-		NAI::SUnitPosition uPos = (*iTemp)->GetUnit()->GetPosition();
+		// retail @0x1db700 anchors the re-path on GetSetPosePosition (CUnit vtbl+0x48), NOT GetPosition:
+		// a moving unit re-paths from the tile it is stepping INTO, not backwards to the one it left.
+		NAI::SUnitPosition uPos = (*iTemp)->GetUnit()->GetSetPosePosition();
 		uPos.SetPose( ePose );
 		pMission->Command( (*iTemp)->GetUnit(), new NWorld::CCmdWishPose( ePose ) );
 		pMission->Command( (*iTemp)->GetUnit(), new NWorld::CCmdPath( uPos.pos, NAI::PF_USE_POSEDIR ) );

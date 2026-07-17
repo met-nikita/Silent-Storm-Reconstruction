@@ -8,6 +8,7 @@
 #include "GText.h"
 #include "Interface.h"
 #include "UIWrap.h"
+#include "UIML.h"
 #include "DiscretePos.h"
 #include "..\Misc\StrProc.h"
 #include "..\DBFormat\DataLight.h"
@@ -19,39 +20,36 @@ namespace NUI
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CTextDraw
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail ctor @0x329c20: sSize = sRealSize = size; sPosition = pos; nSize = 0; wsText(text);
+// pML = CreateML(); pML->SetText(wsText, 0).
 CTextDraw::CTextDraw( const SPoint &_sPosition, const SPoint &_sSize, const wstring &_wsText ):
-	sPosition( _sPosition ), sSize( _sSize ), sRealSize( _sSize ), wsText(_wsText)
+	sPosition( _sPosition ), sSize( _sSize ), sRealSize( _sSize ), wsText(_wsText), nSize( 0 )
 {
-	pSize = new NGScene::CCTPoint;
-	pTextString = new NGScene::CCWString;
-
-	pSize->Set( sSize );
-	pTextString->Set( wsText );
+	pML = CreateML();
+	pML->SetText( wsText, 0 );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail GetSize @0x329a30: a dead/null view returns the requested sSize untouched; otherwise
+// refresh the layout (UpdateText), copy requested -> resolved, and overwrite each -1 component with
+// the layout's measured extent mapped back into virtual 1024x768 coordinates. NOTE retail always
+// recomputes sRealSize on a live view (the old dev body only did so when a component was -1).
 const SPoint& CTextDraw::GetSize( NGScene::I2DGameView *pView )
 {
-	if ( IsValid( pView ) && ( ( sSize.x == -1 ) || ( sSize.y == -1 ) ) )
-	{
-		UpdateSize( pView );
+	if ( !IsValid( pView ) )
+		return sSize;
 
-		if ( !pText )
-			pText = pView->CreateText( pTextString, pSize );
+	UpdateText( pView );
 
-		pText.Refresh();
-		const CVec2 &vScreenRect = pView->GetViewportSize();
-		const NGScene::SText &sText = pText->GetValue();
+	const SPoint &sMLSize = pML->GetSize();
+	const CVec2 &vScreenRect = pView->GetViewportSize();
 
-		sRealSize = sSize;
-		if ( sSize.x == -1 )
-			sRealSize.x = sText.sSize.x * 1024 / vScreenRect.x;
-		if ( sSize.y == -1 )
-			sRealSize.y = sText.sSize.y * 768 / vScreenRect.y;
+	sRealSize = sSize;
+	if ( sSize.x == -1 )
+		sRealSize.x = sMLSize.x * 1024 / vScreenRect.x;
+	if ( sSize.y == -1 )
+		sRealSize.y = sMLSize.y * 768 / vScreenRect.y;
 
-		return sRealSize;
-	}
-
-	return sSize;
+	return sRealSize;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CTextDraw::SetSize( const SPoint &_sSize )
@@ -75,17 +73,21 @@ const wstring& CTextDraw::GetText() const
 	return wsText;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail SetText @0x329ce0: nSize = 0 (force a regenerate); wsText = arg (self-assign guarded in
+// retail); push the text into the layout object.
 void CTextDraw::SetText( const wstring &_wsText )
 {
-	wsText = _wsText;
-	pTextString->Set( wsText );
+	nSize = 0;
+	if ( &_wsText != &wsText )
+		wsText = _wsText;
+	pML->SetText( wsText, 0 );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail Draw @0x329b10: resolve the size, map position+rect to screen (through the window, or the
+// raw 1024x768 scale when free-standing), then let the layout render. NOTE retail's tail does NOT
+// re-run UpdateText here (GetSize already did) -- the old dev tail call is gone.
 void CTextDraw::Draw( CWindow *pWindow, const STime &sTime, NGScene::I2DGameView *pView )
 {
-	if ( !pText )
-		pText = pView->CreateText( pTextString, pSize );
-
 	SPoint sTextSize = GetSize( pView );
 	SRect sScrWindow( sPosition.x, sPosition.y, sPosition.x + sTextSize.x, sPosition.y + sTextSize.y );
 	SPoint sScrPosition( sPosition );
@@ -109,23 +111,26 @@ void CTextDraw::Draw( CWindow *pWindow, const STime &sTime, NGScene::I2DGameView
 		sScrWindow.y2 *= fYCoef;
 	}
 
-	UpdateSize( pView );
-
-	pView->CreateDynamicRects( pText, sScrPosition, sScrWindow );
+	pML->Render( pView, sScrPosition, sScrWindow );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CTextDraw::UpdateSize( NGScene::I2DGameView *pView )
+// retail UpdateText @0x329680: resolve the layout width in screen pixels (a positive requested
+// width scaled by viewport/1024, else the raw viewport width) and regenerate the layout only when
+// it changed since the cached nSize.
+void CTextDraw::UpdateText( NGScene::I2DGameView *pView )
 {
 	CVec2 vScreenRect = pView->GetViewportSize();
-	SPoint sSetSize( sSize );
-	if ( sSize.x != -1 )
-		sSetSize.x = sSize.x * vScreenRect.x / 1024;
-	if ( sSize.y != -1 )
-		sSetSize.y = sSize.y * vScreenRect.y / 768;
+	int nNewSize;
+	if ( sSize.x > 0 )
+		nNewSize = int( float( sSize.x ) * vScreenRect.x / 1024.0f );   // retail truncates here (or ah,0xc)
+	else
+		nNewSize = int( vScreenRect.x );
 
-	pSize.Refresh();
-	if ( pSize->GetValue() != sSetSize )
-		pSize->Set( sSetSize );
+	if ( nNewSize != nSize )
+	{
+		nSize = nNewSize;
+		pML->Generate( pView, nNewSize );
+	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CImageDraw
@@ -245,46 +250,78 @@ void CImageDraw::Draw( CWindow *pWindow, const STime &sTime, NGScene::I2DGameVie
 			sTexRect.y2 = 0;
 		}
 
+		// retail 12-byte CRectLayout has no scale member -- the tile quad size (|texrect| * the
+		// mode-scale * the user vScale) is baked into every AddRect (retail 6-arg AddRect @0x174620).
+		const CVec2 vTileScale( scale.x * vScale.x, scale.y * vScale.y );
+		const float fTileSizeX = fabsf( sTexRect.Width() ) * vTileScale.x;
+		const float fTileSizeY = fabsf( sTexRect.Height() ) * vTileScale.y;
 		CRectLayout sLayout;
-		sLayout.scale.x = scale.x * vScale.x;
-		sLayout.scale.y = scale.y * vScale.y;
 		for ( int nTempY = 0; nTempY < sWindow.Height(); nTempY += pUITexture->nHeight )
 			for ( int nTempX = 0; nTempX < sWindow.Width(); nTempX += pUITexture->nWidth )
-				sLayout.AddRect( nTempX * sLayout.scale.x, nTempY * sLayout.scale.y, sTexRect, sColor );
+				sLayout.AddRect( nTempX * vTileScale.x, nTempY * vTileScale.y, fTileSizeX, fTileSizeY, sTexRect, sColor );
 
 		pView->CreateDynamicRects( pTexture, sLayout, sScrPosition, sScrWindow );
 	}
 	else
 	{
+		// texture-less fill: the old scale (vp/1024, vp/768) times the |texrect| (= the window dims)
 		CRectLayout sLayout;
-		sLayout.scale.x = pView->GetViewportSize().x / 1024.0f;
-		sLayout.scale.y = pView->GetViewportSize().y / 768.0f;
-		sLayout.AddRect( 0, 0, CTRect<float>( 0, 0, sWindow.Width(), sWindow.Height() ), sColor );
+		sLayout.AddRect( 0, 0,
+			sWindow.Width() * pView->GetViewportSize().x / 1024.0f,
+			sWindow.Height() * pView->GetViewportSize().y / 768.0f,
+			CTRect<float>( 0, 0, sWindow.Width(), sWindow.Height() ), sColor );
 		pView->CreateDynamicRects( (NDb::CTexture*)0, sLayout, sScrPosition, sScrWindow );
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CModelWrap
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CModelDraw::CModelDraw( const SRect &_sWindow, NDb::CModel* _pModel, CFBTransform *_pBaseTransform ):
-	sWindow( _sWindow ), pModel( _pModel ), pBaseTransform( _pBaseTransform ), sColor( 0xFF, 0xFF, 0xFF, 0xFF )
+// retail @0x329710: Init + the fixed UI-item projection.
+void MakeProjection( CTransformStack *pTS )
+{
+	pTS->Init();
+	pTS->MakeProjective( CVec2( 1024, 768 ), 60, 0.1f, 300 );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail @0x329830 (disasm-verified consts 512/384): conjugate the widget-center NDC shift through
+// the projection, then camera, then the model matrix; backward = identity.
+void MakeModelTransform( SFBTransform *pRes, const SPoint &sPosition, const SPoint &sSize, const SHMatrix &sCameraTransform, const SHMatrix &sModelTransform )
+{
+	CTransformStack tsCamera;
+	tsCamera.Init();
+	tsCamera.SetCamera( sCameraTransform );
+
+	CTransformStack tsProjection;
+	MakeProjection( &tsProjection );
+
+	CVec2 vCenter( sPosition.x + sSize.x / 2, sPosition.y + sSize.y / 2 );
+
+	SHMatrix sShift;
+	Identity( &sShift );
+	sShift._14 = ( vCenter.x - 512.0f ) / 512.0f;
+	sShift._24 = ( 384.0f - vCenter.y ) / 384.0f;
+
+	SHMatrix sA, sB;
+	Multiply( &sA, sShift, tsProjection.Get().forward );
+	Multiply( &sB, tsProjection.Get().backward, sA );
+	Multiply( &sA, sB, tsCamera.Get().forward );
+	Multiply( &pRes->forward, sA, sModelTransform );
+	Identity( &pRes->backward );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail @0x32a920: identity wire matrices, then SetScene(0,true) -> own fast view, bParentScene=false.
+CModelDraw::CModelDraw( const SRect &_sWindow, NDb::CModel* _pModel ):
+	sWindow( _sWindow ), pModel( _pModel ), sColor( 0xFF, 0xFF, 0xFF, 0xFF )
 {
 	CTransformStack ts;
 	ts.Init();
 	pTransform = new NGScene::CCFBTransform;
 	pTransform->Set( ts.Get() );
 
-	p3DView = NGScene::CreateNewFastInterfaceView();
+	Identity( &sModelTransform );
+	Identity( &sCameraTransform );
 
-	SRand rnd;
-	NDb::CTAmbientLight *p = NDb::GetTAmbientLight(7);
-	p3DView->SetAmbient( p->GetLight( &rnd ), NGScene::IGameView::LT_INVENTORY );
-/*
-	p3DView = NGScene::CreateNewFastInterfaceView();//CreateNewView();
-	p3DView->SetAmbient( 0 );
-	pAmbientDirectional = p3DView->AddDirectionalLight( CVec3(0.5f,0.4f,0.45f), CVec3( 0.6f,1.4f,-1), CVec3(5,5,0), CVec2( 150, 150 ), 20 );
-	p3DView->SetAmbient( CVec3( 0.5f, 0.5f, 0.5f ) );
-*/
+	SetScene( 0, true );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 const SRect& CModelDraw::GetWindow() const
@@ -295,6 +332,9 @@ const SRect& CModelDraw::GetWindow() const
 void CModelDraw::SetWindow( const SRect &_sWindow )
 {
 	sWindow = _sWindow;
+	// retail @0x329570: SetWindow ALWAYS raises bUpdated -- CModel::Draw (@0x3126f0) calls it every
+	// frame, so the placement fold (MakeModelTransform) tracks the window's current screen position
+	bUpdated = true;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 const NGfx::SPixel8888& CModelDraw::GetColor() const
@@ -320,18 +360,8 @@ void CModelDraw::SetModel( NDb::CModel* _pModel )
 	pRender = 0;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CFBTransform* CModelDraw::GetTransform() const
-{
-	return pBaseTransform;
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-void CModelDraw::SetTransform( CFBTransform *_pBaseTransform )
-{
-	pBaseTransform = _pBaseTransform;
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-// iSpecialView (release) setters @0x32a390 / @0x3295b0 / @0x3295d0 over the existing fields.
-////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail @0x32a390. (bFast=false is retail CreateNewInterfaceView @0x18b3e0 -- new CGameView +
+// SetInterfaceMode(1); dev's scene has no interface-mode knob, CreateNewView is its standing stand-in.)
 void CModelDraw::SetScene( NGScene::IGameView *pView, bool bFast )
 {
 	pRender = 0;
@@ -364,6 +394,10 @@ void CModelDraw::SetCameraTransform( const SHMatrix &sMatrix )
 	sCameraTransform = sMatrix;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail @0x32a4d0. Flow: off-screen -> DROP the mesh; lazy (re)create from the serialized
+// pModel+pTransform; bUpdated -> fold sCameraTransform/sModelTransform + placement into pTransform
+// (CCFBTransform::Set bumps the version, the mesh's transform functor picks it up); a parent-scene
+// mesh is drawn BY the parent -- only an own-view CModelDraw draws p3DView here.
 void CModelDraw::Draw( CWindow *pWindow, const STime &sTime, NGScene::I2DGameView *pView )
 {
 	if ( !pModel )
@@ -371,23 +405,42 @@ void CModelDraw::Draw( CWindow *pWindow, const STime &sTime, NGScene::I2DGameVie
 
 	SRect sScrWindow( sWindow );
 	SPoint sScrPosition( sWindow.x1, sWindow.y1 );
-	if ( pWindow )
+	if ( pWindow && !pWindow->ClientToScreen( &sScrPosition, &sScrWindow, false ) )
 	{
-		if ( !pWindow->ClientToScreen( &sScrPosition, &sScrWindow, false ) )
-			return;
+		pRender = 0;
+		return;
 	}
 
-	SPoint sSize( (float)sWindow.Width() * p3DView->GetScreenRect().x / 1024.0f, (float)sWindow.Height() * p3DView->GetScreenRect().y / 768.0f );
+	if ( !IsValid( pRender ) )
+		pRender = p3DView->CreateMesh( pModel, pTransform );
+
+	if ( bUpdated )
+	{
+		bUpdated = false;
+		SFBTransform sResult;
+		MakeModelTransform( &sResult, sScrPosition, SPoint( sWindow.Width(), sWindow.Height() ), sCameraTransform, sModelTransform );
+		pTransform->Set( sResult );
+	}
+
+	if ( bParentScene )
+		return;
+
 	SRect s2DScrWindow( sScrWindow );
 	SPoint s2DScrPosition( sScrPosition );
+	SPoint sRealSize( sWindow.Width(), sWindow.Height() );
 	if ( pWindow )
+	{
 		pWindow->VirtualToScreen( &s2DScrPosition, &s2DScrWindow );
+		pWindow->VirtualToScreen( &sRealSize, 0 );
+	}
 	else
 	{
-		CVec2 vScreenRect = pView->GetViewportSize();
+		const CVec2 &vScreenRect = pView->GetViewportSize();
 
 		float fXCoef = vScreenRect.x / 1024.0f;
 		float fYCoef = vScreenRect.y / 768.0f;
+		sRealSize.x *= fXCoef;
+		sRealSize.y *= fYCoef;
 		s2DScrPosition.x *= fXCoef;
 		s2DScrPosition.y *= fYCoef;
 		s2DScrWindow.x1 *= fXCoef;
@@ -397,36 +450,17 @@ void CModelDraw::Draw( CWindow *pWindow, const STime &sTime, NGScene::I2DGameVie
 	}
 
 	CRectLayout sLayout;
-	sLayout.AddRect( 0, 0, CTRect<float>( 0, 0, s2DScrWindow.Width(), s2DScrWindow.Height() ) );
+	sLayout.AddRect( 0, 0, sRealSize.x, sRealSize.y, CTRect<float>( 0, 0, 0, 0 ) );
 	pView->CreateDynamicClearRects( sLayout, s2DScrPosition, s2DScrWindow, 1.0f );
 	pView->Flush();
 
-	if ( !IsValid( pRender ) )
-		pRender = p3DView->CreateMesh( pModel, pTransform );
-
-	CVec2 vPos( sScrPosition.x + sWindow.Width() / 2, sScrPosition.y + sWindow.Height() / 2 );
 	CTransformStack ts;
-	SHMatrix sMatrix;
-	if ( pBaseTransform )
-		sMatrix = pBaseTransform->pos.forward;
-//	MakeMatrix( &sMatrix, ToRadian( 0 ), ToRadian( 90.0f ), CVec3( 10, (float)( 512 - vPos.x ) * 5 / 1024, (float)( vPos.y - 384 ) * 3.75f / 768 ) );
-	ts.Init();
-	ts.MakeProjective( CVec2( 1024, 768 ), 60, 0.1f, 300 );
-	ts.SetCamera( sMatrix );
-
-	SHMatrix sShift;
-	Identity( &sShift);
-	sShift._14 = (float)( vPos.x - 512 ) / 512;
-	sShift._24 = (float)( 384 - vPos.y ) / 384;
-
-	SHMatrix sRes;
-	Multiply( &sRes, sShift, ts.Get().forward );
-	ts.Init( sRes );
+	MakeProjection( &ts );
 
 	NGScene::IGameView::SDrawInfo drawInfo;
 	drawInfo.pTS = &ts;
-	drawInfo.vOrigin = CVec2( sScrPosition.x / 1024.0f, sScrPosition.y / 768.0f );
-	drawInfo.vSize = CVec2( sWindow.Width() / 1024.0f, sWindow.Height() / 768.0f );
+	drawInfo.vOrigin = CVec2( sScrWindow.x1 / 1024.0f, sScrWindow.y1 / 768.0f );
+	drawInfo.vSize = CVec2( sScrWindow.Width() / 1024.0f, sScrWindow.Height() / 768.0f );
 	drawInfo.bOverlay = true;
 	p3DView->Draw( drawInfo );
 

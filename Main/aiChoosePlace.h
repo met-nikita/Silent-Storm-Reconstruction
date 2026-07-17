@@ -31,6 +31,9 @@ class IAIChoosePlaceJob: public CAIJob
 {
 public:
 	IAIChoosePlaceJob( IAIJob *_pParentJob = 0 ): CAIJob( _pParentJob ) {}
+	// retail @0x475ea0: {2 CAIJob} -- the release serializes the CAIJob base through this extra
+	// interface level, so the concrete jobs' wire is 2(ChoosePlaceJob).2(IAIChoosePlaceJob).2(CAIJob).
+	int operator&( CStructureSaver &f );   // defined in the .cpp
 	//
 	virtual void Reset() = 0;                                                  // slot6
 	virtual void AddAction( CAIAction *pAction, IAIActionPlaceSource *pSrc ) = 0; // slot7
@@ -60,7 +63,6 @@ class CAIChoosePlaceJob: public IAIChoosePlaceJob
 		SPlaceSourceInfo(): bPlacesPrepared( false ), nBestPlace( -1 ), nCurrentPlace( 0 ) {}
 	};
 	//
-	bool bChoosingFinished;                                          // set in DoJob when actions exhausted
 	int  nCurrentAction;
 	vector< CPtr<CAIAction> > actions;
 	unordered_map< CPtr<CAIAction>, SPlaceSourceInfo, SPtrHash > info;
@@ -73,12 +75,12 @@ public:
 	CAIChoosePlaceJob( IAIJob *_pParentJob, int _nAPToReserve );
 	//
 	virtual void DoJob();                                            // slot0
-	// The chooser signals completion through its own bChoosingFinished (DoJob sets it once every action's
-	// places are scanned; Reset clears it). The release sets the CAIJob finished flag directly in DoJob
-	// (field_0xc=1 @0x004753f0) and runs the chooser as a job-manager sub-job; here CAICombatLogic::DoJob
-	// drives it inline via this IsJobFinished, so it MUST reflect bChoosingFinished - the inherited
-	// CAIJob::IsJobFinished (bJobFinished) is never set by the chooser and would loop forever.
-	virtual bool IsJobFinished() { return bChoosingFinished; }
+	// Completion travels through the inherited CAIJob bJobFinished byte, exactly like the release:
+	// DoJob Finish()es once every action's places are scanned (@0x004753f0 sets the +0xc byte), Reset
+	// ReArm()s it (@0x00475210 clears it), and the inherited CAIJob::IsJobFinished reports it to the
+	// job manager. The byte is serialized inside the CAIJob chunk (wire tag 2.2.2.3 of the standalone
+	// jobs), so a mid-scan chooser resumes after load. (The former dev-only bChoosingFinished mirror
+	// duplicated this state AND leaked into the wire as a bogus 1-byte tag 6 -- removed.)
 	virtual void Reset();                                            // slot6
 	virtual void AddAction( CAIAction *pAction, IAIActionPlaceSource *pSrc ); // slot7
 	virtual bool GetPlaceForAction( CAIAction *pAction, SPlaceWithAP *pPlace ); // slot8

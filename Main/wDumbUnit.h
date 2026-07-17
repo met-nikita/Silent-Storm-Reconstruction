@@ -43,6 +43,7 @@ class CPlayer;
 struct SInterruptInfo;
 class IDynamicObject;
 class CTimedObject;
+class C3DSound;
 class CUnit;
 class CWorld;
 class CMine;
@@ -120,8 +121,8 @@ private:
 	void MakeStepSound( bool bSound );
 	NDb::CRPGArmor* GetArmor();
 	void GetUnitPositionForVisit( NAI::SUnitPosition *pPos );
-	int GetFloor();
 public:
+	int GetFloor();   // retail @0x34f610; public: LostWeapon @0x3b5c80 / LaunchItem @0x3a7fe0 call it
 	bool IsAddedToVisitor();   // present in the world visitor set (used by the AI WearPK candidate scan)
 private:
 	void FallAsIfDead( const CVec3 &ptDir, bool bDropItemsFromBackPack, bool bPlayDeathAnim );   // retail @0x350770 3-arg
@@ -130,7 +131,9 @@ private:
 protected:
 	bool IsLocker();
 	friend bool NAI::IsLockerUnit( CObjectBase *pUnit ); // aiPositionDebug locker-validity probe (retail @0x917d0)
-	virtual void Die( bool bRemove = false ) {}
+	// retail @0x3c2190 Die(bool,bool) -- arg1 bDeathBeauty ORs into the beauty-cam condition
+	// (the gib path forces it); arg2 bRemove = the silent removal flavor (no ack/state/camera).
+	virtual void Die( bool bDeathBeauty = false, bool bRemove = false ) {}
 	virtual void OnUnitMadeUnconscious( bool bFromScript = false ) {}
 	virtual void OnSuffersDamage( float fAP )	{} // how much is left, in percent
 	virtual void ProcessCritical( NDb::ECritical eCA ) {}
@@ -175,6 +178,7 @@ public:
 
 	NRPG::IUnitMission* GetUnitRPG() const { return pRPG; }
 	const NAI::SUnitPosition& GetUnitPosition() const { return position; }
+	NAI::SUnitPosition GetUnitSetPosePosition() const;   // retail @0x34f430: pose-change anchor (nextLock mid-step in realtime)
 	void GetRealUnitPosition( CVec3 *pRes );
 	CWorld* GetWorld() const { return pWorld; }
 
@@ -183,13 +187,18 @@ public:
 	NAI::EPose GetWishPose() const { return wishPose; }
 	void SetWishPose( NAI::EPose pose ) { wishPose = pose; }
 	
-	void CreateFlash( bool bLeft, bool bFirstBullet );   // @0x351630
+	// @0x351630 -- retail returns the created burst C3DSound* (0 when no sound was emitted) for
+	// CExecShoot's long-burst retention slot (SLongBurstSnd, save tag 3)
+	C3DSound* CreateFlash( bool bLeft, bool bFirstBullet );
 	void Update() { bindGlobal.Update(); }
 	// wCheckTooMuchCorpses corpse-density failsafe (compiland wCheckTooMuchCorpses.obj):
 	// flag this unit OUT of the world visitor set (retail bNotAddedToVisitors @+0x12c = 1).
 	// RemoveOldestCorpse follows it with Update() to refresh the global vis-binding; the
 	// bulk-mark path does not (release-faithful asymmetry).
 	void MarkNotAddedToVisitors() { bNotAddedToVisitors = true; }
+	// the pocket path is the only place the flag is cleared again: retail CUnitStateInPocket
+	// OnStateStarted @0x3c9fb0 sets +0x12c = 1, OnStateFinished @0x3ca060 sets it back to 0.
+	void ClearNotAddedToVisitors() { bNotAddedToVisitors = false; }
 	void SetUndrawItem( bool _bUndraw, bool _bNoHeavyWeapon = false ) { bUndrawWeapon = _bUndraw; bNoHeavyWeapon = _bNoHeavyWeapon; Update(); }
 	bool GetUndrawItem() { return bUndrawWeapon; }
 	// release @0x74fd50 (UnitHoldItem): park a model in the unit's hand (the "Item" bind bone) + refresh the vis
@@ -212,7 +221,8 @@ public:
 	virtual void Visit( IAIVisitor* );
 	virtual void Visit( ISoundVisitor* );   // @0x34fdd0: PK engine loop + hand-effect 3D sound
 	// implement IAttackable
-	virtual int ProcessAttack( int nUserID, NRPG::CAttackPortion *pAttack, NDb::CRPGArmor *pArmor );
+	virtual int ProcessAttack( NWorld::IWorld *_pWorld, int nUserID, NRPG::CAttackPortion *pAttack,
+		const CVec3 &vDir, NDb::CRPGArmor *pArmor );
 
 	void Segment();
 	void PlaceOnPassablePlace();
@@ -229,10 +239,11 @@ public:
 	virtual bool IsUnconscious() const = 0;
 	virtual bool CanFight() const = 0;
 };
-// retail LaunchItem @0x34f500 forwards a CObjectBase* (the launching/dying unit) to AddDebris
-// @0x34ade0 as the fog-gate visibility-parent; non-null routes the flying item to the fog-gated
-// show list and, via the CDItem carrier, keeps its settled frozen form gated too.
-void LaunchItem( CWorld *pWorld, const CDumbUnitServer::SResItem &item, const CVec3 &vel = VNULL3, CObjectBase *pVisibilityParent = 0 );
+// retail LaunchItem @0x34f500 (IWorld*, SResItem&, CVec3&, bool, CObjectBase*, int): forwards
+// bFallFromBody (-> CASphereSet::Init phase PH_THROW_OUT+bool), the visibility parent (the
+// launching/dying unit; fog-gates the flying item AND its settled frozen form) and nFloor
+// (-> CDItem floor, roof-cut culling) to AddDebris @0x34ade0, then UpdateVisible(0).
+void LaunchItem( CWorld *pWorld, const CDumbUnitServer::SResItem &item, const CVec3 &vel, bool bFallFromBody, CObjectBase *pVisibilityParent, int nFloor );
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 }
 #endif

@@ -19,7 +19,6 @@
 #include "RPGUnit.h"
 #include "aiPath.h"
 #include "aiMap.h"                // NAI::IAIMap::GetObjectBound (mine-LOS probe pull-back)
-#include "aiSignal.h"
 #include "scScenarioTracker.h"
 #include "scriptCallLUA.h"		// NScript::luaCallFunction (OnClickUsable)
 #include "RPGGlobal.h"
@@ -130,8 +129,8 @@ CUnitServer::CUnitServer():
 {
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CUnitServer::CUnitServer( CWorld *pWorld, NRPG::IUnitMission *_pRPG, NDb::CModel *pModel, 
-	CPlayer *_pPlayer, const NAI::SUnitPosition &pos )
+CUnitServer::CUnitServer( CWorld *pWorld, NRPG::IUnitMission *_pRPG, NDb::CModel *pModel,
+	CPlayer *_pPlayer, const NAI::SUnitPosition &pos, bool bClueUnit )
 	:CDumbUnitServer( pWorld, _pRPG, pModel, pos ), bIsPK( false ),
 	registerOnNewPlayerTurnOrTime( this, &CUnitServer::OnNewPlayerTurnOrTime ),
 	registerOnNewPlayerFastTurnOrTime( this, &CUnitServer::OnNewPlayerFastTurnOrTime ), bCanTalk( false ), nDialog( 0 )
@@ -142,6 +141,8 @@ CUnitServer::CUnitServer( CWorld *pWorld, NRPG::IUnitMission *_pRPG, NDb::CModel
 	bIsRunningForcedAction = false;
 	fLastHeight = pos.GetCP().z;
 	plLast = pos.pos.p;
+	if ( bClueUnit )
+		nClueCount = 1;   // retail ctor @0x3c3cc0: the trailing bool marks a quest-clue carrier
 	if ( _pRPG->GetRPGPers()->pPanzerklein )
 	{
 //		_pRPG->GetRPGPers()->pHead = 0;
@@ -161,7 +162,10 @@ CUnitServer::CUnitServer( CWorld *pWorld, NRPG::IUnitMission *_pRPG, NDb::CModel
 	// bind the campaign game onto the mission (retail threads it through CreateUnit @0x2c4f50; this fork
 	// binds it here) so CreateAttack's backstab-damage multipliers can read pGlobalGame->pDifficulty.
 	_pRPG->SetGlobalGame( pWorld->GetGlobalGame() );
-	tPrev = GetWorld()->GetTime()->GetValue();
+	// retail ctor @0x3c3cc0 tail: both pass timestamps are seeded from the current time (the time
+	// getter is called TWICE, once per member).
+	tCriticalPrev = GetWorld()->GetTime()->GetValue();
+	tStatePrev = GetWorld()->GetTime()->GetValue();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CUnitServer::OnSuffersDamage( float fAP )
@@ -175,6 +179,7 @@ void CUnitServer::OnSuffersDamage( float fAP )
 void CUnitServer::OnUnitMadeUnconscious( bool bFromScript )
 {
 	lostUnits.clear();
+	hiddenAtSight.clear();   // retail @0x3c2010 clears BOTH sight-bookkeeping lists (lostUnits @+0x1c0, hiddenAtSight @+0x1f0)
 	NGlobal::ThrowEvent( NWorld::CEventOnUnitDiedOrLoseConsciousness( this ) );   // retail @0x3c2010: other units' trackers drop this unit (enemy-died / lost-ally)
 	pExec = 0;
 	pCurrentCmd = 0;
@@ -184,7 +189,6 @@ void CUnitServer::OnUnitMadeUnconscious( bool bFromScript )
 		// BUG 5 (auto-focus): retail OnUnitMadeUnconscious @0x3c2010 posts CUICmdUnitCamera(self,
 		// PR_UNIT_IS_DEAD, false, 1.0, null) -- the arbitrated auto-focus, not the old one-unit CUICmdUnit.
 		GetWorld()->AddUICommand( new NWorld::CUICmdUnitCamera( this, NWorld::PR_UNIT_IS_DEAD, false, 1.0f, 0 ) );
-		GetWorld()->GetAISignalManager()->Add( NAI::CreateAICorpseSignal( this ) );
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -196,9 +200,10 @@ void CUnitServer::OnUnitDied( CUnitServer *pUS )
 		pState->OnUnitDied( pUS );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CUnitServer::Die( bool bRemove )
+void CUnitServer::Die( bool bDeathBeauty, bool bRemove )
 {
 	lostUnits.clear();
+	hiddenAtSight.clear();   // retail @0x3c2190 clears BOTH sight-bookkeeping lists (lostUnits @+0x1c0, hiddenAtSight @+0x1f0)
 	NGlobal::ThrowEvent( NWorld::CEventOnUnitDiedOrLoseConsciousness( this ) );   // retail @0x3c2190: other units' trackers drop this dead unit (enemy-died / lost-ally)
 	GetWorld()->OnUnitDied( this );
 	if ( !bRemove )
@@ -214,14 +219,11 @@ void CUnitServer::Die( bool bRemove )
 		pCurrentCmd = 0;
 		SetState( new CUnitStateDeath( this ) );
 		// BUG 5 (auto-focus): retail CUnitServer::Die @0x3c2190 posts CUICmdUnitCamera(self,
-		// beauty?PR_UNIT_DIED_BEAUTY:PR_UNIT_IS_DEAD, useSloMo=beauty, 3.0, null) -- a HERO death gets the
-		// slow-mo "beauty shot" (beauty = GetRPG()->IsHero(), the retail cVar6 test; retail also ORs a 2nd
-		// Die bool the a5dll's single-arg Die lacks -- heroes qualify regardless).
-		bool bBeauty = IsValid( GetRPG() ) && GetRPG()->IsHero();
+		// beauty?PR_UNIT_DIED_BEAUTY:PR_UNIT_IS_DEAD, useSloMo=beauty, 3.0, null) -- beauty =
+		// IsHero() || bDeathBeauty (retail @0x7c22f6: a hero death OR the gib path's forced flag).
+		bool bBeauty = bDeathBeauty || ( IsValid( GetRPG() ) && GetRPG()->IsHero() );
 		GetWorld()->AddUICommand( new NWorld::CUICmdUnitCamera( this,
 			bBeauty ? NWorld::PR_UNIT_DIED_BEAUTY : NWorld::PR_UNIT_IS_DEAD, bBeauty, 3.0f, 0 ) );
-		//
-		GetWorld()->GetAISignalManager()->Add( NAI::CreateAICorpseSignal( this ) );
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -511,14 +513,16 @@ EUnitCommandResult CUnitServer::CanDo( CCmd *p, int *pnStartAP, int *pnFullAP )
 	}
 	*/
 	//
-	// @0x3c1570 -- retail PK-ban (absent in Jan03; FOLLOW THE DECOMP): a fight-capable unit that
-	// is CROUCHing may NOT be given a look-around (CCmdLook) command -> UCR_PK_BAN. Placed here
-	// because a CCmdLook is never a CCmdContinue, so the decode's "not continue" gate is implicit.
-	// (The binary computes a CCmdPath cast too, but it does NOT gate this return; in this tree
-	// CCmdLook : CCmd, so the CCmdLook cast alone is the faithful gate.)
+	// @0x3c1570 -- retail PK-ban (absent in Jan03): a unit WEARING a live Panzerklein
+	// (pWearingPK @+0x1cc, [ecx+0x80] off the CUnit base @+0x14c) that is CROUCHing may not
+	// be given a look-around (CCmdLook) command -> UCR_PK_BAN. Ordinary crouched units CAN look.
+	// Placed here because a CCmdLook is never a CCmdContinue, so the decode's "not continue"
+	// gate is implicit. (The binary computes a CCmdPath cast too, but it does NOT gate this
+	// return; in this tree CCmdLook : CCmd, so the CCmdLook cast alone is the faithful gate.)
+	if ( IsValid( pWearingPK ) && GetPosition().GetPose() == NAI::CROUCH )
 	{
 		CDynamicCast<CCmdLook> pLook( p );
-		if ( pLook && CanFight() && GetPosition().GetPose() == NAI::CROUCH )
+		if ( pLook )
 			return UCR_PK_BAN;
 	}
 	//
@@ -675,7 +679,9 @@ void CUnitServer::FallFromHigh( float fHeightDiff )
 		return;
 	int nDamage = GetUnitRPG()->GetFallDamage( fHeightDiff );
 	NRPG::CAttackPortion att( 1, 0, 0.0f, nDamage, -1, 0 );   // retail FallFromHigh @0x3c0570: fPushCoeff=0
-	ProcessAttack( NAI::HL_BODY, &att, GetUnitRPG()->GetRPGArmor() );
+	// retail @0x3c0570 passes this->pWorld and a straight-down direction; pWorld is private on the
+	// CDumbUnitServer base, so reach it through the accessor.
+	ProcessAttack( GetWorld(), NAI::HL_BODY, &att, CVec3( 0, 0, -1 ), GetUnitRPG()->GetRPGArmor() );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CUnitServer::Fall()
@@ -788,17 +794,21 @@ void CUnitServer::OnTBSEvent( ETBSEvent event )
 			break;			
 		case TBS_ACTION_FINISH:
 			ASSERT( !IsPerformingAction() );
-			//if ( pExec->IsValid() ) return;
-			// HOLD-AIM FIX (Issue 2): retail CUnitServer::OnTBSEvent @0x3c2a90 TBS_ACTION_FINISH does NOT reseat --
-			// it only stores height/place + OnActionFinish; the locker Unlock/ForcedMove/Fall/Lock block below is
-			// a5dll grid logic RELOCATED here from the (undelivered) TBS_GRID_INFO_UPDATED event, and it fires for
-			// EVERY player's units on EVERY world action-finish edge. When the unit's tile went non-passable
-			// (-> ForcedMove -> Stand) or drifted >1cm (-> Fall -> IdleOn), it CLEARS bAimed, spuriously dropping a
-			// unit's held aim after firing -- a reset retail never does (retail holds the raised weapon until the
-			// unit next moves/is re-ordered). Skip the reseat for a unit holding its aim: it is stationary, needs no
-			// reseat, and keeps its existing lock untouched (closer to retail's no-Unlock/Lock ACTION_FINISH than
-			// the non-aiming path). Non-aiming units keep the a5dll grid-consistency handling unchanged.
-			if ( IsLocker() && !animator.IsAiming() )
+			// retail CUnitServer::OnTBSEvent @0x3c2a90 TBS_ACTION_FINISH: store height/place +
+			// OnActionFinish ONLY. The locker grid-consistency block that used to live here (an a5dll
+			// relocation from the then-undelivered TBS_GRID_INFO_UPDATED, later gated on !IsAiming to
+			// stop it from clearing a held aim on every shot) has moved to its RETAIL home below --
+			// CWorld::Segment now delivers TBS_GRID_INFO_UPDATED only when the path network actually
+			// changed, so the reseat no longer fires on every action-finish edge and needs no aim gate.
+			fLastHeight = GetPosition().GetCP().z;
+			plLast = GetPosition().pos.p;
+			pState->OnActionFinish();
+			break;
+		case TBS_GRID_INFO_UPDATED:
+			// retail @0x3c2a90 case 10: a locker unit re-seats on the changed grid -- release the lock,
+			// force-move off a now-impassable tile; otherwise fall/snap when the ground height under the
+			// SAME place drifted (> 0.01), store the new height/place, and re-lock.
+			if ( IsLocker() )
 			{
 				NAI::IPathNetwork *pNet = GetWorld()->GetPathNetwork();
 				pNet->Unlock( this );
@@ -815,8 +825,7 @@ void CUnitServer::OnTBSEvent( ETBSEvent event )
 					pNet->Lock( this, GetPosition().pos.p );
 				}
 			}
-			pState->OnActionFinish();
-			break;			
+			break;
 		case TBS_CANCEL_ACTION:
 			CancelAction();
 			break;
@@ -1021,12 +1030,13 @@ void CUnitServer::Segment()
 	CDumbUnitServer::Segment();
 	if ( GetWorld()->IsRealTime() )
 	{
-		if ( tCur - tPrev >= 3000 )
+		if ( tCur - tCriticalPrev >= 3000 )   // retail keeps two throttles (tCriticalPrev/tStatePrev); dev's merged pass rides the criticals one
 		{
 			if ( !IsDead() )
 				GetUnitRPG()->DoRegenerations();
 			pState->OnFinishTimeOrTurn( true );
-			tPrev = tCur;
+			tCriticalPrev = tCur;
+			tStatePrev = tCur;
 		}
 	}
 	pState->Segment();
@@ -1350,7 +1360,7 @@ CVec3 CUnitServer::GetAttackOrigin() const
 CVec3 CUnitServer::GetAttackOrigin( const NAI::SUnitPosition &from ) const
 {
 	if ( CCannon *pCannon = animator.GetCannon() )
-		return pCannon->GetPosition() + CVec3(0,0,0.722f); // CRAP, should be correct position
+		return pCannon->GetPosition() + pCannon->GetCannonAttackOrigin();   // retail @0x3bf8d0: cannon pos + DB muzzle offset (CCannon+0xb4)
 	NDb::CAnimWeaponType *pType = GetUnitRPG()->GetDBAnimWeapon();
 	if ( !pType )
 		return GetPosition().GetEyePosition();
@@ -1375,7 +1385,7 @@ CVec3 CUnitServer::GetAttackOrigin( const NAI::SUnitPosition &from ) const
 float CUnitServer::GetMinClearDistance() const
 {
 	if ( CCannon *pCannon = animator.GetCannon() )
-		return 1.0f; // CRAP, should be correct position
+		return pCannon->GetMinClearDistance();   // retail @0x3bf6a0: reads cannon+0xb0 (DB MinClearDistance)
 	NDb::CAnimWeaponType *pType = GetUnitRPG()->GetDBAnimWeapon();
 	if ( !pType )
 		return 0;
@@ -1496,12 +1506,14 @@ void CUnitServer::CancelHeal()
 		SetState( new CUnitStateNormal( this ) );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-int CUnitServer::ProcessAttack( int nUserID, NRPG::CAttackPortion *pAttack, NDb::CRPGArmor *pArmor )
+// retail @0x3c33a0: forwards to the CDumbUnitServer base with pWorld/vDir unchanged.
+int CUnitServer::ProcessAttack( NWorld::IWorld *pWorld, int nUserID, NRPG::CAttackPortion *pAttack,
+	const CVec3 &vDir, NDb::CRPGArmor *pArmor )
 {
 	if ( bIsPKWhichIsWeared )
 		return 0;
 	bool isDead = GetUnitRPG()->IsDead();
-	int nRet = CDumbUnitServer::ProcessAttack( nUserID, pAttack, pArmor );
+	int nRet = CDumbUnitServer::ProcessAttack( pWorld, nUserID, pAttack, vDir, pArmor );
 	if ( !IsValid( this ) )
 		return nRet;
 	CUnitServer *pPKUnit = 0;
@@ -1649,18 +1661,32 @@ bool CUnitServer::IsCheatEnabled( int nCheat )
 	return GetUnitRPG()->GetRPGUnit()->IsCheatEnabled( nCheat );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CUnitServer::FlipPanzerklein( CUnitServer *pPK, bool bUnloadWeapons )
-{ 
+bool CUnitServer::IsFlyingBoss() const
+{
+	// retail @0x3c1250
+	if ( !IsValid( pWearingPK ) )
+		return false;
+	NDb::CRPGPers *pPKPers = pWearingPK->GetRPG()->GetRPGPers();
+	if ( !IsValid( pPKPers ) )
+		return false;
+	if ( IsValid( pPKPers->pName ) && pPKPers->pName->szStr == L"Boss" )
+		return true;
+	return pPKPers->szUserName == "Boss";
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CUnitServer::FlipPanzerklein( CUnitServer *pPK, bool bUnloadWeapons, bool bTakeInventory )
+{
 	NDb::CModel *pPKModel;
 	if ( !pPK ) // return to non-PK mode
 		pPKModel = GetUnitRPG()->GetRPGUnit()->pModel;
 	else
 		pPKModel = pPK->GetUnitRPG()->GetRPGUnit()->pModel;
 	CUnitServer *pOldPK = pWearingPK;
-	pWearingPK = pPK; 
+	pWearingPK = pPK;
 	NAI::SUnitPosition pos = GetPosition();
 	pos.pos.p.SetPose( NAI::CM_STAND );
 	pos.bRun = false;
+	fLastHeight = pos.GetCP().z;	// retail @0x3c1a90 refreshes it here (no fall from the pre-flip height)
 	SetPosition( pos );
 	pModel = pPKModel;
 	NDb::CRPGPers *pPKPers = 0;
@@ -1690,10 +1716,9 @@ void CUnitServer::FlipPanzerklein( CUnitServer *pPK, bool bUnloadWeapons )
 			}
 		}
 	}
-	animator.ChangeSkeleton( pPKModel->pSkeleton, pPK );
-	animator.SetWeaponAnimation( GetUnitRPG()->GetWeaponType() );
-	animator.SetActiveItem( false );
-	animator.PlaceUnit( GetPosition() );
+	// retail @0x3c1a90: the skeleton PK flags, decided before the criticals/SetPanzerklein block
+	bool bBoss = IsFlyingBoss();
+	bool bTerrorPK = pPKPers && !bBoss && pPKPers->pPanzerklein->bHasNoHead;
 	if ( pWearingPK )
 		GetUnitRPG()->ApplyCritical( NRPG::SCritical( NDb::CL_ANY, NDb::C_PANZERKLEIN_AXIS ) );
 	else
@@ -1701,21 +1726,28 @@ void CUnitServer::FlipPanzerklein( CUnitServer *pPK, bool bUnloadWeapons )
 		for ( int nCrit = NDb::C_PANZERKLEIN_AXIS; nCrit <= NDb::C_PANZERKLEIN_TERRORS_HWG; ++nCrit )
 			GetUnitRPG()->RemoveCritical( (NDb::ECritical)nCrit );
 	}
-	
+
 	if ( pWearingPK )
 	{
 		NDb::CPanzerklein *pDbPK = pWearingPK->GetRPG()->GetRPGPers()->pPanzerklein;
 		NRPG::CDynamicSkill *pVP = &pWearingPK->GetRPG()->GetRPGUnit()->Skills( NDb::ST_VP );
-		GetUnitRPG()->SetPanzerklein( pDbPK, pVP, pWearingPK->GetUnitRPG()->GetInventory() );
+		NRPG::IInventory *pPKInv = 0;
+		if ( bTakeInventory )
+			pPKInv = pWearingPK->GetUnitRPG()->GetInventory();
+		GetUnitRPG()->SetPanzerklein( pDbPK, pVP, pPKInv );
 		SetUndrawItem( false );
 		if ( *pVP < 0 )
 			animator.IdleBan( NAnimation::E_NO_IDLE_WHEN_STUNNED, true );
 	}
 	else
 		GetUnitRPG()->SetPanzerklein( 0, 0, pOldPK->GetUnitRPG()->GetInventory() );
+	animator.ChangeSkeleton( pPKModel->pSkeleton, pPK != 0, bBoss, bTerrorPK );
+	animator.SetWeaponAnimation( GetUnitRPG()->GetWeaponType() );
+	animator.SetActiveItem( pWearingPK != 0 );	// retail: active while worn -- keys the PK_WEAPON_* pose flags
+	animator.PlaceUnit( GetPosition() );
 	Update();
 	GetWorld()->UpdateVisible();
-} 
+}
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 NDb::CPanzerklein *CUnitServer::GetWearingDBPK()
 { 
@@ -1739,18 +1771,9 @@ bool CUnitServer::IsUnitAudible( const CUnit *pUnit ) const
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CUnitServer::CheckStability()
 {
-	if ( CanFight() )
-		return; // falling and forced move don't happen here, but at the end of the WORLD action
-	if ( IsEmptyPK() )
-		return;
-	if ( IsWearingPK() )
-		return;
-	if ( GetCorpseCarrier() )
-		return;
-	OutputDebugString("checking stability for dead unit\n");
-
-	if ( animator.IsInstableCorpse() )
-		animator.BeDropped( this );
+	// retail @0x3bf360: EMPTY -- corpse re-drops are exclusively the stability tracker's corpses
+	// branch (NAI::CStabilityTracker::OnChange @0xa59a0 -> CUnitAnimator::BeDropped, ported in
+	// aiStability.cpp). The Jan03 body here re-dropped instable corpses from the world sweep.
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CUnitServer::IsDead() const 
@@ -1777,7 +1800,8 @@ void CUnitServer::OnNewPlayerTurnOrTime( const CEventOnNewPlayerTurnOrTime &even
 		{
 			int nDamage = pCritical->GetCritical().fValue;
 			NRPG::CAttackPortion att( 1, 0, 0.0f, nDamage, -1, 0 );   // retail ProcessCriticalsAndRegenerations @0x3c2770: fPushCoeff=0
-			ProcessAttack( NAI::HL_BODY, &att, GetUnitRPG()->GetRPGArmor() );
+			// retail ProcessCriticalsAndRegenerations @0x3c2770: this->pWorld, straight-down direction.
+			ProcessAttack( GetWorld(), NAI::HL_BODY, &att, CVec3( 0, 0, -1 ), GetUnitRPG()->GetRPGArmor() );
 		}
 	}
 }

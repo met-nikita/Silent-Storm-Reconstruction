@@ -107,7 +107,7 @@ static void CalcWeighted( CVec3 *pRes, const CVec3 &a, float fA, const CVec3 &b,
 	pRes->z = ( a.z * fB - b.z * fA );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// мощная работа по наложению тени ( no welding yet )
+// пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅ ( no welding yet )
 // calc average point
 static void CalcMiddlePoint( const SSPoint &a, const SSPoint &b, SSPoint *pRes, float fA, float fB )
 {
@@ -160,10 +160,14 @@ static bool DoSplit( SShadowPoly *pRes, const SShadowPoly &src, const CVec3 &vUV
 	return pRes->points.size() > 2;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-inline void ProjectNormalized( CVec3 *pRes, const CVec3 &src, const CVec3 &vNormal )
+// release @0x50aec0: projects src into the plane perpendicular to vNormal,
+// renormalizes, and PACKS the result straight into the vertex's compact tangent
+// slot (SVertex stores texU/texV as NGfx::SCompactVector in this build).
+inline void ProjectNormalized( NGfx::SCompactVector *pRes, const CVec3 &src, const CVec3 &vNormal )
 {
-	*pRes = src - vNormal * (src * vNormal);
-	Normalize( pRes );
+	CVec3 vTmp = src - vNormal * (src * vNormal);
+	Normalize( &vTmp );
+	NGfx::CalcCompactVector( pRes, vTmp );
 }
 WORD CShadowBuilder::AddPoint( SSPoint &pnt )
 {
@@ -173,9 +177,11 @@ WORD CShadowBuilder::AddPoint( SSPoint &pnt )
 	v.pos = pnt.point;
 	v.tex.u = pnt.uv[0];
 	v.tex.v = 1 - pnt.uv[1];
-	v.normal = pnt.normal;
-	ProjectNormalized( &v.texU, projection.vVecU, v.normal );
-	ProjectNormalized( &v.texV, projection.vVecV, v.normal );
+	// release @0x508f10 packs the normal (SVertex.normal is compact in this build)
+	// and feeds the RAW pnt.normal CVec3 to ProjectNormalized as the plane normal.
+	NGfx::CalcCompactVector( &v.normal, pnt.normal );
+	ProjectNormalized( &v.texU, projection.vVecU, pnt.normal );
+	ProjectNormalized( &v.texV, projection.vVecV, pnt.normal );
 	return nRes;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -435,18 +441,19 @@ CExplosionShadowBuilder::CExplosionShadowBuilder( CObjectInfo::SData *pInfo, con
 				const SUVInfo &uv = srcVertices[ nIdx ];
 				const CVec3 &pos = srcPositions[ posIndices[ nIdx ] ];
 				const CVec3 &vXformed = xformed[ posIndices[ nIdx ] ];
-				const CVec3 vTexU = NGfx::GetVector( uv.texU );
-				const CVec3 vTexV = NGfx::GetVector( uv.texV );
 				SVertex res;
 				res.pos = pos;
-				res.normal = NGfx::GetVector( uv.normal );
+				// release @0x509ce0 carries the source's packed normal DWORD verbatim
+				// (SUVInfo.normal and SVertex.normal are both compact in this build --
+				// no GetVector/CalcCompactVector round-trip).
+				res.normal = uv.normal;
 				//res.texV = CVec3(0,0,0);
 
 				CVec3 vLightDir = vXformed - vOrigin;
 				float fH = (vLightDir * vXNormal) / fSize;
 				float fS = Max( 0.0001f, 1 - sqr( fH ) );
-				res.texU = CVec3( 1, 0, 0 );
-				res.texV = CVec3( fS, sqrt(1-sqr(fS)), 0 );
+				NGfx::CalcCompactVector( &res.texU, CVec3( 1, 0, 0 ) );
+				NGfx::CalcCompactVector( &res.texV, CVec3( fS, sqrt(1-sqr(fS)), 0 ) );
 				float fU = (vLightDir * vXTexU) / fS / fSize;
 				float fV = (vLightDir * vXTexV) / fS / fSize;
 				res.tex.u = fU * fCos - fV * fSin;
@@ -522,9 +529,11 @@ CPerPolyDecalBuilder::CPerPolyDecalBuilder( CObjectInfo::SData *pInfo, const COb
 				//const CVec3 vTexV = NGfx::GetVector( uv.texV );
 				SVertex res;
 				res.pos = pos;
-				res.normal = NGfx::GetVector( uv.normal );
-				res.texU = CVec3( 1, 0, 0 );
-				res.texV = CVec3( 0, 1, 0 );
+				// release @0x50a3e0: packed normal copied verbatim; texU/texV built as
+				// CVec3 then packed (the decomp's two CalcCompactVector calls).
+				res.normal = uv.normal;
+				NGfx::CalcCompactVector( &res.texU, CVec3( 1, 0, 0 ) );
+				NGfx::CalcCompactVector( &res.texV, CVec3( 0, 1, 0 ) );
 				res.tex = projection.Project( vXformed );
 				res.tex.u = Clamp( res.tex.u, -15.0f, 15.0f );
 				res.tex.v = Clamp( res.tex.v, -15.0f, 15.0f );

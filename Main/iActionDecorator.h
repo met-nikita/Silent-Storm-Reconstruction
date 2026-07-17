@@ -14,7 +14,9 @@ namespace NUI
 template<class Type>
 class CActionDecorator: public Type
 {
-private:
+protected:
+	// protected (not private): NUI::CSlot's version-gated serialization (retail CSlot::OnSerialize
+	// @0x1c5c90) assigns this pMission (the decorator's, CSlot+0x84) directly on legacy v0 loads.
 	ZDATA_(Type)
 	bool bMouseEnter;
 	CPtr<NGame::IMission> pMission;
@@ -54,32 +56,42 @@ public:
 			}
 		}
 
+		// retail (@0x1ef530 for the CInteractiveUnitView instantiation): the state's handler returns
+		// whether it consumed the event. Swallow ONLY then -- and reset the mouse capture. An
+		// unhandled event still reaches the base, which is what lets CInteractiveUnitView arm its
+		// spin on LBUTTONDOWN while CanHandleState is broadly true.
 		if ( CanHandleState( pMission->GetState() ) )
 		{
+			bool bHandled = false;
 			switch( sEvent.nEvent )
 			{
 			case EVENT_LBUTTONUP:
-				pMission->GetState()->OnLButtonUp( sEvent.nX, sEvent.nY );
-				return true;
+				bHandled = pMission->GetState()->OnLButtonUp( sEvent.nX, sEvent.nY );
+				break;
 			case EVENT_LBUTTONDOWN:
-				pMission->GetState()->OnLButtonDown( sEvent.nX, sEvent.nY );
-				return true;
+				bHandled = pMission->GetState()->OnLButtonDown( sEvent.nX, sEvent.nY );
+				break;
 			case EVENT_LBUTTONDBLCLK:
-				pMission->GetState()->OnLButtonDblClk( sEvent.nX, sEvent.nY );
-				return true;
-			case EVENT_MOUSEMOVE:
-				{
-					GetInterface()->SetCursorInfo( pMission->GetState()->GetCursorInfo() );
-					break;
-				}
+				bHandled = pMission->GetState()->OnLButtonDblClk( sEvent.nX, sEvent.nY );
+				break;
 			}
+			if ( bHandled )
+			{
+				GetInterface()->ResetMouseCapture();
+				return true;
+			}
+			if ( sEvent.nEvent == EVENT_MOUSEMOVE )
+				GetInterface()->SetCursorInfo( pMission->GetState()->GetCursorInfo() );
 		}
 
 		return Type::ProcessMessage( sEvent );
 	}
 	void Update( const STime &sTime, NGScene::I2DGameView *pView )
 	{
-		if ( GetStyle( STYLE_VISIBLE ) && bMouseEnter )
+		// retail @0x1ef4c0: claim the state target only if this window can handle the CURRENT state.
+		// Ungated, an item icon under the cursor claims the target during a drag even though it
+		// declines the state, and the drop is classified GROUND instead of hitting the cell beneath.
+		if ( GetStyle( STYLE_VISIBLE ) && bMouseEnter && CanHandleState( pMission->GetState() ) )
 			pMission->SetStateTarget( GetTarget() );
 
 		Type::Update( sTime, pView );

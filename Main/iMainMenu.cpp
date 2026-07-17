@@ -174,15 +174,6 @@ class CMainMenuInterface: public CRenderBaseInterface
 private:
 	NInput::CBind bindTutorial, bindCampaign, bindCustomGame, bindLoadGame, bindOptions, bindCredits, bindQuitGame;
 
-	// Menu camera-fly executor state (runtime only). The release menu inherits CMissionBase's per-frame
-	// ExecWorldCommand queue-drain + camera executor; the dev menu (CRenderBaseInterface) has none, so we run a
-	// minimal executor in Step(): PlayMenuCamera queues CUICmdSetCameraClipDistance + CUICmdScriptMoveCamera on
-	// the world's own script (via the id-queue), and we drain+play them here. NOT serialized (menu isn't saved).
-	CPtr<NWorld::CUICmdScriptMoveCamera> pActiveCameraCmd;
-	int nActiveWaypoint;
-	STime sWaypointStartTime;
-	ICamera::SCameraPos sWaypointStartPos;
-
 	ZDATA_(CRenderBaseInterface)
 	CObj<NUI::CMainMenuUI> pMainMenuUI;
 public:
@@ -195,16 +186,12 @@ public:
 
 	void Step();
 	bool ProcessEvent( const NInput::SEvent &sEvent );
-private:
-	void ExecMenuCommands();						// drain+execute the menu world's queued camera UI commands
-	bool UpdateMenuCamera( const STime &sTime );	// tick the active camera fly; returns true when finished
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CMainMenuInterface
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CMainMenuInterface::CMainMenuInterface():
-	bindTutorial( "tutorial" ), bindCampaign( "campaign" ), bindCustomGame( "customgame" ), bindLoadGame( "loadgame" ), bindOptions( "options" ), bindCredits( "credits" ), bindQuitGame( "quit" ),
-	nActiveWaypoint( 0 ), sWaypointStartTime( 0 )
+	bindTutorial( "tutorial" ), bindCampaign( "campaign" ), bindCustomGame( "customgame" ), bindLoadGame( "loadgame" ), bindOptions( "options" ), bindCredits( "credits" ), bindQuitGame( "quit" )
 {
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -229,10 +216,13 @@ void CMainMenuInterface::Initialize()
 	// PlayMenuMan) when the world's Segment ticks pOwnScript->ExecuteThreads(), and Segment clears each
 	// object's action flag so WaitForObject advances through the pose list. This game.db's container 347
 	// carries no ScriptID, so we launch the MainMenu DB script (id 85) directly here.
-	// NOTE: id 85's PlayMenuCamera camera-fly thread additionally needs the release-new CameraSequence /
-	// CameraSetClipping / IsUIActionIDPresent bindings + CScript id-queue (a separate save-format leg); they
-	// are absent here, so that thread logs one benign "nil value" and the camera stays static. The Man loop
-	// (PlayMenuMan) is independent and unaffected.
+	// NOTE: id 85's PlayMenuCamera camera-fly thread queues its clip + 3 CameraSequence commands onto the
+	// world UI queue, where NOTHING in the menu drains them -- the thread blocks forever on WaitForUI (4
+	// commands total, one parked coroutine; bounded). That matches RETAIL, whose menu camera is the single
+	// static SetPlacement(GetDBCamera(26)) @0x1f7310: the fly is CUT CONTENT (script 85 ships in game.db,
+	// but retail's only DB-script launcher -- CWindow::ProcessMessage @0x328250, gated on
+	// UIContainers.ScriptID -- never fires: ScriptID is 0 for all 167 shipped containers). The Man loop
+	// (PlayMenuMan) is independent and keeps animating.
 	if ( NWorld::CWorld *pCWorld = CDynamicCast<NWorld::CWorld>( GetWorld() ) )
 		if ( NScript::CScript *pWorldScript = pCWorld->GetOwnScript() )
 			pWorldScript->RunScriptByID( N_MAINMENU_SCRIPT );
@@ -310,10 +300,9 @@ void CMainMenuInterface::Step()
 		if ( NWorld::CWorld *pCWorld = CDynamicCast<NWorld::CWorld>( GetWorld() ) )
 			pCWorld->ExecuteOwnScript();	// sets the active-script context first; a bare ExecuteThreads() crashes after returning from a pushed interface (GetScript()==0)
 
-		// Execute the camera UI commands PlayMenuCamera just queued (clip planes + the waypoint fly) and tick
-		// the active fly. The menu is not a CMissionBase, so this minimal executor stands in for the inherited
-		// ExecWorldCommand path; on completion it drops the queued id so the script's WaitForUI(id) unblocks.
-		ExecMenuCommands();
+		// Deliberately NO camera-command executor here: retail's menu camera is STATIC (the one
+		// GetDBCamera(26) SetPlacement in Initialize); the script-85 camera fly is cut content whose
+		// queued commands retail never plays either (see the Initialize note).
 
 		// Render the 3D menu world full-screen. The predecessor derived a sub-rect from a "clientview" UI
 		// control, but the retail menu container (347) ships no such control (-> GetUIWindow fell back to a
@@ -323,84 +312,6 @@ void CMainMenuInterface::Step()
 
 		RenderFrame( GetTime(), GetCamera() );
 	}
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-void CMainMenuInterface::ExecMenuCommands()
-{
-	NWorld::CWorld *pCWorld = CDynamicCast<NWorld::CWorld>( GetWorld() );
-	if ( !pCWorld )
-		return;
-	NScript::CScript *pWorldScript = pCWorld->GetOwnScript();
-	//
-	// Drain everything PlayMenuCamera queued (clip planes + the waypoint fly) onto the world's UI command list.
-	for ( ; ; )
-	{
-		CPtr<NWorld::CUICmd> pCmd = pCWorld->GetUICommand();
-		if ( !IsValid( pCmd ) )
-			break;
-		//
-		CDynamicCast<NWorld::CUICmdSetCameraClipDistance> pClip( pCmd );
-		if ( pClip )
-		{
-			GetCamera()->SetClipDistance( pClip->fMinDistance, pClip->fMaxDistance );
-			continue;
-		}
-		CDynamicCast<NWorld::CUICmdScriptMoveCamera> pMove( pCmd );
-		if ( pMove )
-		{
-			// start this fly; if one was already running, finish it (drop its id) first.
-			if ( IsValid( pActiveCameraCmd ) && IsValid( pWorldScript ) )
-				pWorldScript->RemoveUIActionID( pActiveCameraCmd->nID );
-			pActiveCameraCmd = pMove;
-			nActiveWaypoint = 0;
-			sWaypointStartTime = 0;
-			continue;
-		}
-		// other UI commands have no menu executor -- ignore them.
-	}
-	//
-	// Tick the active camera fly; when it finishes, drop its id so the script's WaitForUI(id) unblocks.
-	if ( IsValid( pActiveCameraCmd ) && UpdateMenuCamera( GetTime() ) )
-	{
-		if ( IsValid( pWorldScript ) )
-			pWorldScript->RemoveUIActionID( pActiveCameraCmd->nID );
-		pActiveCameraCmd = 0;
-	}
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-bool CMainMenuInterface::UpdateMenuCamera( const STime &sTime )
-{
-	const vector<ICamera::SCameraPos> &positions = pActiveCameraCmd->positions;
-	if ( positions.empty() )
-		return true;
-	//
-	if ( sWaypointStartTime == 0 )
-	{
-		sWaypointStartTime = sTime;
-		GetCamera()->GetPlacement( &sWaypointStartPos );	// seed the start pose from the live camera
-	}
-	STime transitionTime = pActiveCameraCmd->transitionTime;	// per-waypoint duration
-	float fCoeff = ( transitionTime <= 0 ) ? 1.0f : Min( float( sTime - sWaypointStartTime ) / transitionTime, 1.0f );
-	//
-	const ICamera::SCameraPos &target = positions[ nActiveWaypoint ];
-	ICamera::SCameraPos cur;
-	cur.fRod     = target.fRod   * fCoeff + sWaypointStartPos.fRod   * ( 1 - fCoeff );
-	cur.fPitch   = target.fPitch * fCoeff + sWaypointStartPos.fPitch * ( 1 - fCoeff );
-	cur.fYaw     = target.fYaw   * fCoeff + sWaypointStartPos.fYaw   * ( 1 - fCoeff );
-	cur.fRoll    = target.fRoll  * fCoeff + sWaypointStartPos.fRoll  * ( 1 - fCoeff );
-	cur.fFOV     = target.fFOV   * fCoeff + sWaypointStartPos.fFOV   * ( 1 - fCoeff );
-	cur.ptAnchor = target.ptAnchor * fCoeff + sWaypointStartPos.ptAnchor * ( 1 - fCoeff );
-	GetCamera()->SetPlacement( cur );
-	//
-	if ( fCoeff >= 1.0f )
-	{
-		sWaypointStartPos = target;			// next segment starts from this waypoint
-		sWaypointStartTime = sTime;
-		++nActiveWaypoint;
-		if ( nActiveWaypoint >= ( int )positions.size() )
-			return true;					// whole sequence played
-	}
-	return false;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CICMainMenu

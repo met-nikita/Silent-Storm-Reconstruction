@@ -355,4 +355,4 @@ bool CanUseDefenceReaction( IAIUnit *pUnit )
 }
 //
 using namespace NAI;
-BASIC_REGISTER_CLASS( CAIDefenceReaction )
+REGISTER_SAVELOAD_CLASS( 0x2306AB00, CAIDefenceReaction )

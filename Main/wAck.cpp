@@ -10,6 +10,7 @@
 #include "wMain.h"	// CPlayer roster (CAckNPercentOfGroupIsKilled squad/dead counts)
 #include "rpgUnit.h"
 #include "rpgUnitMission.h"
+#include "RPGItemInfo.h"	// item interfaces for GetRatingDifference (grenade/melee/weapon)
 #include "..\Misc\EventsBase.h"
 #include "eventUnit.h"
 //
@@ -28,8 +29,10 @@ public:
 	CAckFriendDies() : CAckBase() {};
 	CAckFriendDies( CUnitServer *_pUnit, NDb::CDBAck *_pDBAck ): CAckBase( _pUnit, _pDBAck ) {};
 	virtual void OnUnitDied( CUnitServer *_pUnit )
-	{ 
-		if ( GetUnit() != _pUnit && GetUnit()->GetPlayer() == _pUnit->GetPlayer()  ) 
+	{
+		// retail @0x331c00: the single IsFriend gate (both units alive, different units, same
+		// player) -- the Jan03 raw player compare had no liveness gates.
+		if ( IsFriend( _pUnit ) )
 			PlayAck();
 	}
 };
@@ -56,10 +59,11 @@ public:
 	CAckNPercentOfGroupIsKilled( CUnitServer *_pUnit, NDb::CDBAck *_pDBAck ): CAckBase( _pUnit, _pDBAck ) {};
 	virtual void OnUnitDied( CUnitServer *_pUnit )
 	{
-		if ( !IsValid( _pUnit ) )
+		// retail gate order @0x3384e0: OWNER live -> !IsThis(victim) -> IsFriend(victim)
+		// (the helpers carry the liveness gates; Jan03 raw-compared players instead)
+		if ( !IsValid( GetUnit() ) )
 			return;
-		// retail gate order @0x3384e0: unit live -> !IsThis -> IsFriend (same player, different unit)
-		if ( GetUnit() == _pUnit || GetUnit()->GetPlayer() != _pUnit->GetPlayer() )
+		if ( IsThis( _pUnit ) || !IsFriend( _pUnit ) )
 			return;
 		CDynamicCast<CPlayer> pOwner( GetUnit()->GetPlayer() );	// retail __RTDynamicCast to CPlayer
 		if ( !IsValid( pOwner ) )
@@ -92,8 +96,10 @@ public:
 	CAckFriendTargetMissed() : CAckBase() {};
 	CAckFriendTargetMissed( CUnitServer *_pUnit, NDb::CDBAck *_pDBAck ): CAckBase( _pUnit, _pDBAck ) {};
 	virtual void OnTargetMissed( CUnitServer *_pUnit )
-	{ 
-		if ( GetUnit() != _pUnit && GetUnit()->GetPlayer() == _pUnit->GetPlayer()  ) 
+	{
+		// retail: ICF-folded with CAckFriendDies::OnUnitDied @0x331c00 (vftable VA 0x8c7e0c slot
+		// +0x2c proves it) -- the single IsFriend gate, replacing the Jan03 raw player compare.
+		if ( IsFriend( _pUnit ) )
 			PlayAck();
 	}
 };
@@ -107,9 +113,12 @@ class CAckEnemyHasBeenInfictedCritical: public CAckBase
 public:
 	CAckEnemyHasBeenInfictedCritical() : CAckBase() {};
 	CAckEnemyHasBeenInfictedCritical( CUnitServer *_pUnit, NDb::CDBAck *_pDBAck ): CAckBase( _pUnit, _pDBAck ) {};
+	// NOTE: dead in retail exactly as here -- CreateAck @0x330b10 has no case for this class (it is
+	// classreg-only, id 0x52912145) and nothing dispatches OnCritical; the body is kept source-1:1.
 	virtual void OnCritical( CUnitServer *_pUnit )
-	{ 
-		if ( GetUnit()->GetPlayer() != _pUnit->GetPlayer()  ) 
+	{
+		// retail @0x333f20: IsEnemy first, then the CanSee sight gate (Jan03: raw player compare)
+		if ( IsEnemy( _pUnit ) && CanSee( _pUnit ) )
 			PlayAck();
 	}
 };
@@ -125,8 +134,9 @@ public:
 	CAckFriendGrenadeKillsMoreThanOneEnemy( CUnitServer *_pUnit, NDb::CDBAck *_pDBAck ): CAckBase( _pUnit, _pDBAck ) {};
 	virtual void OnGrenadeExplosion( CUnitServer *_pUnit,
 																		int nUnitsDestroyed, int nObjectsDestroyed )
-	{ 
-		if ( GetUnit() != _pUnit &&  GetUnit()->GetPlayer() == _pUnit->GetPlayer() && nUnitsDestroyed > 1 )
+	{
+		// retail @0x331cc0: IsFriend(thrower) + more than one unit destroyed (Jan03: raw compares)
+		if ( IsFriend( _pUnit ) && nUnitsDestroyed > 1 )
 			PlayAck();
 	}
 };
@@ -142,8 +152,9 @@ public:
 	CAckGrenadeKillsMoreThanOneEnemy( CUnitServer *_pUnit, NDb::CDBAck *_pDBAck ): CAckBase( _pUnit, _pDBAck ) {};
 	virtual void OnGrenadeExplosion( CUnitServer *_pUnit,
 																		int nUnitsDestroyed, int nObjectsDestroyed )
-	{ 
-		if ( GetUnit()  == _pUnit && nUnitsDestroyed > 1 )
+	{
+		// retail @0x331d90: IsThis(thrower) -- adds the owner-liveness gate over the Jan03 raw compare
+		if ( IsThis( _pUnit ) && nUnitsDestroyed > 1 )
 			PlayAck();
 	}
 };
@@ -159,8 +170,9 @@ public:
 	CAckFriendGrenadeDestroysALotOfObjects( CUnitServer *_pUnit, NDb::CDBAck *_pDBAck ): CAckBase( _pUnit, _pDBAck ) {};
 	virtual void OnGrenadeExplosion( CUnitServer *_pUnit,
 																		int nUnitsDestroyed, int nObjectsDestroyed )
-	{ 
-		if ( GetUnit() != _pUnit &&  GetUnit()->GetPlayer() == _pUnit->GetPlayer() &&
+	{
+		// retail @0x331e60: IsFriend(thrower), then sParam[0] <= objects destroyed
+		if ( IsFriend( _pUnit ) &&
 			nObjectsDestroyed >= atoi( GetDBAck()->sParam[0].c_str() ) )
 				PlayAck();
 	}
@@ -177,86 +189,128 @@ public:
 	CAckGrenadeDestroysALotOfObjects( CUnitServer *_pUnit, NDb::CDBAck *_pDBAck ): CAckBase( _pUnit, _pDBAck ) {};
 	virtual void OnGrenadeExplosion( CUnitServer *_pUnit,
 																		int nUnitsDestroyed, int nObjectsDestroyed )
-	{ 
-		if ( GetUnit()  == _pUnit  && 
+	{
+		// retail @0x331f40: IsThis(thrower), then sParam[0] <= objects destroyed
+		if ( IsThis( _pUnit ) &&
 			nObjectsDestroyed >= atoi( GetDBAck()->sParam[0].c_str() ) )
 				PlayAck();
 	}
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail reworked the whole "enemy becomes visible" family from the Jan03 IAck virtual
+// (OnEnemyBecomesVisible, fanned out by CGlobalAck) onto the typed event bus: each class embeds a
+// CEventRegister<class, CEventOnSeeNewEnemy> (ctors @0x331f80/@0x334150 et al.), the retail IAck
+// vftable has NO OnEnemyBecomesVisible slot (24 handler slots, mapping complete via the CGlobalAck
+// dispatchers @0x3389c0..0x338df0), and the event is raised by CUnitServer::UpdateVisible (the
+// dev ThrowEvent site already matches retail). Predicates moved onto the CAckBase helpers.
 class CAckEnemyBecomesVisibleInRealtime: public CAckBase
-{	
+{
 	OBJECT_BASIC_METHODS(CAckEnemyBecomesVisibleInRealtime);
+	NGlobal::CEventRegister< CAckEnemyBecomesVisibleInRealtime, NWorld::CEventOnSeeNewEnemy > registerEvent;
 	ZDATA
 	ZPARENT( CAckBase );
 	ZEND int operator&( CStructureSaver &f ) { f.Add(2,(CAckBase *)this); return 0; }
 public:
-	CAckEnemyBecomesVisibleInRealtime() : CAckBase() {};
-	CAckEnemyBecomesVisibleInRealtime( CUnitServer *_pUnit, NDb::CDBAck *_pDBAck ): CAckBase( _pUnit, _pDBAck ) {};
+	CAckEnemyBecomesVisibleInRealtime( CUnitServer *_pUnit = 0, NDb::CDBAck *_pDBAck = 0 ):
+		registerEvent( this, &CAckEnemyBecomesVisibleInRealtime::OnEvent ), CAckBase( _pUnit, _pDBAck ) {}
 	//
-	virtual void OnEnemyBecomesVisible( CUnitServer *pWatcher, CUnitServer *pTarget, bool bRealTime )
+	void OnEvent( const CEventOnSeeNewEnemy &event )
 	{
-		if ( GetUnit() == pWatcher && bRealTime )
+		// retail @0x3316a0: IsThis(watcher) + the real-time flag; the target is not consulted
+		if ( IsThis( event.pWatcher ) && event.bRealTime )
+			PlayAck();
+	}
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail NWorld::CAckPCHasBeenSpottedByTheEnemy (release-added; NO Jan03 counterpart, NO CreateAck
+// case -- classreg-only, retail id 0x51953111 raw-disasm'd from the registrar init stub @0x4a6eb0,
+// factory NewCAckPCHasBeenSpottedByTheEnemy @0x3363f0, default ctor @0x3342c0). Subscribed to the
+// same CEventOnSeeNewEnemy bus with the roles SWAPPED: MY unit is the freshly-SPOTTED target and
+// the hostile watcher just acquired it.
+class CAckPCHasBeenSpottedByTheEnemy: public CAckBase
+{
+	OBJECT_BASIC_METHODS(CAckPCHasBeenSpottedByTheEnemy);
+	NGlobal::CEventRegister< CAckPCHasBeenSpottedByTheEnemy, NWorld::CEventOnSeeNewEnemy > registerEvent;
+	ZDATA
+	ZPARENT( CAckBase );
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,(CAckBase *)this); return 0; }
+public:
+	CAckPCHasBeenSpottedByTheEnemy( CUnitServer *_pUnit = 0, NDb::CDBAck *_pDBAck = 0 ):
+		registerEvent( this, &CAckPCHasBeenSpottedByTheEnemy::OnEvent ), CAckBase( _pUnit, _pDBAck ) {}
+	//
+	void OnEvent( const CEventOnSeeNewEnemy &event )
+	{
+		// retail @0x3316d0: IsThis(target) gates first, then IsEnemy(watcher)
+		if ( IsThis( event.pTarget ) && IsEnemy( event.pWatcher ) )
 			PlayAck();
 	}
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CAckEnemyBecomesVisible: public CAckBase
-{	
+{
 	OBJECT_BASIC_METHODS(CAckEnemyBecomesVisible);
+	NGlobal::CEventRegister< CAckEnemyBecomesVisible, NWorld::CEventOnSeeNewEnemy > registerEvent;
 	ZDATA
 	ZPARENT( CAckBase );
 	ZEND int operator&( CStructureSaver &f ) { f.Add(2,(CAckBase *)this); return 0; }
 public:
-	CAckEnemyBecomesVisible() : CAckBase() {};
-	CAckEnemyBecomesVisible( CUnitServer *_pUnit, NDb::CDBAck *_pDBAck ): CAckBase( _pUnit, _pDBAck ) {};
+	CAckEnemyBecomesVisible( CUnitServer *_pUnit = 0, NDb::CDBAck *_pDBAck = 0 ):
+		registerEvent( this, &CAckEnemyBecomesVisible::OnEvent ), CAckBase( _pUnit, _pDBAck ) {}
 	//
-	virtual void OnEnemyBecomesVisible( CUnitServer *pWatcher, CUnitServer *pTarget, bool bRealTime )
+	void OnEvent( const CEventOnSeeNewEnemy &event )
 	{
-		if ( GetUnit() == pWatcher && GetUnit()->GetPlayer() != pTarget->GetPlayer() )
+		// retail @0x331720: IsThis(watcher) then IsEnemy(target) -- diplomacy, not the Jan03
+		// "different player" compare (allied players no longer count as enemies)
+		if ( IsThis( event.pWatcher ) && IsEnemy( event.pTarget ) )
 			PlayAck();
 	}
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CAckWeakEnemyBecomesVisible: public CAckBase
-{	
+{
 	OBJECT_BASIC_METHODS(CAckWeakEnemyBecomesVisible);
+	NGlobal::CEventRegister< CAckWeakEnemyBecomesVisible, NWorld::CEventOnSeeNewEnemy > registerEvent;
 	ZDATA
 	ZPARENT( CAckBase );
 	ZEND int operator&( CStructureSaver &f ) { f.Add(2,(CAckBase *)this); return 0; }
 public:
-	CAckWeakEnemyBecomesVisible() : CAckBase() {};
-	CAckWeakEnemyBecomesVisible( CUnitServer *_pUnit, NDb::CDBAck *_pDBAck ): CAckBase( _pUnit, _pDBAck ) {};
+	CAckWeakEnemyBecomesVisible( CUnitServer *_pUnit = 0, NDb::CDBAck *_pDBAck = 0 ):
+		registerEvent( this, &CAckWeakEnemyBecomesVisible::OnEvent ), CAckBase( _pUnit, _pDBAck ) {}
 	//
-	virtual void OnEnemyBecomesVisible( CUnitServer *pWatcher, CUnitServer *pTarget, bool bRealTime )
+	void OnEvent( const CEventOnSeeNewEnemy &event )
 	{
-		if ( GetUnit() == pWatcher )
+		// retail @0x331790: IsThis(watcher) + the release-ADDED IsEnemy(target) gate, then the
+		// level test  delta + targetLevel <= watcherLevel  (identical math to Jan03)
+		if ( IsThis( event.pWatcher ) && IsEnemy( event.pTarget ) )
 		{
-			int nWatcherLevel = pWatcher->GetUnitRPG()->GetRPGUnit()->Skills( NDb::ST_LEVEL );
-			int nTargetLevel = pTarget->GetUnitRPG()->GetRPGUnit()->Skills( NDb::ST_LEVEL );
+			int nWatcherLevel = event.pWatcher->GetUnitRPG()->GetRPGUnit()->Skills( NDb::ST_LEVEL );
+			int nTargetLevel = event.pTarget->GetUnitRPG()->GetRPGUnit()->Skills( NDb::ST_LEVEL );
 			int nDelta = atoi( GetDBAck()->sParam[0].c_str() );
-			if ( nWatcherLevel >= nTargetLevel + nDelta ) 
+			if ( nWatcherLevel >= nTargetLevel + nDelta )
 				PlayAck();
 		}
 	}
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CAckStrongEnemyBecomesVisible: public CAckBase
-{	
+{
 	OBJECT_BASIC_METHODS(CAckStrongEnemyBecomesVisible);
+	NGlobal::CEventRegister< CAckStrongEnemyBecomesVisible, NWorld::CEventOnSeeNewEnemy > registerEvent;
 	ZDATA
 	ZPARENT( CAckBase );
 	ZEND int operator&( CStructureSaver &f ) { f.Add(2,(CAckBase *)this); return 0; }
 public:
-	CAckStrongEnemyBecomesVisible() : CAckBase() {};
-	CAckStrongEnemyBecomesVisible( CUnitServer *_pUnit, NDb::CDBAck *_pDBAck ): CAckBase( _pUnit, _pDBAck ) {};
+	CAckStrongEnemyBecomesVisible( CUnitServer *_pUnit = 0, NDb::CDBAck *_pDBAck = 0 ):
+		registerEvent( this, &CAckStrongEnemyBecomesVisible::OnEvent ), CAckBase( _pUnit, _pDBAck ) {}
 	//
-	virtual void OnEnemyBecomesVisible( CUnitServer *pWatcher, CUnitServer *pTarget, bool bRealTime )
+	void OnEvent( const CEventOnSeeNewEnemy &event )
 	{
-		if ( GetUnit() == pWatcher )
+		// retail @0x331840: IsThis(watcher) + the release-ADDED IsEnemy(target) gate, then the
+		// level test  delta + watcherLevel <= targetLevel  (identical math to Jan03)
+		if ( IsThis( event.pWatcher ) && IsEnemy( event.pTarget ) )
 		{
-			int nWatcherLevel = pWatcher->GetUnitRPG()->GetRPGUnit()->Skills( NDb::ST_LEVEL );
-			int nTargetLevel = pTarget->GetUnitRPG()->GetRPGUnit()->Skills( NDb::ST_LEVEL );
+			int nWatcherLevel = event.pWatcher->GetUnitRPG()->GetRPGUnit()->Skills( NDb::ST_LEVEL );
+			int nTargetLevel = event.pTarget->GetUnitRPG()->GetRPGUnit()->Skills( NDb::ST_LEVEL );
 			int nDelta = atoi( GetDBAck()->sParam[0].c_str() );
 			if ( nWatcherLevel + nDelta <= nTargetLevel )
 				PlayAck();
@@ -337,9 +391,10 @@ public:
 	//
 	virtual void OnDoCriticalDamage( CUnitServer *pAttacker, CUnitServer *pTarget )
 	{
-		if ( !IsValid( pAttacker ) || !IsValid( pTarget ) )
-			return;
-		if ( GetUnit() == pAttacker && GetUnit()->GetPlayer() != pTarget->GetPlayer() )
+		// retail @0x332840: IsThis + CanSee + IsEnemy. The Jan03 predecessor compared raw players
+		// (any different player counted, and no sight gate); retail barks only about a critical
+		// the owner inflicted on a SEEN unit its diplomacy calls ENEMY.
+		if ( IsThis( pAttacker ) && CanSee( pTarget ) && IsEnemy( pTarget ) )
 			PlayAck();
 	}
 };
@@ -356,11 +411,10 @@ public:
 	//
 	virtual void OnDoCriticalDamage( CUnitServer *pAttacker, CUnitServer *pTarget )
 	{
-		if ( !IsValid( pAttacker ) || !IsValid( pTarget ) )
-			return;
-		if ( GetUnit() != pAttacker && GetUnit()->GetPlayer() == pAttacker->GetPlayer() 
-			&& GetUnit()->GetPlayer() != pTarget->GetPlayer() )
-				PlayAck();
+		// retail @0x3326a0: IsFriend(attacker) + CanSee(target) + IsEnemy(target) -- the OWNER
+		// must see the victim; the Jan03 predecessor only compared players (no sight gate).
+		if ( IsFriend( pAttacker ) && CanSee( pTarget ) && IsEnemy( pTarget ) )
+			PlayAck();
 	}
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -376,11 +430,10 @@ public:
 	//
 	virtual void OnDoCriticalDamage( CUnitServer *pAttacker, CUnitServer *pTarget )
 	{
-		// retail CAckBase::IsThis(pTarget) @0x338ec0: only the unit that ACTUALLY suffered the crit barks the
+		// retail @0x332780: IsThis(pTarget) -- only the unit that ACTUALLY suffered the crit barks the
 		// "PC suffers critical" line. The Jan03 predecessor filter (GetUnit()->GetPlayer() != pTarget->GetPlayer())
 		// made every player-hero ack-owner bark "I'm hurt" whenever an ENEMY was critted (different player).
-		// The sibling suffer-acks (CAckSuffersLightDamage/HardDamage) already use GetUnit()==unit -- match them.
-		if ( IsValid( pTarget ) && GetUnit() == pTarget )
+		if ( IsThis( pTarget ) )
 			PlayAck();
 	}
 };
@@ -397,9 +450,11 @@ public:
 	//
 	virtual void OnUnitWasKilled( CUnitServer *pAttacker, CUnitServer *pTarget )
 	{
-		if ( !IsValid( pAttacker ) || !IsValid( pTarget ) )
-			return;
-		if ( GetUnit() == pAttacker && GetUnit()->GetPlayer() != pTarget->GetPlayer() )
+		// retail @0x332840 (body ICF-folded with CAckInflictCriticalDamageToEnemy::OnDoCriticalDamage;
+		// proven via the CAckKilledAnEnemy vftable 0x8c8604 slot +0x40): IsThis + CanSee + IsEnemy.
+		// The killer barks only about a kill he SAW of a unit his diplomacy calls ENEMY -- no bark
+		// when the victim was never visible (e.g. suppressive fire at a heard-only target).
+		if ( IsThis( pAttacker ) && CanSee( pTarget ) && IsEnemy( pTarget ) )
 			PlayAck();
 	}
 };
@@ -416,13 +471,13 @@ public:
 	//
 	virtual void OnUnitWasKilled( CUnitServer *pAttacker, CUnitServer *pTarget )
 	{
-		if ( !IsValid( pAttacker ) || !IsValid( pTarget ) )
-			return;
-		if ( GetUnit() == pAttacker && GetUnit()->GetPlayer() != pTarget->GetPlayer() )
+		// retail @0x332930: the same IsThis + CanSee + IsEnemy gate as CAckKilledAnEnemy,
+		// then the victim's RPG class record id must match the ack's sParam[0].
+		if ( IsThis( pAttacker ) && CanSee( pTarget ) && IsEnemy( pTarget ) )
 		{
 			int nTargetClass = pTarget->GetUnitRPG()->GetRPGUnit()->pClass->GetRecordID();
 			int nClass = atoi( GetDBAck()->sParam[0].c_str() );
-			if ( nClass == nTargetClass ) 
+			if ( nClass == nTargetClass )
 				PlayAck();
 		}
 	}
@@ -457,20 +512,16 @@ public:
 	}
 	virtual void OnUnitWasKilled( CUnitServer *pAttacker, CUnitServer *pTarget )
 	{
-		if ( !IsValid( pAttacker ) || !IsValid( pTarget ) )
-			return;
-		if ( GetUnit() == pAttacker )
+		// retail @0x332a80: IsThis + CanSee + IsEnemy, then count toward sParam[0]. NOTE the
+		// Jan03 predecessor RESET the streak on a same-player kill; retail has no such clause
+		// (the streak only resets via OnNewTurnStarted/OnRealTimeStarted).
+		if ( IsThis( pAttacker ) && CanSee( pTarget ) && IsEnemy( pTarget ) )
 		{
-			if ( GetUnit()->GetPlayer() == pTarget->GetPlayer() )
-				nKilled = 0;
-			else
-			{
-				++nKilled;
-				bKilledLastTurn = true;
-				int nParam = atoi( GetDBAck()->sParam[0].c_str() );
-				if ( nParam == nKilled )
-					PlayAck();
-			}
+			++nKilled;
+			bKilledLastTurn = true;
+			int nParam = atoi( GetDBAck()->sParam[0].c_str() );
+			if ( nParam == nKilled )
+				PlayAck();
 		}
 	}
 };
@@ -489,15 +540,17 @@ public:
 	//
 	virtual void OnUnitWasKilled( CUnitServer *pAttacker, CUnitServer *pTarget )
 	{
-		if ( !IsValid( pAttacker ) || !IsValid( pTarget ) )
+		// retail @0x332ba0: counts deaths of FRIENDS only -- pTarget valid, NOT the owner itself
+		// (IsThis excluded), same player (IsFriend). pAttacker is ignored. The Jan03 predecessor
+		// also counted the owner's own death.
+		if ( !IsValid( pTarget ) )
 			return;
-		if ( GetUnit()->GetPlayer() == pTarget->GetPlayer() )
-		{
-			++nKilled;
-			int nParam = atoi( GetDBAck()->sParam[0].c_str() );
-			if ( nKilled == nParam ) 
-				PlayAck();
-		}
+		if ( IsThis( pTarget ) || !IsFriend( pTarget ) )
+			return;
+		++nKilled;
+		int nParam = atoi( GetDBAck()->sParam[0].c_str() );
+		if ( nKilled == nParam )
+			PlayAck();
 	}
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -511,8 +564,10 @@ public:
 	CAckEnemyMissedTarget() : CAckBase() {};
 	CAckEnemyMissedTarget( CUnitServer *_pUnit, NDb::CDBAck *_pDBAck ): CAckBase( _pUnit, _pDBAck ) {};
 	virtual void OnTargetMissed( CUnitServer *_pUnit )
-	{ 
-		if ( GetUnit()->GetPlayer() != _pUnit->GetPlayer()  ) 
+	{
+		// retail @0x332ca0: CanSee + IsEnemy -- the owner must SEE the enemy who missed. The
+		// Jan03 predecessor compared raw players (and deref'd _pUnit with no null guard).
+		if ( CanSee( _pUnit ) && IsEnemy( _pUnit ) )
 			PlayAck();
 	}
 };
@@ -527,8 +582,13 @@ public:
 	CAckInterruptedEnemy() : CAckBase() {};
 	CAckInterruptedEnemy( CUnitServer *_pUnit, NDb::CDBAck *_pDBAck ): CAckBase( _pUnit, _pDBAck ) {};
 	virtual void OnInterrupt( CUnitServer *pWho )
-	{ 
-		if ( GetUnit() == pWho ) 
+	{
+		// retail @0x332d70: pWho valid, IsThis(pWho), AND the world says the owner is the ACTIVE
+		// unit (IWorld::IsUnitActive via the unit's world ptr; slot pinned between IsFirstTurn/
+		// IsInterrupt in the IWorld vftable). Jan03 barked on the bare owner match.
+		if ( !IsValid( pWho ) )
+			return;
+		if ( IsThis( pWho ) && GetWorld()->IsUnitActive( pWho ) )
 			PlayAck();
 	}
 };
@@ -642,6 +702,176 @@ public:
 	}
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail NWorld::CAckSuccessfulMeleeAttack (release-added; NO Jan03 counterpart -- factory case 74,
+// ctors @0x333180/@0x335520, OnEvent COMDAT-folded @0x331700). Event-bus ack bound to
+// CEventOnUnitSuccessfulMelee: the unit that just landed a melee blow barks. Modeled on CAckLongBurst.
+class CAckSuccessfulMeleeAttack: public CAckBase
+{
+	OBJECT_BASIC_METHODS( CAckSuccessfulMeleeAttack );
+	NGlobal::CEventRegister< CAckSuccessfulMeleeAttack, NWorld::CEventOnUnitSuccessfulMelee > registerEvent;
+	ZDATA
+	ZPARENT( CAckBase );
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,(CAckBase *)this); return 0; }
+public:
+	CAckSuccessfulMeleeAttack( CUnitServer *_pUnit = 0, NDb::CDBAck *_pDBAck = 0 ):
+		registerEvent( this, &CAckSuccessfulMeleeAttack::OnEvent ), CAckBase( _pUnit, _pDBAck ) {}
+	//
+	void OnEvent( const CEventOnUnitSuccessfulMelee &event )
+	{
+		if ( GetUnit() == event.pWho )		// retail folds this through CAckBase::IsThis @0x331700
+			PlayAck();
+	}
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail NWorld::CAckDiscoveringMineNearby (release-added; factory case 106, ctors @0x332060/@0x334440,
+// OnEvent folded @0x331700). Bound to CEventOnSpotMineOrTrap (fired by CUnitServer::UpdateVisible when
+// a unit newly spots a set mine/trap): that unit barks. Modeled on CAckLongBurst.
+class CAckDiscoveringMineNearby: public CAckBase
+{
+	OBJECT_BASIC_METHODS( CAckDiscoveringMineNearby );
+	NGlobal::CEventRegister< CAckDiscoveringMineNearby, NWorld::CEventOnSpotMineOrTrap > registerEvent;
+	ZDATA
+	ZPARENT( CAckBase );
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,(CAckBase *)this); return 0; }
+public:
+	CAckDiscoveringMineNearby( CUnitServer *_pUnit = 0, NDb::CDBAck *_pDBAck = 0 ):
+		registerEvent( this, &CAckDiscoveringMineNearby::OnEvent ), CAckBase( _pUnit, _pDBAck ) {}
+	//
+	void OnEvent( const CEventOnSpotMineOrTrap &event )
+	{
+		if ( GetUnit() == event.pWho )		// retail folds this through CAckBase::IsThis @0x331700
+			PlayAck();
+	}
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail NWorld::CAckNPCInteraction (release-added; factory case 113, ctors @0x333340/@0x335800,
+// OnEvent folded @0x331700). Bound to CEventOnNotHeroWantsToTalk (fired when a non-hero unit is told
+// to talk): that unit barks. Modeled on CAckLongBurst.
+class CAckNPCInteraction: public CAckBase
+{
+	OBJECT_BASIC_METHODS( CAckNPCInteraction );
+	NGlobal::CEventRegister< CAckNPCInteraction, NWorld::CEventOnNotHeroWantsToTalk > registerEvent;
+	ZDATA
+	ZPARENT( CAckBase );
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,(CAckBase *)this); return 0; }
+public:
+	CAckNPCInteraction( CUnitServer *_pUnit = 0, NDb::CDBAck *_pDBAck = 0 ):
+		registerEvent( this, &CAckNPCInteraction::OnEvent ), CAckBase( _pUnit, _pDBAck ) {}
+	//
+	void OnEvent( const CEventOnNotHeroWantsToTalk &event )
+	{
+		if ( GetUnit() == event.pWho )		// retail folds this through CAckBase::IsThis @0x331700
+			PlayAck();
+	}
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail NWorld::GetRating @0x330840 -- an item's store rating, or 0 for a null/dead item or one with
+// no store record (CRPGItem::pStoreItem->nRating, @0x4280a0).
+static int GetRating( NRPG::IInventoryItem *pItem )
+{
+	if ( !IsValid( pItem ) )
+		return 0;
+	NDb::CRPGItem *pDBItem = pItem->GetDBItem();
+	if ( !IsValid( pDBItem ) )
+		return 0;
+	NDb::CRPGStoreItem *pStore = pDBItem->pStoreItem;	// plain extraction (no ternary over CPtr -- UAF rule)
+	if ( !IsValid( pStore ) )
+		return 0;
+	return pStore->nRating;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail NWorld::GetRatingDifference @0x3308d0 -- how much better the freshly-given item (pNew) rates
+// than the one it replaced (pOld). Same-kind grenades and (matching) melee/firearms compare by store
+// rating; a couple of firearm-class transitions carry a fixed +/-99 verdict. Anything mismatched -> 0.
+// The SMG(3)<->rocket-launcher(7) special cases and the direction are taken from the retail decomp
+// (call convention: pNew in EAX, pOld on the stack).
+static int GetRatingDifference( NRPG::IInventoryItem *pNew, NRPG::IInventoryItem *pOld )
+{
+	if ( !IsValid( pNew ) || !IsValid( pOld ) )
+		return 0;
+	// both grenades -> plain rating difference
+	CDynamicCast<NRPG::IGrenadeItemInfo> pGrenNew( pNew ), pGrenOld( pOld );
+	if ( pGrenNew && pGrenOld )
+		return GetRating( pNew ) - GetRating( pOld );
+	// both melee weapons -> require the same bThrowing class, then rating difference
+	CDynamicCast<NRPG::IMeleeWeaponItem> pMeleeNew( pNew ), pMeleeOld( pOld );
+	if ( pMeleeNew && pMeleeOld )
+	{
+		if ( pMeleeNew->GetDBMeleeWeapon()->bThrowing == pMeleeOld->GetDBMeleeWeapon()->bThrowing )
+			return GetRating( pNew ) - GetRating( pOld );
+		return 0;
+	}
+	// both firearms -> require the same bBazookaLogic; bazooka logic compares by rating, otherwise the
+	// anim-weapon-type must match (rating diff) except the SMG<->rocket-launcher swaps (+/-99).
+	CDynamicCast<NRPG::IWeaponItemInfo> pWpnNew( pNew ), pWpnOld( pOld );
+	if ( pWpnNew && pWpnOld )
+	{
+		NDb::CRPGWeapon *pDBNew = pWpnNew->GetDBWeapon();
+		NDb::CRPGWeapon *pDBOld = pWpnOld->GetDBWeapon();
+		if ( pDBNew->bBazookaLogic != pDBOld->bBazookaLogic )
+			return 0;
+		if ( !pDBNew->bBazookaLogic )
+		{
+			NDb::EWeaponType eNew = pDBNew->pAnimWeaponType->type;
+			NDb::EWeaponType eOld = pDBOld->pAnimWeaponType->type;
+			if ( eNew != eOld )
+			{
+				if ( eOld == NDb::WT_SUB_MACHINE_GUN && eNew == NDb::WT_RLAUNCHER )
+					return 99;
+				if ( eOld != NDb::WT_RLAUNCHER )
+					return 0;
+				if ( eNew != NDb::WT_SUB_MACHINE_GUN )
+					return 0;
+				return -99;
+			}
+		}
+		return GetRating( pNew ) - GetRating( pOld );
+	}
+	return 0;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail NWorld::CAckGoodItemGiven (release-added; factory case 107, ctors @0x333420/@0x335970,
+// OnEvent @0x331940). Bound to CEventOnItemGiven: the receiving unit barks when the freshly-equipped
+// item out-ranks the one it replaced by more than one step. Modeled on CAckLongBurst.
+class CAckGoodItemGiven: public CAckBase
+{
+	OBJECT_BASIC_METHODS( CAckGoodItemGiven );
+	NGlobal::CEventRegister< CAckGoodItemGiven, NWorld::CEventOnItemGiven > registerEvent;
+	ZDATA
+	ZPARENT( CAckBase );
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,(CAckBase *)this); return 0; }
+public:
+	CAckGoodItemGiven( CUnitServer *_pUnit = 0, NDb::CDBAck *_pDBAck = 0 ):
+		registerEvent( this, &CAckGoodItemGiven::OnEvent ), CAckBase( _pUnit, _pDBAck ) {}
+	//
+	void OnEvent( const CEventOnItemGiven &event )
+	{
+		if ( GetUnit() == event.pUnit && GetRatingDifference( event.pNewItem, event.pOldItem ) > 1 )
+			PlayAck();
+	}
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail NWorld::CAckBadItemGiven (release-added; factory case 108, ctors @0x333500/@0x335ae0,
+// OnEvent @0x331980). Mirror of CAckGoodItemGiven: barks when the freshly-equipped item rates more
+// than one step BELOW the one it replaced.
+class CAckBadItemGiven: public CAckBase
+{
+	OBJECT_BASIC_METHODS( CAckBadItemGiven );
+	NGlobal::CEventRegister< CAckBadItemGiven, NWorld::CEventOnItemGiven > registerEvent;
+	ZDATA
+	ZPARENT( CAckBase );
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,(CAckBase *)this); return 0; }
+public:
+	CAckBadItemGiven( CUnitServer *_pUnit = 0, NDb::CDBAck *_pDBAck = 0 ):
+		registerEvent( this, &CAckBadItemGiven::OnEvent ), CAckBase( _pUnit, _pDBAck ) {}
+	//
+	void OnEvent( const CEventOnItemGiven &event )
+	{
+		if ( GetUnit() == event.pUnit && GetRatingDifference( event.pNewItem, event.pOldItem ) < -1 )
+			PlayAck();
+	}
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
 #define DEFINE_UNITSERVER_ACK( AckName ) class CAck##AckName: public CAckBase                 \
 {                                                                                             \
 	OBJECT_BASIC_METHODS(CAck##AckName);	                                                      \
@@ -668,11 +898,21 @@ DEFINE_UNITSERVER_ACK( TargetMissed );
 DEFINE_UNITSERVER_ACK( UnitDied );
 DEFINE_UNITSERVER_ACK( SuffersHardDamage );
 DEFINE_UNITSERVER_ACK( SkillIncreased );
+// retail NWorld::CAckNoPlaceInInventory (release-added; factory case 104, ctors @0x333c40/@0x336150).
+// A bare CAckBase leaf: the unit barks when its inventory has no room for an offered item. Broadcast
+// through CGlobalAck::OnNoPlaceInInventory @0x338c30 (a plain vAck fan-out, see wAckBase.cpp).
+DEFINE_UNITSERVER_ACK( NoPlaceInInventory );
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // Condition ID-s
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 const int N_ENEMY_BECOMES_VISIBLE = 68;
 const int N_ENEMY_BECOMES_VISIBLE_IN_REALTIME = 111;
+const int N_SUCCESSFUL_MELEE_ATTACK = 74;	// retail CreateAck case -> CAckSuccessfulMeleeAttack
+const int N_NO_PLACE_IN_INVENTORY = 104;	// retail CreateAck case -> CAckNoPlaceInInventory
+const int N_DISCOVERING_MINE_NEARBY = 106;	// retail CreateAck case -> CAckDiscoveringMineNearby
+const int N_GOOD_ITEM_GIVEN = 107;			// retail CreateAck case -> CAckGoodItemGiven
+const int N_BAD_ITEM_GIVEN = 108;			// retail CreateAck case -> CAckBadItemGiven
+const int N_NPC_INTERACTION = 113;			// retail CreateAck case -> CAckNPCInteraction
 const int N_WEAK_ENEMY_BECOMES_VISIBLE = 69;
 const int N_STRONG_ENEMY_BECOMES_VISIBLE = 70;
 const int N_CERTAIN_TYPE_ENEMY_BECOMES_VISIBLE = 71;
@@ -838,6 +1078,24 @@ CAckBase *CreateAck( CUnitServer *_pUnit, NDb::CDBAck *_pDBAck )
 		case N_N_PERCENT_OF_GROUP_IS_KILLED:
 			pRes = new CAckNPercentOfGroupIsKilled( _pUnit, _pDBAck );
 			break;
+		case N_SUCCESSFUL_MELEE_ATTACK:
+			pRes = new CAckSuccessfulMeleeAttack( _pUnit, _pDBAck );
+			break;
+		case N_DISCOVERING_MINE_NEARBY:
+			pRes = new CAckDiscoveringMineNearby( _pUnit, _pDBAck );
+			break;
+		case N_NO_PLACE_IN_INVENTORY:
+			pRes = new CAckNoPlaceInInventory( _pUnit, _pDBAck );
+			break;
+		case N_GOOD_ITEM_GIVEN:
+			pRes = new CAckGoodItemGiven( _pUnit, _pDBAck );
+			break;
+		case N_BAD_ITEM_GIVEN:
+			pRes = new CAckBadItemGiven( _pUnit, _pDBAck );
+			break;
+		case N_NPC_INTERACTION:
+			pRes = new CAckNPCInteraction( _pUnit, _pDBAck );
+			break;
 	}
 	return pRes;
 }
@@ -886,3 +1144,10 @@ REGISTER_SAVELOAD_CLASS( 0x52162102, CAckCannotFinishHeal );
 REGISTER_SAVELOAD_CLASS( 0x52162050, CAckEnemyBecomesVisible );
 REGISTER_SAVELOAD_CLASS( 0x52122180, CAckLongBurst );
 REGISTER_SAVELOAD_CLASS( 0x52122181, CAckUnhide );
+// retail classreg ids (release-added ack family)
+REGISTER_SAVELOAD_CLASS( 0x51953112, CAckSuccessfulMeleeAttack );
+REGISTER_SAVELOAD_CLASS( 0x51953113, CAckDiscoveringMineNearby );
+REGISTER_SAVELOAD_CLASS( 0x230753C0, CAckNoPlaceInInventory );
+REGISTER_SAVELOAD_CLASS( 0x23074C00, CAckGoodItemGiven );
+REGISTER_SAVELOAD_CLASS( 0x23074C01, CAckBadItemGiven );
+REGISTER_SAVELOAD_CLASS( 0x50133130, CAckNPCInteraction );

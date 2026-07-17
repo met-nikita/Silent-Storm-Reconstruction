@@ -24,6 +24,11 @@ namespace NAI
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 SAIState::SAIState(): nCurrentAction( 0 ), nTurnStartAllyHP( 0 ), nTurnStartEnemyHP( 0 )
 {
+	// retail rebuilds the rosters in Synchronize; dev's Synchronize derefs pAlly/pEnemy directly and the
+	// deserialize path uses THIS default ctor (retail no longer serializes them), so create them here too
+	// (mirrors the param ctor) -- otherwise a loaded save null-derefs pAlly at aistate.cpp:71.
+	pAlly = CreateAIPlayer();
+	pEnemy = CreateAIPlayer();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 SAIState::SAIState( NWorld::CWorld *_pWorld, CAICommander *_pAICommander ):
@@ -44,9 +49,14 @@ SAIState::~SAIState()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 int SAIState::operator&( CStructureSaver &f )
 {
-	f.Add( 2, &pWorld ); f.Add( 3, &pAlly ); f.Add( 4, &pEnemy ); f.Add( 5, &pCurrentUnit );
-	f.Add( 6, &pCurrentEnemy ); f.Add( 7, &nCurrentAction ); f.Add( 8, &nTurnStartAllyHP );
-	f.Add( 9, &nTurnStartEnemyHP ); f.Add( 10, &pAICommander ); f.Add( 11, &enemyGroups );
+	// retail SAIState::operator& @0x38c30 serializes ONLY {2 pWorld, 3 pPlayer, 4 enemyGroups}. The ally/
+	// enemy rosters (pAlly/pEnemy) and per-turn action state are RUNTIME -- Synchronize rebuilds the rosters
+	// from the commander's units every segment. dev's old leg serialized 8 extra fields misaligned against
+	// retail's 3, so loading a retail save read retail's pPlayer ref into dev's CObj<IAIPlayer> pAlly
+	// (dynamic_cast -> null) -> Synchronize null-derefs pAlly (aistate.cpp:71). Match retail: pWorld@2,
+	// pPlayer@3, enemyGroups@4. pAlly/pEnemy are created in the ctor now; the pAICommander/pWorld
+	// back-refs are runtime (reconnected as the owning commander runs).
+	f.Add( 2, &pWorld ); f.Add( 3, &pPlayer ); f.Add( 4, &enemyGroups );
 	return 0;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////

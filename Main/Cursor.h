@@ -4,6 +4,7 @@
 #pragma once
 #endif // _MSC_VER > 1000
 #include "../DBFormat/DataInterface.h"
+#include "../DBFormat/DataMisc.h"		// NDb::CUICursor -- retail SCursorInfo carries the UICursors record
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 namespace NInput
 {
@@ -15,15 +16,17 @@ namespace NUI
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // Cursor
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail NUI::SCursorInfo operator& @0xd4570: 2=wsText (string chunk), 3=pCursor (CDBPtr<NDb::CUICursor>).
+// The cursor is the UICursors DB RECORD (texture + hotspot center), not a bare UITexture; the dev
+// vCenter member did not exist in retail and is dropped (the center lives in the CUICursor record).
 struct SCursorInfo
 {
 	ZDATA
-	CVec2 vCenter;
 	wstring wsText;
-	CDBPtr<NDb::CUITexture> pTexture;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&vCenter); f.Add(3,&wsText); f.Add(4,&pTexture); return 0; }
+	CDBPtr<NDb::CUICursor> pCursor;
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&wsText); f.Add(3,&pCursor); return 0; }
 
-	SCursorInfo( NDb::CUITexture *_pTexture = 0, const wstring &_wsText = L"", const CVec2 &_vCenter = CVec2( 0, 0 ) ): vCenter( _vCenter ), wsText( _wsText ), pTexture( _pTexture ) {}
+	SCursorInfo( NDb::CUICursor *_pCursor = 0, const wstring &_wsText = L"" ): wsText( _wsText ), pCursor( _pCursor ) {}
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class ICursor: public CObjectBase

@@ -196,9 +196,10 @@ public:
 // advances to places inside the guarded area. ctor @0x0044e430, MakeDecision @0x0044ed00 (a DIFFERENT rule
 // order from attack - snipe-above-HG, Shoot>Rocket>Grenade, heal IS ruled). Member layout from the release
 // PDB (size 240, on CAICombatLogic @0..135): the 2 place sources, then the actions with pArea interleaved
-// @192 (between pShootFromHG and the snipe block). operator& serializes only base + pArea (tag 3); the 18
-// actions serialize via the base's pChoosePlace.actions vector (so the repertoire IS part of the save format
-// - a converging save-format change vs the sess24 8-action predecessor, session 25).
+// @192 (between pShootFromHG and the snipe block). operator& @0x50c70 serializes base(2) + the members in
+// declaration order (tags 3..23, pArea at 17 as a WEAK CPtr) -- retail-exact since the serialization-
+// convergence Wave 2; the CObj members are the same objects as in the base's pChoosePlace.actions, so the
+// framework writes them by ref-id.
 class CAIGuardLogic: public CAICombatLogic
 {
 	OBJECT_BASIC_METHODS( CAIGuardLogic );
@@ -217,7 +218,7 @@ class CAIGuardLogic: public CAICombatLogic
 	CObj<CAIDockWithHGAction>       pDockWithHG;         // @180 -> currentPlaceSource
 	CObj<CAIUndockFromHGAction>     pUndockFromHG;       // @184 -> currentPlaceSource
 	CObj<CAIShootFromHGAction>      pShootFromHG;        // @188 -> currentPlaceSource
-	CObj<CUnitArea>                 pArea;               // @192  the guarded area
+	CPtr<CUnitArea>                 pArea;               // @192  the guarded area (WEAK -- the guard REACTION owns it via CObj; retail operator& @0x50c70 tag 17 is CPtr)
 	CObj<CAIBeginSnipeAction>       pBeginSnipe;         // @196 -> currentPlaceSource
 	CObj<CAICollectSnipeAPAction>   pCollectSnipeAP;     // @200 -> currentPlaceSource
 	CObj<CAISnipeShotAction>        pSnipeShot;          // @204 -> currentPlaceSource

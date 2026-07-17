@@ -28,6 +28,7 @@ enum EChapterMapMode
 class CUnit;
 class IInventoryItem;
 class CGlobalDiplomacy;
+class CStore;   // per-player vendor stock model (RPGStore.h); the CObj member works over the fwd-decl via the saveload class registration
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 struct SStoreItem
 {
@@ -63,12 +64,12 @@ struct SUnitDeployData
 struct SDeployData
 {
 	ZDATA
-	bool bPassage;
-	int nPassageZoneID;
-	unordered_map< CPtr<NRPG::CUnit>, SUnitDeployData, SPtrHash > unitsDeployData;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&bPassage); f.Add(3,&nPassageZoneID); f.Add(4,&unitsDeployData); return 0; }
+	int nPassageZoneID;   // retail +0x00, save tag 2 (retail operator& @0x29cf50 writes the int FIRST; byte-walk x9 slots: 2:int 3:bool 4:hashmap)
+	bool bPassage;        // retail +0x04, save tag 3
+	unordered_map< CPtr<NRPG::CUnit>, SUnitDeployData, SPtrHash > unitsDeployData;   // save tag 4
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&nPassageZoneID); f.Add(3,&bPassage); f.Add(4,&unitsDeployData); return 0; }
 	//
-	SDeployData(): bPassage( false ), nPassageZoneID( 0 ) {}
+	SDeployData(): nPassageZoneID( 0 ), bPassage( false ) {}
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CGlobalPlayer
@@ -81,10 +82,19 @@ public:
 	CDBPtr<NDb::CSide> pSide;
 	vector< CObj<CUnit> > mercs;
 	vector< CObj<CUnit> > totalMercs;
+	// zoneMercs (retail +0x48, save tag 7): units the player fields only inside the current zone
+	// (retail CGlobalPlayer::GetAliveUnits @0x29a8c0 walks it between mercs and the carried corpses).
+	vector< CObj<CUnit> > zoneMercs;
 	SDeployData deployData;
-	list<SStoreItem> storeItemsList;
+	CObj<CStore> pStore;			// retail +0x28, save tag 3: the per-player vendor stock model (RPGStore.h)
+	bool bAIPlayer = false;			// retail +0x54, save tag 8: AI-controlled player flag (retail ctor @0x29a7c0 clears it)
 	int nMoney = 0;		// the player's cash (release: read by the Player*Money script bindings)
-	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&pSide); f.Add(3,&mercs); f.Add(4,&totalMercs); f.Add(5,&deployData); f.Add(6,&storeItemsList); f.Add(7,&nMoney); return 0; }
+	// (the Jan03 transient storeItemsList is GONE -- the store stock lives on pStore->itemsSet,
+	// serialized at tag 3 like retail; wMain.cpp's store flow operates on it directly.)
+	// Retail tag table 1:1 (CGlobalPlayer::operator& @0x29cba0): 2=deployData, 3=pStore, 4=pSide,
+	// 5=mercs, 6=totalMercs, 7=zoneMercs, 8=bAIPlayer, 9=nMoney.
+	// (Previous dev table was 2=pSide,3=mercs,4=totalMercs,5=deployData,6=storeItemsList,7=nMoney.)
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&deployData); f.Add(3,&pStore); f.Add(4,&pSide); f.Add(5,&mercs); f.Add(6,&totalMercs); f.Add(7,&zoneMercs); f.Add(8,&bAIPlayer); f.Add(9,&nMoney); return 0; }
 	//
 private:
 	int GetPlayerSkill( NDb::ESkillType skill, NRPG::CUnit **ppUnit );
@@ -137,7 +147,7 @@ public:
 	CDBPtr<NDb::CDBDifficulty> pDifficulty;
 	int nCurrentChapterDifficulty;
 	// release save-format tags 14-22: campaign global vars / hint sequencing / hot-seat state.
-	// Dead in this predecessor (no hint-sequence or hot-seat machinery); save-format members only.
+	// hintsSet is read by the journal's SHOW_HINTS filter (iCluesMenu.cpp, retail @0x1bb930).
 	unordered_map< string, string > globalVars;
 	int nHintSequenceID = 0;
 	vector< CDBPtr<NDb::CUIHint> > hintsSet;

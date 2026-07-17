@@ -35,6 +35,7 @@ public:
 	virtual void OnEnemyBecomesVisible( CUnitServer *pWatcher, 
 		CUnitServer *pTarget, bool bRealTime ) {}
 	virtual void OnLastPieceOfAmmo( CUnitServer *pUnit ) {} // out of ammo
+	virtual void OnNoPlaceInInventory( CUnitServer *pUnit ) {} // no room in inventory for an offered item
 	virtual void OnWeaponJammed( CUnitServer *pUnit ) {} // weapon jammed
 	virtual void OnOrderConfirmation( CUnitServer *pUnit ) {} // order confirmation
 	virtual void OnImpossibleToPerformAction( CUnitServer *pUnit ) {} // cannot perform command
@@ -104,6 +105,7 @@ public:
 	virtual void OnEnemyBecomesVisible( CUnitServer *pWatcher, 
 		CUnitServer *pTarget, bool bRealTime );
 	virtual void OnLastPieceOfAmmo( CUnitServer *pUnit );
+	virtual void OnNoPlaceInInventory( CUnitServer *pUnit );
 	virtual void OnWeaponJammed( CUnitServer *pUnit );
 	virtual void OnOrderConfirmation( CUnitServer *pUnit );
 	virtual void OnImpossibleToPerformAction( CUnitServer *pUnit );
@@ -143,6 +145,11 @@ public:
 	CAckBase() : pUnit(0), pDBAck(0) { }
 	CAckBase( CUnitServer *_pUnit, NDb::CDBAck *_pDBAck );
 	CUnitServer *GetUnit();
+	// retail-added unit predicates (absent in Jan03; every concrete CAck* gate goes through them)
+	bool IsThis( CUnitServer *pWho );		// retail @0x338ec0
+	bool IsFriend( CUnitServer *pWho );		// retail @0x338ef0
+	bool IsEnemy( CUnitServer *pWho );		// retail @0x338f80
+	bool CanSee( CUnitServer *pWho );		// retail @0x338fe0
 	// IAck
 	virtual NDb::CDBAck *GetDBAck();
 	virtual CWorld *GetWorld();

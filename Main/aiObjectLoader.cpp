@@ -30,6 +30,7 @@ struct SStoredPiece
 {
 	vector<STriangle> tris;
 	vector<CVec3> verts;
+	vector<NGScene::SLoadVertexWeight> weights;	// release SStoredPiece (PDB, 64 bytes) member 3: per-piece skin weights
 	float fVolume;
 	vector<SJunction> juncs;
 	vector<CPtr<CPrecalcSpheres> > precalc;	// was vector<CPtr<CBSPTree> > trees (chunk 12 -> 13)
@@ -38,6 +39,7 @@ struct SStoredPiece
 	{
 		f.Add( 1, &verts );
 		f.Add( 2, &tris );
+		f.Add( 3, &weights );	// release SStoredPiece::operator& @00483dd0 chunk 3 (read there; Recalc @00481820 never consumes it)
 		f.Add( 10, &fVolume );
 		f.Add( 11, &juncs );
 		f.Add( 13, &precalc );	// release SStoredPiece::operator& @00483dd0 chunk '\r'

@@ -9,10 +9,12 @@
 // This adds the RETAIL class shapes (NGame::CShowObjectivesInterface / NGame::CICShowObjectives /
 // NUI::CShowObjectivesUI / NUI::CClueLine / NUI::CTaskLine + the NScenario value model) alongside the
 // existing working-but-divergent "LUA convergence" reconstruction in iObjectivesMenu.cpp
-// (CObjectivesUI/CObjectivesInterface/CICObjectives). Nothing constructs these new classes yet: the lua
-// ShowObjectives() command and iMission.cpp still build the old CICObjectives(globalGame), so this is
-// behaviour-neutral -- it carries the 18 release @rva markers WITHOUT performing the same-tag rewrite or
-// rewiring any live call path. (Per-row textures / template container ids that were lost in the decode
+// (CObjectivesUI/CObjectivesInterface/CICObjectives). Nothing constructs these new classes from the live
+// UI paths yet: the lua ShowObjectives() command and iMission.cpp still build the old
+// CICObjectives(globalGame), so this is behaviour-neutral -- it carries the 18 release @rva markers
+// WITHOUT performing the same-tag rewrite or rewiring any live call path. (Serialization-convergence W3
+// added the four retail serializers + saveload ids 0xB3225130/31/32/3A, so retail savegames carrying the
+// modal now reconstruct these classes.) (Per-row textures / template container ids that were lost in the decode
 // are documented at each call site in the .cpp; row sub-templates the dev game.db lacks are IsValid-
 // guarded, so this is build-GREEN, not pixel-parity.)
 //

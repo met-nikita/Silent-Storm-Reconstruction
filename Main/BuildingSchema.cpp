@@ -15,7 +15,7 @@ void CBuildingSchema::Reserve( int nJuncs, int nRods )
 	rods.reserve( nRods );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// в точке х,у на земле одновременно может находиться только один узел
+// пїЅ пїЅпїЅпїЅпїЅпїЅ пїЅ,пїЅ пїЅпїЅ пїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅ
 void CBuildingSchema::CheckGroundHash( CJunction *pJ )
 {
 	ASSERT( pJ );
@@ -40,18 +40,18 @@ void CBuildingSchema::CheckGroundHash( CJunction *pJ )
 	ref = pJ->GetID();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CRod* CBuildingSchema::AddRod( NDb::CRPGArmor *pArmor, SRodEdge ptLeft, SRodEdge ptRight, bool bCellarWall, bool bGround )
+CRod* CBuildingSchema::AddRod( NDb::CRPGArmor *pArmor, SRodEdge ptLeft, SRodEdge ptRight, bool bGround )
 {
 #ifdef _DEBUG
 	if ( ptLeft == ptRight || (ptLeft.pt.x != ptRight.pt.x && ptRight.pt.y != ptLeft.pt.y && ptLeft.pt.z != ptRight.pt.z) 
 		|| fabs2( ptLeft.pt - ptRight.pt ) > 1 )
 	{
-		ASSERT( 0 ); // только горизонтальные или вертикальные стержни
+		ASSERT( 0 ); // пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ
 		return 0;
 	}
 #endif
 	//
-	if ( ptRight.pt.z < ptLeft.pt.z ) // упорядочивание краев стержня (левый край ниже правого и т.д)
+	if ( ptRight.pt.z < ptLeft.pt.z ) // пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ (пїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅ пїЅ.пїЅ)
 		swap( ptLeft, ptRight );
 	else if ( ptRight.pt.y < ptLeft.pt.y )
 		swap( ptLeft, ptRight );
@@ -82,7 +82,7 @@ CRod* CBuildingSchema::AddRod( NDb::CRPGArmor *pArmor, SRodEdge ptLeft, SRodEdge
 		if ( IsRodValid( pLJ->GetRod( dir ) ) )
 		{
 			CRod *pR = GetRod( pLJ->GetRod( dir ) );
-			// такой стержень уже есть
+			// пїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅ пїЅпїЅпїЅпїЅ
 			//pLJ->AddWeight( ptLeft.fWeight );
 			//pRJ->AddWeight( ptRight.fWeight );
 			if ( ptLeft.bFilled && !pLJ->IsFilled() )
@@ -97,16 +97,16 @@ CRod* CBuildingSchema::AddRod( NDb::CRPGArmor *pArmor, SRodEdge ptLeft, SRodEdge
 	//
 	if ( !IsJunctionValid( nLJ ) )
 	{
-		nLJ = juncs.size(); // записываем в хэш индекс узла
-		CJunction &lj = *juncs.insert( juncs.end(), CJunction( this, nLJ, ptLeft, 0, bGround, bCellarWall ) );
+		nLJ = juncs.size(); // remember the new junction in the hash
+		CJunction &lj = *juncs.insert( juncs.end(), CJunction( this, nLJ, ptLeft, 0, bGround, ptLeft.bCellar ) );   // retail @0xc9b60: e1.bCellar
 		CheckGroundHash( &lj );
 		lj.AddWeight( ptLeft.fWeight );
 		ASSERT( lj.GetID() < juncs.size() );
 	}
 	if ( !IsJunctionValid( nRJ ) )
 	{
-		nRJ = juncs.size(); // записываем в хэш индекс узла
-		CJunction &rj = *juncs.insert( juncs.end(), CJunction( this, nRJ, ptRight, 0, bGround && ptLeft.pt.z == ptRight.pt.z, bCellarWall ) );
+		nRJ = juncs.size(); // remember the new junction in the hash
+		CJunction &rj = *juncs.insert( juncs.end(), CJunction( this, nRJ, ptRight, 0, bGround && ptLeft.pt.z == ptRight.pt.z, ptRight.bCellar ) );   // retail: e2.bCellar
 		CheckGroundHash( &rj );
 		rj.AddWeight( ptRight.fWeight );
 		ASSERT( rj.GetID() < juncs.size() );
@@ -129,7 +129,8 @@ void CBuildingSchema::AddNode( NDb::CRPGArmor *pArmor, const CVec3 &pt, bool bCe
 	fWeight *= 0.1f;
 	for ( int i = 0; i < points.size(); ++i )
 	{
-		CRod *p = AddRod( pArmor, SRodEdge( pt, bFilled, fWeight ), SRodEdge( points[i].pt, false, 0 ), bCellarWall, points[i].bGround );
+		// retail @0xc9f80: the node end carries the caller's cellar bit, the far end its OWN per-SJunction bit
+		CRod *p = AddRod( pArmor, SRodEdge( pt, bFilled, fWeight, bCellarWall ), SRodEdge( points[i].pt, false, 0, points[i].bCellar ), points[i].bGround );
 		if ( p )
 		{
 			const CIVec3 ptCenter(pt.x, pt.y, pt.z);
@@ -162,14 +163,14 @@ void CBuildingSchema::Destroy(	CBuildingGrid *pGrid, const SPoint3 &pt )
 	pJ->Destroy();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-bool CBuildingSchema::Destroy( CBuildingGrid *pGrid, CJunction *pJ, int nDepth )
+bool CBuildingSchema::Destroy( CBuildingGrid *pGrid, CJunction *pJ, int nDepth, bool bEffects )
 {
 	if ( !pJ || nDepth > 5 )
 		return false;
 	if ( pJ->IsGround() || pJ->IsCellarWall() )
 		return false;
 	SPoint3 pt( pJ->ptJ.x, pJ->ptJ.y, pJ->ptJ.z );
-	bool bRet1 = pGrid->DamageSpot( pt );
+	bool bRet1 = pGrid->DamageSpot( pt, 255, bEffects );   // retail @0xc8f40: DamageSpot(pt, 0xff=DESTROY_LIM, bEffects)
 	if ( pJ->IsFilled() )
 	{
 		if ( pGrid->IsDestroyed( pt ) )
@@ -182,7 +183,7 @@ bool CBuildingSchema::Destroy( CBuildingGrid *pGrid, CJunction *pJ, int nDepth )
 	if ( pNearestJF )
 	{
 		SPoint3 ptNear( pNearestJF->ptJ.x, pNearestJF->ptJ.y, pNearestJF->ptJ.z );
-		bool bRet2 = pGrid->DamageSpot( ptNear );
+		bool bRet2 = pGrid->DamageSpot( ptNear, 255, bEffects );
 		if ( pNearestJF->IsFilled() )
 		{
 			if ( pGrid->IsDestroyed( ptNear ) )
@@ -210,7 +211,7 @@ bool CBuildingSchema::Destroy( CBuildingGrid *pGrid, CJunction *pJ, int nDepth )
 			return true;
 		}
 	}
-	// не удалось разрушить ни один узел 
+	// пїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅ пїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅ 
 	for ( int i = XP; i < NDIRECTIONS; ++i )
 	{
 		CJunction *pNJ = pJ->GetNeighbour( EDirection(i) );
@@ -240,15 +241,18 @@ bool CBuildingSchema::Recalc( CBuildingGrid *pGrid )
 		CJunction &jun = *pJ;
 		if ( pJ->GetStability() == CJunction::FREE )
 		{
-			if ( Destroy( pGrid, &jun ) )
+			// retail Recalc @0xc9670: FREE-cluster removals are SILENT (bEffects=false)
+			if ( Destroy( pGrid, &jun, 0, false ) )
 				bModified = true;
 		}
 		else if ( pJ->GetStability() == CJunction::STABLE )
 		{
-			int nHP = sqrt( pGrid->GetHP( SPoint3( pJ->ptJ.x, pJ->ptJ.y, pJ->ptJ.z ) ) );
+			// retail: ROUND(SQRT(cellHP)) -- round-to-nearest fistp, not truncation
+			int nHP = Float2Int( sqrt( (float)pGrid->GetHP( SPoint3( pJ->ptJ.x, pJ->ptJ.y, pJ->ptJ.z ) ) ) );
 			if ( pJ->IsBroken( nHP ) )
 			{
-				if ( Destroy( pGrid, &jun ) )
+				// broken-STABLE junction: FX-worthy break (retail bEffects=true)
+				if ( Destroy( pGrid, &jun, 0, true ) )
 				{
 					bModified = true;
 					continue;
@@ -262,7 +266,8 @@ bool CBuildingSchema::Recalc( CBuildingGrid *pGrid )
 					if ( IsJunctionValid( nJID ) )
 					{
 						CJunction *pNJ = GetJunction( nJID );
-						if ( Destroy( pGrid, pNJ ) )
+						// broken link of a stable junction: FX-worthy (retail bEffects=true)
+						if ( Destroy( pGrid, pNJ, 0, true ) )
 						{
 							bModified = true;
 							pJ->DestroyRod( EDirection(i) );
@@ -320,7 +325,7 @@ void CBuildingSchema::ComputeStability()
 		}
 		CJunction *pI = GetJunction( sortedJuncs[i] );
 		const int nz = pI->ptJ.z;
-		// инициализируем состояние слоя по предыдущему слою
+		// пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅ пїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅ
 		for ( j = i; j < sortedJuncs.size(); ++j )
 		{
 			if ( !IsJunctionValid( sortedJuncs[j] ) )
@@ -332,7 +337,7 @@ void CBuildingSchema::ComputeStability()
 		}
 		bool bChanges = true;
 		int  nIterations = 0;
-		// пока при происходят изменения, продолжаем итерации
+		// пїЅпїЅпїЅпїЅ пїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ, пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ
 		while ( bChanges )
 		{
 			bChanges = false;
@@ -385,10 +390,10 @@ void CBuildingSchema::FindFree()
 {
 	for ( vector<CJunction>::iterator pJ = juncs.begin(); pJ != juncs.end(); ++pJ )
 	{
-		//ASSERT( pJ->GetStability() != CJunction::UNKNOWN ); // еще не расчитана стабильность узла
+		//ASSERT( pJ->GetStability() != CJunction::UNKNOWN ); // пїЅпїЅпїЅ пїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅ
 //		if ( !pJ->IsFilled() && !pJ->HasRightAngle() )
 //		{
-			// если узел не соответствует реальному строительному блоку и у него нет стержней под 90 град., то выкидываем его
+			// пїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅ пїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅ пїЅ пїЅ пїЅпїЅпїЅпїЅ пїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅ 90 пїЅпїЅпїЅпїЅ., пїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅ
 //			pJ->SetStability( CJunction::FREE );
 //			continue;
 //		}

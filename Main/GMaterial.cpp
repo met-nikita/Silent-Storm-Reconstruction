@@ -60,6 +60,8 @@ public:
 	void SetDiffuseTex( CPtrFuncBase<NGfx::CTexture> *_p ) { info.diffuse.type = SMaterialInfo::T_TEXTURE; pDiffuseTex = _p; }
 	void SetSpecularTex( CPtrFuncBase<NGfx::CTexture> *_p, float _fPower ) { info.specular.type = SMaterialInfo::T_TEXTURE; pSpecularTex = _p; info.fSpecPower =_fPower; }
 	void SetBump( CPtrFuncBase<NGfx::CTexture> *_p ) { pBump = _p; }
+	// release save-format tags 13/14: a second diffuse texture layer + its blend weight (@0x136270)
+	void SetDiffuse1Tex( CPtrFuncBase<NGfx::CTexture> *_pTex, CFuncBase<float> *_pBlend ) { pDiffuseTex1 = _pTex; pDiffuseTex1Blend = _pBlend; }
 	void SetDecal() { info.mt = SMaterialInfo::DECAL; bDoesCastShadow = false; }
 	void SetSelfIllum() { info.mt = SMaterialInfo::SELF_ILLUM; }
 	void SetAlphaTest( bool _b ) { info.bAlphaTest = _b; }
@@ -355,6 +357,15 @@ IMaterial* CreateMaterial(
 	pRes->SetReflectionInfo( pSky, pMirrorTexture, fDielMirror, fMetalMirror );
 	pRes->Check();
 	return pRes;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// @0x136270: attach a second diffuse layer (texture + blend weight) to a generic material. NOTE: the
+// render-op consumption of the diffuse1 layer is a separate leg (AddOperations is not touched here).
+void AddSecondDiffuse( IMaterial *pMaterial, CPtrFuncBase<NGfx::CTexture> *pTex, CFuncBase<float> *pBlend )
+{
+	CGenericMaterial *pGeneric = CDynamicCast<CGenericMaterial>( pMaterial );
+	if ( pGeneric )
+		pGeneric->SetDiffuse1Tex( pTex, pBlend );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 }

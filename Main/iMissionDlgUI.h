@@ -67,7 +67,7 @@ private:
 	CPtr<CImage> pBottomBackground;
 	////
 	string szDialogCode;
-	CObj<CMLText> pDialog;
+	CObj<CText> pDialog;
 	CObj<CHoverButton> pBack;
 	CObj<CHoverButton> pNext;
 	CObj<CHoverButton> pExit;

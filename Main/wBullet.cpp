@@ -14,7 +14,6 @@
 #include "wUnitServer.h"
 #include "RPGUnitMission.h"
 #include "wAckBase.h"
-#include "aiSignal.h"
 #include "wDecal.h"
 #include "..\Misc\EventsBase.h"   // NGlobal::ThrowEvent
 #include "eventUnit.h"            // NWorld::CEventOnBullet (AI bullet-perception event)
@@ -140,7 +139,6 @@ bool CBulletServer::Segment()
 			{
 				NDb::CSound *pS = NDb::GetSound( pArmor->pSoundShot );
 				pWorld->MakeSound( sCurrent.vPosition, pS );
-				pWorld->GetAISignalManager()->Add( NAI::CreateAISoundSignal( sCurrent.vPosition, pShooter, 3 ) );
 			}
 		}
 		CObjectBase *pCatcher = trailpointsSet[nTemp].pAttackTarget;
@@ -151,7 +149,7 @@ bool CBulletServer::Segment()
 		{
 			if ( IsValid( pCatcher ) )
 			{
-				pAttackCatcher->ProcessAttack( sCurrent.nUserID, &sCurrent.sAttack, sCurrent.pArmor );
+				pAttackCatcher->ProcessAttack( pWorld, sCurrent.nUserID, &sCurrent.sAttack, sCurrent.vDir, sCurrent.pArmor );
 		
 				if ( IsValid( pCatcher ) )
 				{
@@ -197,7 +195,6 @@ bool CBulletServer::Segment()
 			ray.ptDir = trailpointsSet[nLast].vPosition - ray.ptOrigin;
 			float fDistance = fabs( ray.ptDir );   // shooter -> last-trail-point length, BEFORE normalize
 			Normalize( &( ray.ptDir ) );
-			pWorld->GetAISignalManager()->Add( NAI::CreateAIShootSignal( pShooter, ray ) );
 			// retail CBulletServer::Segment @0x3463a0: tell every subscribed AI unit about the shot. OnBullet adds the
 			// shooter as a possibleEnemy when the ray passed within 2.5 of the unit -- being shot FROM CONCEALMENT now
 			// alerts the AI (the marquee reactive-perception fix; the suspect now survives Populate, see aiUnitState).

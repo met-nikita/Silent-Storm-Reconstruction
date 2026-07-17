@@ -104,6 +104,11 @@ public:
 	CClueLine( const SWindowInfo &sInfo, NGame::IMission *pMission,
 			   const NScenario::SGoalDescription &goal, bool bDoubleLine );	// @0x21eaf0
 
+	// retail @0x2208b0: 1=CWindow base, 2=pMission, 3=goal (retail raw-DataChunks the whole
+	// SGoalDescription value, 0x14 bytes, pointers and all -- the dev POD fallback path does the
+	// same over the dev struct), 4=pType, 5=pState, 6=pBackgroundImage, 7=pDescription, 8=bDoubleLine
+	int operator&( CStructureSaver &f ) { f.Add(1,(CWindow*)this); f.Add(2,&pMission); f.Add(3,&goal); f.Add(4,&pType); f.Add(5,&pState); f.Add(6,&pBackgroundImage); f.Add(7,&pDescription); f.Add(8,&bDoubleLine); return 0; }
+
 	bool ProcessMessage( const SEvent &sEvent );	// @0x21eb90
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -191,6 +196,10 @@ public:
 	CTaskLine( const SWindowInfo &sInfo, NGame::IMission *pMission,
 			   const NScenario::STaskDescription &task, int nNumber, bool bDoubleLine );	// @0x21ea80
 
+	// retail @0x220970: 1=CWindow base, 2=nNumber, 3=pMission, 4=task (raw 8-byte DataChunk over
+	// the STaskDescription value, as retail), 5=pState, 6=pBackgroundImage, 7=pDescription, 8=bDoubleLine
+	int operator&( CStructureSaver &f ) { f.Add(1,(CWindow*)this); f.Add(2,&nNumber); f.Add(3,&pMission); f.Add(4,&task); f.Add(5,&pState); f.Add(6,&pBackgroundImage); f.Add(7,&pDescription); f.Add(8,&bDoubleLine); return 0; }
+
 	bool ProcessMessage( const SEvent &sEvent );	// @0x21f020
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -271,6 +280,9 @@ public:
 	CShowObjectivesUI( const SWindowInfo &sInfo, NGame::IMission *pMission,
 					   NScenario::CScenarioZone *pZone );	// @0x21e550
 
+	// retail @0x220a30: 1=CWindow base, 2=pMission, 3=pZone, 4=pObjectives, 5=pCloseButton, 6=pObjectivesView
+	int operator&( CStructureSaver &f ) { f.Add(1,(CWindow*)this); f.Add(2,&pMission); f.Add(3,&pZone); f.Add(4,&pObjectives); f.Add(5,&pCloseButton); f.Add(6,&pObjectivesView); return 0; }
+
 	bool ProcessMessage( const SEvent &sEvent );	// @0x21f3c0
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -347,7 +359,8 @@ namespace NGame
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CShowObjectivesInterface -- the modal "show objectives" screen (IInterfaceBase). Sibling of the
 // divergent CObjectivesInterface; carries the per-zone payload (mission + zone + reusable screenshot)
-// and exits the modal on close (no nEventID). Transient -- not serialized.
+// and exits the modal on close (no nEventID). Serialized in retail (part of the interface stack):
+// operator& @0x2203d0, id 0xB322513A.
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CShowObjectivesInterface: public NMainLoop::IInterfaceBase
 {
@@ -364,6 +377,10 @@ private:
 public:
 	CShowObjectivesInterface(): bindClose( "cancel" ) {}		// @0x21e5b0
 	CShowObjectivesInterface( const CShowObjectivesInterface &src );	// @0x2201b0
+
+	// retail @0x2203d0: 2=pMission, 3=pZone, 4=pCursor, 5=pInterface, 6=pUI, 7=pScreenShot
+	// (no tag 1: the IInterfaceBase base is not serialized; bindClose is a POD bind, not saved)
+	int operator&( CStructureSaver &f ) { f.Add(2,&pMission); f.Add(3,&pZone); f.Add(4,&pCursor); f.Add(5,&pInterface); f.Add(6,&pUI); f.Add(7,&pScreenShot); return 0; }
 
 	void Initialize( IMission *pMission, NScenario::CScenarioZone *pZone, NUI::CScreenShot *pSrcShot );	// @0x21e640
 
@@ -490,3 +507,14 @@ void CICShowObjectives::Exec()
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 } // namespace NGame
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail saveload ids (serialization-convergence W3): the objectives modal + its rows are part of
+// the retail interface-stack save graph. (CICShowObjectives stays unregistered, as in retail.)
+using NUI::CShowObjectivesUI;
+using NUI::CClueLine;
+using NUI::CTaskLine;
+using NGame::CShowObjectivesInterface;
+REGISTER_SAVELOAD_CLASS( 0xB3225130, CShowObjectivesUI )
+REGISTER_SAVELOAD_CLASS( 0xB3225131, CClueLine )
+REGISTER_SAVELOAD_CLASS( 0xB3225132, CTaskLine )
+REGISTER_SAVELOAD_CLASS( 0xB322513A, CShowObjectivesInterface )

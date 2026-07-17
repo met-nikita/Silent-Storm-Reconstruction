@@ -43,7 +43,7 @@ public:
 	CPtr<CSound>  pSound;
 	CPtr<CTSound> pTemplate;
 	vector<SVariantFlags> flags;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CDBRecord*)this); f.Add(2,&pSound); f.Add(3,&pTemplate); f.Add(5,&flags); return 0; }
+	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CDBRecord*)this); f.Add(2,&pSound); f.Add(3,&pTemplate); f.Add(4,&flags); return 0; } // retail @0x41d460: flags@4 (dev's old tag 5 left them empty on retail-db reads)
 	//
 	virtual void Import();
 };

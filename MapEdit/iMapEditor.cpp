@@ -93,7 +93,7 @@ class CMapViewer: public CIMapEditor
 	RECT rLastWindowRect;
 	CRectLayout sLayout;
 	CPtr<NDb::CTexture> pFrameTex;
-	int nPhase; // фаза разрушений
+	int nPhase; // пїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ
 	float fFov;
 	CObj<NGScene::CLightGroup> pLG;
 	
@@ -1101,9 +1101,8 @@ void CMapViewer::SetRect( float fw, float fh )
 	pFrameRect->Set( r );
 
 	sLayout = CRectLayout();
-	sLayout.AddRect( r.left, r.top, CRectLayout::STextureCoord( CTRect<float>( 0, 0, pFrameTex->nWidth, pFrameTex->nHeight ) ) );
-	sLayout.scale.x = float(w) / pFrameTex->nWidth;
-	sLayout.scale.y = float(h) / pFrameTex->nHeight;
+	// quad size = texture dims * (w/texW, h/texH) = (w, h), baked (no layout scale on retail CRectLayout)
+	sLayout.AddRect( r.left, r.top, w, h, CRectLayout::STextureCoord( CTRect<float>( 0, 0, pFrameTex->nWidth, pFrameTex->nHeight ) ) );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CMapViewer::ComputeRPGItemRect()

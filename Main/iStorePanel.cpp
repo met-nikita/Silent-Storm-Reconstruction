@@ -52,7 +52,11 @@ private:
 	EFilter eFilter;
 	vector<SItem> itemsSet;
 	CArray2D<bool> placeMap;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(1,( CSlot *)this); f.Add(2,&pMission); f.Add(3,&sCellSize); f.Add(4,&eFilter); f.Add(5,&itemsSet); f.Add(6,&placeMap); return 0; }
+	// retail CStoreSlot::operator& = {1 CSlot, 2 pMission, 3 pScrollBase(CPtr<CScrollWindowBase>), 4 sCellSize,
+	// 5 eFilter}. dev had pScrollBase MISSING and serialized the runtime itemsSet/placeMap instead, so tag 3
+	// (sCellSize) read pScrollBase's ref etc. -- same class-of-bug as CSlot::hilights. Match retail; itemsSet
+	// and placeMap are transient runtime state (rebuilt), not on the wire.
+	ZEND int operator&( CStructureSaver &f ) { f.Add(1,( CSlot *)this); f.Add(2,&pMission); f.Add(3,&pScrollBase); f.Add(4,&sCellSize); f.Add(5,&eFilter); return 0; }
 
 protected:
 	void SetPlaceMapSize( int nWidth, int nHeight );
@@ -67,6 +71,8 @@ public:
 
 	EFilter GetFilter() const { return eFilter; }
 	void SetFilter( EFilter eFilter );
+
+	CObjectBase* GetTarget();      // retail @0x241220 (CActionDecorator pure virtual)
 
 	void Take( int nX, int nY );
 	void Place( int nX, int nY, const NWorld::SItem &sItem );
@@ -88,6 +94,12 @@ CStoreSlot::CStoreSlot( const SWindowInfo &sInfo, NGame::IMission *_pMission, CS
 void CStoreSlot::SetFilter( EFilter _eFilter )
 {
 	eFilter = _eFilter;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail @0x241220: the store grid is a STORAGE drop target (no owning unit).
+CObjectBase* CStoreSlot::GetTarget()
+{
+	return new CSlotInfo( CSlotInfo::STORAGE );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CStoreSlot::Take( int nX, int nY )
@@ -295,7 +307,7 @@ bool CStoreSlot::ProcessMessage( const SEvent &sEvent )
 	{
 	case EVENT_LBUTTONDOWN:
 		{
-			NWorld::IPlayer::SItemInfo sInfo;
+			NWorld::SItem sInfo;
 			if ( GetDragItem( &sInfo ) )
 			{
 				NWorld::SItem sSource( sInfo.pUnit, NWorld::SItem::HAND, sInfo.pItem );

@@ -33,6 +33,7 @@ private:
 	CPtr<CWindow> pPlayerTurn;
 	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CWindow*)this); f.Add(2,&pMission); f.Add(3,&bCanLeaveZone); f.Add(4,&eMode); f.Add(5,&pText); f.Add(6,&pFlash); f.Add(7,&pAllyTurn); f.Add(8,&pEnemyTurn); f.Add(9,&pPlayerTurn); f.Add(10,&pEndMission); f.Add(11,&pObjectives); return 0; }
 	bool bCanLeaveZone = false;
+	STime sUpdateTime = 0;	// last CanLeaveZone/tooltip refresh (retail +0x84; TRANSIENT like retail)
 	CPtr<CWindow> pAllyTurn;
 	CPtr<CPushButton> pObjectives;
 

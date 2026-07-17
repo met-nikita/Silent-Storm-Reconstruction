@@ -29,7 +29,8 @@ void CPassCalcerJob::DoJob()
 	ASSERT( IsValid( pMap ) && IsValid( pGroup ) );
 	if ( IsValid( pMap ) && IsValid( pGroup ) )
 	{
-		pGroup->RefreshSpot( where, pMap, 2 );
+		// retail @0x488880: forced -- the recolour job added alongside would otherwise gate it off
+		pGroup->RefreshSpot( where, pMap, 2, true );
 		DebugTrace( "Pass calcer job is done (%d left is this group)\n", pGroup->nPassCalcJobsLeft );
 	}
 	else
@@ -123,3 +124,7 @@ void AddNewPassCalcerJob( IAIJobManager *pWhere, IAIMap *pMap, CLayersGroup *pGr
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 }
+// retail saveload ids (serialization-convergence W1; s2_scratch docs/SERIALIZATION_CONVERGENCE.md)
+using namespace NAI;
+REGISTER_SAVELOAD_CLASS( 0x00513130, CPassCalcerJob )
+REGISTER_SAVELOAD_CLASS( 0x00513131, CRecountColourerJob )

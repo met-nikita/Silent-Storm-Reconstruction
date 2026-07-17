@@ -76,6 +76,12 @@ static EFogMode defaultFogMode = FOG_DYNAMIC;
 static EHSRMode defaultHSRMode = HSR_FAST;
 static ESceneRenderMode defaultRenderMode = SRM_BEST;
 #endif
+// retail bDefaultShadows @0x579e34 (gfx_shadows): the DRAW-time shadow master switch GetRenderPath
+// @0x1860f0 consults -- per-view renderMode alone never enables the shadow paths.
+static bool bDefaultShadows = true;
+// retail bShowParticles @0x979e28 (gfx_particles): MODULE global, not a view member -- retail
+// CGameView::Draw @0x586e40 reads it directly; the options checkbox drives it via VarBoolHandler.
+static bool bShowParticles = true;
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CRenderNode;
 class CGameView: public IGameView
@@ -93,7 +99,7 @@ class CGameView: public IGameView
 	int nCutFloor;
 	SFogParams fog;
 	EFogMode fogMode;
-	bool bShowParticles;
+	// (bShowParticles is the gfx_particles MODULE global above, as in retail -- not a member)
 	EHSRMode hsrMode;
 	CVec3 vCurrentFogColor;
 	CVec3 vDefaultClearColor;
@@ -157,13 +163,13 @@ public:
 	virtual CObjectBase* CreateTerrainRegion( CFuncBase<STerrainInfo> *pInfo, CVersioningBase *pUpdateRegion, const SRandomSeed &sSeed, const CTRect<int> &sRegion, const list<CObj<CPtrFuncBase<CTerrainPart> > > &partsList, CGrassTracker *pGrass, const SFullRoomInfo &_g = SFullRoomInfo() );
 	virtual CObjectBase* CreateTerrainWall( CPtrFuncBase<CTerrainPart> *pPart, NDb::CTexture *pTexture, const SFullRoomInfo &_g = SFullRoomInfo() );
 	virtual CObjectBase* CreateGrassSector( CGrassAnimator *pEffect, NDb::CTexture *pTexture, CFuncBase<SFBTransform> *pPlacement, const SBound &bound, const SRoomInfo &_g = SRoomInfo() );
-	virtual CSelectionNode* CreateSelection( const vector<CObjectBase*> &target, const CVec4 &vColor );
+	virtual CObjectBase* CreateSelection( const vector<CObjectBase*> &target, const CVec4 &vColor );
 	virtual CObjectBase* CreateParticles( NDb::CEffect *pEffect, STime stBeginTime, CFuncBase<STime> *pTime, CFuncBase<SFBTransform> *pPlacement, const SRoomInfo &_g, NAnimation::CSkeletonAnimator *pScAnim );
 	virtual CObjectBase* CreateParticles( NDb::CEffect *pEffect, STime stBeginTime, CFuncBase<STime> *pTime, const SFBTransform &place, const SRoomInfo &_g );
 	virtual CBuilding* CreateBuildingPart( int nPartID, const SMapBuilding &info, NBuilding::CBuildingInfoHold *pBI );
 	virtual CPolyline* CreatePolyline( const vector<CVec3> &points, const CVec3 &color );
 	virtual CObjectBase* CreateExplosion( CFuncBase<STime> *pTime, NDb::CEffect *pEffect, CFuncBase<CExplosionInfo> *pExplosion, const CVec3 &pos, const SRoomInfo &_g );
-	virtual CObjectBase* CreateLSHead( NDb::CComplexHead *pHead, CFuncBase<NLSHead::SHeadFrame> *pAnimation, CFuncBase<STime> *pTime, CFuncBase<SFBTransform> *pPlacement, bool bInterface, const SRandomSeed &headSeed, bool bHasCap, const SRoomInfo &_g, CPtrFuncBase<NGfx::CTexture> *pFaceTexture, const NLSHead::CHeadInfo *pHeadInfo );
+	virtual CObjectBase* CreateLSHead( NDb::CComplexHead *pHead, CPtrFuncBase<CObjectInfo> *pAnimator, CFuncBase<STime> *pTime, CFuncBase<SFBTransform> *pPlacement, bool bInterface, const SRandomSeed &headSeed, bool bHasCap, const SRoomInfo &_g, CPtrFuncBase<NGfx::CTexture> *pFaceTexture, const NLSHead::CHeadInfo *pHeadInfo );
 	virtual CObjectBase* Precache( NDb::CModel *pModel );
 	virtual void StartAlienStyle();
 	virtual void FinishAlienStyle();
@@ -185,6 +191,8 @@ public:
 	virtual CDecalTarget* CreateDecalTarget( const vector<CObjectBase*> &targets, const SDecalMappingInfo &_info );
 	virtual CObjectBase* AddDecal( NGScene::CDecalTarget *pTarget, NDb::CMaterial *pMaterial );
 	virtual void SetAmbient( NDb::CAmbientLightReal *pLight, ELightMode lm );
+	// retail IGameView vtbl+0xa0 (folded getter @0x776ea0): the light last passed to SetAmbient.
+	virtual NDb::CAmbientLightReal* GetPrevLight() { return pPrevLight; }
 	virtual ESceneRenderMode GetRenderMode() const;
 	virtual void SetRenderMode( ESceneRenderMode mode );
 	virtual EFogMode GetFogMode() const;
@@ -195,7 +203,13 @@ public:
 	EHSRMode GetHSRMode() const { return hsrMode; }
 	void SetTransparentMode( ETransparentMode m ) { trMode = m; }
 	ETransparentMode GetTransparentMode() const { return trMode; }
-	void SetForceFastest( bool b ) { bForceFastest = b; }
+	// retail @0x186960: forcing fastest also marks the scene no-shadow/no-CL via lighting options
+	void SetForceFastest( bool b ) { bForceFastest = b; pScene->SetLightingOptions( b ? 1 : 0 ); }
+	// retail IGameView vtbl tail @0x186990; interface mode = no shadows + no CL updates
+	void SetInterfaceMode( bool b ) { pScene->SetLightingOptions( b ? 3 : ( bForceFastest ? 1 : 0 ) ); }
+	// retail CreateNewFastInterfaceView @0x18b370 tail: bFastMode (SERIALIZED, tag 29) marks an
+	// interface view; Draw derives fog/HSR from it every frame (@0x186e40), so it round-trips.
+	void SetFastViewFlag() { bFastMode = true; }
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CObjectSet: public CObjectBase
@@ -353,7 +367,7 @@ CGameView::CGameView()
 	SetFogMode( defaultFogMode );
 	fFogBaseHeight = 0;
 	fog.SetDefaults();
-	bShowParticles = true;
+	// (bShowParticles: config-owned module global; the ctor must not reset it)
 	vCurrentFogColor = CVec3( 0.25f, 0.25f, 0.25f );
 	vDefaultClearColor = CVec3( 0.25f, 0.25f, 0.25f );
 	Zero( mPrevView );
@@ -473,11 +487,19 @@ CObjectBase* CGameView::CreateTerrainRegion( CFuncBase<STerrainInfo> *pInfo, CVe
 {
 	bHasTerrain = true;
 	CVec3 ptCenter( ( sRegion.x1 + sRegion.x2 ) * 0.5f * FP_GRID_STEP, ( sRegion.y1 + sRegion.y2 ) * 0.5f * FP_GRID_STEP,	10 );
-	CTerrainTexture *pTerrainBump = new CTerrainTexture( true, sSeed, sRegion, new CLODCalcer( ptCenter, pScene->GetCamera() ), pInfo, pUpdateRegion, pGrass );
-	CTerrainTexture *pTerrainTexture = new CTerrainTexture( false, sSeed, sRegion, new CLODCalcer( ptCenter, pScene->GetCamera() ), pInfo, pUpdateRegion, pGrass );
+	// @0x187d30: ONE shared LOD calcer drives both blend nodes; each blend owns its own 128+256 leaves.
+	CLODCalcer *pLOD = new CLODCalcer( ptCenter, pScene->GetCamera() );
+	CTerrainTextureBlend *pTerrainBump = new CTerrainTextureBlend( true, sSeed, sRegion, pLOD, pInfo, pUpdateRegion, pGrass );
+	CTerrainTextureBlend *pTerrainTexture = new CTerrainTextureBlend( false, sSeed, sRegion, pLOD, pInfo, pUpdateRegion, pGrass );
 
-	CPtr<IMaterial> pMaterial = CreateMaterial( CVec3(0,0,0), pTerrainTexture, pTerrainBump );
-	//pMaterial->light = CMaterial::SC_NORMAL; 
+	// n=0 fetches on each blend feed the diffuse (bump=false blend) and bump (bump=true blend) slots.
+	CPtr<IMaterial> pMaterial = CreateMaterial( CVec3(0,0,0),
+		new CTerrainTextureFetch( pTerrainTexture, 0 ), new CTerrainTextureFetch( pTerrainBump, 0 ) );
+	// Second diffuse layer: the n=1 fetch AND the blend-colour both hang off the DIFFUSE (bump=false)
+	// blend -- per the @0x187d30 decomp both take iVar3, the return of the bBump=false blend ctor.
+	AddSecondDiffuse( pMaterial, new CTerrainTextureFetch( pTerrainTexture, 1 ),
+		new CTerrainTextureBlendColor( pTerrainTexture ) );
+	//pMaterial->light = CMaterial::SC_NORMAL;
 
 	SFullGroupInfo fg = GetGroupInfo( _g );
 	CRenderNode *pRes = NewRenderNode();
@@ -624,7 +646,7 @@ CObjectBase* CGameView::CreateOccluder( NDb::CAIGeometry *pGeom, NDb::CSkeleton 
 	return pRes;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CSelectionNode* CGameView::CreateSelection( const vector<CObjectBase*> &target, const CVec4 &vColor )
+CObjectBase* CGameView::CreateSelection( const vector<CObjectBase*> &target, const CVec4 &vColor )
 {
 	return new CSelectionNode( pScene, target, vColor );
 }
@@ -789,7 +811,7 @@ CPolyline* CGameView::CreatePolyline( const vector<CVec3> &points, const CVec3 &
 	return pScene->CreatePolyline( new CMemGeometry( points ), cr );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CObjectBase* CGameView::CreateLSHead( NDb::CComplexHead *pCHead, CFuncBase<NLSHead::SHeadFrame> *pAnimation,
+CObjectBase* CGameView::CreateLSHead( NDb::CComplexHead *pCHead, CPtrFuncBase<CObjectInfo> *pAnimator,
 	CFuncBase<STime> *pTime, CFuncBase<SFBTransform> *pPlacement, bool bInterface, const SRandomSeed &headSeed, bool bHasCap, const SRoomInfo &_r, CPtrFuncBase<NGfx::CTexture> *pFaceTexture, const NLSHead::CHeadInfo *pHeadInfo )
 {
 	CRenderNode *pRes = NewRenderNode();
@@ -803,18 +825,20 @@ CObjectBase* CGameView::CreateLSHead( NDb::CComplexHead *pCHead, CFuncBase<NLSHe
 	// (@0x188c90: local_48.nSeed = param_1->seed.nSeed); this reconstruction takes the bare CComplexHead, so
 	// the unit callers thread CUnit::GetHeadSeed() (== that per-unit seed); standalone heads pass a per-head seed.
 	SRand rnd( headSeed );
-	if ( IsValid( pCHead->pHead ) )
+	if ( IsValid( pCHead->pHead ) && IsValid( pAnimator ) )
 	{
+		// retail @0x188c90: the placement chain is CMSRNode{ pAncestor = placement, pPos =
+		// CMSRConvert{ move (0,-0.035,0), scale (1,1,1), rotate (0,-pi/2,0) } } -- the x0.014 model
+		// scale is baked INTO the generated geometry (CalcHeadGeometry @0x265100), NOT into this node.
 		NGScene::CMSRConvert *pConvert = new NGScene::CMSRConvert;
 		pConvert->pMove = new NGScene::CCVec3( CVec3( 0, -0.035f, 0 ) );
-		pConvert->pScale = new NGScene::CCVec3( CVec3( 0.014f, 0.014f, 0.014f ) );
+		pConvert->pScale = new NGScene::CCVec3( CVec3( 1, 1, 1 ) );
 		pConvert->pRotate = new NGScene::CCVec3( CVec3( 0, -FP_PI2, 0 ) );
 		NGScene::CMSRNode *pMSR = new NGScene::CMSRNode;
 		pMSR->pAncestor = pPlacement;
 		pMSR->pPos = pConvert;
 
 		NDb::CHead *pHead = pCHead->pHead;
-		CPtr<NLSHead::CHead> pMesh = new NLSHead::CHead( pMSR, pAnimation, NLSHead::shareHeads.Get( pHead->GetRecordID() ) );
 		CPtr<NLSHead::CHeadBound> pBound = new NLSHead::CHeadBound( pPlacement );
 		// A committed advanced-FaceGen hero carries a baked face texture (headInfo->pTexture); render the head skin
 		// with an UNSHARED white-modulated diffuse material over it (a per-unit texture has no DB record to key a
@@ -826,7 +850,9 @@ CObjectBase* CGameView::CreateLSHead( NDb::CComplexHead *pCHead, CFuncBase<NLSHe
 			pSkinMat = CreateMaterialShared( pHead->pMaterial->GetMaterial( &rnd ) );
 		if ( pSkinMat )
 		{
-			CObjectBase *pPart = pScene->CreateDynamicGeometry( pMesh, pSkinMat, pBound, SFullGroupInfo( GetGroupInfo(_r), 0, 0 ) );
+			// retail @0x188c90 -> CGScene::CreateDynamicGeometry @0x15cd20: the ANIMATOR is the part's
+			// pObjInfo generator, the CMSRNode its pTransform (there is no intermediate mesh node).
+			CObjectBase *pPart = pScene->CreateDynamicGeometry( pAnimator, pMSR, pSkinMat, pBound, SFullGroupInfo( GetGroupInfo(_r), 0, 0 ) );
 			pRes->AddPart( pPart );
 		}
 	}
@@ -924,9 +950,15 @@ void CGameView::Draw( CTransformStack *pTS, CTransformStack *pClipTS, NGfx::CRen
 	nodes.clear();
 	fog.fTime = GetTickCount() / 1024.0f;
 	SGroupSelect mask( GetFloorMask( nCutFloor ), GetParticlesRequireFlag( bShowParticles ) );
-	EFogMode usedFog = fogMode;
+	// retail @0x186e40: fog/HSR are NOT per-view state -- they are derived EVERY draw from the
+	// SERIALIZED bFastMode (tag 29) vs the config globals. This is what keeps a DESERIALIZED
+	// interface view (doll/icon) fog-free and HSR-free forever: dev's unserialized per-view
+	// fogMode/hsrMode regressed to mission defaults on load, and HSR_FAST's HZB pass culled every
+	// re-created skin part in the static-camera ortho scene (the black post-load doll).
+	EFogMode usedFog = bFastMode ? FOG_NONE : defaultFogMode;
 	if ( usedFog == FOG_DYNAMIC && NGfx::GetHardwareLevel() < NGfx::HL_GFORCE3 )
 		usedFog = FOG_PERVERTEX;
+	EHSRMode usedHSR = bFastMode ? HSR_NONE : defaultHSRMode;
 	NGfx::CCubeTexture *pSky = 0;
 	CDGPtr<CPtrFuncBase<NGfx::CCubeTexture> > pSkyNode( pMaterials->GetSky() );
 	if ( pSkyNode )
@@ -934,7 +966,7 @@ void CGameView::Draw( CTransformStack *pTS, CTransformStack *pClipTS, NGfx::CRen
 		pSkyNode.Refresh();
 		pSky = pSkyNode->GetValue();
 	}
-	pScene->Draw( pTS, pClipTS, pRC, mask, rp, usedFog, fog, hsrMode, trMode, pSky );
+	pScene->Draw( pTS, pClipTS, pRC, mask, rp, usedFog, fog, usedHSR, trMode, pSky );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CGameView::MakeTargetRect( CTRect<float> *pRes, const SDrawInfo &drawInfo )
@@ -947,11 +979,18 @@ void CGameView::MakeTargetRect( CTRect<float> *pRes, const SDrawInfo &drawInfo )
 	rFullScreen.y2 = rFullScreen.y1 + vSize.y * drawInfo.vSize.y;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-static ERenderPath GetRenderPath( ESceneRenderMode rm, bool bForceFastest )
+// retail @0x1860f0: (rm, bForceFastest, bFastMode). Everything is RP_FASTEST unless shadows are
+// ON via the GLOBAL bDefaultShadows (gfx_shadows -- consulted at DRAW time, so it also governs
+// RESTORED views whose wire renderMode stays SRM_BEST) AND the view is not a fast interface view
+// (bFastMode, tag 29). [retail returns RP_GF3_FAST for bForceFastest on GF3+ hw; dev's executor
+// has no GF3_FAST path -- fastest.]
+static ERenderPath GetRenderPath( ESceneRenderMode rm, bool bForceFastest, bool bFastMode )
 {
 	if ( NGfx::IsTnLDevice() )
 		return RP_TNL;
-	if ( bForceFastest || !CanRenderShadows() )
+	if ( !CanRenderShadows() || bFastMode || !bDefaultShadows )
+		return RP_FASTEST;
+	if ( bForceFastest )
 		return RP_FASTEST;
 	switch ( rm )
 	{
@@ -966,7 +1005,9 @@ static ERenderPath GetRenderPath( ESceneRenderMode rm, bool bForceFastest )
 			if ( CanCacheLighting() )
 				return RP_UPDATE_CL;
 			return RP_FASTEST;
-		case SRM_LIGHTMAPPED: 
+		case SRM_SHOW_PL_OVERDRAW:   // retail: RP_SHOW_PL_OVERDRAW debug path; dev executor lacks it
+			return RP_FASTEST;
+		case SRM_LIGHTMAPPED:
 			if ( CanCacheLighting() )
 				return RP_SHOWLIGHTMAPPED;
 			return RP_FASTEST;
@@ -985,7 +1026,7 @@ static ERenderPath GetRenderPath( ESceneRenderMode rm, bool bForceFastest )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 ERenderPath CGameView::GetRenderPath() const
 {
-	return NGScene::GetRenderPath( renderMode, bForceFastest );
+	return NGScene::GetRenderPath( renderMode, bForceFastest, bFastMode );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 static void MakeClipTS( CTransformStack *pRes, const CTransformStack &ts, const CVec2 &vOrigin, const CVec2 &vSize )
@@ -1284,8 +1325,9 @@ IGameView* CreateNewView()
 IGameView* CreateNewFastInterfaceView()
 {
 	CGameView *pRes = new CGameView;
-	pRes->SetForceFastest( true );
+	pRes->SetForceFastest( true );   // retail @0x18b3c1: also sets scene lighting options = 1 (no depth shadows)
 	pRes->SetFastMode();
+	pRes->SetFastViewFlag();   // retail @0x18b370: the serialized fast-view mark (tag 29)
 	return pRes;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1309,15 +1351,20 @@ static void VarSetFog( const string &szID, const NGlobal::CValue &sValue, void *
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 static void VarSetShadows( const string &szID, const NGlobal::CValue &sValue, void *pContext )
 {
+	bDefaultShadows = sValue.GetFloat() != 0;   // retail @0x579e34 -- the draw-time master switch
 	defaultRenderMode = SRM_FASTEST;//SHADOW_NOSHADOWS;
 	if ( sValue.GetFloat() != 0 )
 		defaultRenderMode = SRM_BEST;//SHADOW_FULL;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail GViewInit registers FIVE vars: gfx_hsr default is 2.0 there, gfx_hqshot_mag is a plain
+// unsaved value var, gfx_particles binds VarBoolHandler to the module global above.
 START_REGISTER(GView)
-	REGISTER_VAR( "gfx_hsr", VarSetHSR, 1, true )
+	REGISTER_VAR( "gfx_hsr", VarSetHSR, 2, true )
 	REGISTER_VAR( "gfx_fog", VarSetFog, 0, true )
 	REGISTER_VAR( "gfx_shadows", VarSetShadows, 1, true )
+	REGISTER_VAR( "gfx_hqshot_mag", 0, 4, false )
+	REGISTER_VAR_EX( "gfx_particles", NGlobal::VarBoolHandler, &bShowParticles, 1, true )
 FINISH_REGISTER
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 }

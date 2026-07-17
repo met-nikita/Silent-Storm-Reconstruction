@@ -20,6 +20,7 @@ namespace NDb
 	class CTemplVariant;
 	class CRPGPers;
 	class CAmbientLightReal;
+	class CTAmbientLight;        // SMapInfo::pDefaultLight -- the ambient TEMPLATE (retail +0xbc)
 	class CWaypointName;
 	class CRPGItem;
 	class CScript;
@@ -32,6 +33,10 @@ namespace NDb
 namespace NAI
 {
 	class IPathNetwork;
+}
+namespace NWorld
+{
+	enum ETimeOfDay : int;   // defined in wMain.h (retail NDb::ETimeOfDay; 0 = ANYTIME)
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 struct SMapElement
@@ -50,6 +55,10 @@ struct SMapElement
 	vector<int> flags;
 	bool bBorder;
 	int nDC;
+	// retail SMapElement @104 (after nDC): the element's light activity window, copied from
+	// NDb::CFinalElement::eTimeOfDay by AddSimpleElements @0x2747c0 and threaded into every
+	// object-server ctor by CWorld::AddObject @0x365ee0.
+	NWorld::ETimeOfDay eTimeOfDay;
 	CPtr<NDb::CRPGGrenade> pGrenade;
 	// release door/chest lock params (retail folds pGrenade + these into a nested SMapDoorParams;
 	// kept flat here so existing consumers of pGrenade stay untouched):
@@ -58,11 +67,11 @@ struct SMapElement
 	int nLockHardness;
 	bool bIsChest;				// the element carries a loot chest (CFinalElement::pChest)
 	bool bIsTransparentIfOpen;	// chest containers turn transparent when open
-	SMapElement(): bOpen(false), nObjectPhase(0), bBorder( false ), nDC(0),
+	SMapElement(): bOpen(false), nObjectPhase(0), bBorder( false ), nDC(0), eTimeOfDay( NWorld::ETimeOfDay(0) ),
 		bIsLocked(false), nKeyID(0), nLockHardness(0), bIsChest(false), bIsTransparentIfOpen(false) {}
 	SMapElement( NDb::CObject *_pObject, SMapPosition _pos, bool _bBorder = false ):
 		pObject( _pObject ), pos( _pos ), bOpen( false ), nObjectPhase( 0 ),
-		ptAlignTo( CVec2( _pos.ptPos.x, _pos.ptPos.y ) ), bBorder( _bBorder ), nDC(0),
+		ptAlignTo( CVec2( _pos.ptPos.x, _pos.ptPos.y ) ), bBorder( _bBorder ), nDC(0), eTimeOfDay( NWorld::ETimeOfDay(0) ),
 		bIsLocked(false), nKeyID(0), nLockHardness(0), bIsChest(false), bIsTransparentIfOpen(false) {}
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -91,8 +100,9 @@ public:
 	CVec2 ptAlignTo;
 	bool bExists;
 	SMapPosition pos;
+	bool b3DWaypoint;	// retail CMapWaypoint+0x48, from NDb::CWaypoint::b3DPoint
 
-	CMapWaypoint(): bExists(false) {}
+	CMapWaypoint(): bExists(false), b3DWaypoint(false) {}
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 struct SMapUnit
@@ -180,7 +190,10 @@ struct SMapInfo
 	vector<SMapBuilding> buildings;
 	STerrainInfo terrain;
 	CTRect<float> sMapSafeZone;
-	CPtr<NDb::CAmbientLightReal> pDefaultLight;
+	// retail SMapInfo+0xbc is CPtr<NDb::CTAmbientLight> -- the map carries the ambient TEMPLATE, and
+	// CWorld::GetDefaultLight (@0x3620a0) resolves it per call. Resolving it here instead froze one
+	// roulette roll into the world AND made CWorld's tag-18 chunk a raw pointer (wire-audit RAWSZ 18.18).
+	CPtr<NDb::CTAmbientLight> pDefaultLight;
 	vector<SDeploySpot> deploySpots;
 	vector<SClueSlot> slots;
 	unordered_map<int, SUnitGroup> groups;

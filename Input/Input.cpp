@@ -415,7 +415,20 @@ void PumpMessages( bool bFocus )
 	SetFocus( bFocus );
 	if ( !bFocusCaptured )
 		return;
-	
+
+	// release PumpMessages @0x7ccde0: poll DirectInput at most once per GetTickCount tick
+	// (gate @0x7cce11 `if ( GetTickCount() - dwLastPumpTime < 1 ) return`). DirectInput buffers
+	// relative motion between polls, so one tick's poll carries the whole accumulated delta and
+	// lands it on a clock-advanced (dt>0) frame. Without this the mouse is read every render
+	// frame and CCamera::Update drains + discards the deltas that fall on dt==0 frames (~90% at
+	// high fps) -- the "slow pan / dead scroll-zoom" bug. Keyboard/edge-pan are time-integrated
+	// and unaffected, which is why only the mouse-relative axes broke.
+	static DWORD dwLastPumpTime = 0;
+	DWORD dwPumpNow = GetTickCount();
+	if ( dwPumpNow - dwLastPumpTime < 1 )
+		return;
+	dwLastPumpTime = dwPumpNow;
+
 	int nNumEvents = 0;
 	events.resize( SAMPLE_BUFFER_SIZE * devices.size() );
 	for ( CDevicesList::iterator iTempDevice = devices.begin(); iTempDevice != devices.end(); ++iTempDevice )

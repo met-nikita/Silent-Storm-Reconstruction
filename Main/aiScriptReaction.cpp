@@ -36,4 +36,4 @@ CAIReaction* CreateAIScriptReaction( IAIUnit *pUnit )
 }
 //
 using namespace NAI;
-BASIC_REGISTER_CLASS( CAIScriptReaction )
+REGISTER_SAVELOAD_CLASS( 0x52443161, CAIScriptReaction )

@@ -97,7 +97,11 @@ public:
 	virtual CCoverInfo* CalcCoversForTile( const CVec3 &src, const CAttackPortion &attack, NWorld::CUnit *pIgnore,
 	const CVec3 &ptTarget, float fMinClearDistance ) = 0;
 	virtual void ProcessMeleeAttackPortion( const CAttackPortion &a, const CRay &ray, const vector<IAttackable*> &ignores ) = 0;
-	virtual void ProcessRangedAttackPortion( const CAttackPortion &a, const CRay &ray, const vector<IAttackable*> &ignores, vector<STrailPoint> *pTrail ) = 0;
+	// retail keeps the per-attack range cap on SAttackRayInfo.fMaxRange (TraceLooseRaySegment @0x292010
+	// gates fEnter/fExit on it and places the terminal trail point at origin+dir*fMaxRange); this tree's
+	// tracer takes it as a parameter (30 = the old N_WEAPONTRAIL_MAXDISTANCE, retail's own value on the
+	// normal/accidental shot paths; splinters pass fFragmentRange*FP_GRID_STEP).
+	virtual void ProcessRangedAttackPortion( const CAttackPortion &a, const CRay &ray, const vector<IAttackable*> &ignores, vector<STrailPoint> *pTrail, float fMaxRange ) = 0;
 	virtual EAttackResult ProcessThrowingAttackPortion( CAttackPortion *pA, IAttackable *pTarget, NDb::CRPGArmor *pArmor, int nUserID ) = 0;
 	virtual int GetCompositeToHit( NWorld::CUnit *pAttacker, NWorld::CUnit *pTarget, NAI::EHitLocation eHL, bool bFirstTurn ) = 0;
 	virtual int GetGrenadeCompositeToHit( NWorld::CUnit *pAttacker, 
@@ -146,6 +150,9 @@ public:
 
 	virtual CVec3 GetIllumination( const vector<CVec3> &unit ) = 0;
 	virtual IVisionTracker* GetVisionTracker() = 0;
+	// retail CGame::UpdateVision @0x2995a0 (game vtbl+0x4c): forward to the vision tracker's
+	// time-sliced changed-cube recalc -- the CWorld::TryUpdateVisible action-finish probe.
+	virtual bool UpdateVision( float fTime ) = 0;
 	// luaSetMaxCriticalSeverity @0x2ee0e0 -> SetMaxCriticalSeverity (retail CGame vtbl+0x48); read back by
 	// the combat critical clamp (retail vtbl+0x44). The severity (DC) of a rolled critical is capped to it.
 	virtual int GetMaxCriticalSeverity() const = 0;
@@ -164,10 +171,12 @@ NDb::CRPGArmor* GetTerrainArmor();
 bool CanShoot( CCoverInfo *pCover );
 bool PeekRayForRocket( CCoverInfo *pCover, CRay *pRes, bool bHit );
 bool PeekRay( CCoverInfo *pCover, CRay *pRes, float fHit, bool *bIsMiss, bool bStickTo_pRes = false );
-float CheckToHit( NWorld::CUnit *pAttacker, NWorld::CUnit *pTarget, int nExtraAP, NAI::EHitLocation eHL, 
-	const vector<int> &accessibleHLs, CCoverInfo *pCover, bool bFirstRound, int *nToHit );
+// retail @0x2b5220/@0x2b53d0: the check fns carry the burst bullet index (default 0 -- one-shot
+// weapons and the callers that predate the exec-side cursor).
+float CheckToHit( NWorld::CUnit *pAttacker, NWorld::CUnit *pTarget, int nExtraAP, NAI::EHitLocation eHL,
+	const vector<int> &accessibleHLs, CCoverInfo *pCover, bool bFirstRound, int *nToHit, int nBullet = 0 );
 float CheckTileToHit( NWorld::CUnit *pAttacker, const CVec3 ptTarget, int nExtraAP,
-	NAI::ETileHitLocation eHitLocation, CCoverInfo *pCover, bool bFirstRound, int *nToHit );
+	NAI::ETileHitLocation eHitLocation, CCoverInfo *pCover, bool bFirstRound, int *nToHit, int nBullet = 0 );
 void GetOccupiedCubes( vector<CVec3> *pRes, const NAI::SPosition &pos );
 void GetTileOccupiedCubes( vector<CVec3> *pRes, const CVec3 &ptPos, NAI::ETileHitLocation eHitLocation );
 NAI::EDirection GetShootDirection( NAI::IPathNetwork *pNet, const NAI::SPathPlace &from, const CVec3 &ptTarget );

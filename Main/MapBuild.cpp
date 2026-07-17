@@ -105,6 +105,16 @@ class CMapBuilder
 	bool bResetPins;
 	bool bShowHoles;
 	int nRelativeLevel;	// retail CMapBuilder+0xa0: map/mission relative level (chest-loot level gate + lock hardness)
+	// retail CMapBuilder::SCreatingLadder: ladders are collected in WORLD space during the template
+	// traversal (bottom point + a point one grid-step in the climb direction) and resolved to a
+	// layers group only at the BuildMap tail, after EVERY group exists -- a traversal-time group
+	// index files ladders near later-built buildings into the wrong group with wrong tile coords.
+	struct SCreatingLadder
+	{
+		CVec2 ptPos, ptUpperPos;
+		int nHeight, nFloor;
+	};
+	vector<SCreatingLadder> creatingLadders;
 
 	void AddSimpleElements( SMapInfo *pDst, SMapBuilding *pB, NDb::CTemplVariant *pVar, const SMapPosition &parent,
 		bool bTerrAlign, const CVec2 &ptAlignTo, const vector<int> &flags );
@@ -280,7 +290,7 @@ bool CMapBuilder::CreateBuilding( SMapInfo *pDst, SMapBuilding *pRes, NBuilding:
 	pInfo->nMaxFloor = pInfo->nMaxFloor == -100 ? 0 : pInfo->nMaxFloor;
 	//
 	pRes->pGrid->Setup( pInfo->nMaxX, pInfo->nMaxY, // CRAP rotations are not accounted in max size calcs
-		pInfo->nMinFloor, pInfo->nMaxFloor, VNULL2, pRes->pos );
+		pInfo->nMinFloor, pInfo->nMaxFloor, VNULL2 ); // retail CreateBuilding @0x273f20: Setup(...,&VNULL2), no transform
 	NBuilding::BuildingHP( pInfo, pRes->pGrid, pRes->pSWMap );
 	return true;
 }
@@ -346,6 +356,9 @@ void CMapBuilder::AddSimpleElements( SMapInfo *pDst, SMapBuilding *pB, NDb::CTem
 						me.szName = pFin->szName;
 						me.nObjectPhase = pFin->nObjectPhase;
 						me.nDC = Float2Int( pFin->fPower );
+						// retail AddSimpleElements @0x2747c0: the element's light activity window comes straight
+						// from the CFinalElement record (read of pFin+0x8c right before the items push_back)
+						me.eTimeOfDay = (NWorld::ETimeOfDay)pFin->eTimeOfDay;
 						// retail @0x2747c0 (disasm 0x674b2a-0x674c0e): the trap grenade defaults to the
 						// OBJECT's self-detonation grenade; an element-level grenade overrides it and
 						// rescales the disarm DC by the map level.
@@ -809,11 +822,15 @@ void CMapBuilder::CreateGrids( SMapBuilding *pRes, const vector<NBuilding::SBuil
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail @0x672b30: fistp = round to NEAREST (C truncation rejected origins a roundoff hair
+// below a grid line, e.g. from 90-degree building rotations) and tolerance 0.001, not 1e-4.
+// A false negative here creates a separate ROTATED layers group for a grid-aligned building --
+// and the ladder pipeline (world-axis rung probes in CLadderCalcer) breaks on rotated groups.
 static bool IsGridNumber( float f )
 {
 	float fNorm = f > 0? f / FP_GRID_STEP : -f / FP_GRID_STEP;
-	int nNorm = fNorm;
-	return ( nNorm - fNorm ) < 1e-4 && ( nNorm - fNorm ) > -1e-4;
+	int nNorm = Float2Int( fNorm );
+	return ( nNorm - fNorm ) < 0.001f && ( nNorm - fNorm ) > -0.001f;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 static bool AreAlignedGrids( float fSin, float fCos, const CVec2 &vOrig1, const CVec2 &vOrig2 )
@@ -951,37 +968,35 @@ void CMapBuilder::TraverseTemplateTree( NDb::CTemplate* pTemplate, SMapInfo *pFr
 		}
 		CreateGrids( &b, pBInfo->solidFragments, pos );
 		info.buildings.push_back( b );
-		//ladders
+		//ladders -- retail TraverseTemplateTree @0x276c60: record each ladder in WORLD space (the
+		// old traversal-time group index + displacement fixup is gone); resolution happens at the
+		// BuildMap tail via CPathNetwork::CreateLadder @0x40290.
 		vector<NBuilding::SLadder> &lads = pBInfo->ladders;
 		if( !lads.empty() )
 		{
+			float fSinStep = sin( layerPlace.fRotation ) * FP_GRID_STEP;
+			float fCosStep = cos( layerPlace.fRotation ) * FP_GRID_STEP;
 			for ( int i = 0; i < lads.size(); ++i )
 			{
 				NBuilding::SLadder &lad = lads[i];
 				if ( lad.nID <= 0 )
 					continue;
-				//const float fLadFloors = lad.nHeight * NAI::F_LADDER_STEP / NBuilding::WALL_HEIGHT;
-				int x = lad.pos.ptMove.x + 1; // CRAP subtracted in aiGrid
-				int y = lad.pos.ptMove.y + 1;
-				if ( nNewGroup >= 0 )
-					pNet->CreateLadder( x, y, lad.nHeight, lad.pos.nRotation, nNewGroup, lad.pos.ptMove.z + pos.nFloor );
-				else
+				float fX = lad.pos.ptMove.x + 1.0f; // retail keeps the +1 grid fixup
+				float fY = lad.pos.ptMove.y + 1.0f;
+				SCreatingLadder cl;
+				cl.ptPos = CVec2( fX * fCosStep - fY * fSinStep + layerPlace.vOrigin.x,
+					fX * fSinStep + fY * fCosStep + layerPlace.vOrigin.y );
+				cl.ptUpperPos = cl.ptPos;
+				switch ( lad.pos.nRotation )
 				{
-					CVec2 vDisplacement = layerPlace.vOrigin - rootPlace.vOrigin;
-					x += vDisplacement.x / FP_GRID_STEP;
-					y += vDisplacement.y / FP_GRID_STEP;
-					// CRAP{
-					if ( x < 0 )
-						x = 0;
-					if ( y < 0 )
-						y = 0;
-					if ( x >= pTemplate->nWidth )
-						x = pTemplate->nWidth - 1;
-					if ( y >= pTemplate->nWidth )
-						y = pTemplate->nWidth - 1;
-					// }CRAP
-					pNet->CreateLadder( x, y, lad.nHeight, lad.pos.nRotation, 0, lad.pos.ptMove.z + pos.nFloor );
+					case 0: cl.ptUpperPos += CVec2( -fCosStep, -fSinStep ); break;
+					case 1: cl.ptUpperPos += CVec2(  fSinStep, -fCosStep ); break;
+					case 2: cl.ptUpperPos += CVec2(  fCosStep,  fSinStep ); break;
+					case 3: cl.ptUpperPos += CVec2( -fSinStep,  fCosStep ); break;
 				}
+				cl.nHeight = lad.nHeight;
+				cl.nFloor = Float2Int( lad.pos.ptMove.z + pos.nFloor );
+				creatingLadders.push_back( cl );
 			}
 		}
 	}
@@ -1249,6 +1264,7 @@ void CMapBuilder::AddWaypoints( SMapInfo *pDst, NDb::CTemplVariant *pVar, const 
 		CMapWaypoint *pMW = new CMapWaypoint;
 		pMW->bExists = true;
 		pMW->pName = pdbW->pName;
+		pMW->b3DWaypoint = pdbW->b3DPoint;
 		pMW->commands = pW->commands;
 		CalcPosition( &pMW->pos, pW.GetPtr() , parent );
 		if ( bTerrAlign ) 
@@ -1330,8 +1346,10 @@ bool CMapBuilder::BuildMap( int nPlacementID )
 		bRet = LoadRootTerrain( nPlacementID, &info.terrain, &rand, initialFlags );
 	}
 
+	// carry the TEMPLATE, not a resolved light: retail SMapInfo+0xbc is CPtr<CTAmbientLight> and the
+	// GetLight( rand, createFlags ) roll happens in CWorld::GetDefaultLight (@0x3620a0) on every call.
 	if ( IsValid( pVar->pLight ) )
-		info.pDefaultLight = pVar->pLight->GetLight( &rand, initialFlags );
+		info.pDefaultLight = pVar->pLight;
 	
 	SMapInfo freeInfo;
 	NAI::SAlternativeGridInfo altGrids;
@@ -1356,7 +1374,8 @@ bool CMapBuilder::BuildMap( int nPlacementID )
 		CVec3 pos( b.mpos.ptPos );
 		pos.z += GetMeterHeightCheck( info.terrain, b.ptAlignTo.x, b.ptAlignTo.y );
 		MakeMatrix( &b.pos, CVec3(1,1,1), pos, ToRadian( b.mpos.fRotation ) );
-		b.pGrid->SetPos( b.pos );
+		// retail: the grid stores no transform -- the placement lives in SMapBuilding (pPos/pos)
+		// and is passed to CBuildingGrid::Explode by the caller (BuildMap @0x277900, wBuilding @0x343ac0).
 	}
 
 	// destructions authored in the editor
@@ -1364,7 +1383,8 @@ bool CMapBuilder::BuildMap( int nPlacementID )
 	{
 		const SExplosion &ex = explosions[j];
 		for ( int i = 0; i < info.buildings.size(); ++i )
-			info.buildings[i].pGrid->Explode( ex.pos.ptPos, ex.fPower, ex.fRadius );
+			// retail BuildMap @0x277900: Explode( &building.pPos->pos, ex.pos.ptPos, ex.fPower, ex.fRadius )
+			info.buildings[i].pGrid->Explode( info.buildings[i].pos, ex.pos.ptPos, ex.fPower, ex.fRadius );
 		if ( ex.nObjStageDelta > 0 && ex.fObjRadius > FP_EPSILON )
 		{
 			const float fRadius2 = sqr( ex.fObjRadius * FP_INV_GRID_STEP );
@@ -1384,6 +1404,14 @@ bool CMapBuilder::BuildMap( int nPlacementID )
 	{
 		// create special layers to resolve walking on different grids troubles
 		pNet->CreateAlternativeGrids( altGrids );
+		// retail BuildMap @0x277900 tail: only NOW does every layers group exist -- resolve the
+		// world-space ladder records collected during the traversal into their owning groups
+		for ( int i = 0; i < creatingLadders.size(); ++i )
+		{
+			SCreatingLadder &cl = creatingLadders[i];
+			pNet->CreateLadder( cl.ptPos, cl.ptUpperPos, cl.nHeight, cl.nFloor );
+		}
+		csSystem << CC_GREEN << "MapBuild: " << (int)creatingLadders.size() << " ladders created" << endl;
 	}
 	//
 	ClearTerrainCache();

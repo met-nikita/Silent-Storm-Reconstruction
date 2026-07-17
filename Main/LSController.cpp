@@ -37,50 +37,53 @@ void CHeadsController::Advance( STime currentTime )
 	timer.Advance( true, currentTime );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CHeadAnimator* CHeadsController::GetAnimator( NWorld::CUnit *pUnit )
+// release GetInfo @0x25dc40: raw-pointer scan of the records by CHeadInfo.
+SUnitHeadAnimator* CHeadsController::GetInfo( CHeadInfo *pHeadInfo )
 {
-	if ( !pUnit->GetDBHead() || !pUnit->GetDBHead()->pHead )
-		return 0;
 	for ( vector<SUnitHeadAnimator>::iterator i = animators.begin(); i != animators.end(); ++i )
 	{
-		if ( !IsValid(i->pUnit) )
-			continue;
-		if ( i->pUnit == pUnit )
-			return i->pAnimator;
+		if ( i->pHead == pHeadInfo )
+			return &*i;
 	}
-	// A committed advanced-FaceGen hero carries a baked static head (CHeadInfo::pMesh = CFaceGenMeshHolder);
-	// build the animator from THAT baked morph instead of the un-morphed base mesh keyed by record id.
-	NLSHead::CHeadInfo *pHI = pUnit->GetHeadInfo();
-	CObj<NLSHead::CHeadAnimator> pAnimator;
-	if ( IsValid( pHI ) && pHI->IsStaticHead() && pHI->GetMesh() )
-		pAnimator = new NLSHead::CHeadAnimator( timer.GetTime(), pHI->GetMesh() );
-	else
-		pAnimator = new NLSHead::CHeadAnimator( timer.GetTime(), pUnit->GetDBHead()->pHead );
-	//pAnimator->PlaySequence( NDb::GetSequence( random.Get(3) + 1 ), 0 ); // CRAP
+	return 0;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// release @0x25de50: guard (valid CHeadInfo whose CComplexHead carries a CHead record), find the
+// existing record via GetInfo, else create the animator from the info's mesh node -- CHeadInfo::pMesh
+// is the shared base-pack CHeadMeshLoader for a normal head or the baked CFaceGenMeshHolder for a
+// committed AdvFaceGen hero, so the one retail creation covers both.
+CHeadAnimator* CHeadsController::GetAnimator( CHeadInfo *pHeadInfo )
+{
+	if ( !IsValid( pHeadInfo ) || !pHeadInfo->GetHead() || !pHeadInfo->GetHead()->pHead )
+		return 0;
+	SUnitHeadAnimator *pInfo = GetInfo( pHeadInfo );
+	if ( pInfo )
+		return pInfo->pAnimator;
+	CObj<NLSHead::CHeadAnimator> pAnimator = new NLSHead::CHeadAnimator( timer.GetTime(), pHeadInfo->GetMesh() );
 	SUnitHeadAnimator anim;
-	anim.pUnit = pUnit;
+	anim.pHead = pHeadInfo;
 	anim.pAnimator = pAnimator;
 	animators.push_back( anim );
 	return pAnimator;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CHeadsController::PlaySequence( NWorld::CUnit *pUnit, NDb::CSequence *pSeq, NDb::CSequence *pExpr, bool bCycle )
+void CHeadsController::PlaySequence( CHeadInfo *pHeadInfo, NDb::CSequence *pSeq, NDb::CSequence *pExpr, bool bCycle )
 {
 	// release @0x25df90: both sequences go to the animator in one call (the expression = the MASK entry)
-	CHeadAnimator *pAnimator = GetAnimator( pUnit );
+	CHeadAnimator *pAnimator = GetAnimator( pHeadInfo );
 	if ( pAnimator )
 		pAnimator->PlaySequence( pSeq, pExpr, timer.GetTime()->GetValue(), bCycle );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// release @0x25dda0: find the unit's animator record (raw-pointer compare, exactly the release scan --
+// release @0x25dda0: find the head's animator record (raw-pointer compare, exactly the release scan --
 // no record is created here: the render path's AddHead/GetAnimator made it before the visitor reaches
 // AddHeadIdleAnimator); if its idle token is missing or dying, create a fresh one (whose ctor arms
 // IDLE_NORMAL) into the weak pIdler slot, and return it for the caller to own via its sync destination.
-CObjectBase* CHeadsController::PlayIdle( NWorld::CUnit *pUnit )
+CObjectBase* CHeadsController::PlayIdle( CHeadInfo *pHeadInfo )
 {
 	for ( vector<SUnitHeadAnimator>::iterator i = animators.begin(); i != animators.end(); ++i )
 	{
-		if ( i->pUnit != pUnit )
+		if ( i->pHead != pHeadInfo )
 			continue;
 		if ( !IsValid( i->pIdler ) )
 			i->pIdler = new CIdleHead( i->pAnimator );
@@ -89,13 +92,13 @@ CObjectBase* CHeadsController::PlayIdle( NWorld::CUnit *pUnit )
 	return 0;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// release @0x25dc60: force the unit's head animator into the frozen death-mask idle (skipped when it
-// is already there). No-op when the unit has no animator record.
-void CHeadsController::KillHead( NWorld::CUnit *pUnit )
+// release @0x25dc60: force the head's animator into the frozen death-mask idle (skipped when it
+// is already there). No-op when the head has no animator record.
+void CHeadsController::KillHead( CHeadInfo *pHeadInfo )
 {
 	for ( vector<SUnitHeadAnimator>::iterator i = animators.begin(); i != animators.end(); ++i )
 	{
-		if ( i->pUnit != pUnit )
+		if ( i->pHead != pHeadInfo )
 			continue;
 		if ( IsValid( i->pAnimator ) && i->pAnimator->GetIdleType() != IDLE_DEATH )
 			i->pAnimator->SetIdleType( IDLE_DEATH );

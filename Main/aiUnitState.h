@@ -34,11 +34,19 @@ struct SModifiable
 	T    data;
 	SModifiable(): nLock( 0 ), bModified( false ) {}
 	void SetModified() { bModified = true; }
+	// retail @0xb00e0 (bool) / @0xb0150 (SUnitsAndPositions): nLock + flag + payload.
+	int operator&( CStructureSaver &f ) { f.Add( 2, &nLock ); f.Add( 3, &bModified ); f.Add( 4, &data ); return 0; }
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 struct SUnitsAndPositions
 {
-	vector< CPtr<IAIUnit> > units;   // release also caches a unit->SUnitPosition map; deferred
+	vector< CPtr<IAIUnit> > units;
+	// retail SUnitsAndPositions second member: the per-unit position cache (serialized @0xb01d0
+	// tag 3 as DoHashMap<CPtr<IAIUnit>,SUnitPosition,SPtrHash>). Serialized for format parity;
+	// the retail cache-refresh writers are a behaviour follow-up.
+	unordered_map< CPtr<IAIUnit>, SUnitPosition, SPtrHash > positions;
+	// retail @0xb01d0: units chunk (2) + positions hash (3).
+	int operator&( CStructureSaver &f ) { f.Add( 2, &units ); f.Add( 3, &positions ); return 0; }
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 struct SAIUnitState
@@ -54,6 +62,8 @@ struct SAIUnitState
 	CPtr<IAIUnit>                   pAlly;            // nearest ally
 	bool                            bScared;
 	vector< CPtr<IAIUnit> >         knownCorpses;
+	// retail NAI::SAIUnitState::operator& @0xaffa0 -- serialized BY VALUE inside CAIUnit tag 9.
+	int operator&( CStructureSaver &f ) { f.Add( 2, &pUnit ); f.Add( 3, &selfModified ); f.Add( 4, &enemies ); f.Add( 5, &possibleEnemies ); f.Add( 6, &allies ); f.Add( 7, &bHelpCalled ); f.Add( 8, &pEnemy ); f.Add( 9, &pPossibleEnemy ); f.Add( 10, &pAlly ); f.Add( 11, &bScared ); f.Add( 12, &knownCorpses ); return 0; }
 	//
 	SAIUnitState();
 	void SetUnit( IAIUnit *_pUnit ) { pUnit = _pUnit; }

@@ -27,6 +27,9 @@
 // GAutoDetectInit) are deferred: they reach absent cross-compiland NGfx internals
 // (NGfx::GetVideoCard + videoCardsArray, and NGfx::GetSystemInfo whose real D3D
 // video-memory probe is an unreconstructed empty stub).
+// !! KNOWN RETAIL BUG -- DO NOT PORT AS-IS: retail's video-memory probe stores the size
+// in a SIGNED int; on modern GPUs (>= 2GB VRAM) it wraps negative and auto-detect forces
+// features off.  Any future GetSystemInfo/AutoDetectVideoConfig port must keep it unsigned.
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 namespace NGScene
 {

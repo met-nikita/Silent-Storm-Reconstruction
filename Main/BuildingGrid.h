@@ -56,24 +56,30 @@ class CBuildingGrid : public CVersioningBase
 	enum { DESTROY_LIM = 255 };
 	typedef SPlane SPlane6[6];
 
+	// retail @0xc42e0 (layout 0x104): the grid has NO `pos` member -- the placement transform lives in
+	// SMapBuilding (pPos) and is threaded into Explode as a parameter. Dev's serialized SFBTransform pos
+	// (tag 6, 128B raw) shifted every following tag by one vs the retail wire; removed to match retail 1:1.
 	ZDATA
 	CArray3D<BYTE> net;
 	int nDZ;
 	CVec3 ptBoxMin;
 	CVec3 ptBoxMax;
-	SFBTransform pos;
 	vector<NBuilding::SRoomMatch> rooms;
 	SRandomSeed seed;
 	bool bStabilityUpdate;
 	int nBaseFloor;
-	
+
 	// computed values /ComputeAuxValues()/
 	SPlane6 box;
 	int nCutFloor; // for WYSIWYG
 	unordered_map<int, bool> visibleLayers;
 	bool bOnlyCutFloorVisible;
 	unordered_map<SPart, bool, SPart> updatedParts;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&net); f.Add(3,&nDZ); f.Add(4,&ptBoxMin); f.Add(5,&ptBoxMax); f.Add(6,&pos); f.Add(7,&rooms); f.Add(8,&seed); f.Add(9,&bStabilityUpdate); f.Add(10,&nBaseFloor); f.Add(11,&box); f.Add(12,&nCutFloor); f.Add(13,&visibleLayers); f.Add(14,&bOnlyCutFloorVisible); f.Add(15,&updatedParts); return 0; }
+	// retail CBuildingGrid::operator& @0xc42e0 = {2 net(obj), 3 nDZ(4B), 4 ptBoxMin(12B), 5 ptBoxMax(12B),
+	// 6 rooms(DoDataVector), 7 seed(4B), 8 bStabilityUpdate(1B), 9 nBaseFloor(4B), 10 box(0x60=96B),
+	// 11 nCutFloor(4B), 12 visibleLayers(DoHashMap), 13 bOnlyCutFloorVisible(1B), 14 updatedParts(DoHashMap)}.
+	// Byte-walked save slot 1 (3 grids): 2:big 3:4 4:12 5:12 6:6 7:4 8:1 9:4 10:96 11:4 12:0 13:1 14:0.
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&net); f.Add(3,&nDZ); f.Add(4,&ptBoxMin); f.Add(5,&ptBoxMax); f.Add(6,&rooms); f.Add(7,&seed); f.Add(8,&bStabilityUpdate); f.Add(9,&nBaseFloor); f.Add(10,&box); f.Add(11,&nCutFloor); f.Add(12,&visibleLayers); f.Add(13,&bOnlyCutFloorVisible); f.Add(14,&updatedParts); return 0; }
 	CObj<CBuildingSchema> pSchema;
 	vector<SPoint3> brokenSpots;   // retail @0xf8: transient per-flush list of destroyed voxels (FX source); NOT serialized
 
@@ -89,14 +95,13 @@ public:
 	void AddRoom( int nFloor, int nInternal, int Global );
 	int GetRoomGlobal( int nFloor, int nInternal ) const;
 	void GetRoomLocal( int nGlobalID, int *pnFloor, int *pnInternal ) const;
-	void Setup( int nMaxX, int nMaxY, int nMinFloor, int nMaxFloor, const CVec2 &ptMinXY, const SFBTransform &pos );
+	void Setup( int nMaxX, int nMaxY, int nMinFloor, int nMaxFloor, const CVec2 &ptMinXY ); // retail @0xc3a90: no transform param
 	bool DamageSpot( const SPoint3 &pt, int nDmg = DESTROY_LIM, bool bAddToBrokenSpots = false );
 	bool IsDestroyed( const SPoint3 &pt ) const;
-	void Explode( const CVec3 &ptEpicentre, int nPower, float fRadius );
+	// retail @0xc3680: the caller's placement transform is a parameter (CBuilding::Explode @0x343ac0 passes info.pos)
+	void Explode( const SFBTransform &pos, const CVec3 &ptEpicentre, int nPower, float fRadius );
 	const SRandomSeed& GetSeed() const { return seed; }
 	void GetSize( CVec3 *pptMin, CVec3 *pptMax ) const;
-	SFBTransform GetPos() const { return pos; }
-	void SetPos( const SFBTransform &_pos ) { pos = _pos; }
 	void Reset();
 	void ToggleStability() { bStabilityUpdate = !bStabilityUpdate; }
 	bool NeedComputeStability() const { return bStabilityUpdate; }

@@ -247,8 +247,8 @@ inline static bool IsGoodPt( const NAI::SPathPlace &p, CPathNetwork *pNet )
 //	1b) moves if source pose == CM_STAND are returned for all directions
 //	1c) moves with dest pose == CM_STAND are returned with final direction = 0, and with "not moving" flag
 // 2) All crouch and inactive poses with different directions and moving/nonmoving are identical
-void GetNonStandartMoves( 
-		IPathNetwork *_pNet, const SPathPlace &src, bool bCheckSuicide, bool bMoveOnly, 
+void GetNonStandartMoves(
+		IPathNetwork *_pNet, const SPathPlace &src, bool bCheckSuicide, bool bMoveOnly, bool bNoClimb,
 		vector<SMove> *pRes, int *pMovesCount, vector<char> *pDynLocks )
 {
 	CDynamicCast<CPathNetwork> pNet( _pNet );
@@ -366,7 +366,9 @@ void GetNonStandartMoves(
 					int nX1 = nX + nMoveShift[i][0];
 					int nY1 = nY + nMoveShift[i][1];
 					SPathPlace layPlace( nX1, nY1, src.GetLayer(), i, CM_LAY, 0 );
-					if ( pNet->IsPassable( layPlace ) )
+					// retail @0x478708: GetPassability + IsBigLockerLocked (IsLocked is the IsGoodPt below)
+					if ( pNet->GetPassability( layPlace ) == AIP_YES
+						&& !pNet->IsBigLockerLocked( layPlace, BL_PANZERKLEINE ) )
 					{
 						m.dest = layPlace;
 						m.type = (i&1) ? MT_MOVE_CRAWL_DIAG : MT_MOVE_CRAWL;
@@ -457,7 +459,7 @@ void GetNonStandartMoves(
 			break;
 
 		case CM_STAND:
-			if ( !bMoveOnly )
+			if ( !bMoveOnly && !bNoClimb )	// retail climb gate: bNoClimb set only by the door-free re-route
 			{
 				// climbing -- retail @0x78300 SIMPLIFIED the Jan03 nested variant: the climb onto a
 				// special point is emitted whenever the point is higher by (0, F_MAX_CLIMB_HEIGHT]
@@ -582,7 +584,7 @@ void GetNonStandartMoves(
 				CNodesLayer::CLadderHash::iterator where = pLayer->ladderEntrances.find( search );
 				if ( where != pLayer->ladderEntrances.end() ) // there is a ladder
 				{
-					if ( where->second.bUpper ) 
+					if ( where->second.bUpper )
 					{
 						//OutputDebugString("[ LADDER ] Can try go on ladder from up\n");
 						int nL = where->second.nLayerGroup;
@@ -618,7 +620,7 @@ void GetNonStandartMoves(
 				CNodesLayer::CLadderHash::iterator where = pLayer->ladderEntrances.find( search );
 				if ( where != pLayer->ladderEntrances.end() ) // there is a ladder
 				{
-					if ( !where->second.bUpper ) 
+					if ( !where->second.bUpper )
 					{
 						//OutputDebugString("[ LADDER ]Can try go on ladder\n");
 						int nL = where->second.nLayerGroup;
@@ -638,8 +640,6 @@ void GetNonStandartMoves(
 								dynLocks[ pResPos ] = t.nDynLocks;
 								++pResPos;
 							}
-							//else
-								//OutputDebugString("[ LADDER ]But for some damn reason it's locked\n");
 						}
 					}
 				}
@@ -663,16 +663,19 @@ void GetNonStandartMoves(
 				}
 			}*/
 
-			// rotate left
+			// rotate left -- retail @0x4790ec gates the emit (not the rotation) on IsBigLockerLocked
 			int leftdir = (src.GetDirection() + 1) & 7;
 			SPathPlace layPlaceLeft( src.GetX(), src.GetY(), src.GetLayer(), leftdir, src.GetPose(), 0 );
 			while ( pNet->IsPassable( layPlaceLeft ) )
 			{
-				m.dest = layPlaceLeft;
-				m.type = MT_TURN;
-				res[ pResPos ] = m;
-				dynLocks[ pResPos ] = t.nDynLocks;
-				++pResPos;
+				if ( !pNet->IsBigLockerLocked( layPlaceLeft, BL_PANZERKLEINE ) )
+				{
+					m.dest = layPlaceLeft;
+					m.type = MT_TURN;
+					res[ pResPos ] = m;
+					dynLocks[ pResPos ] = t.nDynLocks;
+					++pResPos;
+				}
 				leftdir = ( leftdir + 1 ) & 7;
 				if ( leftdir == src.GetDirection() )
 					break;
@@ -682,6 +685,8 @@ void GetNonStandartMoves(
 			int rightdir = src.GetDirection() - 1;
 			if ( rightdir == -1 )
 				rightdir = 7;
+			// ORIGINAL BUG (confirmed retail disasm @0x479195): the right-rotation place is seeded with
+			// the LEFT loop's stop direction, and the right side has no big-locker gate.
 			SPathPlace layPlaceRight( src.GetX(), src.GetY(), src.GetLayer(), leftdir, src.GetPose(), 0 );
 			while ( pNet->IsPassable( layPlaceRight ) )
 			{
@@ -777,8 +782,18 @@ void GetNonStandartMoves(
 					if ( pNew == pLayer )
 						continue;
 					CNodesLayer::STile &tDst = pNew->tiles[ src.GetY() ][ src.GetX() ];
-					if ( tDst.nHeight == t.nHeight && tDst.nDisplacement == t.nDisplacement )				
+					if ( tDst.nHeight == t.nHeight && tDst.nDisplacement == t.nDisplacement )
 					{
+						// retail @0x479576: the destination tile must allow the current pose
+						bool bDstPassable;
+						if ( src.GetPose() == CM_LAY )
+							bDstPassable = ( tDst.nPassable & (CP_LAY1 << (src.GetDirection() & 3)) ) != 0;
+						else if ( src.GetPose() == CM_CROUCH )
+							bDstPassable = ( tDst.nPassable & CP_CROUCH ) != 0;
+						else
+							bDstPassable = ( tDst.nPassable & CP_STAND ) != 0;
+						if ( !bDstPassable )
+							continue;
 						if ( src.GetPose() != CM_LAY )
 							m.dest = SPathPlace( src.GetX(), src.GetY(), pNew->nLayer, 0, src.GetPose(), 0 );
 						else

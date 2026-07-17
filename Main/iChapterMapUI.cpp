@@ -14,6 +14,7 @@
 #include "iChapterMap.h"
 #include "iShowClue.h"
 #include "ChapterInfo.h"
+#include "iLogPanel.h"			// NUI::CLogPanel + STREAM_GAME (the chapter map's tag-19 log panel)
 #include "iChapterMapUI.h"
 #include "..\Misc\StrProc.h"
 #include "..\MiscDll\Commands.h"
@@ -199,17 +200,29 @@ public:
 
 private:
 	ZDATA_(CWindow)
+	// retail tag 2: the owning mission back-pointer, stored by the ctor @0x1a9190 and handed in by
+	// CChapterMapUI::ProcessMessage @0x1abd20 (`CVar24 = this->pChapter`). Retail types it
+	// CPtr<NGame::IMission> because retail's CChapterMap IS-A CMissionBase IS-A IMission -- which is
+	// now literally true in this fork too (CChapterMap reparented onto CMissionBase; see
+	// iChapterMap.cpp), so this matches the retail decl exactly: the ctor @0x1a9190 signature is
+	// `CDescriptionText(CDescriptionText *this, SWindowInfo *, IMission *)`.
+	CPtr<NGame::IMission> pMission;
 	EMode eMode, eTargetMode;
 	STime sMorphTime;
 	float fCoeff;
 	////
 	CPtr<CText> pText;
 	CPtr<CImage> pBackground;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CWindow*)this); f.Add(2,&eMode); f.Add(3,&eTargetMode); f.Add(4,&sMorphTime); f.Add(5,&fCoeff); f.Add(6,&pText); f.Add(7,&pBackground); return 0; }
+	// retail CDescriptionText::operator& @0x1af050: 1=CWindow, 2=pMission, 3..6 the scalars,
+	// pBackground=7, pText=8 (a CObj in retail -- wire-compatible with our weak CPtr, since the CText
+	// is restored via CWindow's listChildren).
+	// dev's old scheme started at tag 2, shifting everything one low -> pText read fCoeff's bytes ->
+	// null -> SetStyle(null) AV (iChapterMapUI.cpp:265) on chapter-map save load.
+	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CWindow*)this); f.Add(2,&pMission); f.Add(3,&eMode); f.Add(4,&eTargetMode); f.Add(5,&sMorphTime); f.Add(6,&fCoeff); f.Add(7,&pBackground); f.Add(8,&pText); return 0; }
 
 public:
 	CDescriptionText() {}
-	CDescriptionText( const SWindowInfo &sInfo );
+	CDescriptionText( const SWindowInfo &sInfo, NGame::IMission *pMission );
 
 	void Set( EMode eMode, const wstring &wsText = L"" );
 
@@ -217,8 +230,10 @@ public:
 	void Update( const STime &sTime, NGScene::I2DGameView *pView );
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CDescriptionText::CDescriptionText( const SWindowInfo &sInfo ):
-	CWindow( sInfo ), eMode( MODE_HIDDEN ), eTargetMode( MODE_HIDDEN ), sMorphTime( 0 ), fCoeff( 0 )
+// retail ctor @0x1a9190: CWindow(sInfo) then stores the mission back-pointer (a refcounted CPtr
+// assign); the scalars keep their Jan03 seeds.
+CDescriptionText::CDescriptionText( const SWindowInfo &sInfo, NGame::IMission *_pMission ):
+	CWindow( sInfo ), pMission( _pMission ), eMode( MODE_HIDDEN ), eTargetMode( MODE_HIDDEN ), sMorphTime( 0 ), fCoeff( 0 )
 {
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -361,7 +376,7 @@ class CZoneSector: public CChapterSector
 	OBJECT_BASIC_METHODS(CZoneSector)
 private:
 	ZDATA_(CChapterSector)
-	CPtr<NGame::IChapterMap> pChapter;
+	CPtr<NGame::IMission> pChapter;
 	CPtr<NScenario::CScenarioZone> pZone;
 	////
 	bool bVisited;
@@ -375,7 +390,7 @@ private:
 
 public:
 	CZoneSector() {}
-	CZoneSector( const SWindowInfo &sInfo, NGame::IChapterMap *pChapter, const SChapterSector &sSector );
+	CZoneSector( const SWindowInfo &sInfo, NGame::IMission *pChapter, const SChapterSector &sSector );
 
 	bool IsRecommended() const;
 	bool GetDescription( wstring *psText ) const;
@@ -384,13 +399,13 @@ public:
 	void Draw( const STime &sTime, NGScene::I2DGameView *pView );
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CZoneSector::CZoneSector( const SWindowInfo &sInfo, NGame::IChapterMap *_pChapter, const SChapterSector &sSector ):
+CZoneSector::CZoneSector( const SWindowInfo &sInfo, NGame::IMission *_pChapter, const SChapterSector &sSector ):
 	CChapterSector( sInfo, sSector ), pChapter( _pChapter ), bVisited( false ), bRecommended( false ), fCoeff( 0 ), sMorphTime( 0 )
 {
 	pFlash = new CImageDraw( SRect( 0, 0, GetSize().x, GetSize().y ) );
 	pNormal = new CImageDraw( SRect( 0, 0, GetSize().x, GetSize().y ) );
 
-	pZone = pChapter->GetGlobalGame()->pScenarioTracker->GetZoneByDBZone( NDb::GetDBScenarioZone( GetSector().nTemplate ) );
+	pZone = pChapter->GetRPGGame()->pScenarioTracker->GetZoneByDBZone( NDb::GetDBScenarioZone( GetSector().nTemplate ) );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CZoneSector::IsRecommended() const
@@ -405,7 +420,7 @@ bool CZoneSector::GetDescription( wstring *psText ) const
 
 	*psText = GetDBString( GetSector().nDescriptionID );
 
-	CPtr<NRPG::CGlobalGame> pGame = pChapter->GetGlobalGame();
+	CPtr<NRPG::CGlobalGame> pGame = pChapter->GetRPGGame();
 	if ( IsValid( pZone ) )
 	{
 		list< CPtr<NScenario::CScenarioClue> > cluesList;
@@ -439,7 +454,7 @@ void CZoneSector::UpdateSector( const STime &sTime, const CVec2 &vTeamPos )
 	if ( !IsValid( pZone ) )
 		return;
 
-	CPtr<NRPG::CGlobalGame> pGame = pChapter->GetGlobalGame();
+	CPtr<NRPG::CGlobalGame> pGame = pChapter->GetRPGGame();
 
 	bool bHit = HitTest( vTeamPos.x, vTeamPos.y );
 	if ( bHit )
@@ -507,7 +522,7 @@ class CRandomSector: public CChapterSector
 	OBJECT_BASIC_METHODS(CRandomSector)
 private:
 	ZDATA_(CChapterSector)
-	CPtr<NGame::IChapterMap> pChapter;
+	CPtr<NGame::IMission> pChapter;
 	////
 	STime sUpdateTime;
 	CTRect<float> sZone;
@@ -519,14 +534,14 @@ private:
 
 public:
 	CRandomSector() {}
-	CRandomSector( const SWindowInfo &sInfo, NGame::IChapterMap *pChapter, const SChapterSector &sSector );
+	CRandomSector( const SWindowInfo &sInfo, NGame::IMission *pChapter, const SChapterSector &sSector );
 
 	void UpdateSector( const STime &sTime, const CVec2 &vTeamPos );
 	void Update( const STime &sTime, NGScene::I2DGameView *pView );
 	void Draw( const STime &sTime, NGScene::I2DGameView *pView );
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CRandomSector::CRandomSector( const SWindowInfo &sInfo, NGame::IChapterMap *_pChapter, const SChapterSector &sSector ):
+CRandomSector::CRandomSector( const SWindowInfo &sInfo, NGame::IMission *_pChapter, const SChapterSector &sSector ):
 	CChapterSector( sInfo, sSector ), pChapter( _pChapter ), sUpdateTime( 0 ), sZone( 0, 0, 0, 0 ), fCoeff( 0 ), sMorphTime( 0 )
 {
 	for ( int nPoint = 0; nPoint < sSector.pointsSet.size(); nPoint++ )
@@ -551,7 +566,7 @@ void CRandomSector::UpdateSector( const STime &sTime, const CVec2 &vTeamPos )
 
 	vector<string> templParams;
 	if ( HitTest( vTeamPos.x, vTeamPos.y ) )
-		NMainLoop::Command( new NGame::CICBeginMission( GetSector().nTemplate, -1, templParams, pChapter->GetGlobalGame(), pChapter->GetChapterMap()->pPWLImage ) );
+		NMainLoop::Command( new NGame::CICBeginMission( GetSector().nTemplate, -1, templParams, pChapter->GetRPGGame(), pChapter->GetChapterMap()->pPWLImage ) );
 
 	if ( sUpdateTime > sTime )
 		return;
@@ -624,7 +639,7 @@ class CExitZoneSector: public CChapterSector
 	OBJECT_BASIC_METHODS(CExitZoneSector)
 private:
 	ZDATA_(CChapterSector)
-	CPtr<NGame::IChapterMap> pChapter;
+	CPtr<NGame::IMission> pChapter;
 	////
 	bool bRecommended;
 	////
@@ -636,13 +651,13 @@ private:
 
 public:
 	CExitZoneSector() {}
-	CExitZoneSector( const SWindowInfo &sInfo, NGame::IChapterMap *pChapter, const SChapterSector &sSector );
+	CExitZoneSector( const SWindowInfo &sInfo, NGame::IMission *pChapter, const SChapterSector &sSector );
 
 	void UpdateSector( const STime &sTime, const CVec2 &vTeamPos );
 	void Draw( const STime &sTime, NGScene::I2DGameView *pView );
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CExitZoneSector::CExitZoneSector( const SWindowInfo &sInfo, NGame::IChapterMap *_pChapter, const SChapterSector &sSector ):
+CExitZoneSector::CExitZoneSector( const SWindowInfo &sInfo, NGame::IMission *_pChapter, const SChapterSector &sSector ):
 	CChapterSector( sInfo, sSector ), pChapter( _pChapter ), bRecommended( false ), fCoeff( 0 ), sMorphTime( 0 )
 {
 	pFlash = new CImageDraw( SRect( 0, 0, GetSize().x, GetSize().y ), NDb::GetUITexture( 561 ) );
@@ -657,10 +672,32 @@ CExitZoneSector::CExitZoneSector( const SWindowInfo &sInfo, NGame::IChapterMap *
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CExitZoneSector::UpdateSector( const STime &sTime, const CVec2 &vTeamPos )
 {
-	CPtr<NScenario::CScenarioZone> pRecomendedZone = pChapter->GetGlobalGame()->pScenarioTracker->GetRecommendedZone( pChapter->GetGlobalPlayer() );
+	// retail @0x1aa690 decodes to:
+	//     GetRecommendedZone( pChapter->GetRPGGame()->pScenarioTracker,          // vt+0x130, +0x38
+	//                         pChapter->GetActivePlayer()->GetGlobalPlayer() );  // vt+0x5c, then +0x68
+	// (slot-walked, not guessed: CChapterMap vftable @0x4b9adc slot 23 = vt+0x5c =
+	// CMissionBase::GetActivePlayer @0x1a1950 and slot 76 = vt+0x130 = CMissionBase::GetRPGGame
+	// @0x19df10; CPlayerTracker vftable @0x4c1ac4 slot 26 = vt+0x68 = CPlayerTracker::GetGlobalPlayer
+	// @0x2878b0.) The old `pChapter->GetGlobalPlayer()` was an IChapterMap-ism -- IMission has no such
+	// accessor, so the reparent had to resolve it.
+	//
+	// We CANNOT spell it retail's way yet, and calling GetActivePlayer() here would be a guaranteed
+	// null deref: retail's CChapterMap::Initialize @0x1a6b30 builds a world + a CPlayerTracker per
+	// global player and sets pActivePlayer = playersSet[0], but this fork's CChapterMap::Initialize
+	// creates none of that (CPlayerTracker's ctor hard-requires pMission->GetWorld()->AddPlayer /
+	// GetPathNetwork, and the fork's chapter map has no world). Porting that world/tracker
+	// construction is a separate behaviour leg, NOT this serialization reparent.
+	// What is written below is retail's VALUE, exactly: retail's pActivePlayer is
+	// playersSet[0] == CPlayerTracker(this, pGlobalGame->players[0], ...), whose GetGlobalPlayer()
+	// @0x2878b0 returns that same pGlobalGame->players[0]. So GetActivePlayer()->GetGlobalPlayer()
+	// IS GetRPGGame()->players.front() -- the identical object, not an approximation of it. It is
+	// also byte-for-byte what this call site already resolved to before the reparent (the deleted
+	// CChapterMap::GetGlobalPlayer body was `ASSERT(players.size()==1); return players.front();`).
+	// Switch to the retail spelling when the chapter-map world/tracker port lands.
+	CPtr<NScenario::CScenarioZone> pRecomendedZone = pChapter->GetRPGGame()->pScenarioTracker->GetRecommendedZone( pChapter->GetRPGGame()->players.front() );
 
 	list<CPtr<NScenario::CScenarioZone> > zonesList;
-	pChapter->GetGlobalGame()->pScenarioTracker->GetAvailableZones( &zonesList );
+	pChapter->GetRPGGame()->pScenarioTracker->GetAvailableZones( &zonesList );
 
 	CDGPtr<CPtrFuncBase<CChapterInfo> > pChapterInfo = pChapter->GetChapterInfo();
 	pChapterInfo.Refresh();
@@ -673,7 +710,7 @@ void CExitZoneSector::UpdateSector( const STime &sTime, const CVec2 &vTeamPos )
 		if ( sChapterSector.eType != ZONE )
 			continue;
 
-		CPtr<NScenario::CScenarioZone> pZone = pChapter->GetGlobalGame()->pScenarioTracker->GetZoneByDBZone( NDb::GetDBScenarioZone( sChapterSector.nTemplate ) );
+		CPtr<NScenario::CScenarioZone> pZone = pChapter->GetRPGGame()->pScenarioTracker->GetZoneByDBZone( NDb::GetDBScenarioZone( sChapterSector.nTemplate ) );
 		if ( ( find( zonesList.begin(), zonesList.end(), pZone ) != zonesList.end() ) && ( pRecomendedZone == pZone ) )
 			bRecommended = false;
 	}
@@ -700,19 +737,18 @@ void CExitZoneSector::Draw( const STime &sTime, NGScene::I2DGameView *pView )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CChapterMapUI
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CChapterMapUI::CChapterMapUI( const SWindowInfo &sInfo, NGame::IChapterMap *_pChapter ):
-	CWindow( sInfo ), pChapter( _pChapter )
+CChapterMapUI::CChapterMapUI( const SWindowInfo &sInfo, NGame::IMission *_pChapter ):
+	CDesktopWindow( sInfo ), pChapter( _pChapter ), nWaitForSpecialFrame( 0 )
 {
 	// retail CChapterMapUI ctor @0x1aa1b0: disasm @0x5aa2a3 `mov ecx,1` -> NDb::GetUICursor(1) =
 	// UICursors row 1 "xz" (UITexture 295, NormalPen.cur) -- the chapter-map default cursor.
-	// (492 was the pre-remap arbitrary id = HitLocationLeftArm.cur.)
-	sCursor = SCursorInfo( NDb::GetUITexture( 295 ) );
+	sCursor = SCursorInfo( NDb::GetUICursor( 1 ) );
 
 	CDGPtr<CPtrFuncBase<CChapterInfo> > pChapterInfo = pChapter->GetChapterInfo();
 	pChapterInfo.Refresh();
 	pInfo = pChapterInfo->GetValue();
 
-	vCurrentPos = pChapter->GetGlobalGame()->vChapterPos;
+	vCurrentPos = pChapter->GetRPGGame()->vChapterPos;
 	vTargetPos = vCurrentPos;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -752,17 +788,17 @@ bool CChapterMapUI::ProcessMessage( const SEvent &sEvent )
 					if ( sSector.eType == ZONE )
 					{
 						vector<string> templParams;
-						CPtr<NScenario::CScenarioZone> pZone = pChapter->GetGlobalGame()->pScenarioTracker->GetZoneByDBZone( NDb::GetDBScenarioZone( sSector.nTemplate ) );
+						CPtr<NScenario::CScenarioZone> pZone = pChapter->GetRPGGame()->pScenarioTracker->GetZoneByDBZone( NDb::GetDBScenarioZone( sSector.nTemplate ) );
 						if ( IsValid( pZone ) )
 						{
 							bHandled = true;
-							NMainLoop::Command( new NGame::CICBeginMission( pZone, -1, templParams, pChapter->GetGlobalGame(), false, pChapter->GetChapterMap()->pPWLImage ) );
+							NMainLoop::Command( new NGame::CICBeginMission( pZone, -1, templParams, pChapter->GetRPGGame(), false, pChapter->GetChapterMap()->pPWLImage ) );
 						}
 					}
 					else if ( sSector.eType == EXITZONE )
 					{
 						bHandled = true;
-						NMainLoop::Command( new NGame::CICContinueGlobal( pChapter->GetGlobalGame() ) );
+						NMainLoop::Command( new NGame::CICContinueGlobal( pChapter->GetRPGGame() ) );
 					}
 				}
 
@@ -775,7 +811,7 @@ bool CChapterMapUI::ProcessMessage( const SEvent &sEvent )
 						int nID = sRand.Get( pChapterMap->campZonesSet.size() );
 
 						vector<string> templParams;
-						NMainLoop::Command( new NGame::CICBeginMission( pChapterMap->campZonesSet[nID], -1, templParams, pChapter->GetGlobalGame(), pChapterMap->pPWLImage ) );
+						NMainLoop::Command( new NGame::CICBeginMission( pChapterMap->campZonesSet[nID], -1, templParams, pChapter->GetRPGGame(), pChapterMap->pPWLImage ) );
 					}
 				}
 
@@ -793,8 +829,16 @@ bool CChapterMapUI::ProcessMessage( const SEvent &sEvent )
 		{
 			pShowGlobal = new CFlashButton( sEvent.pLoader->GetControl( "showglobal" ) );
 
-			pTextLeft = new CDescriptionText( sEvent.pLoader->GetControl( "text_left" ) );
-			pTextRight = new CDescriptionText( sEvent.pLoader->GetControl( "text_right" ) );
+			// retail @0x1abd20: both description panels are handed `this->pChapter` (decomp
+			// `CVar24 = this->pChapter; CDescriptionText::CDescriptionText(..., (IMission *)CVar24)`)
+			// -- that is the panel's tag-2 pMission.
+			pTextLeft = new CDescriptionText( sEvent.pLoader->GetControl( "text_left" ), pChapter );
+			pTextRight = new CDescriptionText( sEvent.pLoader->GetControl( "text_right" ), pChapter );
+
+			// retail @0x1abd20 builds the log panel here too, from the "logpanel" control with
+			// STREAM_GAME (decomp `EVar25 = STREAM_GAME; CLogPanel::CLogPanel(..., EVar25)`).
+			// Jan03 built it elsewhere; the decomp wins.
+			pLogPanel = new CLogPanel( sEvent.pLoader->GetControl( "logpanel" ), STREAM_GAME );
 			break;
 		}
 	case EVENT_TEMPLATELOADCOMPLETE:
@@ -846,7 +890,9 @@ bool CChapterMapUI::ProcessMessage( const SEvent &sEvent )
 		}
 	}
 
-	if ( CWindow::ProcessMessage( sEvent ) )
+	// retail @0x1abd20 chains the CDesktopWindow base (it is one) -- that is also what fills the base
+	// pClientWindow from the "view" control on EVENT_TEMPLATELOADCOMPLETE (CDesktopWindow tag 2).
+	if ( CDesktopWindow::ProcessMessage( sEvent ) )
 		return true;
 
 	switch( sEvent.nEvent )
@@ -931,7 +977,7 @@ void CChapterMapUI::Draw( const STime &sTime, NGScene::I2DGameView *pView )
 	if ( bHideRight )
 		pTextRight->Set( CDescriptionText::MODE_HIDDEN );
 
-	pChapter->GetGlobalGame()->vChapterPos = vCurrentPos;
+	pChapter->GetRPGGame()->vChapterPos = vCurrentPos;
 	sLastUpdateTime = sTargetTime;
 
 	SPoint sPoint;
@@ -951,19 +997,26 @@ void CChapterMapUI::Draw( const STime &sTime, NGScene::I2DGameView *pView )
 	pTeamMarker->SetPosition( SPoint( sPoint.x - sSize.x / 2, sPoint.y - sSize.y / 2 ) );
 	pTeamMarker->SetMode( bMoving ? CTeamMarker::MODE_MOVE : bHitSector ? CTeamMarker::MODE_ZONE : CTeamMarker::MODE_NORMAL );
 
-	list< CPtr<NScenario::CScenarioClue> > cluesList;
-	pChapter->GetGlobalGame()->pScenarioTracker->GetAvailableClues( &cluesList );
-	cluesList.sort( SCluesSort() );
-	for( list< CPtr<NScenario::CScenarioClue> >::const_iterator iTemp = cluesList.begin(); iTemp != cluesList.end(); iTemp++ )
+	// retail @0x1aac20: the clue drain is gated on the SECOND frame -- nWaitForSpecialFrame is
+	// post-incremented every Draw and the drain runs only when it reaches 2, i.e. exactly once, on
+	// the frame after the map first painted (so a CICShowClue never covers a blank map).
+	nWaitForSpecialFrame++;
+	if ( nWaitForSpecialFrame == 2 )
 	{
-		if ( !(*iTemp)->IsJustFound() )
-			continue;
+		list< CPtr<NScenario::CScenarioClue> > cluesList;
+		pChapter->GetRPGGame()->pScenarioTracker->GetAvailableClues( &cluesList );
+		cluesList.sort( SCluesSort() );
+		for( list< CPtr<NScenario::CScenarioClue> >::const_iterator iTemp = cluesList.begin(); iTemp != cluesList.end(); iTemp++ )
+		{
+			if ( !(*iTemp)->IsJustFound() )
+				continue;
 
-		NMainLoop::Command( new NGame::CICShowClue( pChapter->GetGlobalGame(), (*iTemp) ) );
-		(*iTemp)->SetJustFound( false );
+			NMainLoop::Command( new NGame::CICShowClue( pChapter->GetRPGGame(), (*iTemp) ) );
+			(*iTemp)->SetJustFound( false );
+		}
 	}
 
-	CWindow::Draw( sTime, pView );
+	CDesktopWindow::Draw( sTime, pView );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 } // NAMESPACE

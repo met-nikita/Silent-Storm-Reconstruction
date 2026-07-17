@@ -26,7 +26,6 @@ namespace NGScene
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CRenderPart;
 class CPolyline;
-class CRects;
 class IMaterial;
 class CParticles;
 class CParticleEffect;
@@ -123,7 +122,9 @@ public:
 	virtual CObjectBase* CreateGeometry( CPtrFuncBase<CObjectInfo> *pInfo, IMaterial *pMat, 
 		CFuncBase<vector<SHMatrix> > *pPlacement, CFuncBase<vector<NGfx::SCompactTransformer> > *_pMMXAnim, 
 		const SFullGroupInfo &_ginfo ) = 0;
-	virtual CObjectBase* CreateDynamicGeometry( CPtrFuncBase<CObjectInfo> *pInfo, IMaterial *pMat, 
+	// retail @0x15cd20: (generator, TRANSFORM node, material, bound node, group) -- the transform is a
+	// first-class part member (CDynamicGeometryPart::operator& @0x16b200 tag 3), applied by the combiner.
+	virtual CObjectBase* CreateDynamicGeometry( CPtrFuncBase<CObjectInfo> *pInfo, CFuncBase<SFBTransform> *pPlacement, IMaterial *pMat,
 		CFuncBase<SBound> *pBound, const SFullGroupInfo &_ginfo ) = 0;
 	virtual CObjectBase* CreateParticles( CPtrFuncBase<CParticleEffect> *pInfo,
 		CFuncBase<SFBTransform> *pPlacement, const SBound &bound, const SGroupInfo &_ginfo, int nPFlags ) = 0;
@@ -146,6 +147,8 @@ public:
 	virtual bool TraceScene( const SGroupSelect &mask, const CRay &r, float *pfT, CVec3 *pNormal, CVec3 *pColor, EScenePartsSet ps = SPS_STATIC, CObjectBase **ppElement = 0 ) = 0;
 	virtual SGroupSelect GetLastMask() = 0;
 	virtual void PrecacheMaterials() = 0;
+	// retail IGScene vtbl slot 25 @0x1673a0; bit 1 = scene receives no depth shadows, bit 2 = no CL updates
+	virtual void SetLightingOptions( int nOptions ) = 0;
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 IGScene* CreateScene();

@@ -20,17 +20,19 @@ namespace NGScene
 void CLODCalcer::Recalc() 
 {
 	float fDist = fabs2( ptCenter - pCamera->GetValue() ); 
-	value = fDist > sqr(4 * 8 * FP_GRID_STEP) ? 1 : 0; // 3 * 8 * GRID_STEP в квадрате
+	value = fDist > sqr(4 * 8 * FP_GRID_STEP) ? 1 : 0; // 3 * 8 * GRID_STEP пїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // Functions
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CalcDer( const CVec3 &ptSrc, const CVec3 &ptNormal, CVec3 *ptRes )
+// release @0x579f10: same projection/renormalize, but the result is PACKED into
+// the vertex's compact tangent slot (SVertex texU/texV are NGfx::SCompactVector).
+void CalcDer( const CVec3 &ptSrc, const CVec3 &ptNormal, NGfx::SCompactVector *ptRes )
 {
 	CVec3 vRes(ptSrc);
 	vRes -= ptNormal * (ptNormal * vRes);
 	Normalize( &vRes );
-	*ptRes = vRes;
+	NGfx::CalcCompactVector( ptRes, vRes );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 static SVertex* SetupMapVertex( SVertex *pvVertex, const CVec3 &vPoint, const CTRect<int> &nrRegion, const STerrainInfo *ptiInfo )
@@ -54,9 +56,9 @@ static SVertex* SetupMapVertex( SVertex *pvVertex, const CVec3 &vPoint, const CT
 	const float F_MUL = 1 / ( 2 * FP_GRID_STEP );
 	CVec3 ptNormal( -( fXP - fXM ) * F_MUL, -( fYP - fYM ) * F_MUL, 1 );
 	Normalize( &ptNormal );
-	pvVertex->normal = ptNormal;
-
-	pvVertex->normal = ptNormal;
+	// release @0x579f90 packs the heightfield normal once (the predecessor's
+	// duplicated raw store collapsed); texU/texV pack inside CalcDer.
+	NGfx::CalcCompactVector( &pvVertex->normal, ptNormal );
 	CalcDer( CVec3( 1, 0, 0 ), ptNormal, &pvVertex->texU );
 	CalcDer( CVec3( 0, 1, 0 ), ptNormal, &pvVertex->texV );
 	pvVertex->tex.u = (float)( vPoint.x - nrRegion.x1 ) / nrRegion.Width();
@@ -100,8 +102,10 @@ static SVertex* SetupHoleVertex( SVertex *pvVertex, const CVec3 &vPos, const CVe
 	pvVertex->pos.y = vPos.y * FP_GRID_STEP;
 	pvVertex->pos.z = vPos.z * FP_TERRAIN_H_SCALE;
 	pvVertex->tex = vTex;
-	pvVertex->texU = CVec3( 1, 0, 0 );
-	pvVertex->texV = CVec3( 0, 1, 0 );
+	// release @0x57a220 packs the constant tangent basis; NOTE it leaves
+	// pvVertex->normal UNWRITTEN here (stamped later from the face normals).
+	NGfx::CalcCompactVector( &pvVertex->texU, CVec3( 1, 0, 0 ) );
+	NGfx::CalcCompactVector( &pvVertex->texV, CVec3( 0, 1, 0 ) );
 	return pvVertex;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -149,9 +153,10 @@ void CTerrainModelWallPart::Recalc()
 
 		CVec3 vNormal = ( verts[sTriangle.i2] - verts[sTriangle.i1] ) ^ ( verts[sTriangle.i3] - verts[sTriangle.i2] );
 		vNormal /= fabs( vNormal );
-		res.verts[sTriangle.i1].normal = vNormal;
-		res.verts[sTriangle.i2].normal = vNormal;
-		res.verts[sTriangle.i3].normal = vNormal;
+		// release @0x57a4a0 stamps each face normal packed (SVertex.normal is compact).
+		NGfx::CalcCompactVector( &res.verts[sTriangle.i1].normal, vNormal );
+		NGfx::CalcCompactVector( &res.verts[sTriangle.i2].normal, vNormal );
+		NGfx::CalcCompactVector( &res.verts[sTriangle.i3].normal, vNormal );
 	}
 
 	pValue->Assign( res );

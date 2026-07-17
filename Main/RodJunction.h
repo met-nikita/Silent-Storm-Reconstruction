@@ -34,10 +34,14 @@ struct SRodEdge
 {
 	CIVec3 pt;
 	bool bFilled;
+	// retail SRodEdge carries the cellar/permanent-ground flag PER EDGE (AddRod @0xc9b60 builds
+	// junction L with e1.bCellar and junction R with e2.bCellar); the old per-CALL bCellarWall arg
+	// over-classified every neighbour of a cellar node as indestructible ground.
+	bool bCellar;
 	float fWeight;
 
-	SRodEdge( const CVec3 &point, bool bFilledNode, float _fWeight )
-		: pt(point.x, point.y, point.z ), bFilled(bFilledNode ), fWeight(_fWeight)
+	SRodEdge( const CVec3 &point, bool bFilledNode, float _fWeight, bool _bCellar = false )
+		: pt(point.x, point.y, point.z ), bFilled(bFilledNode ), bCellar(_bCellar), fWeight(_fWeight)
 	{
 	}
 	bool operator==( const SRodEdge &op ) const { return pt == op.pt && bFilled == op.bFilled; }
@@ -58,7 +62,7 @@ struct SPath
 struct SNeighb
 {
 	CRodID nRod;
-	ERodSide side;				// край pRod, который является соседом для текущей точки
+	ERodSide side;				// пїЅпїЅпїЅпїЅ pRod, пїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅ
 
 	SNeighb() : nRod(-1) {}
 	SNeighb( CRodID nR, ERodSide s ) : nRod(nR), side(s) {}
@@ -70,12 +74,12 @@ public:
 	enum EStability 
 	{ 
 		STABLE,	
-		UNSTABLE,		// может отвалиться, висит в воздухе или нет - неизвестно
-		FREE,				// висит в воздухе
-		UNSTABLE_NOTFREE, // точно не висит в воздухе
+		UNSTABLE,		// пїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ, пїЅпїЅпїЅпїЅпїЅ пїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅ пїЅпїЅпїЅ - пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ
+		FREE,				// пїЅпїЅпїЅпїЅпїЅ пїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ
+		UNSTABLE_NOTFREE, // пїЅпїЅпїЅпїЅпїЅ пїЅпїЅ пїЅпїЅпїЅпїЅпїЅ пїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ
 		UNKNOWN, 
 		UNINITIALIZED,
-		UNKNOWN_MOMENT,	// в этой точке не удалось посчитать момент
+		UNKNOWN_MOMENT,	// пїЅ пїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅ пїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ
 	};
 
 private:
@@ -86,22 +90,22 @@ private:
 	SNeighb neighbs[NDIRECTIONS];
 	//CNeighbList nlist;
 	EStability stability;
-	//EStability stabilities[NDIRECTIONS];	// стабильность по разным направлениям
-	float fJWeight;						// масса узла
-	float moments[UP];				// посчитанные моменты 
-	float fPressure;					// общая масса, давящая на узел
-	float fUltimateMoment;		// макс. момент, выдерживаемый узлом
-	float fUltimatePressure;	// макс. давление
+	//EStability stabilities[NDIRECTIONS];	// пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ
+	float fJWeight;						// пїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅ
+	float moments[UP];				// пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ 
+	float fPressure;					// пїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅ, пїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅ пїЅпїЅпїЅпїЅ
+	float fUltimateMoment;		// пїЅпїЅпїЅпїЅ. пїЅпїЅпїЅпїЅпїЅпїЅ, пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅ
+	float fUltimatePressure;	// пїЅпїЅпїЅпїЅ. пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ
 	int   nFlags;
 	int   nNeighbs;
-	//bool  bArrows[XPYM + 1];	// "стрелы" попавшие в узел из стабильных узлов
+	//bool  bArrows[XPYM + 1];	// "пїЅпїЅпїЅпїЅпїЅпїЅ" пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅ пїЅпїЅпїЅпїЅ пїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅ
 	enum EFlags
 	{
-		FLAG_GROUND     = 1 << 16,		// узел находится на земле <=> разрушаем или нет данный узел
-		FLAG_CELLARWALL = 1 << 17,		// принадлежит стенке подвала => неразрушаемый узел
+		FLAG_GROUND     = 1 << 16,		// пїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅ пїЅпїЅпїЅпїЅпїЅ <=> пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅ пїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅ
+		FLAG_CELLARWALL = 1 << 17,		// пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ => пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅ
 		FLAG_LOCK       = 1 << 18,
 		FLAG_FREECHECK  = 1 << 19,
-		FLAG_FILLED     = 1 << 20,		// соответсвует ли узел строительному блоку
+		FLAG_FILLED     = 1 << 20,		// пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅ пїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅ
 		FLAG_DESTROY    = 1 << 21,
 		FLAG_WAVEFRONT  = 1 << 22,
 		FLAG_BOTTOM     = 1 << 23,
@@ -112,7 +116,7 @@ private:
 	//vector<SPath> stableJunctions;
 	float fStableWeight;
 
-	vector<CJunctionID> parents; // ближайший узлы, который соответсвует строительному блоку
+	vector<CJunctionID> parents; // пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅ, пїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅ
 	EDirection wfrom;
 	//SPath wavefront;
 	int wavefront;
@@ -154,7 +158,7 @@ public:
 	float GetWeight() const { return fJWeight; }
 	float GetPressure() const { return fPressure; }
 	float GetMoment( EDirection dir ) const;
-	float GetMoment( const CRod *pRod ) const; // для визуализации
+	float GetMoment( const CRod *pRod ) const; // пїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ
 	CJunctionID GetNeighbour( EDirection dir ) const;
 	CRodID GetRod( EDirection dir ) const;
 	bool  IsFilled() const { return Flag( FLAG_FILLED ); }

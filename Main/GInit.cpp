@@ -16,21 +16,48 @@ bool CanRenderShadows() { return bCanRenderShadows; }
 bool CanCacheLighting() { return bCanCacheLighting; }
 bool CanCalcAmbient() { return bCanCalcAmbient; }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-bool SetModeFromConfig()
+// WIDESCREEN (Sentinels design): gfx_resolution accepts a "WxH" string (Sentinels stores it that
+// way -- its "gfx_resolution" @rdata 0x90b8d0 sits in a cmdline map of L"WxH" values, e.g.
+// "-1280" -> L"1280x960"); a plain number keeps the legacy width whitelist.
+void GetConfiguredVideoMode( int *pModeX, int *pModeY )
 {
-	NGfx::CheckDeviceCaps();
-	NGlobal::CValue sValue;
-
 	int nModeX = 1024, nModeY = 768;
-	sValue = NGlobal::GetVar( "gfx_resolution", 1024 );
-	if ( sValue.GetFloat() == 320 ) { nModeX = 320; nModeY = 200; }
+	NGlobal::CValue sValue = NGlobal::GetVar( "gfx_resolution", 1024 );
+
+	int nW = 0, nH = 0;
+	if ( swscanf( sValue.GetString().c_str(), L"%dx%d", &nW, &nH ) == 2 && nW > 0 && nH > 0 )
+	{
+		nModeX = nW; nModeY = nH;
+	}
+	// legacy width whitelist -- retail @0x1292e0 (note 1280 maps to 1280x960, NOT 1280x1024)
+	else if ( sValue.GetFloat() == 320 ) { nModeX = 320; nModeY = 200; }
 	else if ( sValue.GetFloat() == 400 ) { nModeX = 400; nModeY = 300; }
 	else if ( sValue.GetFloat() == 640 ) { nModeX = 640; nModeY = 480; }
 	else if ( sValue.GetFloat() == 800 ) { nModeX = 800; nModeY = 600; }
 	else if ( sValue.GetFloat() == 1024 ) { nModeX = 1024; nModeY = 768; }
-	else if ( sValue.GetFloat() == 1280 ) { nModeX = 1280; nModeY = 1024; }
+	else if ( sValue.GetFloat() == 1152 ) { nModeX = 1152; nModeY = 864; }
+	else if ( sValue.GetFloat() == 1280 ) { nModeX = 1280; nModeY = 960; }
 	else if ( sValue.GetFloat() == 1600 ) { nModeX = 1600; nModeY = 1200; }
 	else { ASSERT( 0 ); }
+
+	*pModeX = nModeX;
+	*pModeY = nModeY;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+bool SetModeFromConfig( bool bRecreate )
+{
+	// retail @0x1292e0 head: the gfx_recreate path tears the device down and re-initializes
+	// before applying the mode (this is what makes an in-game resolution switch take effect)
+	if ( bRecreate )
+	{
+		NGfx::Done3D();
+		NGfx::Init3D( NGfx::GetHWND() );
+	}
+	NGfx::CheckDeviceCaps();
+	NGlobal::CValue sValue;
+
+	int nModeX = 1024, nModeY = 768;
+	GetConfiguredVideoMode( &nModeX, &nModeY );
 
 	NGfx::EFS fullScreen = NGfx::WINDOWED;
 	sValue = NGlobal::GetVar( "gfx_fullscreen", 0 );
@@ -106,19 +133,32 @@ bool SetModeFromConfig()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CommandGfxUpdate( const string &szID, const vector<wstring> &paramsSet, void *pContext )
 {
-	SetModeFromConfig();
+	SetModeFromConfig( false );   // retail @0x12a250
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+void CommandGfxRecreate( const string &szID, const vector<wstring> &paramsSet, void *pContext )
+{
+	SetModeFromConfig( true );    // retail @0x12a260
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// gfx_16bit_mode backing flag, retail @0x99cf93 (Is16BitMode @0x10cde0 returns it; this tree's
+// render path is still always 32-bit -- the flag only feeds the saved config / options packing).
+static bool bUse16BitMode = false;
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail GInitInit @0x12a320: 2 cmds + 9 vars; Jan03's gfx_refreshlimit was DROPPED in retail and
+// gfx_fullscreen defaults to 1.0 there.
 START_REGISTER(GInit)
 	REGISTER_CMD( "gfx_update", CommandGfxUpdate )
+	REGISTER_CMD( "gfx_recreate", CommandGfxRecreate )
 	REGISTER_VAR( "gfx_resolution", 0, 1024, true )
-	REGISTER_VAR( "gfx_fullscreen", 0, 0, true )
-	REGISTER_VAR( "gfx_refreshlimit", 0, 1000, true )
+	REGISTER_VAR( "gfx_fullscreen", 0, 1, true )
 	REGISTER_VAR( "gfx_depth_tex_resolution", 0, 512, true )
 	REGISTER_VAR( "gfx_cl_sky_textures", 0, 0, true )
 	REGISTER_VAR( "gfx_cl_cube_resolution", 0, 16, true )
 	REGISTER_VAR( "gfx_cl", 0, 1, true )
 	REGISTER_VAR( "gfx_fastest", 0, 0, true )
+	REGISTER_VAR( "gfx_cl_use_precise_shadows", 0, 1, true )
+	REGISTER_VAR_EX( "gfx_16bit_mode", NGlobal::VarBoolHandler, &bUse16BitMode, 0, true )
 FINISH_REGISTER
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 }

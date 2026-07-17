@@ -53,10 +53,13 @@ class CDBAckInfo: public CDBRecord
 	ZDATA
 	ZPARENT( CDBRecord );
 public:
-	int nRPGPersID; // ��� ��������� ack
-	CPtr<CString> pText; // ��������� ������� ack
+	int nRPGPersID; // whose ack this is (the owning persona id)
+	CPtr<CString> pText; // the ack's display text
 	vector< SAckVoice > voices;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(2,(CDBRecord *)this); f.Add(3,&nRPGPersID); f.Add(4,&pText); f.Add(5,&voices); return 0; }
+	// retail CDBAckInfo +0x24 (operator& @0x420090 tag 6; Import @0x42d280 column "FemaleStringID"):
+	// the female-voiced variant of the ack text; without it female units show the male ack text.
+	CPtr<CString> pFemaleText;
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,(CDBRecord *)this); f.Add(3,&nRPGPersID); f.Add(4,&pText); f.Add(5,&voices); f.Add(6,&pFemaleText); return 0; }
 
 	virtual void Import();
 	const SAckVoice& GetVoice( int nVoice ) const;

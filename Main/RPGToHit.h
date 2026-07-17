@@ -6,6 +6,7 @@ namespace NAI
 	class IAIUnit;
 	struct SPosition;
 	struct SUnitPosition;
+	enum EHitLocation;
 }
 
 namespace NDb
@@ -25,6 +26,33 @@ class CWeaponItem;
 class IInventoryItem;
 class IGrenadeItem;
 class IMeleeWeaponItem;
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// STargetHLInfo -- which hit location(s) a melee swing at a unit may strike
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail NRPG::STargetHLInfo (PDB: sizeof 0x10; eHL @+0x00, accessibleHLs @+0x04): the release
+// replaced the Jan03 CExecMeleeUnit pair {bool bIsHitLocationShot; NAI::EHitLocation eHL} with this
+// one carrier -- the called (or HL_ANY) hit location PLUS the accessible-HL set SelectTargetHLs
+// computed, kept together so a mid-swing save restores the exact to-hit inputs.
+// Wire (operator& @0x3b0e10): tag 2 = eHL (4-byte DataChunk), tag 3 = accessibleHLs (int DoDataVector).
+struct STargetHLInfo
+{
+	ZDATA
+	NAI::EHitLocation eHL;
+	vector<int> accessibleHLs;
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&eHL); f.Add(3,&accessibleHLs); return 0; }
+
+	STargetHLInfo( NAI::EHitLocation _eHL = NAI::HL_ANY ): eHL( _eHL ) {}
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail NRPG::SelectTargetHLs @0x2b49e0 (RPGToHit.obj; PDB: bool __fastcall (CUnitServer*,
+// const SUnitPosition&, STargetHLInfo*, CUnitServer*, EHitLocation)) -- (re)fill *pInfo for a swing
+// by pUS (standing at pos) at pTarget:
+//   pInfo->eHL = eHL; accessibleHLs cleared; non-TH_MELEE attackers -> true (eHL only);
+//   melee: accessibleHLs = AIMap accessible hit locations of pTarget within F_MELEE_DISTANCE of
+//   pos.GetCenter(); empty -> FALSE; a called eHL found in the set narrows it to {eHL}; true.
+// (HL_ANY stays HL_ANY -- see the ORIGINAL BUG note at the definition.)
+bool SelectTargetHLs( NWorld::CUnitServer *pUS, const NAI::SUnitPosition &pos, STargetHLInfo *pInfo,
+	NWorld::CUnitServer *pTarget, NAI::EHitLocation eHL );
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // IToHitCalcer
 ////////////////////////////////////////////////////////////////////////////////////////////////////

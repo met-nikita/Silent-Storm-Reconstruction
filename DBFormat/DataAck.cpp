@@ -20,6 +20,7 @@ void CDBAckInfo::Import()
 {
 	NDatabase::ImportField( "WhoID", &nRPGPersID );
 	NDatabase::ImportField( "StringID", &pText );
+	NDatabase::ImportField( "FemaleStringID", &pFemaleText );	// retail @0x42d280: female-voiced ack text variant
 	// retail Import @0x42d280: ONE "FaceExpression" column seeds the expression of ALL SIX voice
 	// slots (it is the fill value of the voices resize)
 	string szExpr;

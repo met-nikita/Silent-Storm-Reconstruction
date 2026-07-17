@@ -22,8 +22,10 @@ externA5 bool bStaticShadowDepthRendered;
 class ICacheLightRender : virtual public CObjectBase
 {
 public:
-	virtual void RenderCL( NGfx::CRenderContext *pRC, IRender *pRender, CTransformStack *pTS, 
+	virtual void RenderCL( NGfx::CRenderContext *pRC, IRender *pRender, CTransformStack *pTS,
 		CSceneFragments *pGeom, bool bSceneHasChanged ) = 0;
+	// retail ICacheLightRender vtbl+8 @0x167380 (CGScene::nLightingOptions)
+	virtual int GetLightingOptions() = 0;
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CDirectionalLight: public ILight
@@ -68,7 +70,12 @@ class CDirectionalLight: public ILight
 		Execute( pRender, pRC, *pTS, lightOps, scene, lightInfo );
 	}
 	void FinalPass( NGfx::CRenderContext *pRC, ERenderPath renderPath );
-	void RenderPPShadowOps( CTransformStack *pTS, CTransformStack *pClipTS, NGfx::CRenderContext *pRC, ERenderPath renderPath, 
+	// retail @0x153900: fills depthInfo and re-renders the shared depth map; a no-shadow scene
+	// (options bit 1) gets identity/constant depthInfo and leaves the shared map untouched
+	void UpdateDepthTexture( CTransformStack *pTS, CTransformStack *pClipTS, IRender *pRender,
+		const SLightInfo &lightInfo, SPerspDirectionalDepthInfo *pDepthInfo );
+	NGfx::CTexture* GetDepthTexture();   // retail @0x150c00
+	void RenderPPShadowOps( CTransformStack *pTS, CTransformStack *pClipTS, NGfx::CRenderContext *pRC, ERenderPath renderPath,
 		IRender *pRender, CSceneFragments &scene, const SLightInfo &lightInfo, const SParticleLMRenderTargetInfo &particleLM );
 	void BlurLight( NGfx::CRenderContext *pRC );
 	void RenderOccluders( CTransformStack *pTS, NGfx::CRenderContext *pRC, IRender *pRender, CSceneFragments &scene );

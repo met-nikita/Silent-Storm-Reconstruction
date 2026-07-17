@@ -581,33 +581,18 @@ static void VarSetMusicVolume( const string &szID, const NGlobal::CValue &sValue
 	NFMSound::SetMusicMasterVolume( sValue.GetFloat() * 0xFF );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-static void VarSetOutputType( const string &szID, const NGlobal::CValue &sValue, void *pContext )
-{
-	NFMSound::ESpeakerType eType = NFMSound::SOUND_SM_MONO;
-
-	if ( sValue.GetString() == L"mono" )
-		eType = NFMSound::SOUND_SM_MONO;
-	else if ( sValue.GetString() == L"stereo" )
-		eType = NFMSound::SOUND_SM_STEREO;
-	else if ( sValue.GetString() == L"headphone" )
-		eType = NFMSound::SOUND_SM_HEADPHONE;
-	else if ( sValue.GetString() == L"surround" )
-		eType = NFMSound::SOUND_SM_SURROUND;
-	else if ( sValue.GetString() == L"quad" )
-		eType = NFMSound::SOUND_SM_QUAD;
-	else if ( sValue.GetString() == L"5dot1" )
-		eType = NFMSound::SOUND_SM_5DOT1;
-
-	NFMSound::SetSpeakerType( eType );
-}
+// (v1.2 deleted the whole sound_outputmode mechanism -- registration, VarSetOutputType handler and
+// the SetModeFromConfig output-mode stage.)
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// v1.2 SoundInit @0x706ae0: sound_mode is registered UNSAVED, both volumes default 0.75 (saved),
+// and the v1.1 sound_outputmode registration is dropped entirely (its SetModeFromConfig stage is
+// gone too -- already ported above).
 START_REGISTER(Sound)
 	REGISTER_CMD( "sound_update", CommandSoundUpdate )
 	////
-	REGISTER_VAR( "sound_mode", 0, 1.0f, true )
-	REGISTER_VAR( "sound_sfxvolume", VarSetSfxVolume, 1.0f, true )
-	REGISTER_VAR( "sound_musicvolume", VarSetMusicVolume, 1.0f, true )
-	REGISTER_VAR( "sound_outputmode", VarSetOutputType, NGlobal::CValue( L"mono" ), true )
+	REGISTER_VAR( "sound_mode", 0, 1.0f, false )
+	REGISTER_VAR( "sound_sfxvolume", VarSetSfxVolume, 0.75f, true )
+	REGISTER_VAR( "sound_musicvolume", VarSetMusicVolume, 0.75f, true )
 FINISH_REGISTER
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 }
@@ -617,3 +602,5 @@ BASIC_REGISTER_CLASS( ISoundScene )
 REGISTER_SAVELOAD_CLASS( 0x03081147, CSound )
 REGISTER_SAVELOAD_CLASS( 0xa1063160, CMusic )		// retail classreg id for NSound::CMusic (pMusic is serialized in the scene's tag 5)
 REGISTER_SAVELOAD_CLASS( 0x02881171, CSoundScene )
+// retail saveload ids (serialization-convergence W1; s2_scratch docs/SERIALIZATION_CONVERGENCE.md)
+REGISTER_SAVELOAD_CLASS( 0xA1863130, CSound2D )

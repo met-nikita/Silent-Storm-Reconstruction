@@ -229,8 +229,8 @@ BEGIN_SCRIPT_COMMAND( LeaveToSubZone, "n" )
 	return 0;
 END_SCRIPT_COMMAND
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// retail luaSetFirstMissionMode @0x2ee200 ("b"): enter/exit "first mission" HUD mode. The mission strips the
-// 0x14 HUD panels now and latches CMission::bSpecialFirstMissionMode (future SetPanelState keeps them off).
+// retail luaSetFirstMissionMode @0x2ee200 ("b"): enter/exit "first mission" HUD mode. The mission closes the
+// medals/biography panels now and latches CMission::bSpecialFirstMissionMode (future SetPanelState keeps them off).
 BEGIN_SCRIPT_COMMAND( SetFirstMissionMode, "b" )
 	pScript->AddUICommand( new NWorld::CUICmdFirstMissionMode( luaParams[ 0 ].b ) );
 	return 0;

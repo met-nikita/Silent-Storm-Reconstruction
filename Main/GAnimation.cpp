@@ -4,6 +4,7 @@
 #include "..\Misc\RandomGen.h"
 #include "..\Misc\BasicShare.h"
 #include "..\MiscDll\LogStream.h"
+#include "..\MiscDll\Commands.h"   // NGlobal::GetVar (d_idle_animation, retail @0x4deac0)
 #include "GSceneUtils.h"
 #include "GAnimFormat.h"
 #include "GAnimParticles.h"
@@ -703,6 +704,9 @@ void CASmartAimer::GetFrame( STime t, SSkeletonPose *pPose )
 					pAnim->SetInterval( tFrom, tFrom + pAnim->GetTime() );
 					pAnim->SetStand( tFrom, state.pos, state.fAngle );
 					tIdleEnd = tFrom + pAnim->GetTime();
+					// retail @0x4deac0: d_idle_animation console var logs every scheduled ambient-idle clip
+					if ( NGlobal::GetVar( "d_idle_animation" ).GetFloat() != 0 )
+						csSystem << " Playing idle animation, id = " << pAnim->GetRecordID() << endl;
 					if ( !state.pTerrain )
 						pIdleAnim = pAnim;
 					else if ( state.bCrawl )

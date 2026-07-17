@@ -108,9 +108,14 @@ private:
 	CPtr<NGame::IMission> pMission;
 	////
 	CPtr<CButton> pClose;
-	CObj<CMLText> pTextInfo;
+	CObj<CText> pTextInfo;
 	vector<CPtr<CPerkButton> > perksButtons;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CWindow*)this); f.Add(2,&pUnit); f.Add(3,&pMission); f.Add(4,&pClose); f.Add(5,&pTextInfo); f.Add(6,&perksButtons); return 0; }
+	// retail +0x9c/+0xa0/+0xa4 (operator& @0x22e170 tags 7/8/9): the top-bar hover buttons,
+	// built in EVENT_TEMPLATELOAD (@0x22cdf0) and gated in Draw (@0x22c630)
+	CPtr<CHoverButton> pMedals;
+	CPtr<CHoverButton> pBiography;
+	CPtr<CHoverButton> pCharacter;
+	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CWindow*)this); f.Add(2,&pUnit); f.Add(3,&pMission); f.Add(4,&pClose); f.Add(5,&pTextInfo); f.Add(6,&perksButtons); f.Add(7,&pMedals); f.Add(8,&pBiography); f.Add(9,&pCharacter); return 0; }
 
 public:
 	CPerksPanelView() {}
@@ -146,7 +151,25 @@ bool CPerksPanelView::ProcessMessage( const SEvent &sEvent )
 		}
 	case EVENT_TEMPLATELOAD:
 		{
-			pTextInfo = new CMLText( sEvent.pLoader->GetControl( "info" ) );
+			// retail @0x22cdf0 builds the top-bar hover buttons FIRST (before the info text and the
+			// perk grid), each AddImageState in retail's literal order hover(1)/normal(0)/disabled(2);
+			// texture ids raw-disasm'd from the `mov ecx, imm` GetUITexture args (Ghidra dropped them):
+			// medals 400/400/418, biography 381/381/429, character 383/383 (NO disabled state).
+			pMedals = new CHoverButton( sEvent.pLoader->GetControl( "medals" ) );
+			pMedals->AddImageState( CHoverButton::STATE_HOVER, NDb::GetUITexture( 400 ) );
+			pMedals->AddImageState( CHoverButton::STATE_NORMAL, NDb::GetUITexture( 400 ) );
+			pMedals->AddImageState( CHoverButton::STATE_DISABLED, NDb::GetUITexture( 418 ) );
+
+			pBiography = new CHoverButton( sEvent.pLoader->GetControl( "biography" ) );
+			pBiography->AddImageState( CHoverButton::STATE_HOVER, NDb::GetUITexture( 381 ) );
+			pBiography->AddImageState( CHoverButton::STATE_NORMAL, NDb::GetUITexture( 381 ) );
+			pBiography->AddImageState( CHoverButton::STATE_DISABLED, NDb::GetUITexture( 429 ) );
+
+			pCharacter = new CHoverButton( sEvent.pLoader->GetControl( "character" ) );
+			pCharacter->AddImageState( CHoverButton::STATE_HOVER, NDb::GetUITexture( 383 ) );
+			pCharacter->AddImageState( CHoverButton::STATE_NORMAL, NDb::GetUITexture( 383 ) );
+
+			pTextInfo = new CText( sEvent.pLoader->GetControl( "info" ) );
 
 			NRPG::CPerksTree *pTree = pUnit->GetRPG()->GetRPGUnit()->GetPerksTree();
 
@@ -176,6 +199,12 @@ bool CPerksPanelView::ProcessMessage( const SEvent &sEvent )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CPerksPanelView::Draw( const STime &sTime, NGScene::I2DGameView *pView )
 {
+	// retail @0x22c630 head: Medals & Biography are enabled only outside the scripted first-mission
+	// (tutorial) HUD mode -- the probe (mission vtbl+0xf8) is invoked once per button, and
+	// pCharacter is deliberately left unstyled; no null guards, exactly like retail.
+	pMedals->SetStyle( STYLE_ENABLED, !pMission->IsSpecialFirstMissionMode() );
+	pBiography->SetStyle( STYLE_ENABLED, !pMission->IsSpecialFirstMissionMode() );
+
 	NRPG::CPerksTree *pTree = pUnit->GetRPG()->GetRPGUnit()->GetPerksTree();
 
 	pTextInfo->SetVal( L"points", pTree->GetPerkPoints() );
@@ -263,3 +292,5 @@ void CPerksPanel::Draw( const STime &sTime, NGScene::I2DGameView *pView )
 using namespace NUI;
 REGISTER_SAVELOAD_CLASS( 0xB1202130, CPerksPanel );
 REGISTER_SAVELOAD_CLASS( 0xB1202131, CPerksPanelView );
+// retail saveload ids (serialization-convergence W1; s2_scratch docs/SERIALIZATION_CONVERGENCE.md)
+REGISTER_SAVELOAD_CLASS( 0xA2033140, CPerkButton )

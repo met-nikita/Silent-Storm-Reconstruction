@@ -14,15 +14,15 @@
 #include "UIBaseCtrls.h"
 #include "UICommCtrls.h"
 #include "Console.h"
+#include "..\MiscDll\Commands.h"   // REGISTER_CMD ("wirbelwind" console unlock)
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 namespace NUI
 {
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// UITexture 292 = "Normal" (the arrow cursor). The predecessor's 202 is UITexture "HitLocation - Head"
-// (the attack_head body-part cursor) -> the default cursor showed the body silhouette everywhere. The release
-// reaches the normal cursor via GetUICursor(2), whose UITexture is 292; we keep the GetUITexture path + the
-// correct id. (A fuller GetUICursor migration -- UICursor carries the hotspot center -- is a separate leg.)
-const int N_DEFAULT_CURSOR = 292;
+// UICursors row 2 = "normal" (the arrow cursor, UITexture 292). Retail reaches it via NDb::GetUICursor(2)
+// (ctor @0x31dbd0); the GetUICursor migration landed with the serialization convergence -- SCursorInfo now
+// carries the CUICursor record (hotspot center included) exactly like retail.
+const int N_DEFAULT_CURSOR = 2;
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 wstring GetDBString( int nID )
 {
@@ -297,17 +297,51 @@ void LoadTemplate( CWindow *pWindow, NDb::CUIContainer *pTemplate )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CInterface
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CInterface::CInterface(): 
-	cmdLButtonDown( "leftbutton_down" ), cmdLButtonUp( "leftbutton_up" ), cmdRButtonDown( "rightbutton_down" ), cmdRButtonUp( "rightbutton_up" ), 
-	cmdConsole( "console" ), cmdFPSShow( "showfps" ), bindScroll( "scroll" )
+// retail NUI::CInterface::operator& @0x31fea0 -- see the tag map in UIInterface.h. Out of line so
+// CToolTip (UICommCtrls.h) is a complete type for the pToolTip slot.
+int CInterface::operator&( CStructureSaver &f )
 {
+	f.Add( 1, (CWindow*)this );
+	f.Add( 5, &sCursorPoint );
+	f.Add( 6, &sCursor );
+	f.Add( 7, &sDefaultCursor );
+	f.Add( 10, &pCursor );
+	f.Add( 11, &pConsole );
+	f.Add( 12, &pSound );
+	f.Add( 13, &pView );
+	f.Add( 14, &pMouseCapture );
+	f.Add( 15, &pToolTipOwner );
+	f.Add( 16, &pToolTip );
+	f.Add( 17, &bShowFPSStats );
+	f.Add( 18, &pFPSText );
+	f.Add( 20, &bToolTipSet );
+	f.Add( 21, &fMouseWheelDelta );
+	f.Add( 22, &sCounter );
+	f.Add( 23, &bOwnSoundScene );
+	return 0;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+CInterface::CInterface():
+	cmdLButtonDown( "leftbutton_down" ), cmdLButtonUp( "leftbutton_up" ), cmdRButtonDown( "rightbutton_down" ), cmdRButtonUp( "rightbutton_up" ),
+	cmdConsole( "console" ), cmdFPSShow( "showfps" ), bindScroll( "scroll" ),
+	sDoubleClickTime( 0 ), sLastLButtonDownTime( 0 ), sLastRButtonDownTime( 0 ), sLastLButtonClickPoint( 0, 0 ), sCursorPoint( 0, 0 ), sLastTime( 0 ), bShowFPSStats( false ),
+	bToolTipSet( false ), fMouseWheelDelta( 0 ), bOwnSoundScene( false )		// retail default ctor @0x31cbd0 zeroes the time/point scalars + flags
+{
+	// retail default ctor @0x31cbd0 tail: sDoubleClickTime = GetDoubleClickTime(). These members
+	// became retail-parity FORMAT HOLES in W3 (dev tags 2/3/4/8/9/19 dropped from operator&), so
+	// the deserialization path must seed them here -- they no longer arrive from the save.
+	sDoubleClickTime = GetDoubleClickTime();
+	// dev-only "Work in progress" overlay (no retail counterpart; retail tag-19 hole). Drawn
+	// unconditionally each frame -- a loaded CInterface crashed on the NULL CTextDraw.
+	pNonPublicDemo = new CTextDraw( SPoint( 0, 32 ), SPoint( 1024, 768 ), L"<font size=18pt face=Courier><right>Work in progress" );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CInterface::CInterface( ICursor* _pCursor, NSound::ISoundScene *_pSound ): 
 	CWindow( SWindowInfo( 0, SPoint( 0, 0 ), SPoint( 1024, 768 ), "desktop", STYLE_VISIBLE | STYLE_ENABLED ) ), bShowFPSStats( false ), 
 	cmdLButtonDown( "leftbutton_down" ), cmdLButtonUp( "leftbutton_up" ), cmdRButtonDown( "rightbutton_down" ), cmdRButtonUp( "rightbutton_up" ), 
 	cmdConsole( "console" ), cmdFPSShow( "showfps" ), bindScroll( "scroll" ),
-	sDoubleClickTime( 0 ), sLastLButtonDownTime( 0 ), sLastRButtonDownTime( 0 ), sCursorPoint( 0, 0 ), sLastTime( 0 )
+	sDoubleClickTime( 0 ), sLastLButtonDownTime( 0 ), sLastRButtonDownTime( 0 ), sLastLButtonClickPoint( 0, 0 ), sCursorPoint( 0, 0 ), sLastTime( 0 ),
+	bToolTipSet( false ), fMouseWheelDelta( 0 ), bOwnSoundScene( false )
 {
 	SetInterface( this );
 
@@ -324,13 +358,17 @@ CInterface::CInterface( ICursor* _pCursor, NSound::ISoundScene *_pSound ):
 	// per-frame pump; the CPtr releases it at interface teardown.
 	pSound = _pSound;
 	if ( !IsValid( pSound ) )
+	{
+		bOwnSoundScene = true;		// retail @0x31dbd0: the flag is SET before the own scene is created (serialized tag 23)
 		pSound = NSound::CreateSoundScene( 0 );
+	}
 	pCursor = _pCursor;
 	pConsole = new CConsole( SWindowInfo( this, SPoint( 0, 0 ), SPoint( 0, 0 ), "console", STYLE_ENABLED | STYLE_TOPMOST ) );
 	NUI::LoadTemplate( pConsole, NDb::GetUIContainer( 42 ) );
 	sDoubleClickTime = GetDoubleClickTime();
 
-	sDefaultCursor = SCursorInfo( NDb::GetUITexture( N_DEFAULT_CURSOR ) );
+	// retail @0x31dbd0 tail: sDefaultCursor = SCursorInfo( NDb::GetUICursor(2) ) -- the UICursors RECORD.
+	sDefaultCursor = SCursorInfo( NDb::GetUICursor( N_DEFAULT_CURSOR ) );
 
 	pFPSText = new CTextDraw( SPoint( 0, 32 ), SPoint( 1024, 768 ), L"Counting..." );
 	pNonPublicDemo = new CTextDraw( SPoint( 0, 32 ), SPoint( 1024, 768 ), L"<font size=18pt face=Courier><right>Work in progress" );
@@ -353,7 +391,8 @@ const SCursorInfo& CInterface::GetDefaultCursorInfo() const
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CInterface::SetCursorInfo( const SCursorInfo &sInfo )
 {
-	if ( sInfo.pTexture )
+	// retail @0x31bf80: a null incoming CURSOR RECORD falls back to the default cursor.
+	if ( sInfo.pCursor )
 		sCursor = sInfo;
 	else
 		sCursor = sDefaultCursor;
@@ -361,6 +400,11 @@ void CInterface::SetCursorInfo( const SCursorInfo &sInfo )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CInterface::SetToolTipOwner( CWindow *pOwner )
 {
+	// retail @0x31c9e0: a live owner that owns a live tooltip sets the STICKY per-frame flag first
+	// (Step clears it and tears the tooltip down when no window re-claims it this frame).
+	if ( IsValid( pOwner ) && IsValid( pOwner->GetToolTip() ) )
+		bToolTipSet = true;
+
 	if ( pToolTipOwner == pOwner )
 		return;
 
@@ -392,6 +436,12 @@ CObjectBase* CInterface::CreateMouseCapture( CWindow *pWindow )
 	return pMouseCapture;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail @0x31c060: drop the capture; the CMObj assignment releases the old handler.
+void CInterface::ResetMouseCapture()
+{
+	pMouseCapture = 0;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 NSound::ISoundScene* CInterface::GetSound()
 {
 	return pSound;
@@ -402,6 +452,20 @@ NGScene::I2DGameView* CInterface::GetView()
 	return pView;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// Console lock: zero-init flag @0x9C7794, set ONLY by the "wirbelwind" command (UnlockConsole @0x71B870,
+// registered in UIInterfaceInit @0x71E630), checked ONLY at the ProcessEvent console toggle @0x71C0CB.
+static bool bEnableConsole = false;
+////////////////////////////////////////////////////////////////////////////////////////////////////
+static void UnlockConsole( const string &szID, const vector<wstring> &szParams, void *pContext )
+{
+	bEnableConsole = true;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+START_REGISTER(UIInterface)
+	REGISTER_CMD( "wirbelwind", UnlockConsole )
+FINISH_REGISTER
+////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CInterface::ProcessEvent( const NInput::SEvent &eEvent )
 {
 	int nVirtualKey;
@@ -409,21 +473,33 @@ bool CInterface::ProcessEvent( const NInput::SEvent &eEvent )
 
 	if ( cmdConsole.ProcessEvent( eEvent ) )
 	{
-		pConsole->SetConsoleState( !pConsole->GetStyle( NUI::STYLE_VISIBLE ) );
+		// retail @0x71C0CB: locked console still consumes the toggle event
+		if ( bEnableConsole )
+			pConsole->SetConsoleState( !pConsole->GetStyle( NUI::STYLE_VISIBLE ) );
 		return true;
 	}
 	if ( pConsole->ProcessEvent( eEvent ) )
 		return true;
 
-	SPoint sPoint( pCursor->GetPos().x * 1024 / pView->GetViewportSize().x, pCursor->GetPos().y * 768 / pView->GetViewportSize().y  );
+	// retail @0x31c090: div-then-mul at x87 double precision, fistp RC=truncate (NOT round-to-nearest)
+	SPoint sPoint( int( (double)pCursor->GetPos().x / pView->GetViewportSize().x * 1024.0 ), int( (double)pCursor->GetPos().y / pView->GetViewportSize().y * 768.0 ) );
 	if ( cmdLButtonUp.ProcessEvent( eEvent ) )
 	{
 		bRet |= ProcessMessage( SEvent( EVENT_LBUTTONUP, sPoint.x, sPoint.y ) );
 
+		// retail @0x31c090 step 4: the synthetic DBLCLK also needs the two clicks within 5.0px.
+		// Time-only gating forged a DBLCLK from panel-button click + world click -- the reset
+		// default state ran CStateMove::OnLButtonDblClk, so a look/attack click became a move.
 		if ( GetTickCount() - sLastLButtonDownTime < sDoubleClickTime )
-			bRet |= ProcessMessage( SEvent( EVENT_LBUTTONDBLCLK, sPoint.x, sPoint.y ) );
+		{
+			int nDX = sLastLButtonClickPoint.x - sPoint.x;
+			int nDY = sLastLButtonClickPoint.y - sPoint.y;
+			if ( sqrt( (float)( nDX * nDX + nDY * nDY ) ) < 5.0f )
+				bRet |= ProcessMessage( SEvent( EVENT_LBUTTONDBLCLK, sPoint.x, sPoint.y ) );
+		}
 
 		sLastLButtonDownTime = GetTickCount();
+		sLastLButtonClickPoint = sPoint;
 	}
 	if ( cmdLButtonDown.ProcessEvent( eEvent ) )
 		bRet |= ProcessMessage( SEvent( EVENT_LBUTTONDOWN, sPoint.x, sPoint.y ) );
@@ -431,8 +507,20 @@ bool CInterface::ProcessEvent( const NInput::SEvent &eEvent )
 		bRet |= ProcessMessage( SEvent( EVENT_RBUTTONUP, sPoint.x, sPoint.y ) );
 	if ( cmdRButtonDown.ProcessEvent( eEvent ) )
 		bRet |= ProcessMessage( SEvent( EVENT_RBUTTONDOWN, sPoint.x, sPoint.y ) );
-	if ( bindScroll.ProcessEvent( eEvent ) )
-		bRet |= ProcessMessage( SEvent( EVENT_SCROLL, sPoint.x, sPoint.y, -bindScroll.GetDelta() ) );
+	// retail ProcessEvent @0x31c090 step 11: the scroll binding is ALWAYS pumped for its delta; the
+	// delta accumulates (x100) into fMouseWheelDelta, and only WHOLE steps are dispatched as
+	// EVENT_SCROLL (fParam = whole * -0.01), the remainder carrying over to the next event.
+	bindScroll.ProcessEvent( eEvent );
+	{
+		float fDelta = bindScroll.GetDelta();
+		fMouseWheelDelta = fDelta * 100.0f + fMouseWheelDelta;
+		if ( fabs( fMouseWheelDelta ) > 1.0f )
+		{
+			float fWhole = (float)(int)( fMouseWheelDelta >= 0 ? fMouseWheelDelta + 0.5f : fMouseWheelDelta - 0.5f );	// ROUND
+			fMouseWheelDelta -= fWhole;
+			bRet |= ProcessMessage( SEvent( EVENT_SCROLL, sPoint.x, sPoint.y, fWhole * -0.01f ) );
+		}
+	}
 	if ( NInput::GetKeyForMessage( eEvent.mMessage, &nVirtualKey ) )
 		bRet |= ProcessMessage( SEvent( EVENT_CHAR, nVirtualKey ) );
 	// Raw Windows message-derived keys (auto-repeating via the OS WM_KEYDOWN/WM_CHAR stream).
@@ -474,12 +562,26 @@ void CInterface::Step( const STime &sTime )
 {
 	sLastTime = sTime;		// keep the UI ms clock current (read by NScript::luaGetUITime)
 
-	SPoint sPoint( pCursor->GetPos().x * 1024 / pView->GetViewportSize().x, pCursor->GetPos().y * 768 / pView->GetViewportSize().y  );
+	// retail @0x31c5c0: same div-then-mul double-precision truncating map as ProcessEvent @0x31c090
+	SPoint sPoint( int( (double)pCursor->GetPos().x / pView->GetViewportSize().x * 1024.0 ), int( (double)pCursor->GetPos().y / pView->GetViewportSize().y * 768.0 ) );
 	sCursorPoint = sPoint;
+
+	// retail Step @0x31c5c0: clear the sticky claim flag, pump the frame's MOUSEMOVE (any window that
+	// owns a tooltip re-claims via SetToolTipOwner), and when nothing claimed it this frame tear the
+	// tooltip down (hide + release tooltip and owner -- the open-coded SetToolTipOwner(0)).
+	bToolTipSet = false;
 
 	sCursor = sDefaultCursor;
 	ProcessMessage( SEvent( EVENT_MOUSEMOVE, sPoint.x, sPoint.y ) );
 	pCursor->SetCursor( sCursor );
+
+	if ( !bToolTipSet )
+	{
+		if ( IsValid( pToolTip ) )
+			pToolTip->SetStyle( STYLE_VISIBLE, false );
+		pToolTip = 0;
+		pToolTipOwner = 0;
+	}
 
 	CWindow::Update( sTime, pView );
 }
@@ -491,6 +593,13 @@ void CInterface::UpdateCursor()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CInterface::Draw( const STime &sTime )
 {
+	// retail Draw @0x31caa0 step 1: when this interface OWNS its sound scene, advance the listener
+	// counter each frame (sCounter is serialized, tag 22). Retail follows with a listener-transform
+	// push (pSound vtbl+0x24, identity transforms); the dev self-created scene is 2D-only and exposes
+	// no listener API, so only the counter advance is live here.
+	if ( bOwnSoundScene )
+		sCounter.Advance( true, sTime );
+
 	pView->StartNewFrame();
 	CWindow::Draw( sTime, pView );
 

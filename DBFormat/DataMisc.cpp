@@ -25,6 +25,20 @@ void CMedal::Import()
 	NDatabase::ImportField( "ImageID", &pImage );
 	NDatabase::ImportField( "NameID", &pName );
 	NDatabase::ImportField( "IsRussianOnly", &bIsRussianOnly );
+	// retail CMedal::Import @0x42a110 tail: a live side collects this medal on its medals list
+	// (retail PushItem = dedup push -- skip if already present).
+	if ( IsValid( pSide ) )
+	{
+		bool bPresent = false;
+		for ( vector< CPtr<CMedal> >::iterator it = pSide->medals.begin(); it != pSide->medals.end(); ++it )
+			if ( *it == this )
+			{
+				bPresent = true;
+				break;
+			}
+		if ( !bPresent )
+			pSide->medals.push_back( CPtr<CMedal>( this ) );
+	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 int CMedal::operator&( CStructureSaver &f )
@@ -129,3 +143,8 @@ using namespace NDb;
 // retail saveload id (from initCRPGPicklock0x70122181); CRPGPicklock is an RPG item record like
 // CRPGTool/CRPGKey, which carry their own saveload registration for the object-graph load path.
 REGISTER_SAVELOAD_CLASS( 0x70122181, CRPGPicklock )
+// retail saveload ids (serialization-convergence W1; s2_scratch docs/SERIALIZATION_CONVERGENCE.md)
+REGISTER_SAVELOAD_CLASS( 0xB3421140, CMedal )
+REGISTER_SAVELOAD_CLASS( 0x01293130, CRPGAP )
+REGISTER_SAVELOAD_CLASS( 0x00143110, CUICursor )
+REGISTER_SAVELOAD_CLASS( 0xB3212190, CUIHint )

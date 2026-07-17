@@ -26,13 +26,16 @@ public:
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 //      
-class CInventoryItem: virtual public IInventoryItem, public CItem
+// retail PDB layout: CItem base @0, CLockable base @0xc (the item usage-lock mixin -- lockable
+// containers/held items), pDBItem @0x14, virtual IInventoryItem base. operator& @0x2aab10:
+// 1 = CItem base, 2 = pDBItem, 4 = CLockable sub-chunk (retail's own format SKIPS tag 3).
+class CInventoryItem: virtual public IInventoryItem, public CItem, public CLockable
 {
 	//OBJECT_BASIC_METHODS(CInventoryItem)
 	ZDATA_(CItem)
 	CDBPtr<NDb::CRPGItem> pDBItem;
 public:
-	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CItem*)this); f.Add(2,&pDBItem); return 0; }
+	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CItem*)this); f.Add(2,&pDBItem); f.Add(4,(CLockable*)this); return 0; }
 
 public:
 	CInventoryItem() {}
@@ -64,6 +67,14 @@ public:
 	void Load( T *p ) { pItem = p; }
 	T* GetItem() const { return pItem; }
 	virtual int GetIncQuantity() const { return pItem->nQuantity; }
+	// retail @0x2a4780 -- the ONE shared IsEmpty body behind every container's IItemContainerInfo
+	// slot 2 (each class reaches it through an adjustor thunk: CToolItem/CPicklockItem/CFirstAidItem
+	// all funnel into 0x2a6950 -> 0x2a4780). Disasm is literally
+	//   mov eax,[ecx-0x50] / mov edx,[eax+0x14] / mov eax,[edx+ecx-0x50] / lea ecx,[edx+ecx-0x50]
+	//   call [eax]            ; GetIncQuantity() through vbtable[5]
+	//   xor ecx,ecx / test eax,eax / setle cl
+	// i.e. `return GetIncQuantity() < 1;`, dispatched virtually.
+	virtual bool IsEmpty() const { return GetIncQuantity() < 1; }
 	virtual IJoinSplit* SplitItem( int nQ )
 	{
 		nQ = Min( nQ, pItem->nQuantity );
@@ -100,10 +111,19 @@ public:
 		return pNewCont;
 	}
 	// retail CItemContainer<CSimpleCharge>::SpendCharge @0x2a6fa0: unless the container is
-	// already empty, split one charge off and discard it.
+	// already empty, split one charge off and discard it. Non-virtual, void (mangled
+	// `...::SpendCharge(void)`). Retail reaches BOTH inner calls virtually -- disasm:
+	//   mov eax,[esi+4] / mov ecx,[eax+0x14] / mov edx,[ecx+esi+4] / lea ecx,[ecx+esi+4]
+	//   call [edx+8]     ; IItemContainerInfo::IsEmpty() through the vbase (slot 2)
+	//   test al,al / jne ret
+	//   mov eax,[esi+0x18] / lea ecx,[esi+0x18] / push 1 / call [eax]
+	//                    ; IItemContainer::SplitItem(1) through the base at +0x18 (slot 0)
+	// then AddRef/ReleaseObj on the result = the CObj<> temp that frees the split-off charge.
+	// (The emptiness test used to be inlined here as `GetIncQuantity() <= 0`; identical in
+	// behaviour, but retail calls the virtual, so now that IsEmpty exists we call it.)
 	void SpendCharge()
 	{
-		if ( GetIncQuantity() <= 0 )
+		if ( IsEmpty() )
 			return;
 		CObj<IJoinSplit> pSpent = SplitItem( 1 );
 	}
@@ -197,7 +217,10 @@ public:
 	bool Reload( IInventory *pInventory );
 	bool Unload( IInventory *pInventory );
 	void Damage() { bWorking = false; }
-	void DiscardAmmo() { pInnerClip = 0; }   // luaItemUnload @0x2e76a0: drop the loaded clip
+	// retail @0x2a0b90 (luaItemUnload @0x2e76a0): split ALL rounds out of the inner clip into a
+	// temporary that dies on scope exit -- the emptied clip STAYS installed. pInnerClip must never
+	// go null: GetInfo @0x2a08d0 reaches GetInnerClip()->GetDBAmmo() with no null check.
+	void DiscardAmmo() { CObj<IJoinSplit> pSpent = pInnerClip->SplitItem( pInnerClip->GetIncQuantity() ); }
 	virtual IClipItem *GetInnerClip() const { return pInnerClip; }
 
 	NDb::CRPGWeapon* GetDBWeapon() const { return pDBWeapon; }
@@ -262,7 +285,10 @@ public:
 	// retail spend = the container's SpendCharge @0x2a6fa0 (the old dev SpendPotion had an INVERTED
 	// empty-guard and never actually consumed a charge -- infinite medkits)
 	void SpendPotion() { SpendCharge(); }
-	virtual bool IsEmpty() { return GetIncQuantity() < 1; }   // retail @0x2a4780 (IItemContainerInfo slot 2)
+	// IsEmpty is NOT declared here: it is IItemContainerInfo slot 2 and there is exactly ONE body for
+	// every container (retail @0x2a4780), now inherited from the CItemContainer<CSimpleCharge> base.
+	// CFirstAidItem's slot 2 (??_7CFirstAidItem@NRPG@@6BIItemContainerInfo@1@@ @rva 0x4c2fb0 +0x008)
+	// resolves to the same 0x2a6950 -> 0x2a4780 thunk CToolItem/CPicklockItem use.
 	virtual int GetMaxIncQuantity() const;                    // retail @0x2a0740: pDBFirstAid->nQuantity
 	NDb::CRPGFirstAid *GetDBFirstAid() const { return pDBFirstAid; }
 };
@@ -304,20 +330,31 @@ typedef CSomeItem<NDb::CRPGKey, IKeyItem> CKeyItem;
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CToolItem
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-class CToolItem: public CInventoryItem, public IToolItem
+// retail CToolItem (PDB: size 0x68 = CItemContainer<CSimpleCharge> @0 + IToolItem @36 + pDBTool
+// @0x2c -- byte-identical in shape to CPicklockItem): a tool's remaining uses are CSimpleCharge
+// charges held in the CItemContainer base (seeded from the record's nCharges), NOT the Jan03
+// CItem::nQuantity this used to carry. ctor @0x2a1ef0, operator& @0x2abeb0, save id 0x024C2140.
+class CToolItem: public CItemContainer<CSimpleCharge>, public IToolItem
 {
 	OBJECT_BASIC_METHODS( CToolItem )
-	ZDATA
-	ZPARENT( CInventoryItem );
+	typedef CItemContainer<CSimpleCharge> TChargeContainer;
+	ZDATA_(TChargeContainer)
 	CDBPtr<NDb::CRPGTool> pDBTool;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(2,(CInventoryItem *)this); f.Add(3,&pDBTool); return 0; }
-	//
 public:
+	// retail @0x2abeb0: tag 2 = the container base (which serializes the charge), tag 3 = the DB record
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,(TChargeContainer*)this); f.Add(3,&pDBTool); return 0; }
+
 	CToolItem() {}
 	CToolItem( NDb::CRPGTool *_pDBTool );
 	//
 	virtual bool CanBeUsed( NRPG::CUnit *pUnit ) const;
 	virtual int GetSkillModifForMineCleaning() const;
+	// retail @0x2a6f90 (IToolItem slot 3) -- literally a two-instruction adjustor thunk into the
+	// container's SpendCharge:  `add ecx,-0x24 ; jmp 0x6a6fa0`  (-0x24 = 36 = the IToolItem subobject's
+	// offset inside CToolItem, walking `this` back to the CItemContainer<CSimpleCharge> base).
+	// This is the call the two disarm executors make and dev never did -- the infinite-tools root.
+	virtual void SpendOneCharge() { SpendCharge(); }
+	virtual int GetMaxIncQuantity() const;   // retail @0x2a0200: GetDBItemInfo()->nCharges
 	NDb::CRPGTool* GetDBItemInfo() const { return pDBTool; }
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////

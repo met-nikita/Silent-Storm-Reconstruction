@@ -95,12 +95,6 @@ public:
 	CHeadBound( CFuncBase<SFBTransform> *_pParent ): pParent(_pParent) {}
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-struct SHeadFrame
-{
-	vector<CVec3> mesh;
-	vector<CVec3> normals; // not normalized
-};
-////////////////////////////////////////////////////////////////////////////////////////////////////
 // Ambient facial-idle state of a head animator (release enum NLSHead::EIdleType, PDB values). The
 // refcount-scoped CIdleHead token (LSController.h) flips IDLE_NONE <-> IDLE_NORMAL while some view
 // renders the head; CHeadsController::KillHead forces IDLE_DEATH (the frozen death mask).
@@ -128,47 +122,30 @@ struct SSequence
 	SSequence(): tStart(0), bCycle(false), bIdle(false), bMask(false) {}
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-class CHeadAnimator: public CFuncBase<SHeadFrame>
+// CHeadAnimator -- the head-mesh GENERATOR node itself. Retail PDB: base CPtrFuncBase<NGScene::CObjectInfo>
+// (size 0x3c; inherited pValue @+0x14), pTime @+0x18, pHead @+0x20, sequences @+0x28, eIdleType @+0x34,
+// bDeathMask @+0x38. The render part's IPart::pObjInfo references THIS object (CGameView::CreateLSHead
+// @0x188c90 -> CGScene::CreateDynamicGeometry @0x15cd20), and it is saveload-registered (0x10942151,
+// factory NewCHeadAnimator @0x267bb0), so a retail save round-trips the whole head graph. The generated
+// CObjectInfo (pValue) is NOT serialized: the first post-load IPart::RefreshObjectInfo (@0xfe340)
+// regenerates it via Recalc (@0x265a30). Retail has NO separate "CHead" mesh node -- the former dev
+// CFuncBase<SHeadFrame>-animator + CHead split could not resolve retail saves' pObjInfo references.
+class CHeadAnimator: public CPtrFuncBase<NGScene::CObjectInfo>
 {
 	OBJECT_BASIC_METHODS(CHeadAnimator);
 	ZDATA
-	CDBPtr< NDb::CHead > pDbHead;
-	CDGPtr< CFuncBase<STime> > pTime;
-	CDGPtr< CPtrFuncBase<CHeadMeshInfo> > pHead;
-	// LEGACY dev-format single "current sequence" (tags 5/6/7): kept as a serialized MIRROR of the
-	// current non-idle entry of `sequences` so older exes still read a new save (and old saves migrate
-	// in operator& below). The runtime plays from `sequences` only.
-	CDGPtr< CPtrFuncBase<CHeadSequenceInfo> > pSequence;
-	STime tStart;
-	bool bCycle;
-	// Baked STATIC head (advanced FaceGen commit): pHead is a CFaceGenMeshHolder carrying the morph, and
-	// Recalc Process()es its pLSAnimators[0] as the single whole-head GDP animator (positions) instead of
-	// the live pHeadTransformInfo or the per-segment idle. Serialized (tag 8) so a saved head round-trips.
-	bool bStatic = false;
-	// Release multi-sequence state (retail layout +0x28/+0x34/+0x38; retail operator& @0x268530 tags
-	// 4/5/6). SAVE-FORMAT DEVIATION (deliberate): retail serializes pTime/pHead/sequences/eIdleType/
-	// bDeathMask at tags 2/3/4/5/6, which CONFLICT with the established dev tags above (dev tag 2 is a
-	// CDBPtr pDbHead, retail tag 2 a CObj pTime; dev tag 4 pHead, retail tag 4 the vector) -- so the new
-	// members are parked at fresh tags 9/10/11 to keep every existing dev save loading. A later
-	// save-parity pass that renumbers this class to the retail tags must move: pTime->2, pHead->3,
-	// sequences->4, eIdleType->5, bDeathMask->6, and drop dev tags 2 (pDbHead), 5-7 (legacy single
-	// sequence) and 8 (bStatic has no retail tag -- retail keys static heads off CHeadInfo::pMesh).
-	vector<SSequence> sequences;              // release @0x265a30/@0x265890: everything playing now
-	EIdleType eIdleType = IDLE_NONE;          // release +0x34 (GetAnimator creates with IDLE_NONE)
-	bool bDeathMask = false;                  // release +0x38: death idle finished, face frozen on it
+	CDGPtr< CFuncBase<STime> > pTime;              // retail +0x18 (CFuncBase<unsigned long>; STime == DWORD)
+	CDGPtr< CPtrFuncBase<CHeadMeshInfo> > pHead;   // retail +0x20 (CHeadMeshLoader / CFaceGenMeshHolder)
+	vector<SSequence> sequences;                   // retail +0x28: everything playing now (@0x265a30/@0x265890)
+	EIdleType eIdleType = IDLE_NONE;               // retail +0x34 (GetAnimator creates with IDLE_NONE)
+	bool bDeathMask = false;                       // retail +0x38: death idle finished, face frozen on it
+	// retail operator& @0x268530: 2=pTime, 3=pHead (object refs), 4=sequences (DoVector<SSequence>),
+	// 5=eIdleType (4B), 6=bDeathMask (1B). pValue is never serialized. (The pre-parity dev tag set --
+	// 2 pDbHead / 5-7 legacy single sequence / 8 bStatic / 9-11 parked retail members -- is GONE; dev
+	// saves written before this renumbering do not load, retail v1.2 saves do.)
 	ZEND int operator&( CStructureSaver &f )
 	{
-		f.Add(2,&pDbHead); f.Add(3,&pTime); f.Add(4,&pHead); f.Add(5,&pSequence); f.Add(6,&tStart); f.Add(7,&bCycle); f.Add(8,&bStatic);
-		f.Add(9,&sequences); f.Add(10,&eIdleType); f.Add(11,&bDeathMask);
-		// old-format save (single current sequence, no vector): lift it into the release-style vector
-		if ( f.IsReading() && sequences.empty() && IsValid( pSequence ) )
-		{
-			SSequence s;
-			s.pSequence = pSequence;
-			s.tStart = tStart;
-			s.bCycle = bCycle;
-			sequences.push_back( s );
-		}
+		f.Add(2,&pTime); f.Add(3,&pHead); f.Add(4,&sequences); f.Add(5,&eIdleType); f.Add(6,&bDeathMask);
 		return 0;
 	}
 	// Optional live macro-muscle MORPH source (release-new; NOT serialized -- a transient preview ref):
@@ -181,7 +158,9 @@ protected:
 public:
 	CHeadAnimator() {}
 	CHeadAnimator( CFuncBase<STime> *_pTime, NDb::CHead *_pDbHead );
-	// Static baked head: _pStaticMesh is the CFaceGenMeshHolder published by CreateHeadInfo (sets bStatic).
+	// Baked static head (advanced FaceGen commit): _pStaticMesh is the CFaceGenMeshHolder carrying the
+	// morph. No extra animator state -- retail keys static heads purely off CHeadInfo::pMesh, and the
+	// per-segment Recalc loop handles the holder's single whole-head animator naturally.
 	CHeadAnimator( CFuncBase<STime> *_pTime, CPtrFuncBase<CHeadMeshInfo> *_pStaticMesh );
 
 	void SetHeadTransformInfo( CHeadTransformInfo *p );
@@ -195,23 +174,6 @@ public:
 	// (a fresh one re-arms on the next Recalc) and the death mask is dropped.
 	void SetIdleType( EIdleType e );
 	EIdleType GetIdleType() const { return eIdleType; }
-};
-////////////////////////////////////////////////////////////////////////////////////////////////////
-class CHead : public CPtrFuncBase<NGScene::CObjectInfo>
-{
-	OBJECT_BASIC_METHODS(CHead);
-	ZDATA
-	CDGPtr< CFuncBase<SFBTransform> > pParent;
-	CDGPtr< CFuncBase<SHeadFrame> > pAnimator;
-	CDGPtr< CPtrFuncBase<CHeadMeshInfo> > pHead;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&pParent); f.Add(3,&pAnimator); f.Add(4,&pHead); return 0; }
-protected:
-	virtual bool NeedUpdate() { return pAnimator.Refresh() | pParent.Refresh() | pHead.Refresh(); }
-	virtual void Recalc();
-public:
-	CHead() {}
-	CHead( CFuncBase<SFBTransform> *_pParent, CFuncBase<SHeadFrame> *_pAnimator, CPtrFuncBase<CHeadMeshInfo> *_pHead ):
-		pParent(_pParent), pAnimator(_pAnimator), pHead(_pHead) {}
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CHeadInfo -- per-unit resolved "complex head" render description (release-new, reg 0xA2543120).
@@ -361,8 +323,11 @@ public:
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 struct SMixTex
 {
+	ZDATA
 	CDGPtr< CPtrFuncBase<NGScene::CSWTextureData> > pTex;   // +0x00  source SW-texture node (versioned)
 	string                                          szName; // +0x08  animation-channel name
+	// retail @0x2646c0: 2=pTex (object ref), 3=szName (string chunk)
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&pTex); f.Add(3,&szName); return 0; }
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // Advanced-editor slider-bar entries: each pairs a slider start position with the DB piece it selects.
@@ -451,13 +416,22 @@ inline bool MixTexCmp( const CPtr<NDb::CHeadTexture> &a, const CPtr<NDb::CHeadTe
 // time (the static CFaceGenTextureHolder bakes once at commit; this is its live twin). Fed to
 // CGameView::CreateLSHead as pFaceTexture in the live AddHead path (CSetRender::AddHead with a
 // CHeadTransformInfo); the head material (CDGPtr<CPtrFuncBase<CTexture>> pDiffuseTex) samples it per frame.
-// Transient (never serialized): holds a WEAK ref to the morph node + the DB layer lists.
+// Serialized: retail operator& @0x264540 (LSFaceGen.obj), id 0xA1743122 (LSHead.cpp, landed in W2).
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CHeadTextureTransformer: public CPtrFuncBase<NGfx::CTexture>
 {
 	OBJECT_BASIC_METHODS(CHeadTextureTransformer);
-	CDGPtr< CHeadTransformInfo, CPtr<CHeadTransformInfo> > pTransformInfo;  // weak: the live tension/weight source
+	ZDATA
+	// OWNING ref, exactly as retail: PDB type is CDGPtr<CFuncBase<SLSHeadTransformInfo>,
+	// CObj<CFuncBase<SLSHeadTransformInfo>>> -- the transformer keeps its morph node alive
+	// (was a dev CPtr hedge; reverted to the retail CObj flavor in W3).
+	CDGPtr< CHeadTransformInfo > pTransformInfo;  // the live tension/weight source
 	vector<SMixTex> face, eye, eyelash;   // DB texture-layer lists (built once in the ctor)
+public:
+	// retail @0x264540: 2=pTransformInfo, 3=face, 4=eye, 5=eyelash (DoVector<SMixTex> each);
+	// nLastStamp is NOT serialized in retail (re-bake key only).
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&pTransformInfo); f.Add(3,&face); f.Add(4,&eye); f.Add(5,&eyelash); return 0; }
+private:
 	int nLastStamp;                       // last-baked CHeadTransformInfo tension stamp (re-bake only when it changes)
 protected:
 	virtual bool NeedUpdate();

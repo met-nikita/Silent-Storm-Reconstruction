@@ -28,9 +28,10 @@ namespace NWorld
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CWindowDoor
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail ctor @0x3823f0: eTimeOfDay sits between vCreateFlags and bOpen
 CWindowDoor::CWindowDoor( CWorld *pWorld, const SObjectPlace &pos, bool bLightMap,
-	NDb::CObject *pO, NRPG::IObject *pRPG, CFuncBase<STime> *_pTime, const vector<int> &vCreateFlags, bool bOpen )
-	: CAnimObjectServerBase( pWorld, pos, bLightMap, pO, pRPG, _pTime, vCreateFlags )
+	NDb::CObject *pO, NRPG::IObject *pRPG, CFuncBase<STime> *_pTime, const vector<int> &vCreateFlags, ETimeOfDay eTimeOfDay, bool bOpen )
+	: CAnimObjectServerBase( pWorld, pos, bLightMap, pO, pRPG, _pTime, vCreateFlags, eTimeOfDay )
 {
 	bIsOpen = bOpen;
 	bIsLocked = false;
@@ -123,13 +124,18 @@ CVec3 CWindowDoor::GetChangeStateDirection( bool bOpen ) const
 // GetChangeStateDirection(!bOpen)) > 0.707 (0x3f34fdf4; the old Jan03 0.001 threshold flipped doors on
 // near-perpendicular hits); a shove detonates the trap inside OpenClose. (2) base damage/destroy stages.
 // (3) IsMineSet() -> GoBoom(NULL) UNCONDITIONALLY (any hit on an armed door blows the trap -- EITHER slot).
-int CWindowDoor::ProcessAttack( int nUserID, NRPG::CAttackPortion *pAttack, NDb::CRPGArmor *pArmor )
+// retail @0x382050 resolves the path network off this->pWorld, NOT the argument (disasm 0x782082
+// is a member load) -- hence _pWorld/_vDir, so neither shadows the member nor the local vDir.
+int CWindowDoor::ProcessAttack( NWorld::IWorld *_pWorld, int nUserID, NRPG::CAttackPortion *pAttack,
+	const CVec3 &_vDir, NDb::CRPGArmor *pArmor )
 {
 	if ( pAttack->atkType != NRPG::AT_CLICK_OF_DEATH && !IsBroken() )
 	{
 		CDynamicCast<NAI::CPathNetwork> pNetwork( pWorld->GetPathNetwork() );
 		NAI::CPathNetwork::SFlipper *pFlipper = pNetwork->GetFlipper( this );
 		bool bTmpOpened = pFlipper->bOpen;
+		// LEFT AS DEV'S: retail reads _vDir here; its CAttackPortion has no rTtrajectory. Rerouting
+		// needs that member removed tree-wide -- separate leg, see dossier.
 		CVec3 vDir = pAttack->rTtrajectory.ptDir;
 		Normalize( &vDir );
 		// if the direction is good, move the door
@@ -138,7 +144,7 @@ int CWindowDoor::ProcessAttack( int nUserID, NRPG::CAttackPortion *pAttack, NDb:
 			OpenClose( !bTmpOpened, true );
 		}
 	}
-	int nRes = CAnimObjectServerBase::ProcessAttack( nUserID, pAttack, pArmor );
+	int nRes = CAnimObjectServerBase::ProcessAttack( _pWorld, nUserID, pAttack, _vDir, pArmor );
 	if ( IsMineSet() )
 		GoBoom();
 	//
@@ -323,7 +329,9 @@ bool CWindowDoor::SetTrap( NDb::CRPGGrenade *pGrenade, int nDC, const SPerkMineM
 	trap.nDC = nDC;
 	if ( pMods )
 		trap.sMineModifiers = *pMods;   // retail @0x381ee0: the trapped door carries the placer's explosive-perk mods (map traps have none -> keep the {1,1,false} default)
-	pWorld->GetAIMap()->GetUnitHLPos( &trap.vPos, pAIHull, -1 );
+	// retail @0x381ee0 resolves the door's hull through the user-hulls tracker (pAIHull is a
+	// creation-path cache that a LOADED door doesn't have); GetHull scans by src.pUserData.
+	pWorld->GetAIMap()->GetUnitHLPos( &trap.vPos, pWorld->GetAIMap()->GetHull( CastToObjectBase( this ) ), -1 );
 	pWorld->AddMine( this );
 	return true;
 }
@@ -342,20 +350,27 @@ bool CWindowDoor::SetTrap( NDb::CRPGEngGrenade *pEngGrenade, int nDC, const SPer
 	if ( pMods )
 		trap.sMineModifiers = *pMods;
 	trap.nEngSkill = nEngSkill;
-	pWorld->GetAIMap()->GetUnitHLPos( &trap.vPos, pAIHull, -1 );
+	// retail @0x381ee0 resolves the door's hull through the user-hulls tracker (pAIHull is a
+	// creation-path cache that a LOADED door doesn't have); GetHull scans by src.pUserData.
+	pWorld->GetAIMap()->GetUnitHLPos( &trap.vPos, pWorld->GetAIMap()->GetHull( CastToObjectBase( this ) ), -1 );
 	pWorld->AddMine( this );
 	return true;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CCannon
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail ctor @0x382610: eTimeOfDay appended after vCreateFlags
 CCannon::CCannon( CWorld *pWorld, const SObjectPlace &pos, bool bLightMap,
-	NDb::CObject *pO, NRPG::IObject *pRPG, CFuncBase<STime> *_pTime, const vector<int> &vCreateFlags )
-	: CAnimObjectServerBase( pWorld, pos, bLightMap, pO, pRPG, _pTime, vCreateFlags )
+	NDb::CObject *pO, NRPG::IObject *pRPG, CFuncBase<STime> *_pTime, const vector<int> &vCreateFlags, ETimeOfDay eTimeOfDay )
+	: CAnimObjectServerBase( pWorld, pos, bLightMap, pO, pRPG, _pTime, vCreateFlags, eTimeOfDay )
 {
 	ASSERT( IsValid( pO->pGun ) );
 	pItem = NRPG::CreateWeaponItem( pO->pGun->pWeapon );
 	ASSERT( pItem );
+	// retail ctor @0x382610 tail: seed the clear distance and the barrel muzzle offset from the
+	// DB gun record (NDb::CGun +0x18 = fMinClearDist, +0x1c..+0x24 = ptCannonAttackOrig).
+	fMinClearDistance = pO->pGun->fMinClearDist;
+	ptCannonAttackOrig = pO->pGun->ptCannonAttackOrig;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CVec3 CCannon::GetPosition()
@@ -450,9 +465,10 @@ class CAnimPassageObject: public CAnimObjectServerBase, public CPassageObjectBas
 	//
 public:
 	CAnimPassageObject() {}
-	CAnimPassageObject( CWorld *pWorld, const SObjectPlace &pos, 
-		bool bLightMap,	NDb::CObject *pO, NRPG::IObject *pRPG, 
-		CFuncBase<STime> *_pTime, int _nPassageZoneID,	int _nPassageObjectID, int _nAPRadius, const vector<int> &vCreateFlags );
+	// retail ctor @0x3827d0: eTimeOfDay appended after vCreateFlags
+	CAnimPassageObject( CWorld *pWorld, const SObjectPlace &pos,
+		bool bLightMap,	NDb::CObject *pO, NRPG::IObject *pRPG,
+		CFuncBase<STime> *_pTime, int _nPassageZoneID,	int _nPassageObjectID, int _nAPRadius, const vector<int> &vCreateFlags, ETimeOfDay eTimeOfDay );
 	// IObject
 	virtual bool IsTargetable() const { return true; }
 	// IPassageObject
@@ -460,10 +476,10 @@ public:
 	virtual void GetObjectApproaches( vector<NAI::SPathPlace> *pApproaches );
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CAnimPassageObject::CAnimPassageObject( CWorld *pWorld, const SObjectPlace &pos, 
-	bool bLightMap, NDb::CObject *pO, NRPG::IObject *pRPG, CFuncBase<STime> *_pTime, 
-	int _nPassageZoneID, int _nPassageObjectID, int _nAPRadius, const vector<int> &vCreateFlags ):
-		CAnimObjectServerBase( pWorld, pos, bLightMap, pO, pRPG, _pTime, vCreateFlags ), 
+CAnimPassageObject::CAnimPassageObject( CWorld *pWorld, const SObjectPlace &pos,
+	bool bLightMap, NDb::CObject *pO, NRPG::IObject *pRPG, CFuncBase<STime> *_pTime,
+	int _nPassageZoneID, int _nPassageObjectID, int _nAPRadius, const vector<int> &vCreateFlags, ETimeOfDay eTimeOfDay ):
+		CAnimObjectServerBase( pWorld, pos, bLightMap, pO, pRPG, _pTime, vCreateFlags, eTimeOfDay ),
 		CPassageObjectBase( _nPassageZoneID, _nPassageObjectID, _nAPRadius )
 {
 	ASSERT( IsValid( pWorld ) );
@@ -482,12 +498,13 @@ bool CAnimPassageObject::IsBroken() const
 	return nDestroyStage > 0;//bBroken;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-IPassageObject *CreateAnimPassageObject( CWorld *pWorld, const SObjectPlace &pos, 
-	bool bLightMap, NDb::CObject *pO, NRPG::IObject *pRPG, CFuncBase<STime> *_pTime, 
-	int _nPassageZoneID, int _nPassageObjectID, int _nAPRadius, const vector<int> &vCreateFlags )
+// retail @0x382930: threads the element's eTimeOfDay through to the ctor
+IPassageObject *CreateAnimPassageObject( CWorld *pWorld, const SObjectPlace &pos,
+	bool bLightMap, NDb::CObject *pO, NRPG::IObject *pRPG, CFuncBase<STime> *_pTime,
+	int _nPassageZoneID, int _nPassageObjectID, int _nAPRadius, const vector<int> &vCreateFlags, ETimeOfDay eTimeOfDay )
 {
-	return new CAnimPassageObject( pWorld, pos, bLightMap, pO, 
-		pRPG, _pTime, _nPassageZoneID, _nPassageObjectID, _nAPRadius, vCreateFlags  );
+	return new CAnimPassageObject( pWorld, pos, bLightMap, pO,
+		pRPG, _pTime, _nPassageZoneID, _nPassageObjectID, _nAPRadius, vCreateFlags, eTimeOfDay );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CPassageObject
@@ -502,9 +519,10 @@ class CPassageObject: public CObjectServerBase, public CPassageObjectBase
 	//
 public:
 	CPassageObject() {}
+	// retail ctor @0x3829e0: eTimeOfDay appended after vCreateFlags
 	CPassageObject( CWorld *pWorld, const SObjectPlace &pos, bool bLightMap,
-		NDb::CObject *pO, NRPG::IObject *pRPG, int _nPassageZoneID, int _nPassageObjectID, 
-		int _nAPRadius, const vector<int> &vCreateFlags );
+		NDb::CObject *pO, NRPG::IObject *pRPG, int _nPassageZoneID, int _nPassageObjectID,
+		int _nAPRadius, const vector<int> &vCreateFlags, ETimeOfDay eTimeOfDay );
 	// IObject
 	virtual bool IsTargetable() const { return true; }
 	// IPassageObject
@@ -513,9 +531,9 @@ public:
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CPassageObject::CPassageObject( CWorld *pWorld, const SObjectPlace &pos, bool bLightMap,
-	NDb::CObject *pO, NRPG::IObject *pRPG, int _nPassageZoneID, int _nPassageObjectID, 
-	int _nAPRadius, const vector<int> &vCreateFlags ):
-		CObjectServerBase( pWorld, pos, bLightMap, pO, pRPG, vCreateFlags ), 
+	NDb::CObject *pO, NRPG::IObject *pRPG, int _nPassageZoneID, int _nPassageObjectID,
+	int _nAPRadius, const vector<int> &vCreateFlags, ETimeOfDay eTimeOfDay ):
+		CObjectServerBase( pWorld, pos, bLightMap, pO, pRPG, vCreateFlags, eTimeOfDay ),
 		CPassageObjectBase( _nPassageZoneID, _nPassageObjectID, _nAPRadius )
 {
 }
@@ -536,12 +554,13 @@ void CPassageObject::GetObjectApproaches( vector<NAI::SPathPlace> *pApproaches )
 	pApproaches->push_back( pos.p );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-IPassageObject *CreatePassageObject( CWorld *pWorld, const SObjectPlace &pos,	
-	bool bLightMap, NDb::CObject *pO, NRPG::IObject *pRPG, int _nPassageZoneID, 
-	int _nPassageObjectID, int _nAPRadius, const vector<int> &vCreateFlags )
+// retail @0x382b00: threads the element's eTimeOfDay through to the ctor
+IPassageObject *CreatePassageObject( CWorld *pWorld, const SObjectPlace &pos,
+	bool bLightMap, NDb::CObject *pO, NRPG::IObject *pRPG, int _nPassageZoneID,
+	int _nPassageObjectID, int _nAPRadius, const vector<int> &vCreateFlags, ETimeOfDay eTimeOfDay )
 {
-	return new CPassageObject( pWorld, pos, bLightMap, pO, pRPG, 
-		_nPassageZoneID, _nPassageObjectID, _nAPRadius, vCreateFlags );
+	return new CPassageObject( pWorld, pos, bLightMap, pO, pRPG,
+		_nPassageZoneID, _nPassageObjectID, _nAPRadius, vCreateFlags, eTimeOfDay );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 }

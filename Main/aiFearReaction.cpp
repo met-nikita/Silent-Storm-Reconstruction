@@ -114,4 +114,4 @@ bool IsFearReaction( CAIReaction *p )
 }
 //
 using namespace NAI;
-BASIC_REGISTER_CLASS( CAIFearReaction )
+REGISTER_SAVELOAD_CLASS( 0x53043120, CAIFearReaction )

@@ -339,11 +339,16 @@ void CAnimation::Import()
 		{ "MachineGun", WEAPON_MACHINE_GUN },
 		{ "RLauncher", WEAPON_RLAUNCHER },
 		{ "MDetector", WEAPON_MINE_DETECTOR },
-		{ "Plazmagun", PK_WEAPON_REPAIRER },
+		// column->bit pairs verified against retail CAnimation::Import @0x3f81e0
+		// (dev had Plazmagun/PKPlazmagun wrongly mapped to PK_WEAPON_REPAIRER)
+		{ "Plazmagun", WEAPON_PLAZMAGUN },
 		{ "PKShooter", PK_WEAPON_SHOOTER },
 		{ "PKSlasher", PK_WEAPON_SLASHER },
 		{ "PKRepairer", PK_WEAPON_REPAIRER },
-		{ "PKPlazmagun", PK_WEAPON_REPAIRER },
+		{ "PKPlazmagun", PK_WEAPON_PLAZMAGUN },
+		{ "Machete", WEAPON_MACHETE },
+		{ "PKTerrorGunSpecial", PK_WEAPON_TERROR_GUN },
+		{ "TerrorShooter", PK_WEAPON_TERROR_SHOOTER },
 		{ 0, 0 },
 	};
 	SAnimFlagString animCSFlags[] =
@@ -359,6 +364,8 @@ void CAnimation::Import()
 		{ "Medic", MEDIC },
 		{ "Engineer", ENGINEER },
 		{ "Enemy", ENEMY },
+		{ "Boss", BOSS },
+		{ "TerrorPK", TERROR_PK },
 		{ 0, 0 },
 	};
 	string szType;
@@ -415,11 +422,23 @@ CAnimation* SAnimationVector::GetAnimation( int nFlags,
 	const char *pszParams, int nClassSexFlags, CSide *pSide, bool bMostPossible ) const
 {
 	vector< CPtr<CAnimation> > results;
-	if ( !pszParams )
+	// retail @0x3faa80: a BOSS request selects purely by the BOSS bit (no pose/weapon/side/params
+	// filtering); non-BOSS requests must never pick a BOSS-flagged clip
+	if ( nClassSexFlags & CAnimation::BOSS )
+	{
+		for ( int i=0; i<anims.size(); ++i )
+		{
+			if ( anims[i]->nClassSexFlags & CAnimation::BOSS )
+				results.push_back( anims[i] );
+		}
+	}
+	else if ( !pszParams )
 	{
 		for ( int i=0; i<anims.size(); ++i )
 		{
 			if ( anims[i]->pSide && anims[i]->pSide != pSide )
+				continue;
+			if ( anims[i]->nClassSexFlags & CAnimation::BOSS )
 				continue;
 			if ( (~anims[i]->nPoseWeaponFlags & nFlags) == 0 &&
 					 (~anims[i]->nClassSexFlags & nClassSexFlags) == 0 &&
@@ -433,12 +452,14 @@ CAnimation* SAnimationVector::GetAnimation( int nFlags,
 		{
 			if ( anims[i]->pSide && anims[i]->pSide != pSide )
 				continue;
-			if ( (~anims[i]->nPoseWeaponFlags & nFlags) == 0 && 
+			if ( anims[i]->nClassSexFlags & CAnimation::BOSS )
+				continue;
+			if ( (~anims[i]->nPoseWeaponFlags & nFlags) == 0 &&
 					 (~anims[i]->nClassSexFlags & nClassSexFlags) == 0 &&
 						anims[i]->szParams == pszParams && anims[i]->fRndWeight > 0 )
 				results.push_back( anims[i] );
 		}
-	}		
+	}
 	//
 	if ( results.empty() )
 		return 0;
@@ -515,14 +536,15 @@ int CSkeleton::operator&( CStructureSaver &f )
 // CModel
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 int CModel::operator&( CStructureSaver &f )
-{ 
+{
 //	f.Add( 1, (CDBRecord*)this );
-	f.Add( 2, &pGeometry ); 
-	
+	f.Add( 2, &pGeometry );
+
 	for ( int i = 0; i < N_MODEL_MATERIALS; ++i )
-		f.Add( 3 + i, &pMaterials[i] ); 
+		f.Add( 3 + i, &pMaterials[i] );
 	f.Add( 10, &pSkeleton );
 	f.Add( 11, &pRPGArmor );
+	f.Add( 12, &pSrcRndModel );   // retail tag 0xc: the source CTRndModel (material re-roll link)
 	return 0;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -593,6 +615,9 @@ CModel* CRndModel::CreateModel( SRand *pRand, const vector<int> &flags )
 	pModel->pGeometry = pGeometry;
 	pModel->pSkeleton = pSkeleton;
 	pModel->pRPGArmor = pRPGArmor;
+	// retail CreateModel @0x3f7670 stows the source CTRndModel template on the product
+	// (CModel::pSrcRndModel, save tag 12) so NRender can re-roll materials later.
+	pModel->pSrcRndModel = pTemplate;
 	for ( int i = 0; i < N_MODEL_MATERIALS; ++i )
 		pModel->pMaterials[i] = IsValid( pMaterials[i] ) ? pMaterials[i]->GetRnd( pRand, flags ) : 0;
 	return pModel;
@@ -843,7 +868,11 @@ void CParticle::Import()
 	NDatabase::ImportField( "HalfBoxX", &bound.ptHalfBox.x );
 	NDatabase::ImportField( "HalfBoxY", &bound.ptHalfBox.y );
 	NDatabase::ImportField( "HalfBoxZ", &bound.ptHalfBox.z );
-	bound.s.fRadius = fabs( bound.ptHalfBox );	
+	// retail CParticle::Import @0x3f8d80: the wrap size columns come between the half-box and the
+	// radius computation.
+	NDatabase::ImportField( "WrapX", &vWrapSize.x );
+	NDatabase::ImportField( "WrapY", &vWrapSize.y );
+	bound.s.fRadius = fabs( bound.ptHalfBox );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 int CParticle::operator&( CStructureSaver &f )
@@ -852,6 +881,7 @@ int CParticle::operator&( CStructureSaver &f )
 	f.Add( 2, &pAIGeometry );
 	f.Add( 3, &pRPGArmor );
 	f.Add( 4, &bound );
+	f.Add( 5, &vWrapSize );   // retail tag 5 (8-byte DataChunk): texture wrap size (animator value.vWrap)
 	return 0;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -922,13 +952,13 @@ void CTexture::Import()
 	string szType;
 	NDatabase::ImportField( "Type", &szType );
 	if ( szType == "2D" )
-		type = TEXTURE_2D;
+		usage = TEXTURE_USAGE_2D;
 	else if ( szType == "Transparent" )
-		type = TEXTURE_TRANSPARENT;
+		usage = TEXTURE_USAGE_TRANSPARENT;
 	else if ( szType == "TransparentAdd" )
-		type = TEXTURE_TRANSPARENT;
+		usage = TEXTURE_USAGE_TRANSPARENT;
 	else
-		type = REGULAR;
+		usage = TEXTURE_USAGE_ORDINARY;
 	NDatabase::ImportField( "AverageColor", (int*)&dwAverageColor );
 	string szFormat;
 	NDatabase::ImportField( "Format", &szFormat );
@@ -1086,20 +1116,23 @@ void String2PieceLinks( SPieceLinksHash *pLinks, const string &szStr )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CAIGeometry::Import()
 {
-	bool bPassability, bCover, bVision, bDamage, bItemBlocker;
+	// retail @0x7fa4c0 reads a sixth bool: LadderPart -> TR_LADDER (AIGeometries.LadderPart bit)
+	bool bPassability, bCover, bVision, bDamage, bItemBlocker, bLadderPart;
 	NDatabase::ImportField( "Passability", &bPassability );
 	NDatabase::ImportField( "Cover", &bCover );
 	NDatabase::ImportField( "Vision", &bVision );
 	NDatabase::ImportField( "Damage", &bDamage );
 	NDatabase::ImportField( "ItemBlocker", &bItemBlocker );
+	NDatabase::ImportField( "LadderPart", &bLadderPart );
 	NDatabase::ImportField( "Volume", &fVolume );
 	NDatabase::ImportField( "SolidPart", &fSolidPart );
-	traficability = (ETrafic) ( 
+	traficability = (ETrafic) (
 		( bPassability ? TR_PASS : 0 ) |
 		( bCover ? TR_COVER : 0 ) |
 		( bVision ? TR_VISION : 0 ) |
 		( bDamage ? TR_DAMAGE : 0 ) |
-		( bItemBlocker ? TR_ITEM_BLOCKER : 0 )
+		( bItemBlocker ? TR_ITEM_BLOCKER : 0 ) |
+		( bLadderPart ? TR_LADDER : 0 )
 		);
 	string szLinks;
 	NDatabase::ImportField( "PiecesInfo", &szLinks );
@@ -1846,6 +1879,10 @@ void CTranslatedString::Import()
 			szDst += szStr[k];
 	}
 	szStr = szDst;
+	// retail Import @0x3f7da0 tail: the raw int "TranslationStatus" column (localization state).
+	int nStatus = 0;
+	NDatabase::ImportField( "TranslationStatus", &nStatus );
+	eStatus = (ETranslationStatus)nStatus;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1868,6 +1905,7 @@ CString* GetString( int nID ) { return Get<CString>( nID ); }
 CUITexture* GetUITexture( int nID ) { return Get<CUITexture>( nID ); }
 CUIContainer* GetUIContainer( int nID ) { return Get<CUIContainer>( nID ); }
 CUIHint* GetUIHint( int nID ) { return Get<CUIHint>( nID ); }		// release ShowHint binding -- Hints table 0x6d
+CUICursor* GetUICursor( int nID ) { return Get<CUICursor>( nID ); }	// retail SCursorInfo cursor-record lookup (UICursors table 0x71)
 ////
 CGlobalMap* GetGlobalMap( int nID ) { return Get<CGlobalMap>( nID ); }
 CChapterMap* GetChapterMap( int nID ) { return Get<CChapterMap>( nID ); }
@@ -2214,3 +2252,5 @@ REGISTER_SAVELOAD_CLASS( 0xA22A2160, CSoundInstance )
 REGISTER_SAVELOAD_CLASS( 0xA22A2161, CSoundEffect )
 REGISTER_SAVELOAD_CLASS( 0xA21B2160, CTranslatedString )
 //BASIC_REGISTER_CLASS( CRndConstructionPart )
+// retail saveload ids (serialization-convergence W1; s2_scratch docs/SERIALIZATION_CONVERGENCE.md)
+REGISTER_SAVELOAD_CLASS( 0xA2273100, CTMusic )

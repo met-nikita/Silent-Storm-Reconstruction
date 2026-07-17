@@ -188,7 +188,7 @@ int Proto::operator&( CStructureSaver &f )
 	f.Add( 10, &lineinfo );
 	f.Add( 11, &locvars );
 	f.Add( 12, &lineDefined );
-	f.Add( 13, &source );
+	// retail @0x3e7100 goes 12 -> 14: the Lua debug `source` string is off the wire (member stays, W5)
 
 	int nStrs = strings.size();
 	f.Add( 14, &nStrs );

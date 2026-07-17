@@ -44,8 +44,15 @@ CPlayerTracker::CPlayerTracker( IMission *_pMission, NRPG::CGlobalPlayer *_pGlob
 	pPlayer->GetDeploySpot( &sPos.p );
 	sPos.SetNetwork( pMission->GetWorld()->GetPathNetwork() );
 
-	sCamPlacement = ICamera::SCameraPos( sPos.GetCP(), 25.0f, ToRadian( -65.0f ), ToRadian( -65.0f ), 0 );
+	// retail @0x287d70 tail: each player tracker CREATES AND OWNS its camera through the mission
+	// factory (mission vtbl+0xb4 = CMissionBase::CreateCamera @0x1a2390, CAMERA_PC), stamps the
+	// deploy-spot floor on it (camera vtbl+0x48 = SetCutFloor @0xd0050), and seeds the deploy pose
+	// (rod 25, pitch/yaw -65 deg, roll 0, FOV 35, anchor = deploy CP with z forced to 0).
+	pCamera = pMission->CreateCamera( CAMERA_PC );
+	pCamera->SetCutFloor( sPos.GetFloor() );
+	ICamera::SCameraPos sCamPlacement( sPos.GetCP(), 25.0f, ToRadian( -65.0f ), ToRadian( -65.0f ), 0 );
 	sCamPlacement.ptAnchor.z = 0;
+	pCamera->SetPlacement( sCamPlacement );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CPlayerTracker::AddUnit( NRPG::CUnit *pMerc )
@@ -217,14 +224,16 @@ NWorld::IPlayer* CPlayerTracker::GetPlayer() const
 	return pPlayer;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-const ICamera::SCameraPos& CPlayerTracker::GetCamera() const
+// retail CPlayerTracker::GetCamera @0x2877f0 (IPlayerTracker vtbl+0x18)
+ICamera* CPlayerTracker::GetCamera() const
 {
-	return sCamPlacement;
+	return pCamera;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CPlayerTracker::SetCamera( const ICamera::SCameraPos &sPosition )
+// retail CPlayerTracker::SetCamera @0x287d40 (IPlayerTracker vtbl+0x1c): plain CObj re-seat.
+void CPlayerTracker::SetCamera( ICamera *_pCamera )
 {
-	sCamPlacement = sPosition;
+	pCamera = _pCamera;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 NWorld::CCommander* CPlayerTracker::GetCommander() const

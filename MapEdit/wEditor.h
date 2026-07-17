@@ -198,6 +198,8 @@ public:
 	virtual bool TraceTile( const CRay &ray, NAI::SPosition *pRes, int nMaxFloor = 100 ) {return false;}
 	virtual CUnit* GetUnit( const NAI::SUnitPosition &pos ) { return 0; }
 	virtual NDb::CAmbientLightReal* GetDefaultLight() { return 0; }
+	// the editor world carries no strategic pocket (nothing is ever carried between maps here)
+	virtual NWorld::CPocket* GetPocket() { return 0; }
 	virtual void GetInterrupts( vector< CPtr<IPlayer> > *pInterrups ) const {}
 	virtual void FindCloseGroundItems( CUnit *pUnit, vector<SItem> *pRes ) {}
 	virtual void TraceObjects( const CRay &ray, vector<CObjectBase*> *pRes, int nMaxFloor = 100 ) {};

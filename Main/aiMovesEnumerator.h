@@ -12,13 +12,14 @@ class CMovesEnumerator
 {
 	IPathNetwork *pNet;
 	bool bCheckSuicide, bMoveOnly;
+	bool bNoClimb;   // retail InitMovesEnumerator bNoClimb: the door-free re-route suppresses climb moves
 	const int *pCosts;
 	vector<SMove> pfMoves;
 	vector<char> nDynLocks;
 	bool bBigUnit;
 public:
-	CMovesEnumerator( IPathNetwork* _pNet, const int *_pCosts, bool _bCheckSuicide, bool _bMoveOnly, bool _bBigUnit ):
-			pNet(_pNet), bCheckSuicide(_bCheckSuicide), bMoveOnly(_bMoveOnly), pCosts(_pCosts), bBigUnit(_bBigUnit),
+	CMovesEnumerator( IPathNetwork* _pNet, const int *_pCosts, bool _bCheckSuicide, bool _bMoveOnly, bool _bBigUnit, bool _bNoClimb = false ):
+			pNet(_pNet), bCheckSuicide(_bCheckSuicide), bMoveOnly(_bMoveOnly), bNoClimb(_bNoClimb), pCosts(_pCosts), bBigUnit(_bBigUnit),
 			pfMoves(100), nDynLocks(100) {}
 
 	bool MustDraw( const SPathPlace &p )
@@ -37,7 +38,7 @@ public:
 		void ForEachMove(const SPathPlace& pos, TFunction& f)
 	{
 		int nMovesCount;
-		GetNonStandartMoves( pNet, pos, bCheckSuicide, bMoveOnly, &pfMoves, &nMovesCount, &nDynLocks );
+		GetNonStandartMoves( pNet, pos, bCheckSuicide, bMoveOnly, bNoClimb, &pfMoves, &nMovesCount, &nDynLocks );
 		for ( int i = 0; i < nMovesCount; ++i )
 		{
 			EMoveType type = pfMoves[i].type;

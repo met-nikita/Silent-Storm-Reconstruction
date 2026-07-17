@@ -25,14 +25,18 @@ class IAILogic;
 struct SAIState;
 struct SAIUnitState;
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// CAIReaction - abstract reflex behaviour. Layout: [CObjectBase][IAIUnit* pUnit @0xc] (a weak back-ref to
-// the owning unit, like CAIUnit::pAIState - the unit owns the reaction, so it always outlives it; not
-// serialized).
+// CAIReaction - abstract reflex behaviour. Layout: [CObjectBase][pUnit @0xc] (a weak back-ref to the
+// owning unit). Retail serializes the reaction base as a nested chunk {tag 2 = pUnit ref} (the
+// CAILogRecord chunk every concrete reaction's operator& writes at its own tag 2, e.g. @0x7f780) --
+// pUnit is a CPtr and this operator& reproduces that chunk (serialization-convergence Wave 2; the
+// old dev shape was a raw unserialized IAIUnit*).
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CAIReaction: public virtual CObjectBase   // virtual base (like IAILogic) so CObj<CAIReaction> needs no base cast-registration
 {
+public:
+	int operator&( CStructureSaver &f ) { f.Add( 2, &pUnit ); return 0; }
 protected:
-	IAIUnit *pUnit;
+	CPtr<IAIUnit> pUnit;
 	//
 	IAIUnit*             GetUnit() const { return pUnit; }
 	SAIUnitState*        GetAIUnitState() const;         // pUnit->GetAIUnitState()  (release vtbl 0x74)

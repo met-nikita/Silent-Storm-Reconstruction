@@ -23,7 +23,6 @@ namespace NRender
 {
 	class IRenderGame;
 	class IShowUnit;
-	class IShowUnitHead;
 }
 namespace NGame
 {
@@ -401,31 +400,6 @@ public:
 	TYPE* GetClientWindow() const {	return pScrollWindow; }
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// CUnitHead
-////////////////////////////////////////////////////////////////////////////////////////////////////
-class CUnitHead: public CWindow
-{
-	OBJECT_BASIC_METHODS(CUnitHead);
-protected:
-	ZDATA_(CWindow)
-	float fScale;
-	CObj<NGScene::IGameView> p3DView;
-	CPtr<NRender::IRenderGame> pRenderGame;
-	CObj<NGScene::CCFBTransform> pTransform;
-	CObj<NRender::IShowUnitHead> pHead;
-public:
-	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CWindow*)this); f.Add(2,&fScale); f.Add(3,&p3DView); f.Add(4,&pRenderGame); f.Add(5,&pTransform); f.Add(6,&pHead); return 0; }
-
-public:
-	CUnitHead() {}
-	CUnitHead( const SWindowInfo &sInfo, NRender::IRenderGame *pRender, float fScale = 1.0f );
-
-	void SetUnit( NWorld::CUnit *pUnit );
-	void SetSequence( NDb::CSequence *pSequence, NDb::CSequence *pExpression = 0 );
-
-	void Draw( const STime &sTime, NGScene::I2DGameView *pView );
-};
-////////////////////////////////////////////////////////////////////////////////////////////////////
 // CUnitView
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CUnitView: public CWindow
@@ -439,19 +413,32 @@ public:
 	};
 
 protected:
+	// retail NUI::CUnitView layout / operator& @0x1cab00: {1 CWindow, 2 fScale, 3 fFOV, 4 fAngle,
+	// 5 sCamera (SHMatrix 0x40), 6 sTimer, 7 p3DView, 8 pInventoryUnit, 9 pRenderGame}. Dev previously
+	// split the camera into fYaw/fPitch/fDistance/vAnchor at tags 4-7, which shifted p3DView to tag 9 --
+	// so a RETAIL save's p3DView (tag 7) was read into dev's vAnchor and dev's p3DView (tag 9) picked up
+	// retail's pRenderGame ref -> CastToUserObject<IGameView> fails -> p3DView null -> CUnitView::Draw AV
+	// (the "missing heads" + click-a-party-member crash). Match retail: store the composed camera as the
+	// serialized sCamera (recomputed by RecalcCamera from the runtime orbit params below).
 	ZDATA_(CWindow)
 	float fScale;
 	float fFOV;
-	float fYaw;
-	float fPitch;
-	float fDistance;
-	CVec3 vAnchor;
+	float fAngle;              // retail tag 4: unit spin angle (dev CUnitView doesn't spin -> stays 0)
+	SHMatrix sCamera;          // retail tag 5 (0x40): the camera transform used by Draw
 	CTimeCounter sTimer;
 	CObj<NGScene::IGameView> p3DView;
 	CPtr<NRender::IShowUnit> pInventoryUnit;
 	CPtr<NRender::IRenderGame> pRenderGame;
 public:
-	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CWindow*)this); f.Add(2,&fScale); f.Add(3,&fFOV); f.Add(4,&fYaw); f.Add(5,&fPitch); f.Add(6,&fDistance); f.Add(7,&vAnchor); f.Add(8,&sTimer); f.Add(9,&p3DView); f.Add(10,&pInventoryUnit); f.Add(11,&pRenderGame); return 0; }
+	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CWindow*)this); f.Add(2,&fScale); f.Add(3,&fFOV); f.Add(4,&fAngle); f.Add(5,&sCamera); f.Add(6,&sTimer); f.Add(7,&p3DView); f.Add(8,&pInventoryUnit); f.Add(9,&pRenderGame); return 0; }
+protected:
+	// runtime-only orbit params (NOT serialized -- retail stores the composed sCamera instead); set by
+	// SetUnit, folded into sCamera by RecalcCamera().
+	float fYaw;
+	float fPitch;
+	float fDistance;
+	CVec3 vAnchor;
+	void RecalcCamera();
 
 public:
 	CUnitView() {}
@@ -465,6 +452,7 @@ public:
 	// mission-dialog body view (false, true, false). Defaults reproduce the old dev callers' behavior.
 	void SetUnit( NWorld::CUnit *pUnit, NDb::CDBCamera *pCamera, bool bItems = true, bool bShowCap = true, bool bPlayIdle = false );
 	void SetUnit( NRPG::CUnit *pUnit, NDb::CDBCamera *pCamera );    // release @0x1c0310: global-camera variant FaceGen calls (NRPG::CUnit*)
+	void SetRenderGame( NRender::IRenderGame *pRender ) { pRenderGame = pRender; }   // retail @0x1c0490
 	void SetLight( NDb::CTAmbientLight *pLight );
 	// release @0x1bf030: (lipsync seq, expression seq) -- both forwarded to the shown unit's head
 	void SetSequence( NDb::CSequence *pSequence, NDb::CSequence *pExpression = 0 );
@@ -475,29 +463,28 @@ public:
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CInteractiveUnitView
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-class CInteractiveUnitView: public CWindow
+class CInteractiveUnitView: public CUnitView
 {
 	OBJECT_BASIC_METHODS(CInteractiveUnitView);
-private:
-	ZDATA_(CWindow)
+protected:
+	// retail NUI::CInteractiveUnitView (PDB, 252 bytes) derives from CUnitView (224) and adds ONLY
+	// {bCapture@0xe0, bButtonDown@0xe1, fAngle@0xe4, sLastPoint@0xe8, sTimer@0xf0, pMouseCapture@0xf8};
+	// the 3D view / shown unit / render game live in the CUnitView base. operator& @0x1cb010 =
+	// {1 CUnitView, 2 bCapture, 3 bButtonDown, 4 fAngle, 5 sLastPoint(8B), 6 sTimer, 7 pMouseCapture}.
+	// (dev previously derived from CWindow with the view members re-declared here at tags 3-9, so a
+	// retail save's chunk was misread from tag 3 on -- wire audit CUnitModelShow 1.1.*.) fAngle and
+	// sTimer intentionally shadow the CUnitView members: retail's layout has BOTH copies and both go
+	// on the wire (base tag 4/6 inside chunk 1, own tag 4/6 here). protected (not private) because
+	// CUnitModelShow::CanHandleState (retail @0x1edf60) reads bButtonDown.
+	ZDATA_(CUnitView)
+	bool bCapture;
 	bool bButtonDown;
 	float fAngle;
 	SPoint sLastPoint;
 	CTimeCounter sTimer;
 	CObj<CObjectBase> pMouseCapture;
-	CObj<NGScene::IGameView> p3DView;
-	CPtr<NRender::IShowUnit> pInventoryUnit;
-	CPtr<NRender::IRenderGame> pRenderGame;
 public:
-	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CWindow*)this); f.Add(2,&bButtonDown); f.Add(3,&fAngle); f.Add(4,&sLastPoint); f.Add(5,&sTimer); f.Add(6,&pMouseCapture); f.Add(7,&p3DView); f.Add(8,&pInventoryUnit); f.Add(9,&pRenderGame); return 0; }
-private:
-	// Optional perspective camera (TRANSIENT -- not serialized, so no save-format change). Set only by the
-	// CDBCamera SetUnit overload (AdvFaceGen passes DataCamera 5014); when unset, Draw keeps the orthographic
-	// full-body view CharGen + the inventory model show rely on.
-	bool bHasCamera = false;
-	float fYaw = 0, fPitch = 0, fDistance = 0, fFOV = 60;
-	CVec3 vAnchor;
-
+	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CUnitView*)this); f.Add(2,&bCapture); f.Add(3,&bButtonDown); f.Add(4,&fAngle); f.Add(5,&sLastPoint); f.Add(6,&sTimer); f.Add(7,&pMouseCapture); return 0; }
 public:
 	CInteractiveUnitView() {}
 	CInteractiveUnitView( const SWindowInfo &sInfo, NRender::IRenderGame *pRender = 0 );
@@ -533,9 +520,10 @@ public:
 	CShowItemModel( const SWindowInfo &sInfo );
 
 	NRPG::IInventoryItem* Get() const;
-	// retail Set @0x1c0f50 builds the WHOLE static tooltip (all per-type text); the owning unit (may be
-	// null) is cached for Draw's per-frame "familiarity" refresh.
-	void Set( NRPG::IInventoryItem* pItem, NDb::ECameraType eCameraType, NWorld::CUnit* pUnit = 0 );
+	// retail Set @0x1c0f50: SetScene(pView,true) -- a non-null pView (the slot's shared p3DView)
+	// parents the icon mesh into that scene, null keeps an own private view -- then SetModel +
+	// SetCameraTransform, then the WHOLE static tooltip; pUnit feeds Draw's familiarity refresh.
+	void Set( NGScene::IGameView *pView, NWorld::CUnit *pUnit, NRPG::IInventoryItem *pItem, NDb::ECameraType eCameraType );
 
 	void Draw( const STime &sTime, NGScene::I2DGameView *pView );
 };
@@ -557,9 +545,46 @@ public:
 	CObjectBase* GetTarget();
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// CSlotInfo -- the drag-state target descriptor a slot publishes through CActionDecorator::GetTarget()
+// while the mouse hovers it (the mission state resolves it to decide where a dragged item may drop).
+// retail NUI::CSlotInfo (PDB, 24 bytes: nSlot@+0xc, eType@+0x10, pUnit@+0x14), iCommonUI compiland;
+// operator& @0x1c7130 = {2 nSlot, 3 eType, 4 pUnit}; saveload id 0xB3915110 (registered below in
+// iCommonUI.cpp). Built by CBackPackSlot::GetTarget @0x1ee050 (BACKPACK, unit), CStoreSlot::GetTarget
+// @0x241220 (STORAGE), CInfoPanelSlot::GetTarget @0x255880 (SLOT, nSlot = the NDb::ESlot, unit).
+////////////////////////////////////////////////////////////////////////////////////////////////////
+class CSlotInfo: public CObjectBase
+{
+	OBJECT_BASIC_METHODS(CSlotInfo)
+public:
+	// retail NUI::CSlotInfo::EPlacement (PDB enum)
+	enum EPlacement
+	{
+		VACUUM   = 0,
+		SLOT     = 1,
+		STORAGE  = 2,
+		BACKPACK = 3
+	};
+
+private:
+	ZDATA
+	int nSlot;                    // for SLOT: the NDb::ESlot of the info-panel slot; else 0
+	EPlacement eType;
+	CPtr<NWorld::CUnit> pUnit;    // the owning unit (null for STORAGE)
+public:
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&nSlot); f.Add(3,&eType); f.Add(4,&pUnit); return 0; }
+
+public:
+	CSlotInfo(): nSlot( 0 ), eType( VACUUM ) {}
+	CSlotInfo( EPlacement _eType, int _nSlot = 0, NWorld::CUnit *_pUnit = 0 ): nSlot( _nSlot ), eType( _eType ), pUnit( _pUnit ) {}
+
+	int GetSlot() const { return nSlot; }
+	EPlacement GetPlacement() const { return eType; }
+	NWorld::CUnit* GetUnit() const { return pUnit; }
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
 // CSlot
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-class CSlot: public CWindow
+class CSlot: public CActionDecorator<CWindow>
 {
 protected:
 	struct SItem
@@ -581,7 +606,7 @@ protected:
 	};
 
 private:
-	ZDATA_(CWindow)
+	ZDATA_(CActionDecorator<CWindow>)
 	CPtr<NGame::IMission> pMission;
 	////
 	int nWidth;
@@ -593,14 +618,52 @@ private:
 	CPtr<CWindow> pHilight;
 	vector<SItem> itemsSet;
 	NDb::ECameraType eCameraType;
-	CArray2D<SHilight> hilights;
+	CArray2D<SHilight> hilights;          // retail +0xb8, ON THE WIRE at tag 12 (Do2DArray)
+	CObj<NGScene::IGameView> p3DView;     // retail +0xc8, tag 13 (the slot's shared 3D item view)
 public:
-	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CWindow*)this); f.Add(2,&pMission); f.Add(3,&nWidth); f.Add(4,&nHeight); f.Add(5,&bTrackMouse); f.Add(6,&bAlwaysHilight); f.Add(7,&sMousePoint); f.Add(8,&pSlotView); f.Add(9,&pHilight); f.Add(10,&itemsSet); f.Add(11,&eCameraType); f.Add(12,&hilights); return 0; }
+	// retail wire = operator& @0x1cb1c0 (own tags 2..13) + CSlot::OnSerialize @0x1c5c90 (the
+	// version-gated BASE chunk 1, written LAST -- byte-walk-confirmed against the retail saves):
+	//   {2 pMission, 3 nWidth, 4 nHeight, 5 bTrackMouse, 6 bAlwaysHilight, 7 sMousePoint,
+	//    8 pSlotView, 9 pHilight, 10 itemsSet, 11 eCameraType, 12 hilights, 13 p3DView,
+	//    1 = file version > 0 ? CActionDecorator<CWindow> base {1 CWindow, 2 bMouseEnter, 3 pMission}
+	//                         : plain CWindow base, then decorator pMission adopted from own pMission}.
+	// The hilight grid IS retail save state: its SHilight.pImage cells reference the CImage children
+	// deserialized inside pHilight's window subtree. [dev history: an earlier fix misread the decomp
+	// ('\f' = tag 12, 0xd = tag 13) and serialized the 3D view at tag 12 while dropping hilights off
+	// the wire, so a retail save's 2D-array header was read into the view ref and tag 13 was orphaned;
+	// and the decorator base layer was missing entirely, so the save's chunk 1.1 (decorator) was
+	// misparsed as a CWindow table -- wire audit 1.1.* / 1.12 / 1.13 on all four slot classes.]
+	ZEND int operator&( CStructureSaver &f )
+	{
+		f.Add( 2, &pMission );
+		f.Add( 3, &nWidth );
+		f.Add( 4, &nHeight );
+		f.Add( 5, &bTrackMouse );
+		f.Add( 6, &bAlwaysHilight );
+		f.Add( 7, &sMousePoint );
+		f.Add( 8, &pSlotView );
+		f.Add( 9, &pHilight );
+		f.Add( 10, &itemsSet );
+		f.Add( 11, &eCameraType );
+		f.Add( 12, &hilights );
+		f.Add( 13, &p3DView );
+		// retail CSlot::OnSerialize @0x1c5c90 (invoked at the end of operator& @0x1cb1c0):
+		if ( f.GetVersion() > 0 )
+			f.Add( 1, (CActionDecorator<CWindow>*)this );
+		else
+		{
+			// legacy v0 file: CSlot serialized as a plain CWindow; adopt the slot's own mission
+			// as the decorator's mission link (refcounted CPtr assignment, as retail open-codes).
+			f.Add( 1, (CWindow*)this );
+			CActionDecorator<CWindow>::pMission = pMission;
+		}
+		return 0;
+	}
 
 protected:
 	void GetInSlotPos( int nX, int nY, SPoint *pCoords );
 	void GetItemInSlotPos( int nX, int nY, const SPoint &sItemSize, SPoint *pCoords );
-	bool GetDragItem( NWorld::IPlayer::SItemInfo *pInfo );
+	bool GetDragItem( NWorld::SItem *pInfo );		// retail @0x1beb80
 	NGame::IMission* GetGame();
 
 public:
@@ -611,6 +674,13 @@ public:
 	virtual void Place( int nX, int nY, const NWorld::SItem &sItem ) = 0;
 	virtual bool CanPlace( int nX, int nY, const NWorld::SItem &sItem, int *nAP = 0 ) = 0;
 	virtual void GetItemsList( vector<SItem> *pItemsSet ) = 0;
+	// retail slot vtbl+0x44 (base ICF-folds to `return 0`): the owning unit Draw hands to
+	// CShowItemModel::Set; CBackPackSlot @0x1edfc0 / CInfoPanelSlot @0x25a770 override it.
+	virtual NWorld::CUnit* GetUnit() { return 0; }
+
+	// CActionDecorator pure virtual: a slot handles the item-drag state (retail @0x1be990).
+	// GetTarget() stays pure -- each concrete slot builds its own CSlotInfo.
+	bool CanHandleState( NGame::IState *pState ) const;
 
 	void SetSize( const SPoint &sSize );
 	void SetSlotSize( int nWidth, int nHeight );

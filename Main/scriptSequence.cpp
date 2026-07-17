@@ -82,7 +82,10 @@ static void SetSequenceCheat( NWorld::CWorld *pWorld, bool bOn )
 			// AIM_SCRIPT controls assigned DURING the sequence stack on top and activate normally, so
 			// scripted walks are unaffected. (The earlier De/ActivateCurrentControl pair mishandled the
 			// End side: it re-woke whatever leftover SCRIPT control sat on top instead of the map logic.)
-			CDynamicCast<NAI::CAICommander> pUnitCommander( pUS->GetPlayer()->GetCommander() );
+			// retail enumerates the notify via commander rosters (GetAIUnits @0x2f1890) -- a playerless
+			// unit (empty-PK shell, AddUnit death path) never appears there; skip it here likewise
+			NWorld::IPlayer *pPlayer = pUS->GetPlayer();
+			CDynamicCast<NAI::CAICommander> pUnitCommander( pPlayer ? pPlayer->GetCommander() : 0 );
 			NAI::IAIUnit *pAIUnit = pUnitCommander ? pUnitCommander->GetAIUnit( pUS ) : 0;
 			if ( IsValid( pAIUnit ) )
 			{
@@ -150,9 +153,9 @@ BEGIN_SCRIPT_COMMAND( GetCamera, "n" );
 	return 1;
 END_SCRIPT_COMMAND
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// CameraMove( camera, time ): release migrated this to the id-queue. We keep the dev's single-target
-// CUICmdMoveCamera (the release's CUICmdScriptMoveCamera is reserved for CameraSequence/the menu), but now
-// queue it via AddUICommandWithID so it returns an id and lua CameraSet = WaitForUI(CameraMove(c,0)) waits
+// CameraMove( camera, time ): retail NScript::luaCameraMove @0x2ef8c0 constructs a SINGLE-waypoint
+// CUICmdScriptMoveCamera (W5 serialization-convergence: the dev-only CUICmdMoveCamera 0x51402133 is
+// gone) and queues it via AddUICommandWithID so lua CameraSet = WaitForUI(CameraMove(c,0)) waits
 // correctly (the mission camera executor's Finished posts CCmdInterfaceEvent(id) -> RemoveUIActionID).
 BEGIN_SCRIPT_COMMAND( CameraMove, "un" );
 	CDBPtr<NDb::CDBCamera> pDBCamera = luaGetDBPtr<NDb::CDBCamera>( pScript->GetObject( 1 ) );
@@ -160,9 +163,10 @@ BEGIN_SCRIPT_COMMAND( CameraMove, "un" );
 		return 0;
 	//
 	STime transitionTime = ( STime )luaParams[ 1 ].n;
-	ICamera::SCameraPos pos( pDBCamera->vAnchor,
-		pDBCamera->fDistance, pDBCamera->fPitch, pDBCamera->fYaw, pDBCamera->fRoll, pDBCamera->fFOV );
-	int nMoveID = pScript->AddUICommandWithID( new NWorld::CUICmdMoveCamera( pos, transitionTime ) );
+	vector<ICamera::SCameraPos> positions;
+	positions.push_back( ICamera::SCameraPos( pDBCamera->vAnchor,
+		pDBCamera->fDistance, pDBCamera->fPitch, pDBCamera->fYaw, pDBCamera->fRoll, pDBCamera->fFOV ) );
+	int nMoveID = pScript->AddUICommandWithID( new NWorld::CUICmdScriptMoveCamera( positions, transitionTime ) );
 	return nMoveID;
 END_SCRIPT_COMMAND
 ////////////////////////////////////////////////////////////////////////////////////////////////////

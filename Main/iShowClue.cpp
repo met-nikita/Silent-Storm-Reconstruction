@@ -17,6 +17,35 @@
 namespace NUI
 {
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail NUI::ConvertLineBreaks @0x31bc30 (same local copy as iMissionUI.cpp / iCreditsScreen.cpp)
+static wstring ConvertLineBreaks( const wstring &szStr )
+{
+	wstring szRet;
+	for ( wstring::const_iterator i = szStr.begin(); i != szStr.end(); )
+	{
+		switch ( wchar_t(*i) )
+		{
+			case L'\n':
+				szRet += L"<br>";
+				break;
+			case L'\r':
+				szRet += L"<br>";
+				++i;
+				if ( i != szStr.end() && *i == L'\n' )
+					++i;
+				continue;
+			case 133: // ellipsis symbol
+				szRet += L"...";
+				break;
+			default:
+				szRet += *i;
+				break;
+		}
+		++i;
+	}
+	return szRet;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 // CShowClueView
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CShowClueView: public CWindow
@@ -27,8 +56,8 @@ private:
 	CPtr<NRPG::CGlobalGame> pGame;
 	CPtr<NScenario::CScenarioClue> pClue;
 	////
-	CObj<CMLText> pDescription;
-	CObj<CScrollWindow<CMLText> > pDescriptionView;
+	CObj<CText> pDescription;
+	CObj<CScrollWindow<CText> > pDescriptionView;
 	////
 	CObj<CFlashButton> pCloseButton;
 	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CWindow*)this); f.Add(2,&pGame); f.Add(3,&pPlayer); f.Add(4,&pClue); f.Add(5,&pDescription); f.Add(6,&pDescriptionView); f.Add(7,&pBackground); f.Add(8,&pCloseButton); return 0; }
@@ -55,14 +84,22 @@ bool CShowClueView::ProcessMessage( const SEvent &sEvent )
 		{
 			pCloseButton = new CFlashButton( sEvent.pLoader->GetControl( "cancel" ) );
 
-			pDescriptionView = new CScrollWindow<CMLText>( sEvent.pLoader->GetControl( "view" ) );
+			pDescriptionView = new CScrollWindow<CText>( sEvent.pLoader->GetControl( "view" ) );
 			pDescription = pDescriptionView->GetClientWindow();
 
 			CPtr<NDb::CString> pClueDescription = pGame->pScenarioTracker->GetClueDescriptionFromObjective( pClue );
+			// retail @0x2393e0: text = DB string 0x4F22 ("Clue&Hint Format" markup prefix,
+			// <font face=Courier size=16pt><color=0xFF5A5959>) + line-break-converted description
 			if ( IsValid( pClueDescription ) )
-				pDescription->SetText( pClueDescription->szStr );
+				pDescription->SetText( GetDBString( 0x4F22 ) + ConvertLineBreaks( GetDBString( pClueDescription ) ), true );
 			else
 				pDescription->SetText( L"<color=red>[ERROR]Description not set" );
+
+			// retail @0x2393e0: fit the text to its content height, keeping the template width
+			SPoint sRealSize;
+			pDescription->GetRealSize( &sRealSize );
+			sRealSize.x = pDescription->GetSize().x;
+			pDescription->SetSize( sRealSize );
 			break;
 		}
 	case EVENT_TEMPLATELOADCOMPLETE:

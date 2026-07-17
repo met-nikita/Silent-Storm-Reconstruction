@@ -109,6 +109,7 @@ void CScenarioTracker::BlockZone( CScenarioZone *pZone )
 	//
 	if ( !IsZoneBlocked( pZone ) )
 		blockedZones.push_back( pZone );
+	InvalidateLeaveZoneCache();	// retail @0x301070 (every retail tracker mutator clears the CanLeaveZone cache)
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CScenarioTracker::IsZoneBlocked( CScenarioZone *pZone ) const
@@ -144,6 +145,7 @@ void CScenarioTracker::CheatTakeClue( CScenarioClue *pClue, bool bImmediately )
 		{
 			takenClues.push_back( pClue );
 		}
+		InvalidateLeaveZoneCache();	// retail @0x301d60
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -163,6 +165,7 @@ void CScenarioTracker::CheatDestroyClue( CScenarioClue *pClue, bool bImmediately
 		{
 			destroyedClues.push_back( pClue );
 		}
+		InvalidateLeaveZoneCache();	// retail @0x301d80
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -191,6 +194,7 @@ void CScenarioTracker::CheatOpenZone( CScenarioZone *pZone )
 		else if ( IsValid( pDestroy ) )
 			OnObjectiveComplete( pDestroy );
 	}
+	InvalidateLeaveZoneCache();	// retail @0x301da0
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CScenarioTracker::JustFoundClue( CScenarioClue *pClue )
@@ -288,6 +292,7 @@ void CScenarioTracker::CreateScenario( int nScenarioID )
 		pScenarioFlowChart = pFlowChart;
 		PostCreateScenario();
 	}
+	InvalidateLeaveZoneCache();	// retail @0x301460
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CScenarioTracker::CreateScenario( string szScenarioName )
@@ -298,6 +303,7 @@ void CScenarioTracker::CreateScenario( string szScenarioName )
 		pScenarioFlowChart = pFlowChart;
 		PostCreateScenario();
 	}
+	InvalidateLeaveZoneCache();	// retail @0x301500
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CScenarioTracker::GetAvailableZones( list<CPtr<CScenarioZone> > *pZones ) const
@@ -396,6 +402,7 @@ void CScenarioTracker::OpenZone( CScenarioZone *pZone )
 	//
 	if ( find( availableZones.begin(), availableZones.end(), pZone ) == availableZones.end() )
 		availableZones.push_back( pZone );
+	InvalidateLeaveZoneCache();	// retail @0x301770 (RevealZone @0x301f20 reaches this too)
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CScenarioTracker::DrawScenario()
@@ -462,6 +469,7 @@ bool CScenarioTracker::OnScenarioClueTaken( int nID, bool bUnit )
 			CheatTakeClue( pClue, true );
 		else
 			takenClues.push_back( pClue );
+		InvalidateLeaveZoneCache();	// retail @0x301f50
 		return true;
 	}
 	else
@@ -484,6 +492,7 @@ void CScenarioTracker::OnScenarioClueDestroyed( int nID, bool bUnit )
 			CheatDestroyClue( pClue, true );
 		else
 			destroyedClues.push_back( pClue );
+		InvalidateLeaveZoneCache();	// retail @0x303880
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -582,16 +591,144 @@ void CScenarioTracker::ProcessScenario( const vector< CPtr<NRPG::CUnit> > &units
 		{
 			pInventory->Take( (*b).pItem );
 		}
-		// mouse :)
-		CPtr<NRPG::IInventoryItem> pItem  = pInventory->GetHandItem();
-		if ( IsValid( pItem ) && IsValid( pItem->GetDBItem() ) &&
-			OnScenarioClueTaken( pItem->GetDBItem()->GetRecordID(), false ) )
-		{
-			pInventory->SetHandItem( 0 );
-		}
+		// The Jan03-era in-hand clue leg that used to sit here is GONE, and its absence is retail's:
+		// retail restructured this whole function (@0x303000) onto GetCluesFromPers @0x302a20 +
+		// ProcessCluesList, and GetCluesFromPers scans ONLY the slots (Get, vtbl+0x20) and the
+		// backpack (GetItems, vtbl+0x18) -- there is no hand scan anywhere in it. It could not have
+		// one: this pass is handed NRPG::CUnit (RPG-side) with no CUnitServer/CPlayer to reach a
+		// hand through, and retail's CInventory has no hand member. So no behaviour is lost here.
+		// (The rest of this function is still the Jan03 shape -- e.g. it scans all N_SLOTS where
+		// retail scans only slots 0..1. That divergence pre-dates this change and is left alone.)
 	}
 	//
 	ExpandFlowChart();
+	InvalidateLeaveZoneCache();
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail @0x302a20
+void CScenarioTracker::GetCluesFromPers( NRPG::CUnit *pPers, NRPG::CUnit *pCorpsePers,
+	list< CPtr<CScenarioClue> > *pClues, bool bTake ) const
+{
+	if ( !IsValid( pPers ) )
+		return;
+	// the pers himself is a clue while alive
+	CPtr<CScenarioClue> pClue = bScenarioAvailable ? pScenarioFlowChart->GetClueByPersID( pPers->GetRPGPersID() ) : 0;
+	if ( IsValid( pClue ) && !pPers->IsDead() )
+		pClues->push_back( pClue );
+	//
+	CPtr<NRPG::IInventory> pInventory = pPers->pInventory;
+	// hand slots (retail scans slots 0..1 only)
+	for ( int n = 0; n < NDb::N_SLOTS; ++n )
+	{
+		CPtr<NRPG::IInventoryItem> pItem = pInventory->Get( (NDb::ESlot)n );
+		if ( IsValid( pItem ) && IsValid( pItem->GetDBItem() ) )
+		{
+			pClue = bScenarioAvailable ? pScenarioFlowChart->GetClueByItemID( pItem->GetDBItem()->GetRecordID() ) : 0;
+			if ( IsValid( pClue ) )
+			{
+				pClues->push_back( pClue );
+				if ( bTake )
+					pInventory->TakeOff( (NDb::ESlot)n );
+			}
+		}
+	}
+	// backpack
+	const vector<NRPG::SBackPackItem> &items = pInventory->GetItems();
+	vector<NRPG::SBackPackItem> itemsToRemove;
+	for ( vector<NRPG::SBackPackItem>::const_iterator b = items.begin(); b != items.end(); ++b )
+	{
+		if ( IsValid( (*b).pItem ) && IsValid( (*b).pItem->GetDBItem() ) )
+		{
+			pClue = bScenarioAvailable ? pScenarioFlowChart->GetClueByItemID( (*b).pItem->GetDBItem()->GetRecordID() ) : 0;
+			if ( IsValid( pClue ) )
+			{
+				pClues->push_back( pClue );
+				if ( bTake )
+					itemsToRemove.push_back( *b );
+			}
+		}
+	}
+	for ( vector<NRPG::SBackPackItem>::iterator b = itemsToRemove.begin(); b != itemsToRemove.end(); ++b )
+		pInventory->Take( (*b).pItem );
+	// clues on the carried corpse count too (never taken off it here)
+	if ( IsValid( pCorpsePers ) )
+		GetCluesFromPers( pCorpsePers, 0, pClues, false );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail @0x302e40
+void CScenarioTracker::GetCluesInHand( const vector< CPtr<NWorld::CUnit> > &units,
+	list< CPtr<CScenarioClue> > *pClues ) const
+{
+	pClues->clear();
+	for ( vector< CPtr<NWorld::CUnit> >::const_iterator i = units.begin(); i != units.end(); ++i )
+	{
+		CPtr<NRPG::CUnit> pPers = (*i)->GetRPG()->GetRPGUnit();
+		NRPG::CUnit *pCorpsePers = 0;
+		NWorld::CUnitServer *pServer = CDynamicCast<NWorld::CUnitServer>( (*i).GetPtr() );
+		if ( pServer && IsValid( pServer->GetCorpse() ) )
+			pCorpsePers = pServer->GetCorpse()->GetUnitRPG()->GetRPGUnit();
+		GetCluesFromPers( pPers, pCorpsePers, pClues, false );
+	}
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail @0x3030b0
+bool CScenarioTracker::CanLeaveZone( const vector< CPtr<NWorld::CUnit> > &units,
+	CScenarioZone *pZone, bool *pbGameOver )
+{
+	if ( !bScenarioAvailable )
+		return true;
+	//
+	list< CPtr<CScenarioClue> > cluesInHand;
+	GetCluesInHand( units, &cluesInHand );
+	// the zone's placed clues not yet found and not in hand -- leaving would strand them
+	list< CPtr<CScenarioClue> > cluesToFind;
+	for ( vector< CPtr<CScenarioClue> >::const_iterator i = pZone->GetClues().begin(); i != pZone->GetClues().end(); ++i )
+	{
+		bool bFound = IsClueFound( *i );
+		bool bInHand = find( cluesInHand.begin(), cluesInHand.end(), *i ) != cluesInHand.end();
+		if ( (*i)->IsPlaced() && !bFound && !bInHand )
+			cluesToFind.push_back( *i );
+	}
+	// unchanged inputs -> cached result (retail compares all three lists)
+	if ( bHasCalcedCanLeaveZone && prevCluesToFind == cluesToFind &&
+		prevCluesInHands == cluesInHand && prevDestroyedClues == destroyedClues )
+	{
+		*pbGameOver = bPrevGameOver;
+		return bPrevCanLeaveZone;
+	}
+	// can leave = BASE->FFIGHT still reachable with this zone's unfound clues hidden
+	for ( list< CPtr<CScenarioClue> >::iterator i = cluesToFind.begin(); i != cluesToFind.end(); ++i )
+		(*i)->SetPlaced( false );
+	CObj<CScenarioFlowChartState> pPath = pScenarioFlowChart->GetPathFinder()->FindPath(
+		GetZoneByName( "BASE" ), GetZoneByName( "FFIGHT" ), true );
+	bool bCanLeave = IsValid( pPath );
+	for ( list< CPtr<CScenarioClue> >::iterator i = cluesToFind.begin(); i != cluesToFind.end(); ++i )
+		(*i)->SetPlaced( true );
+	// game over = unreachable even hiding only the DESTROYED unfound clues
+	vector< CPtr<CScenarioClue> > destroyedToHide;
+	for ( list< CPtr<CScenarioClue> >::iterator i = cluesToFind.begin(); i != cluesToFind.end(); ++i )
+	{
+		if ( !IsValid( *i ) || !(*i)->IsPlaced() || IsClueFound( *i ) )
+			continue;
+		if ( (*i)->IsDestroyed() || find( destroyedClues.begin(), destroyedClues.end(), *i ) != destroyedClues.end() )
+		{
+			destroyedToHide.push_back( *i );
+			(*i)->SetPlaced( false );
+		}
+	}
+	pPath = pScenarioFlowChart->GetPathFinder()->FindPath( GetZoneByName( "BASE" ), GetZoneByName( "FFIGHT" ), true );
+	bool bGameOver = !IsValid( pPath );
+	for ( vector< CPtr<CScenarioClue> >::iterator i = destroyedToHide.begin(); i != destroyedToHide.end(); ++i )
+		(*i)->SetPlaced( true );
+	//
+	bPrevGameOver = bGameOver;
+	*pbGameOver = bGameOver;
+	bPrevCanLeaveZone = bCanLeave;
+	bHasCalcedCanLeaveZone = true;
+	prevCluesToFind = cluesToFind;
+	prevCluesInHands = cluesInHand;
+	prevDestroyedClues = destroyedClues;
+	return bCanLeave;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 int CScenarioTracker::GetScenarioID() const
@@ -650,8 +787,8 @@ NDb::CSide *GetSideForScenario( CScenarioTracker *pScenario )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // script-goal/task API (retail @0x302990 / @0x300720 / @0x3007a0). Goals are appended to the zone's
 // scriptGoals; their completion state is set on the runtime CScenarioGoal/CScenarioTask. ELISION: the
-// retail also clears a bHasCalcedCanLeaveZone cache (absent in this tracker) and falls back to a
-// clue-attached goal via GetGoalByID -- both omitted (script goals live only in scriptGoals here).
+// retail falls back to a clue-attached goal via GetGoalByID -- omitted (script goals live only in
+// scriptGoals here). The bHasCalcedCanLeaveZone cache-clear IS ported (InvalidateLeaveZoneCache).
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // First scriptGoal in the zone whose DB goal record id matches nGoalID, or null.
 static CScenarioGoal* FindScriptGoal( CScenarioZone *pZone, int nGoalID )
@@ -673,6 +810,7 @@ void CScenarioTracker::AddScriptGoal( CScenarioZone *pZone, int nGoalID )
 	NDb::CScenarioGoal *pTmpl = NDb::GetScenarioGoal( nGoalID );
 	if ( IsValid( pZone ) && IsValid( pTmpl ) )
 		pZone->AddScriptGoal( new CScenarioGoal( pTmpl ) );
+	InvalidateLeaveZoneCache();	// retail @0x302990
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CScenarioTracker::ScriptGoalSetComplete( CScenarioZone *pZone, int nGoalID, bool bComplete )
@@ -683,6 +821,7 @@ bool CScenarioTracker::ScriptGoalSetComplete( CScenarioZone *pZone, int nGoalID,
 	if ( !IsValid( pGoal ) )
 		return false;
 	pGoal->SetState( bComplete ? TS_COMPLETED : TS_FAILED );
+	InvalidateLeaveZoneCache();	// retail @0x300720
 	return true;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -696,6 +835,7 @@ bool CScenarioTracker::ScriptTaskSetComplete( CScenarioZone *pZone, int nGoalID,
 	if ( nTaskIdx < 0 || nTaskIdx >= (int)pGoal->GetTasks().size() )
 		return false;
 	pGoal->GetTasks()[ nTaskIdx ]->SetState( bComplete ? TS_COMPLETED : TS_FAILED );
+	InvalidateLeaveZoneCache();	// retail @0x3007a0
 	return true;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////

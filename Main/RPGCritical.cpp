@@ -6,6 +6,7 @@
 #include "RPGAllCriticals.h"
 #include "RPGUnitMission.h"
 #include "RPGItemSet.h"
+#include "rpgPerkConstants.h"   // N_PERK_LESS_INFLUENCE_OF_WOUNDS_FOR_TOHIT (CVPCritical @0x295280)
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 namespace NRPG
 {
@@ -28,9 +29,9 @@ int CCritical::GetRemainingTime() const
 	return critical.nDuration - nTurn;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-float CCritical::GetModifier() const 
-{ 
-	if ( modifiers.empty() ) return 0; return modifiers.front()->Get(); 
+float CCritical::GetModifier() const
+{
+	if ( modifiers.empty() ) return 0; return modifiers.front()->fMul;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 int CCritical::Merge( CCritical *pCritical ) const
@@ -107,36 +108,48 @@ CCritical* CreateCritical( const SCritical &critical )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 //                      CLASS CVPCritical
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail @0x295280: percentage of THEORETICAL max VP (healed VP folded in), the wound-tolerance
+// perk 5 (+25 pts), the wounded-IC perk 8 (IC x(Param2+1) below its threshold), the nCheats&0x80
+// harsher-wounds table, and FIVE degraded skills (AP/INTERRUPT/MELEE/SHOOTING/THROWING).
 bool CVPCritical::SetModifiers( CUnit *pRPGUnit, IUnitMission *pRPGMission )
 {
 	ASSERT( pRPGUnit );
 	CDynamicSkill &vp = pRPGUnit->Skills(NDb::ST_VP);
-	CDynamicSkill &ap = pRPGUnit->Skills(NDb::ST_AP);
-	CDynamicSkill &interrupt = pRPGUnit->Skills(NDb::ST_INTERRUPT);
-	CDynamicSkill &melee = pRPGUnit->Skills(NDb::ST_MELEE);
 
-	const int nPercentage = 100.0f * vp / vp.GetMaxValue();
-	//
+	const int nEff = vp;                                     // frozen -> cap, else min(cap, value)
+	const int nDenom = vp.GetTheoreticalMax();               // nBaseValue + nXPValue
+	int nPercentage = int( float( pRPGUnit->nHealedVP + nEff ) * 100.0f / float( nDenom ) );
+
+	if ( pRPGUnit->HasPerk( N_PERK_LESS_INFLUENCE_OF_WOUNDS_FOR_TOHIT ) )
+		nPercentage += 25;
+
+	float fP1 = 0, fP2 = 0;
+	if ( pRPGUnit->HasPerk( 8, &fP1, &fP2 ) && float( nPercentage ) < fP1 * 100.0f )
+		PushModifier( new CSkillModifier( &pRPGUnit->Skills(NDb::ST_IC), SSkillModifyInfo( fP2 + 1.0f, 0 ) ) );
+
+	const bool bCheat = pRPGUnit->IsCheatEnabled( 0x80 );    // harsher-wounds cheat bit
 	if ( nPercentage > 75 )
 		return false;
-	else if ( nPercentage > 50 )
+
+	float mAP, mInt, mMelee, mShoot, mThrow;
+	if ( bCheat )
 	{
-		PushModifier( new CSkillModifier( &ap, 0.95f ) );
-		PushModifier( new CSkillModifier( &interrupt, 0.9f ) );
-		PushModifier( new CSkillModifier( &melee, 0.9f ) );
-	}
-	else if ( nPercentage > 25 )
-	{
-		PushModifier( new CSkillModifier( &ap, 0.9f ) );
-		PushModifier( new CSkillModifier( &interrupt, 0.75f ) );
-		PushModifier( new CSkillModifier( &melee, 0.75f ) );
+		if ( nPercentage < 26 )      { mAP = 0.7f;  mInt = 0.25f; mMelee = 0.4f;  mShoot = 0.4f;  mThrow = 0.4f;  }
+		else if ( nPercentage < 51 ) { mAP = 0.8f;  mInt = 0.5f;  mMelee = 0.6f;  mShoot = 0.6f;  mThrow = 0.6f;  }
+		else                         { mAP = 0.9f;  mInt = 0.75f; mMelee = 0.8f;  mShoot = 0.8f;  mThrow = 0.8f;  }
 	}
 	else
 	{
-		PushModifier( new CSkillModifier( &ap, 0.8f ) );
-		PushModifier( new CSkillModifier( &interrupt, 0.5f ) );
-		PushModifier( new CSkillModifier( &melee, 0.5f ) );
+		if ( nPercentage < 26 )      { mAP = 0.8f;  mInt = 0.5f;  mMelee = 0.5f;  mShoot = 0.5f;  mThrow = 0.5f;  }
+		else if ( nPercentage < 51 ) { mAP = 0.9f;  mInt = 0.75f; mMelee = 0.75f; mShoot = 0.75f; mThrow = 0.75f; }
+		else                         { mAP = 0.95f; mInt = 0.9f;  mMelee = 0.9f;  mShoot = 0.9f;  mThrow = 0.9f;  }
 	}
+
+	PushModifier( new CSkillModifier( &pRPGUnit->Skills(NDb::ST_AP),        SSkillModifyInfo( mAP,    0 ) ) );
+	PushModifier( new CSkillModifier( &pRPGUnit->Skills(NDb::ST_INTERRUPT), SSkillModifyInfo( mInt,   0 ) ) );
+	PushModifier( new CSkillModifier( &pRPGUnit->Skills(NDb::ST_MELEE),     SSkillModifyInfo( mMelee, 0 ) ) );
+	PushModifier( new CSkillModifier( &pRPGUnit->Skills(NDb::ST_SHOOTING),  SSkillModifyInfo( mShoot, 0 ) ) );
+	PushModifier( new CSkillModifier( &pRPGUnit->Skills(NDb::ST_THROWING),  SSkillModifyInfo( mThrow, 0 ) ) );
 	return true;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -146,7 +159,7 @@ bool CAPCritical::SetModifiers( CUnit *pRPGUnit, IUnitMission *pRPGMission )
 {
 	ASSERT( pRPGUnit );
 	CDynamicSkill &ap = pRPGUnit->Skills(NDb::ST_AP);
- 	PushModifier( new CSkillModifier( &ap, 1.0f/critical.fValue ) );
+ 	PushModifier( new CSkillModifier( &ap, SSkillModifyInfo( 1.0f/critical.fValue, 0 ) ) );
 	return true;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -168,7 +181,7 @@ bool CWeaponSkillCritical::SetModifiers( CUnit *pRPGUnit, IUnitMission *pRPGMiss
 	for ( int i = 0; i < ARRAY_SIZE( weaponSkills ); ++i )
 	{
 		CDynamicSkill &s = pRPGUnit->Skills( weaponSkills[i] );
- 		PushModifier( new CSkillModifier( &s, 1.0f/critical.fValue ) );
+ 		PushModifier( new CSkillModifier( &s, SSkillModifyInfo( 1.0f/critical.fValue, 0 ) ) );
 	}
 	return true;
 }
@@ -188,8 +201,8 @@ bool CMotionlessCritical::SetModifiers( CUnit *pRPGUnit, IUnitMission *_pRPGMiss
 {
 	ASSERT( pRPGUnit && _pRPGMission );
 	pRPGMission = _pRPGMission;
-	PushModifier( new CSkillModifier( &pRPGUnit->Skills(NDb::ST_AP), 1.0f/critical.fValue ) );
-	pRPGMission->Seat();
+	PushModifier( new CSkillModifier( &pRPGUnit->Skills(NDb::ST_AP), SSkillModifyInfo( 1.0f/critical.fValue, 0 ) ) );
+	pRPGMission->ApplyMotionless();   // retail @0x295d60 -- the nMotionless ref-count replaces the Jan03 bSitting
 	pRPGMission->AddLastCritical( GetCriticalType() );
 	return true;
 }
@@ -198,7 +211,7 @@ void CMotionlessCritical::RemoveModifiers()
 {
 	CCritical::RemoveModifiers();
 	if ( IsValid( pRPGMission ) )
-		pRPGMission->Stand();
+		pRPGMission->ReleaseMotionless();  // retail @0x294eb0
 	pRPGMission = 0;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -255,20 +268,19 @@ bool CDamageWeaponCritical::SetModifiers( CUnit *pRPGUnit, IUnitMission *pRPGMis
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 //                      CLASS CBlindCritical
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail @0x294da0: bind + AddLastCritical ONLY -- the shipped build has NO Blind(true/false)
+// toggle (the Jan03 fLightPerception member does not exist in retail).
 bool CBlindCritical::SetModifiers( CUnit *pRPGUnit, IUnitMission *_pRPGMission )
 {
 	ASSERT( pRPGUnit && _pRPGMission );
 	pRPGMission = _pRPGMission;
-	pRPGMission->Blind( true );
 	pRPGMission->AddLastCritical( GetCriticalType() );
 	return true;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CBlindCritical::RemoveModifiers()
+void CBlindCritical::RemoveModifiers()  // retail @0x294fb0
 {
 	CCritical::RemoveModifiers();
-	if ( IsValid( pRPGMission ) )
-		pRPGMission->Blind( false );
 	pRPGMission = 0;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -282,20 +294,19 @@ bool CStunCritical::SetModifiers( CUnit *pRPGUnit, IUnitMission *pRPGMission )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 //                      CLASS CDeafCritical
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail @0x294e00: bind + AddLastCritical ONLY -- no Deaf(true/false) toggle (the Jan03
+// fSoundPerception member does not exist in retail).
 bool CDeafCritical::SetModifiers( CUnit *pRPGUnit, IUnitMission *_pRPGMission )
 {
 	ASSERT( pRPGUnit && _pRPGMission );
 	pRPGMission = _pRPGMission;
-	pRPGMission->Deaf( true );
 	pRPGMission->AddLastCritical( GetCriticalType() );
 	return true;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CDeafCritical::RemoveModifiers()
+void CDeafCritical::RemoveModifiers()  // retail @0x295010
 {
 	CCritical::RemoveModifiers();
-	if ( IsValid( pRPGMission ) )
-		pRPGMission->Deaf( false );
 	pRPGMission = 0;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////

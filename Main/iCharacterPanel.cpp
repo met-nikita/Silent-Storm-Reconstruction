@@ -70,9 +70,7 @@ bool CCharacterPanel::ProcessMessage( const SEvent &sEvent )
 
 			// release @0x1b0810 (tail of EVENT_TEMPLATELOAD): the wound icons are created from
 			// the template controls (they must be CInfoPanelCritical wrappers, not the loader's
-			// plain image windows). NOTE: retail Update (@0x1b0420) gates pMedals/pBiography
-			// STYLE_ENABLED on a per-frame mission tab query -- not threaded into dev IMission
-			// yet, so the buttons keep their template enabled state here.
+			// plain image windows).
 			criticalIconsSet.resize( N_NUM_CRITICALS_ICONS );
 			for ( int nTemp = 0; nTemp < N_NUM_CRITICALS_ICONS; nTemp++ )
 				criticalIconsSet[nTemp] = new CInfoPanelCritical( sEvent.pLoader->GetControl( NStr::Format( "critical_%d", nTemp ) ) );
@@ -168,6 +166,10 @@ void CCharacterPanel::Update( const STime &sTime, NGScene::I2DGameView *pView )
 {
 	if ( !GetStyle( STYLE_VISIBLE ) )
 		return;
+
+	// retail @0x1b0420: medals/biography tabs grayed while first-mission (tutorial) mode (mission vtbl+0xf8)
+	pMedals->SetStyle( STYLE_ENABLED, !pMission->IsSpecialFirstMissionMode() );
+	pBiography->SetStyle( STYLE_ENABLED, !pMission->IsSpecialFirstMissionMode() );
 
 	vector<CPtr<NGame::IUnitTracker> > unitsSet;
 	pMission->GetSelectedUnits( &unitsSet );

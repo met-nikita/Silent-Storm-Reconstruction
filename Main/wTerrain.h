@@ -43,6 +43,11 @@ public:
 	void Visit( IRenderVisitor *pVisitors );
 
 	void Update( bool bVisible = true ); // MapEditor
+
+	// retail @0x38ab50: burn an explosion crater into the grass -- scorch the grass-colour grid toward
+	// black by 1-(d/r)^4 within fRadius, clear density cells + prune blades inside the r*0.4 core, then
+	// UpdateRegionGrass on the grown bbox. Called from the explosion tracker's finish (MakeDamage tail).
+	void DrawExplosion( const CVec3 &vCenter, float fRadius );
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 } /// NAMESPACE

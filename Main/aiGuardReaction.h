@@ -35,6 +35,7 @@ class CAIGuardReaction: public CAIReaction
 	int                     nAPRadius;        // +0x18  AP radius of the area
 	SUnitPosition           initialPos;       // +0x1c  the post (snapshotted from the unit's position when the area is built)
 	bool                    bWasCombat;       // +0x28  saw a live enemy -> regroup (AfterCombat) once it is gone
+	int operator&( CStructureSaver &f ) { f.Add( 2, (CAIReaction*)this ); f.Add( 3, &pGuardAnimation ); f.Add( 4, &pArea ); f.Add( 5, &nAPRadius ); f.Add( 6, &initialPos ); f.Add( 7, &bWasCombat ); return 0; }   // retail @0x51810
 public:
 	CAIGuardReaction(): nAPRadius( 0 ), bWasCombat( false ) {}
 	CAIGuardReaction( IAIUnit *pUnit, NDb::CAnimation *pGuardAnimation, int nRadius );   // @0x50f40

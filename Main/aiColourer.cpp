@@ -153,7 +153,6 @@ void CMapColourer::ConstructColouring( CPathNetwork* pNet )
 	}
 
 	CNodesLayer *pLayer = pMap->pLayer;
-	IAIMap *pAIMap = pMap->pMap;
 	for ( int nX = 0; nX < nMaxX; ++nX )
 	{
 		for ( int nY = 0; nY < nMaxY; ++nY )
@@ -376,14 +375,14 @@ void CMapColourer::CalcDistanceTableForColor(
 void CMapColourer::CreateZonesMap( SNet *pZones, vector<CNodesLayer::SLadder> *pLadders )
 {
 	SNet &zones = *pZones;
-	// перестраиваем карту, если она уже была построена
+	// пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅ, пїЅпїЅпїЅпїЅ пїЅпїЅпїЅ пїЅпїЅпїЅ пїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ
 	zones.Clear();
 	if (zones.nodes.size()<nLocalColors)
 		zones.nodes.resize(nLocalColors);
 	for (WORD wCurrColor = 0; wCurrColor < nLocalColors; ++wCurrColor)
 		zones.nodes[wCurrColor].wColor = wCurrColor;
 
-	// определяем структуры, ищущие путь
+	// пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ, пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅ
 	EPathfinderMode mode;
 	CSquareMapCosts *pTable;
 	if ( pZones == &zonesStandOnly )
@@ -396,7 +395,7 @@ void CMapColourer::CreateZonesMap( SNet *pZones, vector<CNodesLayer::SLadder> *p
 		mode = PM_ANY_MOVE;
 		pTable = &pointDistancesAnyMove;
 	}
-	// для каждого цвета, который реально существует, ищем пути к соседям
+	// пїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅ, пїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ, пїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅ пїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ
 	SRectColorConstraint<unsigned char> constraints(0, 0, 24, 24);
 	CWaysCounter counter( pTable, &constraints, pMap, CTPoint<unsigned char>(0, 0) );
 	for (WORD wCurrColor = 0; wCurrColor < nLocalColors; ++wCurrColor)
@@ -445,7 +444,7 @@ void CColouredWaysCalcer::CalcBestWays( CPathNetwork *pPathNet, CLayerColorConst
 		bPrevStandOnly = bStandOnly;
 		prevSrc = src;
 		distances.clear();
-		// Записываем начало пути в таблицу расстояний
+		// пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅ пїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ
 		start = src;
 		distances[src].distance = 0;
 		distances[src].parent.MakeNull();
@@ -453,11 +452,11 @@ void CColouredWaysCalcer::CalcBestWays( CPathNetwork *pPathNet, CLayerColorConst
 		distances[src].next.MakeNull();
 		distances[src].isProceeded = distances[src].isInList = true;
 	}
-	// Начинаем поиск
+	// пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅ
 	for ( int i = 0; i < dst.size(); ++i )
 	{
 		CUpperNetWay way;
-		// проверим, не просчитали ли мы уже эту зону
+		// пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ, пїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅ пїЅпїЅ пїЅпїЅпїЅ пїЅпїЅпїЅ пїЅпїЅпїЅпїЅ
 		CZonesToDistInfo::iterator calced = distances.find( dst[i] );
 		if ( calced != distances.end() )
 		{
@@ -481,21 +480,21 @@ void CColouredWaysCalcer::CalcBestWays( CPathNetwork *pPathNet, CLayerColorConst
 		{
 			firstNotFound = i;
 			break;
-			// если функция вернула false, значит, в таблицу попали все расстояния до всех зон, что были достижимы.
-			// поэтому расчитывать ее дальше не имеет смысла
+			// пїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ false, пїЅпїЅпїЅпїЅпїЅпїЅ, пїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅ пїЅпїЅпїЅпїЅ пїЅпїЅпїЅ, пїЅпїЅпїЅ пїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ.
+			// пїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅ пїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ
 		}
 	}
 	if ( firstNotFound == -1 )
 		return;
 	//OutputDebugString("[ GLOBAL WAY SEARCH ] Way not found! \n");
-	// хотя бы один расчет пути вернул false.
-	// следовательно, надо искать "ближайшее приближение". 
+	// пїЅпїЅпїЅпїЅ пїЅпїЅ пїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ false.
+	// пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ, пїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ "пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ". 
 	for ( int i = firstNotFound; i < dst.size(); ++i )
 	{
 		CUpperNetWay way;
 		CZonesToDistInfo::iterator calced = distances.find( dst[i] );
 		SZone best;
-		if ( calced == distances.end() ) // зона действительно недостижима
+		if ( calced == distances.end() ) // пїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ
 		{
 			float bestDist = 1e8;
 			float fKoeff = ( FP_GRID_STEP / 32 );
@@ -652,7 +651,7 @@ void CMapColourer::ClearColor( EPathfinderMode mode, CPathNetwork* pNet, WORD wC
 		pMyNeighbours = &zonesStandOnly.nodes[wColor].neighbours;
 	else
 		pMyNeighbours = &zonesAnyMove.nodes[wColor].neighbours;
-	// удаляем у соседей не с данного лэйера ссылки на данный цвет
+	// пїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅ пїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅ
 	for ( list<SNeighbour>::iterator i = pMyNeighbours->begin(); i != pMyNeighbours->end(); ++i )
 	{
 		if ( i->nLayer == nLayer )
@@ -674,14 +673,14 @@ void CMapColourer::ClearColor( EPathfinderMode mode, CPathNetwork* pNet, WORD wC
 			}
 		}
 	}
-	// случай, когда этот цвет полностью очищается
+	// пїЅпїЅпїЅпїЅпїЅпїЅ, пїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ
 	if ( localColorCounts[ wColor ] == 0 )
 	{
 		pMyNeighbours->clear();
 		return;
 	}
 	list<SNeighbour> temp;
-	// случай, когда очищаются только ссылки на соседей, которые очищаются полностью
+	// пїЅпїЅпїЅпїЅпїЅпїЅ, пїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ, пїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ
 	for ( list<SNeighbour>::iterator i = pMyNeighbours->begin(); i != pMyNeighbours->end(); ++i )
 	{
 		if ( i->nLayer != nLayer )
@@ -816,7 +815,8 @@ void CMapColourer::RecalcColouring( CPathNetwork *pNet, int nCurrentLayer )
 			sprintf( buf, "Recalc zone %d %d %d %d\n", cMinX, cMaxX, cMinY, cMaxY );
 			OutputDebugString( buf ); 
 		}*/
-		IAIMap *pAIMap = pMap->pMap;
+		// the proxy carries no IAIMap (retail layout) -- derive it through the layer's network
+		IAIMap *pAIMap = pLayer->pGroup->pNet->GetAIMap();
 		for ( unsigned char cX = cMinX; cX < cMaxX; ++cX )
 		{
 			for ( unsigned char cY = cMinY; cY < cMaxY; ++cY )
@@ -866,7 +866,7 @@ void CMapColourer::RecalcColouring( CPathNetwork *pNet, int nCurrentLayer )
 			zonesAnyMove.nodes[wCurrColor].wColor = wCurrColor;
 	}
 
-	// определяем структуры, ищущие путь
+	// пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ, пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅ
 	SRectColorConstraint<unsigned char> constraints(0, 0, 24, 24);
 	CWaysCounter counterStandOnly(&pointDistancesStandOnly, &constraints, pMap, CTPoint<unsigned char>(0, 0) );
 	CWaysCounter counterAnyMove(&pointDistancesAnyMove, &constraints, pMap, CTPoint<unsigned char>(0, 0) );
@@ -901,7 +901,7 @@ void CMapColourer::RecalcColouring( CPathNetwork *pNet, int nCurrentLayer )
 			for ( unsigned char cY = cMinBlockY; cY < cMaxBlockY; ++cY )
 				mustInvestigate[ cY ][ cX ] = true;
 	}
-	// для каждой пары соприкасающихся цветов в MustInvestigate добавляем связь
+	// пїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ пїЅ MustInvestigate пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅ
 	unsigned char cX, cY;
 	for ( cX = 0; cX < ( (nSizeX + 7) >> 3 ); ++cX )
 	{
@@ -1124,9 +1124,9 @@ void CMapColourer::FindAdjacentColours( unsigned char cMinX, unsigned char cMinY
 		}
 	}
 	// add ladders
-	// в этом месте мы добавляем переход с нижней точки на лестницу, если он есть.
-	// переход с верхней половины лестницы будет добавлен позже, в момент AttachTransitions
-	// т.к. сейчас еще не факт, что тот слой вообще посчитан
+	// пїЅ пїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅ пїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅ пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅ пїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ, пїЅпїЅпїЅпїЅ пїЅпїЅ пїЅпїЅпїЅпїЅ.
+	// пїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅ, пїЅ пїЅпїЅпїЅпїЅпїЅпїЅ AttachTransitions
+	// пїЅ.пїЅ. пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅ пїЅпїЅ пїЅпїЅпїЅпїЅ, пїЅпїЅпїЅ пїЅпїЅпїЅ пїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ
 	if ( !pLadders )
 		return;
 	vector<CNodesLayer::SLadder> &ladders = *pLadders;
@@ -1144,7 +1144,7 @@ void CMapColourer::FindAdjacentColours( unsigned char cMinX, unsigned char cMinY
 		unsigned char cY = (unsigned char)ladder.placeOnBottom.GetY();
 		if ( cX < cMinX || cX >= cMaxX || cY < cMinY || cY >= cMaxY )
 			continue;
-		pMap->pLayer->RefreshLadder( i, pMap->pMap );
+		pMap->pLayer->RefreshLadder( i, pMap->pLayer->pGroup->pNet->GetAIMap() );
 		WORD wColor = GetPointColor( cX, cY );
 		WORD wLadderColor = EC_LADDER_COLOR + i * 2;
 		WORD wDistance = pTable->GetCost( CSquareMapCosts::SPosition( cX, cY ) ) +

@@ -4,6 +4,7 @@
 #include "..\MiscDll\LogStream.h"
 #include "..\MiscDll\Commands.h"
 #include "..\FileIO\Streams.h"
+#include "Interface.h"     // NUI umbrella -- GetDBString (IsValidCustomName's reserved-name lookups)
 #include "iSaveManager.h"
 #include <io.h>
 #include <sys/types.h>
@@ -175,8 +176,6 @@ void CSaveManager::GetSlotScreenShot( const string &szName, CArray2D<NGfx::SPixe
 
 		if ( sHeader.nMagic != N_SAVE_MAGIC_NUMBER )
 			throw L"Invalid save file";
-//		if ( sHeader.nChecksum != CalcSaveCheckSum() )
-//			throw L"Save file corrupted";
 
 		pScreenShot->SetSizes( N_SAVE_SCREENSHOT_X, N_SAVE_SCREENSHOT_Y );
 		for ( int nTempY = 0; nTempY < N_SAVE_SCREENSHOT_Y; nTempY++ )
@@ -327,6 +326,24 @@ void SetActiveProfile( const string &szProfile )
 {
 	NGlobal::SetVar( "game_profile", NGlobal::CValue( NStr::ToUnicode( szProfile ) ) );
 	GetSaveManager()->SetActiveProfile( szProfile );    // keep the slot system's active profile in sync
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail NMainLoop::IsValidCustomName @0x235d00 (iSaveManager.obj): a typed save-slot name is valid
+// unless it equals one of the four RESERVED localized slot names, DB strings 20241..20244 (each
+// compared as ToAscii(GetDBString(id)) with plain string equality -- disasm 0x635d1c..0x635e4b).
+// The empty-name check is the caller's job (CSaveView::SaveSlot tests empty separately).
+////////////////////////////////////////////////////////////////////////////////////////////////////
+bool IsValidCustomName( const string &szName )
+{
+	if ( szName == NStr::ToAscii( NUI::GetDBString( 20241 ) ) )
+		return false;
+	if ( szName == NStr::ToAscii( NUI::GetDBString( 20242 ) ) )
+		return false;
+	if ( szName == NStr::ToAscii( NUI::GetDBString( 20243 ) ) )
+		return false;
+	if ( szName == NStr::ToAscii( NUI::GetDBString( 20244 ) ) )
+		return false;
+	return true;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 } // namespace

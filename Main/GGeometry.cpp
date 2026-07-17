@@ -293,9 +293,12 @@ void CObjectInfo::AssignGeometry( const SData &data )
 		positions[k] = v.pos;
 		res.tex.nU = Float2Int( v.tex.u * N_VERTEX_TEX_SIZE );
 		res.tex.nV = Float2Int( v.tex.v * N_VERTEX_TEX_SIZE );
-		NGfx::CalcCompactVector( &res.normal, v.normal );
-		NGfx::CalcCompactVector( &res.texU, v.texU );
-		NGfx::CalcCompactVector( &res.texV, v.texV );
+		// release @0x5217a0: SVertex already stores normal/texU/texV PRE-packed as
+		// SCompactVector, so these are straight DWORD copies (the predecessor packed
+		// raw CVec3s here via CalcCompactVector; producers pack now).
+		res.normal = v.normal;
+		res.texU = v.texU;
+		res.texV = v.texV;
 	}
 	geometry = data.geometry;
 }

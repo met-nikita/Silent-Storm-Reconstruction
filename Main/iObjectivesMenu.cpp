@@ -72,7 +72,7 @@ void CObjectivesUI::AddRow( const wstring &wsText, int *pCount )
 {
 	int &nCount = (*pCount);
 
-	CPtr<CMLText> pText = new CMLText( SWindowInfo( pList, SPoint( 0, 0 ), SPoint( pList->GetSize().x, 0 ), "", STYLE_ENABLED | STYLE_VISIBLE ) );
+	CPtr<CText> pText = new CText( SWindowInfo( pList, SPoint( 0, 0 ), SPoint( pList->GetSize().x, 0 ), "", STYLE_ENABLED | STYLE_VISIBLE ) );
 	pText->SetText( wsText );
 
 	SPoint sSize;

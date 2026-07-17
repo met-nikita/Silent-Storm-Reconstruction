@@ -363,7 +363,9 @@ public:
 	virtual void GetNearPlaces( const SSphere &s, vector<SPathPlace> *pRes, bool bTakeAll = false ) = 0;
 	//virtual void ForceLayersRecalc( const SSphere &s ) = 0;
 	//virtual ETransitionType GetTransitionType( const SPathPlace &from, const SPathPlace &to ) = 0;
-	virtual void CreateLadder( int nX, int nY, int nHeight, int nRotation, int nLayersGroup, int nFloor ) = 0;
+	// retail @0x40290: WORLD-space ladder record (bottom point + a point one grid-step away in the
+	// climb direction); the network resolves the owning layers group, tile coords and rotation
+	virtual void CreateLadder( const CVec2 &ptPos, const CVec2 &ptUpperPos, int nHeight, int nFloor ) = 0;
 	virtual bool UpdateColouring( const vector<SPathPlace> &newLockers ) = 0;
 	virtual void FormationMoveTo( vector<SPosition> *pPlaces, const SPosition &to ) = 0;	
 	virtual void FlipperOpenClose( CObjectBase* flipper, bool bOpen ) = 0;
@@ -374,13 +376,20 @@ public:
 	// true while any layer group still has a pending recolour/pass-calc job (PassCalcerIsActive /
 	// WaitForPassCalc). Retail CPathNetwork::HasPassCalcerJobs @0x3e4a0.
 	virtual bool HasPassCalcerJobs() const { return false; }
+	// read-and-clear "grid changed since last query". Retail CPathNetwork::CheckUpdated @0x4c9a0
+	// (IAIMap vtbl); retail consumer = CWorld::Segment @0x36bce0, which broadcasts the deferred
+	// TBS_GRID_INFO_UPDATED (GridInfoUpdated @0x375ca0) when it returns true. Added like
+	// HasPassCalcerJobs: functional rebuild, no vtable-offset constraint.
+	virtual bool CheckUpdated() { return false; }
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class IAIJobManager;
 IPathNetwork* CreateNodesNetwork( IAIMap *pMap, IAIJobManager *pJobManager );
 // Snap *pOut onto layer 0 near *pSrc's world position, then repurpose its nLayer field to hold the
 // altitude above that ground cell (in F_3D_STEP units, clamped 0..255) and flag it as a 3D/fly
-// position (nFinal). Used by UnitFlyToWaypoint -> CCmdFly. Retail NAI::MakeFlyPos @0x3d0e0/@0x3d180.
+// position (nFinal). Used by UnitFlyToWaypoint -> CCmdFly and 3D-waypoint load.
+// Retail NAI::MakeFlyPos @0x3d0e0 (worker: raw world point) / @0x3d180 (wrapper: from *pSrc's CP).
+bool MakeFlyPos( const CVec3 &pt, IPathNetwork *pNet, SPosition *pOut );
 bool MakeFlyPos( SPosition *pSrc, SPosition *pOut );
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // aiPositionDebug -- locker-validity probes for CPathNetwork::DebugCheck (retail @0x917d0 / @0x91810);

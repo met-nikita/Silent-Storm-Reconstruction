@@ -200,6 +200,14 @@ bool CPath::AddNewPoint( const SPathPlace& point )
 			SPathPlace pushPoint( point );
 			pushPoint.SetDirection( last.GetDirection() );
 			pushPoint.SetMoving( last.IsMoving() );
+			// retail @0x48ac1a: a pose change across the fold emits a pose-entry point first
+			if ( pushPoint.GetPose() != last.GetPose() )
+			{
+				SPathPlace poseEntry( pushPoint );
+				poseEntry.SetPose( last.GetPose() );
+				if ( !AddWithPossibleAction( poseEntry ) )
+					return false;
+			}
 			if ( !AddWithPossibleAction( pushPoint ) )
 				return false;
 			return true;
@@ -245,6 +253,8 @@ bool CPath::AddNewPoint( const SPathPlace& point )
 	if ( tt == TT_TURN )
 		newDir = point.GetDirection();
 	if ( ( !last.IsMoving() ) && ( lastDir != newDir ) )
+		bCanDo = false;
+	if ( point.GetPose() == CM_INACTIVE && last.GetPose() != CM_INACTIVE )   // retail @0x48ad94
 		bCanDo = false;
 	if ( AreAdjacentDirections( lastDir, newDir ) && bCanDo )
 	{
@@ -431,14 +441,19 @@ static SPathPlace HeadPlace( const SPathPlace &p )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // SPathFinder2
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-struct SPathFinder2 
+struct SPathFinder2
 {
 	void AddFinal( CLayerColorConstraints &constraints, const SPathPlace &p, unsigned nDirection, EFindPathParams eParams );
 	void AddFinalLay( CLayerColorConstraints &constraints, const SPathPlace &p );
 public:
+	// retail SPathFinder = { int nAPCost }: the wave cost of the reached place, consumed by the
+	// door-free re-route comparison in NAI::FindPath (retail @0x8bd80).
+	int nAPCost;
+	SPathFinder2(): nAPCost( 0 ) {}
+	// bNoClimb (retail FinderFindPath 9th arg): freeze climb moves -- set only by the re-route.
 	CPath* FindPath( CPathNetwork *pNet, const SPathPlace &src, const vector<SPathPlace> &dst, const int *pCosts,
 		int nPriceLimit, bool bCheckSuicide, bool bMoveOnly, EFindPathParams eParams, bool bCanFindNotExactPath,
-		bool bCountAsBigUnit );
+		bool bCountAsBigUnit, bool bNoClimb = false );
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void SPathFinder2::AddFinalLay( CLayerColorConstraints &constraints, const SPathPlace &_p )
@@ -482,14 +497,28 @@ void SPathFinder2::AddFinal( CLayerColorConstraints &constraints, const SPathPla
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CPath* FindPath( IPathNetwork *_pNet, const SPathPlace &src, const vector<SPathPlace> &_dst, const int *pCosts, 
-	int nPriceLimit, bool bStrafe, const CUnitsContainer &accountUnits, CObjectBase *pSearcher, bool bCheckSuicide, 
+// retail NAI::CalcPathObstacles @0x89560: the door-operating penalty of a path -- 10 per queued
+// action plus 10 per CM_INACTIVE point (climbing/special moves).
+static int CalcPathObstacles( const CPath &path )
+{
+	int n = (int)path.actions.size() * 10;
+	for ( int i = 0; i < (int)path.points.size(); ++i )
+		if ( path.points[i].GetPose() == CM_INACTIVE )
+			n += 10;
+	return n;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+CPath* FindPath( IPathNetwork *_pNet, const SPathPlace &src, const vector<SPathPlace> &_dst, const int *pCosts,
+	int nPriceLimit, bool bStrafe, const CUnitsContainer &accountUnits, CObjectBase *pSearcher, bool bCheckSuicide,
 	bool bMoveOnly, EFindPathParams eParams, bool bCanFindNotExactPath )
 {
+	// retail @0x8bd80: a 3D/final src (flying unit) never paths -- its bits are not a tile address
+	if ( src.IsFinal() )
+		return 0;
 	CDynamicCast<CPathNetwork> pNet( _pNet );
 	if ( !pNet )
 	{
-		ASSERT( 0 );	
+		ASSERT( 0 );
 		return 0;
 	}
 
@@ -525,6 +554,24 @@ CPath* FindPath( IPathNetwork *_pNet, const SPathPlace &src, const vector<SPathP
 	SPathPlace a( src );
 	a.SetMoving( 0 );
 	pRes = pth.FindPath( pNet, a, dst, pCosts, nPriceLimit, bCheckSuicide, bMoveOnly, eParams, bCanFindNotExactPath, bCountAsBigUnit );
+
+	// retail @0x8bd80: a path that has to operate doors (CalcPathObstacles > 0, only when
+	// !bCheckSuicide) triggers a RE-ROUTE with flippers frozen (bDoNotFlipAnything + bNoClimb,
+	// no approximation); the door-free path wins if it exists, carries no actions, and is cheaper
+	// than the first path plus its obstacle penalty. Runs BEFORE Improve/SmoothenPath, as retail.
+	if ( pRes && !bCheckSuicide )
+	{
+		int nObstacles = CalcPathObstacles( *pRes );
+		if ( nObstacles > 0 )
+		{
+			int nFirstAP = pth.nAPCost;
+			pNet->SetDoNotFlipAnything( true );
+			CObj<CPath> p2 = pth.FindPath( pNet, a, dst, pCosts, nPriceLimit, false, bMoveOnly, eParams, false, bCountAsBigUnit, true );
+			pNet->SetDoNotFlipAnything( false );
+			if ( IsValid( p2 ) && p2->actions.empty() && pth.nAPCost < nFirstAP + nObstacles )
+				*pRes = *p2;	// retail CPath::operator= @0x8d430 -- the door-free path wins
+		}
+	}
 
 //	if ( eParams & PF_USE_POSE )
 //		OutputDebugString( " Using pose. \n" );
@@ -589,10 +636,11 @@ bool IsPathComplete( const CPath &path, const SPathPlace &sPlace )
 	return false;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CPath* SPathFinder2::FindPath( CPathNetwork *pNet, const SPathPlace &src, const vector<SPathPlace> &dst, 
-	const int *pCosts, int nPriceLimit, bool bCheckSuicide, bool bMoveOnly, EFindPathParams eParams, 
-	bool bCanFindNotExactPath, bool bCountAsBigUnit )
+CPath* SPathFinder2::FindPath( CPathNetwork *pNet, const SPathPlace &src, const vector<SPathPlace> &dst,
+	const int *pCosts, int nPriceLimit, bool bCheckSuicide, bool bMoveOnly, EFindPathParams eParams,
+	bool bCanFindNotExactPath, bool bCountAsBigUnit, bool bNoClimb )
 {
+	nAPCost = 0;
 #ifdef _DEBUG
 	for ( int i = 0; i < N_MOVE_TYPES; ++i )
 	{
@@ -607,7 +655,7 @@ CPath* SPathFinder2::FindPath( CPathNetwork *pNet, const SPathPlace &src, const 
 		return 0;
 
 	// Simple path not found, find complex path
-	CMovesEnumerator enumerator( pNet, pCosts, bCheckSuicide, bMoveOnly, bCountAsBigUnit );
+	CMovesEnumerator enumerator( pNet, pCosts, bCheckSuicide, bMoveOnly, bCountAsBigUnit, bNoClimb );
 	CLayerColorConstraints constraints( pNet, bMoveOnly, pCosts );
 	if ( nPriceLimit >= 40 )
 	{
@@ -710,10 +758,12 @@ CPath* SPathFinder2::FindPath( CPathNetwork *pNet, const SPathPlace &src, const 
 		if ( fBest > 5.0f )
 			return 0;	// retail: an unreachable target IS a failed path (no ASSERT -- normal case)
 		parent = cur;
+		nAPCost = table.GetCost( cur );	// retail SPathFinder::nAPCost = wave cost of the reached place
 	}
 	else // path was found
 	{
 		cur = counter.firstReached;
+		nAPCost = table.GetCost( cur );	// retail SPathFinder::nAPCost = wave cost of the reached place
 		parent = constraints.GetFinalParent( cur );
 		if ( cur.GetData() != parent.GetData() )
 			points.push_front( parent );

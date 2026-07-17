@@ -253,4 +253,4 @@ bool CanUseAssassinReaction( IAIUnit *pUnit )
 }
 //
 using namespace NAI;
-BASIC_REGISTER_CLASS( CAIAssassinReaction )
+REGISTER_SAVELOAD_CLASS( 0x23069400, CAIAssassinReaction )

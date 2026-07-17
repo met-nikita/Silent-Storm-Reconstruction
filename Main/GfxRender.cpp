@@ -6,6 +6,8 @@
 #include "Gfx.h"
 #include "GfxShaders.h"
 #include "GfxShadersDescr.h"
+#include "..\MiscDll\Commands.h"      // REGISTER_VAR_EX (gfx_maxlag / gfx_register_resolution)
+#include "..\FileIO\BasicChunk1.h"    // START_REGISTER / FINISH_REGISTER
 
 namespace NGfx
 {
@@ -579,12 +581,15 @@ static void SetTexturePointFilter( int n, bool bPoint )
 	}
 	else
 	{
-		if ( bUseAnisotropy )
+		// retail SetTextureFilter @0x51bafd: anisotropy is a LEVEL (>1 = on), clamped to caps max
+		if ( nUseAnisotropy > 1 )
 		{
+			if ( nUseAnisotropy > GetMaxAnisotropicLevel() )
+				nUseAnisotropy = GetMaxAnisotropicLevel();
 			pDevice->SetSamplerState( n, D3DSAMP_MAGFILTER, D3DTEXF_ANISOTROPIC );//D3DTEXF_LINEAR );
 			pDevice->SetSamplerState( n, D3DSAMP_MINFILTER, D3DTEXF_ANISOTROPIC );// D3DTEXF_LINEAR );
 			pDevice->SetSamplerState( n, D3DSAMP_MIPFILTER, D3DTEXF_NONE );//D3DTEXF_LINEAR );//D3DTEXF_POINT );
-			pDevice->SetSamplerState( n, D3DSAMP_MAXANISOTROPY, 2 );
+			pDevice->SetSamplerState( n, D3DSAMP_MAXANISOTROPY, nUseAnisotropy );
 		}
 		else
 		{
@@ -1199,12 +1204,14 @@ void DoneZBuffer()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 static void InitTextureStage( int n )
 {
-	if ( bUseAnisotropy )
+	if ( nUseAnisotropy > 1 )
 	{
+		if ( nUseAnisotropy > GetMaxAnisotropicLevel() )
+			nUseAnisotropy = GetMaxAnisotropicLevel();
 		pDevice->SetSamplerState( n, D3DSAMP_MAGFILTER, D3DTEXF_ANISOTROPIC );//D3DTEXF_LINEAR );
 		pDevice->SetSamplerState( n, D3DSAMP_MINFILTER, D3DTEXF_ANISOTROPIC );// D3DTEXF_LINEAR );
 		pDevice->SetSamplerState( n, D3DSAMP_MIPFILTER, D3DTEXF_NONE );//D3DTEXF_LINEAR );//D3DTEXF_POINT );
-		pDevice->SetSamplerState( n, D3DSAMP_MAXANISOTROPY, 2 );
+		pDevice->SetSamplerState( n, D3DSAMP_MAXANISOTROPY, nUseAnisotropy );
 	}
 	else
 	{
@@ -1374,5 +1381,14 @@ void DoneRender()
 	pDevice->SetPixelShader( 0 );
 	pDevice->SetVertexDeclaration( 0 );
 }
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail GfxRenderInit @0x11e0f0: two vars bound to module globals (nMaxLag @0x99c1fc,
+// fRegisterResolution @0x955408)
+static int nMaxLag = 0;                    // gfx_maxlag
+static float fRegisterResolution = 1.0f;   // gfx_register_resolution
+START_REGISTER(GfxRender)
+	REGISTER_VAR_EX( "gfx_maxlag", NGlobal::VarIntHandler, &nMaxLag, 0.0f, true )
+	REGISTER_VAR_EX( "gfx_register_resolution", NGlobal::VarFloatHandler, &fRegisterResolution, 1.0f, true )
+FINISH_REGISTER
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 }

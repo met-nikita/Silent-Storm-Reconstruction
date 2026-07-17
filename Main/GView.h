@@ -36,7 +36,6 @@ namespace NDb
 };
 namespace NLSHead
 {
-	struct SHeadFrame;
 	class CHeadInfo;
 };
 struct STerrainInfo;
@@ -116,13 +115,17 @@ public:
 	virtual CObjectBase* CreateTerrainRegion( CFuncBase<STerrainInfo> *pInfo, CVersioningBase *pUpdateRegion, const SRandomSeed &sSeed, const CTRect<int> &sRegion, const list<CObj<CPtrFuncBase<CTerrainPart> > > &partsList, NGScene::CGrassTracker *pGrass, const SFullRoomInfo &_g = SFullRoomInfo() ) = 0;
 	virtual CObjectBase* CreateTerrainWall( CPtrFuncBase<CTerrainPart> *pPart, NDb::CTexture *pTexture, const SFullRoomInfo &_g = SFullRoomInfo() ) = 0;
 	virtual CObjectBase* CreateGrassSector( CGrassAnimator *pEffect, NDb::CTexture *pTexture, CFuncBase<SFBTransform> *pPlacement, const SBound &bound, const SRoomInfo &_g = SRoomInfo() ) = 0;
-	virtual CSelectionNode* CreateSelection( const vector<CObjectBase*> &target, const CVec4 &vColor ) = 0;
+	// returns the CSelectionNode as CObjectBase -- the class is GView.cpp-local and callers hold
+	// it opaquely (v1.2 CSelection+0x20 is a CObj<CObjectBase> slot, CreateSelection @0x6cbf60)
+	virtual CObjectBase* CreateSelection( const vector<CObjectBase*> &target, const CVec4 &vColor ) = 0;
 	virtual CObjectBase* CreateParticles( NDb::CEffect *pEffect, STime stBeginTime, CFuncBase<STime> *pTime, CFuncBase<SFBTransform> *pPlacement, const SRoomInfo &_g = SRoomInfo(), NAnimation::CSkeletonAnimator *pScAnim = 0 ) = 0;
 	virtual CObjectBase* CreateParticles( NDb::CEffect *pEffect, STime stBeginTime, CFuncBase<STime> *pTime, const SFBTransform &place, const SRoomInfo &_g = SRoomInfo() ) = 0;
 	virtual CBuilding* CreateBuildingPart( int nPartID, const SMapBuilding &info, NBuilding::CBuildingInfoHold *pBI ) = 0;
 	virtual CPolyline* CreatePolyline( const vector<CVec3> &points, const CVec3 &color ) = 0;
 	virtual CObjectBase* CreateExplosion( CFuncBase<STime> *pTime, NDb::CEffect *pEffect, CFuncBase<CExplosionInfo> *pExplosion, const CVec3 &pos, const SRoomInfo &_g = SRoomInfo() ) = 0;
-	virtual CObjectBase* CreateLSHead( NDb::CComplexHead *pHead, CFuncBase<NLSHead::SHeadFrame> *pAnimation, CFuncBase<STime> *pTime, CFuncBase<SFBTransform> *pPlacement, bool bInterface, const SRandomSeed &headSeed, bool bHasCap = false, const SRoomInfo &_g = SRoomInfo(), CPtrFuncBase<NGfx::CTexture> *pFaceTexture = 0, const NLSHead::CHeadInfo *pHeadInfo = 0 ) = 0;
+	// retail @0x188c90 takes the head-mesh GENERATOR node (the NLSHead::CHeadAnimator, a
+	// CPtrFuncBase<CObjectInfo>) -- it becomes the render part's pObjInfo directly.
+	virtual CObjectBase* CreateLSHead( NDb::CComplexHead *pHead, CPtrFuncBase<NGScene::CObjectInfo> *pAnimator, CFuncBase<STime> *pTime, CFuncBase<SFBTransform> *pPlacement, bool bInterface, const SRandomSeed &headSeed, bool bHasCap = false, const SRoomInfo &_g = SRoomInfo(), CPtrFuncBase<NGfx::CTexture> *pFaceTexture = 0, const NLSHead::CHeadInfo *pHeadInfo = 0 ) = 0;
 	virtual CObjectBase* Precache( NDb::CModel *pModel ) = 0;
 	virtual void StartAlienStyle() = 0;
 	virtual void FinishAlienStyle() = 0;
@@ -153,6 +156,10 @@ public:
 	virtual CDecalTarget* CreateDecalTarget( const vector<CObjectBase*> &targets, const SDecalMappingInfo &_info ) = 0;
 	virtual CObjectBase* AddDecal( NGScene::CDecalTarget *pTarget, NDb::CMaterial *pMaterial ) = 0;
 	virtual void SetAmbient( NDb::CAmbientLightReal *pLight, ELightMode lm = LT_ZONE ) = 0;
+	// retail IGameView vtbl+0xa0 (COMDAT-folded getter @0x776ea0: `return this->pPrevLight`
+	// @CGameView+0xf4): the light last installed by SetAmbient. CRenderGame::SyncWeather
+	// (@0x2cb9b0) latches it as the "sun" reference light for the weather cross-fade.
+	virtual NDb::CAmbientLightReal* GetPrevLight() { return 0; }
 	virtual ESceneRenderMode GetRenderMode() const = 0;
 	virtual void SetRenderMode( ESceneRenderMode mode ) = 0;
 	virtual EFogMode GetFogMode() const = 0;

@@ -5,51 +5,44 @@
 #endif // _MSC_VER > 1000
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class ICamera;
+#include "iMission.h"	// NGame::CMissionBase (serialization-convergence W4.2 base)
 namespace NGame
 {
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-class CRenderBaseInterface: public NMainLoop::IInterfaceBase
+// CRenderBaseInterface -- the 3D-backdrop menu base. Serialization-convergence W4.2: reparented onto
+// the retail NGame::CMissionBase (retail layout = CMissionBase + bindShadows/bindSwitchLighting,
+// NOTHING else); its operator& @0x1cce20 is the tag-1 base chunk ONLY. The old dev members
+// (pScene/pSoundScene/pRender/pWorld/pCursor/pInterface/pCamera/nLightMode/pLightSource, dev tags
+// 2-4/6/9-13) now live on the base (base tags 3/4/5/10/15/16/18/24/25). The dev-extra pPlayer (dev
+// tag 7) / pCommander (dev tag 8) have NO retail member -- kept TRANSIENT below.
+////////////////////////////////////////////////////////////////////////////////////////////////////
+class CRenderBaseInterface: public CMissionBase
 {
 	OBJECT_BASIC_METHODS(CRenderBaseInterface);
 private:
 	NInput::CBind bindShadows, bindSwitchLighting;
 
-	ZDATA
-	//// graphics
-	CObj<NGScene::IGameView> pScene;
-	CObj<NSound::ISoundScene> pSoundScene;
-	CObj<NRender::IRenderGame> pRender;	// owns the sound mixers (retail CRenderGame pSound/pUnitSounds)
-	//// world
-	CObj<NWorld::IWorld> pWorld;
+	ZDATA_(CMissionBase)
+	// dev-extra (TRANSIENT): the backdrop world's single player + commander -- retail
+	// CRenderBaseInterface has no such members (its Initialize @0x22ef80 leaves the player on the
+	// world only). Rebuilt by Initialize; a re-serialized menu re-runs Initialize in dev flows.
 	CPtr<NWorld::IPlayer> pPlayer;
 	CPtr<NWorld::CCommander> pCommander;
-	//// interface
-	CObj<NUI::ICursor> pCursor;
-	CObj<NUI::CInterface> pInterface;
-	//// camera
-	CObj<ICamera> pCamera;
-	//// crap
-	int nLightMode;
-	CObj<CObjectBase> pLightSource;
 public:
-	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&pScene); f.Add(3,&pSoundScene); f.Add(4,&pRender); f.Add(6,&pWorld); f.Add(7,&pPlayer); f.Add(8,&pCommander); f.Add(9,&pCursor); f.Add(10,&pInterface); f.Add(11,&pCamera); f.Add(12,&nLightMode); f.Add(13,&pLightSource); return 0; }
+	// retail NGame::CRenderBaseInterface::operator& @0x1cce20 -- the base chunk only
+	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CMissionBase*)this); return 0; }
 
 public:
 	CRenderBaseInterface();
 
+	// retail CRenderBaseInterface vtbl+0x44 (IsSequence) is COMDAT-folded onto a `return true` stub
+	// (@0x088d00): the 3D-backdrop menus ALWAYS short-circuit the CMissionBase::GetCamera selector
+	// (@0x1a1ee0) to their own pCamera -- they have no player trackers (pActivePlayer is null).
+	virtual bool IsSequence() const { return true; }
+
 	void Initialize( int nTemplate );
 
 	void Command( NWorld::CCommand *pCmd );
-
-	void SetLightMode( int _nLightMode );
-
-	ICamera* GetCamera() const { return pCamera; }
-	NUI::ICursor* GetCursor() const { return pCursor; }
-	NUI::CInterface* GetInterface() const { return pInterface; }
-
-	NWorld::IWorld* GetWorld() const { return pWorld; }
-	NGScene::IGameView* GetScene() const { return pScene; }
-	NRender::IRenderGame* GetRenderGame() const { return pRender; }
 
 	void Step();
 	void OnGetFocus();

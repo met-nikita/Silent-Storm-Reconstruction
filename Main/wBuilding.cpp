@@ -59,9 +59,11 @@ public:
 			p->AddBuildingPart( part.nID, pParent->info, pParent->pBInfo );
 	}
 	virtual void Visit( IAIVisitor* );
-	virtual int ProcessAttack( int nUserID, NRPG::CAttackPortion *pAttack, NDb::CRPGArmor *pArmor )
+	// retail @0x3454a0: a pure forward to the owning building, pWorld/vDir passed straight through.
+	virtual int ProcessAttack( NWorld::IWorld *pWorld, int nUserID, NRPG::CAttackPortion *pAttack,
+		const CVec3 &vDir, NDb::CRPGArmor *pArmor )
 	{
-		return pParent->ProcessAttack( nUserID, pAttack, pArmor );
+		return pParent->ProcessAttack( pWorld, nUserID, pAttack, vDir, pArmor );
 	}
 	void SetFragmentCount()
 	{
@@ -215,17 +217,21 @@ void CBuilding::Update()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CBuilding::Explode( const CVec3 &ptEpic, int nPower )
 {
-	info.pGrid->Explode( ptEpic, nPower, sqrt( nPower ) );
+	// retail CBuilding::Explode @0x343ac0: passes info.pos (the building's placement) into the grid
+	info.pGrid->Explode( info.pos, ptEpic, nPower, sqrt( nPower ) );
 	UpdateBuildingParts();
 	ToggleUpdateFlag();
 		//NBuilding::UpdateBuildingStability( (*it)->info.pVariant->GetRecordID(), (*it)->info.pGrid );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-int CBuilding::ProcessAttack( int nUserID, NRPG::CAttackPortion *pAttack, NDb::CRPGArmor *pArmor )
+// retail @0x3438e0: forwards to the NRPG side (disasm: the vtable call takes the incoming
+// param_2..param_5 unchanged), then flags the visual update.
+int CBuilding::ProcessAttack( NWorld::IWorld *pWorld, int nUserID, NRPG::CAttackPortion *pAttack,
+	const CVec3 &vDir, NDb::CRPGArmor *pArmor )
 {
 	CDynamicCast<NRPG::IAttackable> pAtk( pRPG );
 	ASSERT( pAtk );
-	int nRes = pAtk->ProcessAttack( nUserID, pAttack, pArmor );
+	int nRes = pAtk->ProcessAttack( pWorld, nUserID, pAttack, vDir, pArmor );
 	if ( nRes )
 	{
 //		UpdateBuildingParts(); moved out to Segment

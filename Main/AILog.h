@@ -23,6 +23,7 @@ namespace NWorld
 	class CCommand;
 	class CCannon;
 	class CUnitServer;
+	class CDFrozenItem;
 }
 
 namespace NAI
@@ -45,18 +46,6 @@ public:
 	virtual void RollBack() = 0; // roll back
 	virtual void Commit() = 0;
 	virtual void GetCommands( list< CPtr<NWorld::CCommand> > *Commands ) = 0; // issue commands for execution
-};
-////////////////////////////////////////////////////////////////////////////////////////////////////
-//	IAILogContainer
-////////////////////////////////////////////////////////////////////////////////////////////////////
-class IAILogContainer: public IAILogRecord
-{
-public:
-	virtual void Add( IAILogRecord *pAILogRecord, bool bCommit = false ) = 0; // add a record
-	virtual void Add( IAILogContainer *pAILogContainer ) = 0; // add all records of the container
-	virtual void Clear() = 0; // delete all records without rolling back
-	virtual list< CObj<IAILogRecord> > *GetLogRecords() = 0;
-	virtual bool IsEmpty() = 0;
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CAILogRecord
@@ -343,24 +332,6 @@ public:
 	virtual void GetCommands( list< CPtr<NWorld::CCommand> > *Commands );
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// CAILogHurt
-////////////////////////////////////////////////////////////////////////////////////////////////////
-class CAILogHurt: public CAILogRecord
-{
-	OBJECT_BASIC_METHODS(CAILogHurt);
-	ZDATA
-	ZPARENT(CAILogRecord)
-	int nOldHurtHP, nNewHurtHP;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(2,(CAILogRecord*)this); f.Add(3,&nOldHurtHP); f.Add(4,&nNewHurtHP); return 0; }
-public:
-	CAILogHurt() {}
-	CAILogHurt(	IAIUnit *_pAIUnit, int nHurtHP );
-	// IAILogRecord
-	virtual void RollBack();
-	virtual void Commit();
-	virtual void GetCommands( list< CPtr<NWorld::CCommand> > *Commands );
-};
-////////////////////////////////////////////////////////////////////////////////////////////////////
 // CAILogSpendAmmo
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CAILogSpendAmmo: public CAILogRecord
@@ -402,45 +373,6 @@ public:
 	virtual void GetCommands( list< CPtr<NWorld::CCommand> > *Commands );
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// CAILogAddWeapon
-////////////////////////////////////////////////////////////////////////////////////////////////////
-class CAILogAddWeapon: public CAILogRecord
-{
-	OBJECT_BASIC_METHODS(CAILogAddWeapon);
-	ZDATA
-	ZPARENT(CAILogRecord)
-	CPtr<CAIFireArmsWeapon> pWeapon;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(2,(CAILogRecord*)this); f.Add(3,&pWeapon); return 0; }
-public:
-	//
-	CAILogAddWeapon() {}
-	CAILogAddWeapon(	IAIUnit *_pAIUnit, CAIFireArmsWeapon *_pWeapon );
-	// IAILogRecord
-	virtual void RollBack();
-	virtual void Commit();
-	virtual void GetCommands( list< CPtr<NWorld::CCommand> > *Commands );
-};
-////////////////////////////////////////////////////////////////////////////////////////////////////
-// CAILogAddWeaponClip
-////////////////////////////////////////////////////////////////////////////////////////////////////
-class CAILogAddWeaponClip: public CAILogRecord
-{
-	OBJECT_BASIC_METHODS(CAILogAddWeaponClip);
-	ZDATA
-	ZPARENT(CAILogRecord)
-	CPtr<CAIFireArmsWeapon> pWeapon;
-	CPtr<CAIFireArmsWeaponClip> pClip;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(2,(CAILogRecord*)this); f.Add(3,&pWeapon); f.Add(4,&pClip); return 0; }
-public:
-	//
-	CAILogAddWeaponClip() {}
-	CAILogAddWeaponClip(	IAIUnit *_pAIUnit, CAIFireArmsWeapon *_pWeapon, CAIFireArmsWeaponClip *_pClip );
-	// IAILogRecord
-	virtual void RollBack();
-	virtual void Commit();
-	virtual void GetCommands( list< CPtr<NWorld::CCommand> > *Commands );
-};
-////////////////////////////////////////////////////////////////////////////////////////////////////
 // CAILogPickUpItem
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CAILogPickUpItem: public CAILogRecord
@@ -448,12 +380,15 @@ class CAILogPickUpItem: public CAILogRecord
 	OBJECT_BASIC_METHODS(CAILogPickUpItem);
 	ZDATA
 	ZPARENT(CAILogRecord)
-	CPtr<NRPG::IInventoryItem> pItem;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(2,(CAILogRecord*)this); f.Add(3,&pItem); return 0; }
+	// retail @0x61d40: pItem is the FROZEN world item (CPtr<NWorld::CDFrozenItem>, tag 3) and the
+	// record carries the loot action's wishPose (tag 4, 4-byte) -- serialization-convergence Wave 2.
+	CPtr<NWorld::CDFrozenItem> pItem;
+	EPose wishPose;
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,(CAILogRecord*)this); f.Add(3,&pItem); f.Add(4,&wishPose); return 0; }
 public:
 	//
-	CAILogPickUpItem() {}
-	CAILogPickUpItem(	IAIUnit *_pAIUnit, NRPG::IInventoryItem *_pItem );
+	CAILogPickUpItem(): wishPose( RUN ) {}
+	CAILogPickUpItem(	IAIUnit *_pAIUnit, NWorld::CDFrozenItem *_pItem, EPose _wishPose );
 	// IAILogRecord
 	virtual void RollBack();
 	virtual void Commit();
@@ -524,25 +459,6 @@ public:
 	virtual void GetCommands( list< CPtr<NWorld::CCommand> > *Commands );
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// CAILogExpediency
-////////////////////////////////////////////////////////////////////////////////////////////////////
-class CAILogExpediency: public CAILogRecord
-{
-	OBJECT_BASIC_METHODS(CAILogExpediency);
-	ZDATA
-	ZPARENT(CAILogRecord)
-	int nOldExpediency;
-	int nNewExpediency;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(2,(CAILogRecord*)this); f.Add(3,&nOldExpediency); f.Add(4,&nNewExpediency); return 0; }
-public:
-	CAILogExpediency() {}
-	CAILogExpediency(	IAIUnit *_pAIUnit, int nExpediency );
-	// IAILogRecord
-	virtual void RollBack();
-	virtual void Commit();
-	virtual void GetCommands( list< CPtr<NWorld::CCommand> > *Commands );
-};
-////////////////////////////////////////////////////////////////////////////////////////////////////
 class CAILogChangeShootMode: public CAILogRecord
 {
 	OBJECT_BASIC_METHODS(CAILogChangeShootMode);
@@ -555,23 +471,6 @@ class CAILogChangeShootMode: public CAILogRecord
 public:
 	CAILogChangeShootMode() {}
 	CAILogChangeShootMode( IAIUnit *_pUnit, CAIFireArmsWeapon *pWeapon, NDb::EShootMode _eShootMode );
-	// IAILogRecord
-	virtual void RollBack();
-	virtual void Commit();
-	virtual void GetCommands( list< CPtr<NWorld::CCommand> > *Commands );
-};
-////////////////////////////////////////////////////////////////////////////////////////////////////
-class CAILogChangeMaxToHit: public CAILogRecord
-{
-	OBJECT_BASIC_METHODS(CAILogChangeMaxToHit);
-	ZDATA
-	ZPARENT(CAILogRecord)
-	int nOldToHit;
-	int nNewToHit;	
-	ZEND int operator&( CStructureSaver &f ) { f.Add(2,(CAILogRecord*)this); f.Add(3,&nOldToHit); f.Add(4,&nNewToHit); return 0; }
-public:
-	CAILogChangeMaxToHit() {}
-	CAILogChangeMaxToHit( IAIUnit *_pAIUnit, int nMaxToHit );
 	// IAILogRecord
 	virtual void RollBack();
 	virtual void Commit();
@@ -627,8 +526,6 @@ public:
 	virtual void GetCommands( list< CPtr<NWorld::CCommand> > *Commands );
 };
 */
-////////////////////////////////////////////////////////////////////////////////////////////////////
-IAILogContainer *CreateAILogContainer();
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 }
 

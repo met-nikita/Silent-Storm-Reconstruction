@@ -1,8 +1,46 @@
 #include "StdAfx.h"
 #include "wInterface.h"
 #include "wUnitCommands.h"
+#include "Locks.h"          // ILockable -- the command target-reservation locks
+#include "RPGItemInfo.h"    // IInventoryItem (carries the ILockable virtual base)
 namespace NWorld
 {
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail CCmdCannon::Lock @0x3b1d20 (wUnitCommands.obj): resolve the cannon object to its ILockable
+// facet and reserve it for pBy, replacing any previously held token. Assigns even when ILockable::Lock
+// returns null (a refused lock still releases the old token). Null / expired / non-lockable targets
+// are a no-op (pLock left untouched).
+void CCmdCannon::Lock( CUnit *pBy )
+{
+	if ( !IsValid( pObject ) )
+		return;
+	ILockable *pL = dynamic_cast<ILockable*>( pObject.GetPtr() );
+	if ( !pL )
+		return;
+	pLock = pL->Lock( pBy );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail CCmdTakeCorpse::Lock @0x3b1c90 (wUnitCommands.obj): same pattern against the corpse unit
+// (CUnitServer carries the CLockable base, retail @+0x17c).
+void CCmdTakeCorpse::Lock( CUnit *pBy )
+{
+	if ( !IsValid( pCorpse ) )
+		return;
+	ILockable *pL = dynamic_cast<ILockable*>( pCorpse.GetPtr() );
+	if ( !pL )
+		return;
+	pLock = pL->Lock( pBy );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail SItem::LockItem @0x3b1c30 (wUnitCommands.obj): acquire the inventory item's usage lock for
+// pBy through the IInventoryItem virtual ILockable base and hold the token in pLockItem (the CObj swap
+// releases the previous token). Retail gates ONLY on a non-null pItem (no expired-flag test here).
+void SItem::LockItem( CUnit *pBy )
+{
+	if ( pItem.GetPtr() != 0 )
+		pLockItem = pItem->Lock( pBy );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 }
 using	namespace NWorld;
 REGISTER_SAVELOAD_CLASS( 0xB2541122, CCmdStartCombat )
@@ -23,7 +61,7 @@ REGISTER_SAVELOAD_CLASS( 0x51522140, CCmdEmpty )
 REGISTER_SAVELOAD_CLASS( 0x01822130, CCmdContinue )
 REGISTER_SAVELOAD_CLASS( 0x01922150, CCmdDropCorpse )
 REGISTER_SAVELOAD_CLASS( 0x01922151, CCmdExitCannon )
-REGISTER_SAVELOAD_CLASS( 0x52062170, CCmdNeedReload )
+// (0x52062170 CCmdNeedReload REMOVED -- W5: dead pair with CExecNeedReload, retail-absent)
 REGISTER_SAVELOAD_CLASS( 0x52062171, CCmdWeaponJammed )
 REGISTER_SAVELOAD_CLASS( 0x52062172, CCmdOrderConfirmation )
 REGISTER_SAVELOAD_CLASS( 0x52062173, CCmdImpossibleToPerformAction )
@@ -46,6 +84,7 @@ REGISTER_SAVELOAD_CLASS( 0x017c2181, CCmdSetGrenadeOnObject )
 REGISTER_SAVELOAD_CLASS( 0x018c2120, CCmdUntrapObject )
 REGISTER_SAVELOAD_CLASS( 0x018c2121, CCmdSetMineOnTile )
 REGISTER_SAVELOAD_CLASS( 0x51922110, CCmdTalk )
+REGISTER_SAVELOAD_CLASS( 0x50133140, CCmdNotHeroWantsToTalk )
 REGISTER_SAVELOAD_CLASS( 0xB1922111, CCmdGrenadeMode )
 REGISTER_SAVELOAD_CLASS( 0xB1922112, CCmdCreateInventoryItem )
 REGISTER_SAVELOAD_CLASS( 0xa0123160, CCmdCreateAndActivateInventoryItem )

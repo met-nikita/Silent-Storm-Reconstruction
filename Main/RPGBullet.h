@@ -51,8 +51,8 @@ struct SCoverInterval
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // release-new carrier for the refactored ranged-attack path. Field order matches the
 // shipped 148-byte layout (RPGBullet.obj); the exact byte size differs in the dev tree
-// (the dev CAttackPortion carries the later damage-modifier members), but this is
-// transient runtime state (never serialized), so only field identity matters.
+// (the dev CAttackPortion carries the later damage-modifier members). SERIALIZED in the
+// retail save format: CExecShoot tag 8 and CKnifeServer tag 11 (operator& @0x360fe0).
 struct SAttackRayInfo
 {
 	CObj<NWorld::CUnitServer> pUS;	// shooter (null for splinter / no-shooter rays)
@@ -78,6 +78,28 @@ struct SAttackRayInfo
 	// 8-arg ctor @0x291450 (no shooter / no from-position)
 	SAttackRayInfo( const CAttackPortion &atk, const CVec3 &vOrigin, const CVec3 &vDir,
 		bool bTargetIsHit, float fMinClearDistance, float fMaxRange, CObjectBase *pTarget );
+
+	// retail GetRay (CExecShoot::OnLabel feeds the aim animation from it): the carried firing ray
+	CRay GetRay() const { CRay r; r.ptOrigin = vOrigin; r.ptDir = vDir; return r; }
+
+	// retail operator& @0x360fe0 -- tags 2-14; NOTE pTarget is NOT serialized (matches retail)
+	int operator&( CStructureSaver &f )
+	{
+		f.Add( 2, &pUS );
+		f.Add( 3, &from );
+		f.Add( 4, &bFirstTurn );
+		f.Add( 5, &nExtraAP );
+		f.Add( 6, &nBullet );
+		f.Add( 7, &vOrigin );
+		f.Add( 8, &vDir );
+		f.Add( 9, &trailPoints );
+		f.Add( 10, &bTargetIsHit );
+		f.Add( 11, &pIgnore );
+		f.Add( 12, &fMinClearDistance );
+		f.Add( 13, &fMaxRange );
+		f.Add( 14, &atk );
+		return 0;
+	}
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // @0x291f00 -- initialize *dst as a vertical "splinter" ray (points straight up +Z).

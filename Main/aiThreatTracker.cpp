@@ -383,3 +383,7 @@ void CAIEventTracker::ProcessAISegment()
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 }  // namespace NAI
+// retail saveload ids (serialization-convergence W2)
+using namespace NAI;
+REGISTER_SAVELOAD_CLASS( 0x51143200, CAIEventTracker )
+REGISTER_SAVELOAD_CLASS( 0x52433130, CAIEventTrackerImpl )

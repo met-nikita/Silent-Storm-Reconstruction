@@ -16,10 +16,11 @@ class CICTeamMngMenu: public NMainLoop::CInterfaceCommand
 private:
 	CPtr<IMission> pMission;
 	CPtr<NRPG::CGlobalPlayer> pGlobalPlayer;
+	int nID;   // retail ctor @0x245280 3rd arg (W5): the queueing CUICmdShowTeamMng's wait id
 
 public:
-	CICTeamMngMenu() {}
-	CICTeamMngMenu( NRPG::CGlobalPlayer *pGlobalPlayer, IMission *pMission );
+	CICTeamMngMenu(): nID( -1 ) {}
+	CICTeamMngMenu( NRPG::CGlobalPlayer *pGlobalPlayer, IMission *pMission, int nID = -1 );
 
 	void Exec();
 };

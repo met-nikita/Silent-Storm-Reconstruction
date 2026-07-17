@@ -10,7 +10,6 @@
 #include "aiReaction.h"
 #include "aiUnitState.h"
 #include "aiThreatTracker.h"   // NAI::CAIEventTracker -- per-unit world-event subscriber
-#include "aiScaleConverter.h"
 #include "aiControl.h"
 #include "aiCommander.h"      // NAI::CAICommander (control-stack back-reference)
 
@@ -41,14 +40,29 @@
 namespace NAI
 {
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail NAI::SAIUnitSkill (PDB sizeof 8): one AP/HP cell of the CAIUnit skills vector (tag 5,
+// per-element object-serialized).
+struct SAIUnitSkill
+{
+	ZDATA
+	int nValue;
+	int nMaxValue;
+	ZEND int operator&( CStructureSaver &f ) { f.Add( 2, &nValue ); f.Add( 3, &nMaxValue ); return 0; }
+	SAIUnitSkill(): nValue( 0 ), nMaxValue( 0 ) {}
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
 // CAIUnit
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CAIUnit: public IAIUnit
 {
 	OBJECT_BASIC_METHODS( CAIUnit );
 	ZDATA
-	SPosition ptPosition;
-	int nAP, nMaxAP, nHP, nMaxHP;
+	// retail CAIUnit+0xc: the unit position is a full SUnitPosition (pos+bRun), serialized at
+	// tag 4; the Jan03 bare SPosition + the GetUnitPosition() bRun=false stub are gone.
+	SUnitPosition pos;
+	// retail CAIUnit skills vector (tag 5): exactly two SAIUnitSkill cells, [0]=AP, [1]=HP
+	// (s2_aiunit.h oracle); replaces the four Jan03 scalar AP/HP members.
+	vector<SAIUnitSkill> skills;
 	CPtr<NWorld::CUnitServer> pUnitServer;
 	CPtr<NWorld::CCannon> pCannon;
 	SPosition LastSeenEnemyPosition;
@@ -69,59 +83,88 @@ class CAIUnit: public IAIUnit
 	// world is in sequence mode; ends with its sequence). The dev predecessor folded all three into the
 	// single pLogic slot, so a reaction firing at sequence end DESTROYED the unit's scripted/deploy route
 	// (the GFirst body-carrier froze; patrols never resumed after combat).
-	CObj<IAILogic> routeNormal;
-	CObj<IAILogic> routeSequence;
+	// retail: the two route slots live in a vector<CObj<IAILogic>> of size 2 (serialized whole at
+	// tag 7); routes[0] = normal (deploy/script patrols), routes[1] = sequence.
+	vector< CObj<IAILogic> > routes;
+	CObj<IAILogic>& routeNormal()   { return routes[0]; }
+	CObj<IAILogic>& routeSequence() { return routes[1]; }
+	const CObj<IAILogic>& routeNormal()   const { return routes[0]; }
+	const CObj<IAILogic>& routeSequence() const { return routes[1]; }
 	SAIState *pAIState;   // weak back-ref to the tactical AI state, set when the unit joins it (transient - not serialized)
 	CObj<CAIReaction> pReaction;   // the unit's reflex layer; installed by the tactical commander (transient - not serialized)
 	SAIUnitState state;            // per-unit threat tracker (release: by-value member; transient here)
 	CObj<CAIEventTracker> pEventTracker;   // release: CAIEventTracker base subobject @CAIUnit+0x8 -- a MEMBER here (dev
 	                               // CObjectBase is non-virtual so it can't be a 2nd base). Subscribes the 11 NWorld AI
 	                               // event handlers; transient (lazy-built on first tick, RAII-unsubscribes on release).
-	int nNonFreezeCounter;         // release CAIUnit: per-unit runaway-AI guard tally (IAIUnit vtbl 0x90/0x94).
+	int nNonFreezeCounter;         // release CAIUnit+0x104: per-unit runaway-AI guard tally (IAIUnit vtbl 0x90/0x94).
 	                               // Bumped on every per-unit logic/reaction churn (SetReaction @0xad7d0,
 	                               // SetLogic path @0xadb20); the commander sums it (x200) in IsPossibleFreeze
-	                               // and zeroes it each real-time segment (ClearNonFreezeCounters). Transient
-	                               // (per-turn, re-zeroed each RT segment) -- NOT added to operator& (same
-	                               // treatment as nHideProbability; the dev CAIUnit save format is the
-	                               // predecessor's tags 2-19).
+	                               // and zeroes it each real-time segment. Serialized at retail tag 13.
 	int nHideProbability;          // release CAIUnit+0x100: AI hide-roll %, seeded from the difficulty DB in the
-	                               // ctor (read by the route-AI check-position / check-for-enemy hide roll). NOT
-	                               // added to operator&: the dev CAIUnit save format is the predecessor's (tags
-	                               // 2-19, divergent from the release's) -- reconciling CAIUnit serialization is a
-	                               // separate Tier-B task; the value is re-seeded from difficulty on construction.
+	                               // ctor (read by the route-AI check-position / check-for-enemy hide roll).
+	                               // Serialized at retail tag 12.
 	unordered_map<int,int> disabledShootModes;   // release CAIUnit+0xec hash_map<int,int>: per-mode AI shoot
 	                               // disable (Defence dance @0x3b160 writes, GetBestFireArms @0x560e0 reads).
-	                               // Retail SAVES it (operator& @0xafb70 chunk 11 DoHashMap<int,int>) --
-	                               // appended here as tag 22 (absent on old saves -> stays empty).
-	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&ptPosition); f.Add(3,&nAP); f.Add(4,&nMaxAP); f.Add(5,&nHP); f.Add(6,&nMaxHP); f.Add(7,&pUnitServer); f.Add(8,&pCannon); f.Add(9,&LastSeenEnemyPosition); f.Add(10,&pInventory); f.Add(11,&ptPrevPosition); f.Add(12,&nTurnStartHP); f.Add(13,&pLastSeenEnemy); f.Add(14,&nHurtHP); f.Add(15,&controls); f.Add(16,&bUnderAIControl); f.Add(17,&nAdditionalExpediency); f.Add(18,&nMaxToHit); f.Add(19,&pLogic); f.Add(20,&routeNormal); f.Add(21,&routeSequence); f.Add(22,&disabledShootModes); return 0; }
+	                               // Serialized at retail tag 11 (DoHashMap<int,int> @0xafb70).
+	// retail CAIUnit::operator& @0xafb70, member-by-member. The Jan03 predecessor format (dev tags
+	// 2-22) is GONE: retail serializes ONLY {tracker, pUS, pos, skills, pInventory, routes, pLogic,
+	// state, pReaction, disabledShootModes, nHideProbability, nNonFreezeCounter}; pCannon /
+	// LastSeenEnemyPosition / ptPrevPosition / nTurnStartHP / pLastSeenEnemy / nHurtHP / controls /
+	// bUnderAIControl / nAdditionalExpediency / nMaxToHit are TRANSIENT in retail (rebuilt at runtime).
+	ZEND int operator&( CStructureSaver &f )
+	{
+		// tag 2: retail serializes the CAIEventTracker base subobject INLINE; dev holds it as a
+		// lazily-built member -- ensure the shell exists so the chunk shape matches (a load-created
+		// empty shell is re-armed by ProcessAISegment's pImpl repair below).
+		if ( !IsValid( pEventTracker ) )
+			pEventTracker = new CAIEventTracker();
+		f.Add( 2, pEventTracker.GetPtr() );
+		f.Add( 3, &pUnitServer );
+		f.Add( 4, &pos );
+		f.Add( 5, &skills );
+		f.Add( 6, &pInventory );
+		f.Add( 7, &routes );
+		f.Add( 8, &pLogic );
+		f.Add( 9, &state );
+		f.Add( 10, &pReaction );
+		f.Add( 11, &disabledShootModes );
+		f.Add( 12, &nHideProbability );
+		f.Add( 13, &nNonFreezeCounter );
+		return 0;
+	}
 	//
 	void GetUnitSkillValues();
 public:
-	CAIUnit(): nHideProbability( 0 ), nNonFreezeCounter( 0 ) {}   // release default ctor zeroes the scalar tail (CAIUnit+0x100)
+	// release default ctor zeroes the scalar tail; the AP/HP cells and both route slots always
+	// exist (skills tag-5 vector = exactly 2, routes tag-7 vector = exactly 2). The now-transient
+	// scalars (no longer serialized) are zeroed so a loaded unit starts clean.
+	CAIUnit(): nHideProbability( 0 ), nNonFreezeCounter( 0 ), nTurnStartHP( 0 ), nHurtHP( 0 ),
+		bUnderAIControl( false ), nAdditionalExpediency( 0 ), nMaxToHit( 0 ), pAIState( 0 )
+	{ skills.resize( 2 ); routes.resize( 2 ); }
 	CAIUnit( NWorld::CUnitServer *_pUnitServer, bool _bUnderAIControl );
 	// IAIUnit
 	virtual NWorld::CUnitServer *GetUnitServer() const { return pUnitServer; }
 	virtual NRPG::IUnitMission* GetUnitMission() const { return pUnitServer->GetUnitRPG(); }
 	virtual NRPG::CUnit* GetRPGUnit() const { return pUnitServer->GetUnitRPG()->GetRPGUnit(); }
-	virtual SPosition GetPosition() { return ptPosition; } 
+	virtual SPosition GetPosition() { return pos.pos; } 
 	virtual SUnitPosition GetUnitPosition();
 	virtual void SetPosition( SPosition _ptPrevPosition );
 	virtual void SetPosition( SPathPlace _ptPrevPosition );
 	virtual SPosition GetPrevPosition();
 	virtual void SavePrevPosition();
 	virtual void GetHP( int *_nHP, int *_nMaxHP )
-	{ *_nHP = nHP; *_nMaxHP = nMaxHP; }
-	virtual int GetHP() { return nHP; }
+	{ *_nHP = skills[1].nValue; *_nMaxHP = skills[1].nMaxValue; }
+	virtual int GetHP() { return skills[1].nValue; }
 	virtual void SetHP( int _nHP, int _nMaxHP );
 	virtual void GetAP( int *_nAP, int *_nMaxAP)
-	{ *_nAP = nAP; *_nMaxAP = nMaxAP; }
-	virtual int GetAP() { return nAP; }
+	{ *_nAP = skills[0].nValue; *_nMaxAP = skills[0].nMaxValue; }
+	virtual int GetAP() { return skills[0].nValue; }
 	virtual void SetAP( int _nAP, int _nMaxAP );
 	virtual void SpendHP( int _nHP );
 	virtual void SpendAP( int _nAP );
 	virtual void Synchronize();
-	virtual bool IsDead() { return nHP <= 0; }
-	virtual int GetRemainAP() { return Max( 0, nMaxAP - nAP ); }
+	virtual bool IsDead() { return skills[1].nValue <= 0; }
+	virtual int GetRemainAP() { return Max( 0, skills[0].nMaxValue - skills[0].nValue ); }
 	virtual int GetToHit( IAIUnit *pTarget, const NAI::SUnitPosition &pos, NAI::EHitLocation hl = NAI::HL_ANY );
 	virtual void SetPose( int pose );
 	virtual bool IsPerformingAction() { return pUnitServer->IsPerformingAction(); }
@@ -153,8 +196,8 @@ public:
 	virtual bool IsUnderAIControl() { return IsValid( pUnitServer ) && pUnitServer->IsAIUnit(); }
 	virtual int GetAdditionalExpediency() { return nAdditionalExpediency; }
 	virtual void SetAdditionalExpediency( int nExpediency ) { nAdditionalExpediency = nExpediency; }
-	virtual int GetMaxAP() { return nMaxAP; }
-	virtual int GetMaxHP()  { return nMaxHP; }
+	virtual int GetMaxAP() { return skills[0].nMaxValue; }
+	virtual int GetMaxHP()  { return skills[1].nMaxValue; }
 	virtual void SetMaxToHit( int _nMaxToHit ) { nMaxToHit = _nMaxToHit; }
 	virtual int GetMaxToHit() { return nMaxToHit; }
 	virtual int GetHideProbability() { return nHideProbability; }   // @0xaef00 (CAIUnit+0x100)
@@ -179,15 +222,15 @@ public:
 	virtual IAILogic* GetLogic() const
 	{
 		if ( IsWorldSequence() )
-			return routeSequence;
+			return routeSequence();
 		if ( IsValid( pLogic ) )
 			return pLogic;
-		return routeNormal;
+		return routeNormal();
 	}
 	// retail GetRoute @0xad3a0 (vtbl 0x54): the mode-selected route slot.
 	virtual IAILogic* GetRouteLogic() const
 	{
-		return IsWorldSequence() ? routeSequence.GetPtr() : routeNormal.GetPtr();
+		return IsWorldSequence() ? routeSequence().GetPtr() : routeNormal().GetPtr();
 	}
 	// retail SetRoute @0xadb90 (vtbl 0x5c): install a ROUTE into the mode-selected slot. Only an AI-driven
 	// unit may take a normal route (a non-AI unit only ever gets a SEQUENCE route); the unit's running
@@ -205,9 +248,9 @@ public:
 			pLogic->StopThinking();
 		pLogic = 0;
 		if ( IsWorldSequence() )
-			routeSequence = _pRoute;
+			routeSequence() = _pRoute;
 		else
-			routeNormal = _pRoute;
+			routeNormal() = _pRoute;
 	}
 	virtual void SetLogic( IAILogic *_pLogic );
 	void SetCurrentLogicInner( IAILogic *_pLogic );   // retail @0xadb20
@@ -278,7 +321,9 @@ public:
 		// per-segment threat-tracker/state processing while a scripted sequence runs.
 		if ( IsValid( pUnitServer ) && pUnitServer->GetWorld()->IsSequence() )
 			return;
-		if ( !IsValid( pEventTracker ) && IsValid( pUnitServer ) )
+		// (re)build the tracker -- also re-arms an impl-less shell created by the serializer
+		// (a fresh load whose save was taken before the tracker's first tick).
+		if ( ( !IsValid( pEventTracker ) || !IsValid( pEventTracker->pImpl ) ) && IsValid( pUnitServer ) )
 			pEventTracker = new CAIEventTracker( pUnitServer );
 		if ( IsValid( pEventTracker ) )
 			pEventTracker->ProcessAISegment();
@@ -301,10 +346,13 @@ public:
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CAIUnit::CAIUnit( NWorld::CUnitServer *_pUnitServer, bool _bUnderAIControl ) :
 	pUnitServer(_pUnitServer), pCannon(0), pLastSeenEnemy( 0 ),
-	bUnderAIControl( _bUnderAIControl ), pAIState( 0 ), nNonFreezeCounter( 0 )
+	bUnderAIControl( _bUnderAIControl ), pAIState( 0 ), nNonFreezeCounter( 0 ),
+	nTurnStartHP( 0 ), nHurtHP( 0 ), nAdditionalExpediency( 0 ), nMaxToHit( 0 )
 {
+	skills.resize( 2 );    // [0]=AP, [1]=HP (retail tag-5 vector)
+	routes.resize( 2 );    // [0]=normal, [1]=sequence (retail tag-7 vector)
 	GetUnitSkillValues();
-	ptPosition = pUnitServer->GetPosition().pos;
+	pos = pUnitServer->GetPosition();   // retail: the FULL SUnitPosition (incl. bRun)
 	state.SetUnit( this );
 	pInventory = CreateAIInventory( this );
 	pUnitServer->GetRPG()->PrintLog( false );
@@ -534,9 +582,9 @@ static bool EraseScriptControls( vector< CObj<IAIControl> > *pControls )
 void CAIUnit::OnSequenceStarted()
 {
 	SetLogic( 0 );                 // retail @0xadec0 (the Begin edge now runs pre-push, so this works)
-	if ( IsValid( routeNormal ) )
-		routeNormal->Pause();
-	routeSequence = 0;
+	if ( IsValid( routeNormal() ) )
+		routeNormal()->Pause();
+	routeSequence() = 0;
 	bool bCancel = EraseScriptControls( &controls );
 	if ( !controls.empty() && controls.back()->IsActive() )
 	{
@@ -557,10 +605,10 @@ void CAIUnit::OnSequenceStarted()
 void CAIUnit::OnSequenceFinished()
 {
 	SetLogic( 0 );
-	if ( IsValid( routeSequence ) )
-		routeSequence->Pause();
-	if ( routeNormal.GetPtr() != 0 )
-		routeNormal->Resume();
+	if ( IsValid( routeSequence() ) )
+		routeSequence()->Pause();
+	if ( routeNormal().GetPtr() != 0 )
+		routeNormal()->Resume();
 	if ( EraseScriptControls( &controls ) && GetUnitServer()->CanFight() )
 		GetUnitServer()->Do( new NWorld::CCmdCancel( GetUnitServer() ) );
 	if ( !controls.empty() && !controls.back()->IsActive() )
@@ -605,20 +653,17 @@ void CAIUnit::SetLastSeenEnemy( IAIUnit *pAIUnit )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CAIUnit::HasInactivePose()
 {
-	return ptPosition.p.GetPose() == NAI::CM_INACTIVE;
+	return pos.pos.p.GetPose() == NAI::CM_INACTIVE;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 SUnitPosition CAIUnit::GetUnitPosition()
 {
-	NAI::SUnitPosition res;
-	res.pos = ptPosition;
-	res.bRun = false; // CRAP
-	return res;
+	return pos;   // retail: the member IS the full SUnitPosition (the Jan03 bRun=false stub is gone)
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CAIUnit::SetPosition( SPosition _ptPosition ) 
 { 
-	ptPosition = _ptPosition;
+	pos.pos = _ptPosition;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CAIUnit::SetPosition( SPathPlace _pPosition )
@@ -636,13 +681,13 @@ SPosition CAIUnit::GetPrevPosition()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CAIUnit::SavePrevPosition()
 {
-	ptPrevPosition = ptPosition;
+	ptPrevPosition = pos.pos;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CAIUnit::Synchronize()
 {
 	GetUnitSkillValues();
-	ptPosition = pUnitServer->GetPosition().pos; 
+	pos = pUnitServer->GetPosition();   // full SUnitPosition (incl. bRun), like retail
 	pCannon = GetUnitServer()->animator.GetCannon();
 	nTurnStartHP = GetHP();
 	SetHurtHP( 0 );
@@ -653,22 +698,22 @@ void CAIUnit::Synchronize()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CAIUnit::SetHP( int _nHP, int _nMaxHP )
 { 
-	nHP = _nHP; nMaxHP = _nMaxHP; 
+	skills[1].nValue = _nHP; skills[1].nMaxValue = _nMaxHP; 
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CAIUnit::SetAP( int _nAP, int _nMaxAP )
 { 
-	nAP = _nAP; nMaxAP = _nMaxAP; 
+	skills[0].nValue = _nAP; skills[0].nMaxValue = _nMaxAP; 
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CAIUnit::SpendHP( int _nHP )
 {
-	SetHP( Max( 0, nHP - _nHP ), nMaxHP );
+	SetHP( Max( 0, skills[1].nValue - _nHP ), skills[1].nMaxValue );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CAIUnit::SpendAP( int _nAP )
 {
-	SetAP( Max( 0, nAP - _nAP ), nMaxAP );
+	SetAP( Max( 0, skills[0].nValue - _nAP ), skills[0].nMaxValue );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 int CAIUnit::GetToHit( IAIUnit *pTarget, const NAI::SUnitPosition &pos, NAI::EHitLocation hl )
@@ -686,7 +731,7 @@ int CAIUnit::GetToHit( IAIUnit *pTarget, const NAI::SUnitPosition &pos, NAI::EHi
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CAIUnit::SetPose( int pose )
 {
-	ptPosition.p.SetPose( pose );
+	pos.pos.p.SetPose( pose );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CAIUnit::OnDied()

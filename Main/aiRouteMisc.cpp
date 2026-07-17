@@ -6,7 +6,7 @@
 #include "wMain.h"           // NWorld::CWorld::GetPathNetwork / GetGame (GetCheckPosition)
 #include "wMainPath.h"       // NWorld::PrepareAllPaths
 #include "aiMultiMoves.h"    // NAI::CMultiMovesTable (CPathPlaceTable::GetCost)
-#include "aiTaskCommand.h" // NAI::CTaskCommand family (ChangePose / ChangeDirection / Wait / Roaming)
+#include "aiTaskCommand.h" // NAI::CTaskCommand family (ChangePose / ChangeWishPose / ChangeDirection / Wait / Roaming)
 #include "wUnitCommands.h"   // NWorld::CCmd complete (CTaskCommand::operator& serializes list<CPtr<CCmd>>)
 #include "aiUnit.h"          // NAI::IAIUnit (GetUnitServer / GetUnitPosition / GetAP) -- GetCheckPosition
 #include "RPGGame.h"         // NRPG::IGame::CheckPositionVisibility (GetCheckPosition)
@@ -102,14 +102,14 @@ void RouteAddRoaming( const SPathPlace &center, int nRadius, bool bAddPose, vect
 	RouteAddLookAround( bAddPose, cmds, 2 );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// NAI::RouteAddGoAndCheck @0xa24e0 -- see aiRouteMisc.h. Face the position, change pose to RUN/WALK (bRun),
-// go there (release strafe arg elided), optional full look-around (bAddPose=true, nCount=6), settle at WALK.
-// Command order + the nCount=6 / bAddPose=true look-around args are disasm-verified. ChangeWishPose maps to
-// CTaskCommandChangePose (the wish/normal-pose split is elided in the dev predecessor family, like RouteAddRoundUp).
+// NAI::RouteAddGoAndCheck @0xa24e0 -- see aiRouteMisc.h. Face the position, change the WISH pose to RUN/WALK
+// (bRun) for the move (retail CreateRCChangeWishPose -- @0xa24e0 is one of its four callers), go there
+// (release strafe arg elided), optional full look-around (bAddPose=true, nCount=6), settle at WALK
+// (CreateRCChangePose). Command order + the nCount=6 / bAddPose=true look-around args are disasm-verified.
 void RouteAddGoAndCheck( const SPosition &pos, bool bLookAround, bool bRun, vector< CPtr<CTaskCommand> > &cmds )
 {
 	cmds.push_back( new CTaskCommandLookToPosition( pos.p ) );
-	cmds.push_back( new CTaskCommandChangePose( bRun ? RUN : WALK ) );
+	cmds.push_back( new CTaskCommandChangeWishPose( bRun ? RUN : WALK ) );
 	cmds.push_back( new CTaskCommandGoto( pos ) );
 	if ( bLookAround )
 		RouteAddLookAround( true, cmds, 6 );
@@ -156,7 +156,7 @@ bool GetCheckPosition( IAIUnit *pUnit, CUnitArea *pArea, const SPosition &pos, S
 	int nBest = 0;   // the binary inits 0x100000, dead before first use (the !bFound term guards it)
 	for ( vector<SPathPlace>::iterator it = places.begin(); it != places.end(); ++it )
 	{
-		if ( !pArea->IsInArea( *it ) )       // dev IsInArea: empty/un-prepared keys -> true (no gate)
+		if ( !pArea->IsInArea( *it ) )       // release IsInArea @0x73e30: hash lookup (empty set matches nothing)
 			continue;
 		SUnitPosition cand = GetUnitPos( *it, pNet );
 		cand.pos.p.SetDirection( (unsigned short)( (int)pNet->GetClosestDir( cand.pos.p, pos.p ) & 7 ) );
@@ -591,9 +591,10 @@ bool GetRoundUpPlaces( NWorld::CUnitServer *pServer, const SUnitPosition &enemyP
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // NAI::RouteAddRoundUp @0xa2720 -- see aiRouteMisc.h. Reuses the CTaskCommand family (CreateRC* factories ->
-// new CTaskCommand*). The release strafe prefix on Goto + the ChangeWishPose/ChangePose split are elided (the
-// dev tree's predecessor CTaskCommand family, as CreateAIStrafeToPositionLogic); the final Goto's "looked"
-// flag is elided with the strafe arg (the Look command it gates is still queued).
+// new CTaskCommand*). Retail's pose steps are matched exactly: the nWish step before the stop-Goto is
+// CreateRCChangeWishPose (@0xa2720 is one of its four callers); the nPoseLow settle step and the final WALK
+// are CreateRCChangePose. The final Goto's "looked" flag is elided with the strafe arg (the Look command it
+// gates is still queued).
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void RouteAddRoundUp( NWorld::CUnitServer *pServer, NWorld::CUnitServer *pEnemy, const SUnitPosition &enemyPos,
 	EPose nPose, vector< CPtr<CTaskCommand> > &cmds, bool bCheck )
@@ -621,7 +622,7 @@ void RouteAddRoundUp( NWorld::CUnitServer *pServer, NWorld::CUnitServer *pEnemy,
 		cmds.push_back( new CTaskCommandLookToPosition( enemyPos.pos.p ) );
 		if ( !SamePlaceMasked( stop.p, pServer->GetPosition().pos.p ) )
 		{
-			cmds.push_back( new CTaskCommandChangePose( (EPose)nWish ) );  // release ChangeWishPose ~= ChangePose
+			cmds.push_back( new CTaskCommandChangeWishPose( (EPose)nWish ) );  // retail CreateRCChangeWishPose (@0xa2720)
 			cmds.push_back( new CTaskCommandGoto( stop ) );               // release strafing Goto (prefix elided)
 		}
 		cmds.push_back( new CTaskCommandChangePose( (EPose)nPoseLow ) );

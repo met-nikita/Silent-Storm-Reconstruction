@@ -20,7 +20,7 @@ enum ETraceSet
 	TS_PASS_BLOCKER = 0x100,
 	TS_COVER = 0x200,
 	TS_WEAPON_BLOCKER = 0x400,
-	//TS_LADDER_PART = 0x800,
+	TS_LADDER_PART = 0x800,   // retail: GetMask @0x783c30 sets it from NDb::TR_LADDER; CLadderCalcer probes it
 	TS_STATE_OPEN = 0x1000,
 	TS_STATE_CLOSED = 0x2000,
 	TS_DOOR_HULL_VALID = 0x4000,

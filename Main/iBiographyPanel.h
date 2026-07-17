@@ -33,8 +33,8 @@ private:
 	CObj<CHoverFlashButton> pPerks;
 	CObj<CHoverButton> pMedals;
 	CObj<CHoverButton> pCharacter;
-	CObj<CMLText> pDescription;                  // multi-line (tag-processed, GetRealSize) biography body
-	CObj<CScrollWindow<CMLText> > pDescriptionView;
+	CObj<CText> pDescription;                  // multi-line (tag-processed, GetRealSize) biography body
+	CObj<CScrollWindow<CText> > pDescriptionView;
 	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CWindow*)this); f.Add(2,&pMission); f.Add(3,&pUnit); f.Add(4,&pClose); f.Add(5,&pPerks); f.Add(6,&pMedals); f.Add(7,&pCharacter); f.Add(8,&pDescription); f.Add(9,&pDescriptionView); return 0; }
 
 public:

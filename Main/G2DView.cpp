@@ -28,14 +28,16 @@ private:
 	CDGPtr<CCVec2> pScreenRect;
 	CObj<I2DScene> pScene;
 	CObj<CTextLocaleInfo> pLocale;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&pScreenRect); f.Add(3,&pScene); f.Add(4,&pLocale); return 0; }
+	// retail C2DGameView::operator& @0xd90b0 serializes ONLY {2=pScene, 3=pLocale}. pScreenRect is a
+	// device-bound LIVE resource (the viewport-size CCVec2 func node) that must NOT round-trip -- the
+	// default ctor rebuilds it (new CCVec2(GetScreenRect()), and StartNewFrame keeps it synced). The
+	// old dev leg wrote it at tag 2 and shifted pScene/pLocale up, so loading a retail save deserialized
+	// pScene's bytes INTO the CDGPtr pScreenRect (nulling it) -> GetViewportSize() null-derefs on the
+	// first post-load frame (UIInterface.cpp:461). Match retail: drop pScreenRect, keep the ctor value.
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&pScene); f.Add(3,&pLocale); return 0; }
 
 public:
 	C2DGameView();
-	
-	CRects* CreateRects( NDb::CTexture *pTexture, CFuncBase<CRectLayout> *pLayout, CFuncBase< CTRect<int> > *pSize = 0 );
-	CRects* CreateFullRect( NDb::CTexture *pTexture, CFuncBase< CTRect<int> > *pSize = 0 );
-	CRects* CreateClearRects( CFuncBase<CRectLayout> *pLayout, CFuncBase< CTRect<int> > *pSize = 0 );
 
 	void CreateDynamicRects( CFuncBase<SText> *pText, const CTPoint<int> &sPosition, const CTRect<int> &sWindow );
 	void CreateDynamicRects( NDb::CTexture *pTexture, const CRectLayout &sLayout, const CTPoint<int> &sPosition, const CTRect<int> &sWindow );
@@ -58,26 +60,6 @@ C2DGameView::C2DGameView()
 	///
 	pLocale = new CTextLocaleInfo;
 	pLocale->Setup( NGfx::GetScreenRect() );
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-CRects* C2DGameView::CreateRects( NDb::CTexture *pTexture, CFuncBase<CRectLayout> *pLayout, CFuncBase< CTRect<int> > *pSize )
-{
-	return pScene->CreateRects( shareTextures.Get( pTexture->GetRecordID() ), pLayout, pSize );
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-CRects* C2DGameView::CreateFullRect( NDb::CTexture *pTexture, CFuncBase< CTRect<int> > *pSize )
-{
-	CRectLayout sLayout;
-	sLayout.AddRect( 0, 0, CTRect<float>( 0, pTexture->nHeight, pTexture->nWidth, 0 ) );
-	CPtr<CCRectLayout> pLayout = new CCRectLayout;
-	pLayout->Set( sLayout );
-
-	return CreateRects( pTexture, pLayout, pSize );
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-CRects* C2DGameView::CreateClearRects( CFuncBase<CRectLayout> *pLayout, CFuncBase< CTRect<int> > *pSize )
-{
-	return pScene->CreateClearRects( pLayout, pSize );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void C2DGameView::CreateDynamicRects( CFuncBase<SText> *pText, const CTPoint<int> &sPosition, const CTRect<int> &sWindow )

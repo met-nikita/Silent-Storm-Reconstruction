@@ -7,6 +7,8 @@
 #include "wTSFlags.h"
 #include "wInterface.h"
 #include "aiDoorCollider.h"
+#include "phCollider.h"
+#include "..\MiscDll\LogStream.h"
 namespace NAI
 {
 //
@@ -606,7 +608,7 @@ void CMovesCalcer::Calc()
 	// add found transitions to network
 	pNet->AddDirectTransitions( transitions );
 	MarkSame( &temp );
-	// LAY re-checking - убираем мувы, которые могут потребовать ползать, чтобы просто развернуться
+	// LAY re-checking - drop moves that would require crawling just to turn around
 	for ( int y = 0; y < temp.GetYSize(); ++y )
 	{
 		for ( int x = 0; x < temp.GetXSize(); ++x )
@@ -635,11 +637,31 @@ CLadderCalcer::CLadderCalcer( CNodesLayer *_pLayer, IAIMap *_pMap, CNodesLayer::
 	ASSERT( IsValid( pMap ) );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail NAI::SLadderColliderAnalyzer (DoesIntersect @0x47c660 / Collide @0x47c710
+// instantiations): accumulates the TS flags of every touched hull, never stops the scan.
+struct SLadderColliderAnalyzer
+{
+	int nFlags;
+	SLadderColliderAnalyzer() : nFlags(0) {}
+	bool operator()( const SColliderUserInfo &info )
+	{
+		nFlags |= info.pSrc->nTSFlags;
+		return false;
+	}
+	bool operator()( float, const CVec3&, const SPlane&, const SColliderUserInfo &info )
+	{
+		nFlags |= info.pSrc->nTSFlags;
+		return false;
+	}
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail @0x47bf40: a rung is usable when the 0.1 probe beside the ladder TOUCHES
+// TS_LADDER_PART geometry AND a 0.3 sphere swept one step up hits no TS_PASS_BLOCKER;
+// pointPassable[i] = three consecutive usable rungs (true = passable). The bottom rung is
+// never probed and the top 3 entries keep their creation-default true.
 void CLadderCalcer::Calc()
 {
-	// initialize collider
-	CPtr<NAI::CCollider> pColliderPass = new NAI::CCollider;
-	NAI::CCollider &colliderPass = *pColliderPass;
+	CPhysCollider collider;
 	SBound test;
 	CVec3 ptShift;
 	switch ( pLadder->eDir )
@@ -650,30 +672,38 @@ void CLadderCalcer::Calc()
 		case LD_BACK: ptShift = CVec3( 0, F_LADDER_SHIFT, 0 ); break;
 		default: ASSERT(0);
 	}
+	// retail keeps TWO probe points: the 0.1 touch probe runs on the ladder plane (bottom + side
+	// shift), the 0.3 swept lane probe runs at the UNSHIFTED bottom CP -- the unit's climb lane,
+	// clear of the ladder's own TS_PASS_BLOCKER hull (@0x47c008 vs second GetCP @0x47c05d).
 	CVec3 ptMin( pNet->GetCP( pLadder->placeOnBottom ) + ptShift ), ptMax( ptMin ), ptCurrent( ptMin );
+	CVec3 ptLane( pNet->GetCP( pLadder->placeOnBottom ) );
 	int nHeight = pLadder->GetHeight();
+	if ( nHeight == 0 )
+		return;
 	ptMax.z += F_LADDER_STEP * nHeight;
 	test.BoxInit( ptMin, ptMax );
-	test.Extend( F_TEST_SPHERE_RADIUS + 1 );
-	pMap->PrepareCollider( &colliderPass, test, F_TEST_SPHERE_RADIUS * 2, NWorld::TS_PASS_BLOCKER );
-	for ( int i = 0; i < nHeight; ++i )
+	test.Extend( 1.5f ); // retail 1.5, not F_TEST_SPHERE_RADIUS + 1
+	pMap->PrepareCollider( &collider, test, F_TEST_SPHERE_RADIUS * 2, NWorld::TS_LADDER_PART | NWorld::TS_PASS_BLOCKER );
+	vector<unsigned char> steps( nHeight - 1, 0 );
+	steps[0] = 1;
+	for ( int i = 1; i < nHeight - 1; ++i )
 	{
-		bool bIntersect = colliderPass.DoesIntersect( ptCurrent, F_LADDER_TEST_RADIUS );
-		(*pRes)[ i ] = bIntersect;
 		ptCurrent.z += F_LADDER_STEP;
-	}
-	vector<char> collideRes;
-	collideRes.resize( nHeight - 1 );
-	CVec3 move( 0, 0, F_LADDER_STEP );
-	for ( int i = 0; i < nHeight - 1; ++i )
-	{
-		collideRes[i] = !(*pRes)[ i ];
+		ptLane.z += F_LADDER_STEP;
+		SLadderColliderAnalyzer touch;
+		collider.DoesIntersect( ptCurrent, F_LADDER_TEST_RADIUS, &touch );
+		steps[i] = ( touch.nFlags & NWorld::TS_LADDER_PART ) ? 1 : 0;
+		if ( steps[i] )
+		{
+			SLadderColliderAnalyzer lane;
+			collider.Collide( SSphere( ptLane, 0.3f ), CVec3( 0, 0, F_LADDER_STEP ), &lane );
+			steps[i] = ( lane.nFlags & NWorld::TS_PASS_BLOCKER ) ? 0 : 1;
+			if ( !steps[i] )
+				csSystem << CC_WHITE << "Ladder's step " << i << " is blocked by not passable obj" << endl;
+		}
 	}
 	for ( int i = 0; i < nHeight - 3; ++i )
-	{
-		(*pRes)[i] = !( collideRes[i] && collideRes[ i + 1 ] && collideRes[ i + 2 ] );
-	}
-	(*pRes)[ nHeight - 1 ] = (*pRes)[ nHeight - 2 ] = (*pRes)[ nHeight - 3 ] = false;
+		(*pRes)[i] = ( steps[i] && steps[i + 1] && steps[i + 2] ) ? 1 : 0;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 }

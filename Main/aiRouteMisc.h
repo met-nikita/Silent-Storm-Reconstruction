@@ -150,8 +150,9 @@ bool GetRoundUpPlaces( NWorld::CUnitServer *pServer, const SUnitPosition &enemyP
 // is alive and GetRestoreAPPoint finds a hidden spot: a 40% Wait(1) when <=3 path points were watched, goto
 // restore, Wait(1); with NO worn PK a look toward the enemy; goto attack; look at enemy]. In ALL cases (also on
 // plan failure) it tails Wait(2 + draw&1), RouteAddLookAround(false,6), ChangePose(WALK). Reuses the existing
-// CTaskCommand family (the release strafe prefix on Goto + the ChangeWishPose/ChangePose split are elided -- see
-// CreateAIStrafeToPositionLogic). bAvoidFriends = bCheck && GetGlobalGame()->pDifficulty->bAICheckCorpses.
+// CTaskCommand family; the retail ChangeWishPose/ChangePose split is matched (the nWish step is
+// CTaskCommandChangeWishPose, retail CreateRCChangeWishPose @0xa2720; the settle steps are ChangePose).
+// bAvoidFriends = bCheck && GetGlobalGame()->pDifficulty->bAICheckCorpses.
 void RouteAddRoundUp( NWorld::CUnitServer *pServer, NWorld::CUnitServer *pEnemy, const SUnitPosition &enemyPos,
 	EPose nPose, vector< CPtr<CTaskCommand> > &cmds, bool bCheck );
 ////////////////////////////////////////////////////////////////////////////////////////////////////

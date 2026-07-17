@@ -162,6 +162,4 @@ IAIPlayer *CreateAIPlayer()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 }
 //
-using namespace NAI;
-//
-REGISTER_SAVELOAD_CLASS( 0x52822101, CAIPlayer );
+// not registered: retail has no AI-player roster class on the wire (rosters are runtime-only)

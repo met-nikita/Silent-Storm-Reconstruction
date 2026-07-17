@@ -21,6 +21,11 @@ namespace NAI
 class CAIEmptyReaction: public CAIReaction
 {
 	OBJECT_BASIC_METHODS( CAIEmptyReaction );
+	// retail wraps the base as a NESTED chunk at tag 2 like every concrete reaction (its operator&
+	// is ICF-folded with CAIScriptReaction::operator& @0x3b900: {2 = CAIReaction base{2 pUnit ref}}).
+	// Dev inherited CAIReaction::operator& directly, so tag 2 was read as a bare 4-byte ptr while the
+	// save carries the 6-byte nested chunk -> wire-audit RAWSZ 6v4 @2.2 (slot 9, byte-walked obj#37784).
+	int operator&( CStructureSaver &f ) { f.Add( 2, (CAIReaction*)this ); return 0; }
 public:
 	CAIEmptyReaction() {}
 	CAIEmptyReaction( IAIUnit *_pUnit ): CAIReaction( _pUnit ) {}
@@ -33,6 +38,7 @@ class CAINormalReaction: public CAIReaction
 {
 	OBJECT_BASIC_METHODS( CAINormalReaction );
 	bool bWasCombat;                            // +0x10  was the unit in combat last think?
+	int operator&( CStructureSaver &f ) { f.Add( 2, (CAIReaction*)this ); f.Add( 3, &bWasCombat ); return 0; }   // retail @0x7f780
 public:
 	CAINormalReaction(): bWasCombat( false ) {}
 	CAINormalReaction( IAIUnit *_pUnit ): CAIReaction( _pUnit ), bWasCombat( false ) {}
@@ -48,6 +54,7 @@ class CAIRetreatReaction: public CAIReaction
 {
 	OBJECT_BASIC_METHODS( CAIRetreatReaction );
 	SPathPlace pos;                             // +0x10  the fall-back target
+	int operator&( CStructureSaver &f ) { f.Add( 2, (CAIReaction*)this ); f.Add( 3, &pos ); return 0; }   // retail @0x95e20 (pos = 4-byte DataChunk)
 public:
 	CAIRetreatReaction() {}
 	CAIRetreatReaction( IAIUnit *_pUnit, const SPathPlace &_pos ): CAIReaction( _pUnit ), pos( _pos ) {}

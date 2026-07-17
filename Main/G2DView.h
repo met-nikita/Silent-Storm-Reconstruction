@@ -22,26 +22,16 @@ namespace NDb
 namespace NGScene
 {
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-class CRects;
 class CTextLocaleInfo;
-//////////////////////////////////////////////////////////////////////////////////////	
-class CText: public CObjectBase
-{
-	OBJECT_BASIC_METHODS(CText);
-public:
-	vector< CObj<CRects> > rects;
-	CDGPtr< CFuncBase< int > > pnfHeight;
-
-	int operator&( CStructureSaver &f );
-};
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// I2DGameView -- immediate-mode UI 2D view, exactly the retail NGScene::C2DGameView method set
+// (G2DView.obj: CreateDynamicRects x2, CreateDynamicClearRects, StartNewFrame, Flush,
+// GetViewportSize, operator& @0xd90b0 {2 pScene, 3 pLocale}). The dev-only retained path
+// (CreateRects/CreateFullRect/CreateClearRects over CRects nodes + the vestigial NGScene::CText
+// wrapper) had no retail counterpart and no live caller; removed in the W5 convergence wave.
 class I2DGameView: public CObjectBase
 {
 public:
-	virtual CRects* CreateRects( NDb::CTexture *pTexture, CFuncBase<CRectLayout> *pLayout, CFuncBase< CTRect<int> > *pSize = 0 ) = 0;
-	virtual CRects* CreateFullRect( NDb::CTexture *pTexture, CFuncBase< CTRect<int> > *pSize = 0 ) = 0;
-	virtual CRects* CreateClearRects( CFuncBase<CRectLayout> *pLayout, CFuncBase< CTRect<int> > *pSize = 0 ) = 0;
-
 	virtual void CreateDynamicRects( CFuncBase<SText> *pText, const CTPoint<int> &sPosition, const CTRect<int> &sWindow ) = 0;
 	virtual void CreateDynamicRects( NDb::CTexture *pTexture, const CRectLayout &sLayout, const CTPoint<int> &sPosition, const CTRect<int> &sWindow ) = 0;
 	virtual void CreateDynamicRects( CPtrFuncBase<NGfx::CTexture> *pTexture, const CRectLayout &sLayout, const CTPoint<int> &sPosition, const CTRect<int> &sWindow ) = 0;

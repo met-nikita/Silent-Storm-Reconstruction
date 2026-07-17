@@ -7,6 +7,11 @@
 namespace NDb
 {
 	class CRPGArmor;
+	class CDBDifficulty;
+}
+namespace NWorld
+{
+	class IWorld;
 }
 namespace NRPG
 {
@@ -65,7 +70,9 @@ public:
 	bool CanDealDmg( const NDb::CRPGArmor *pArmor ) const;
 	bool IsArmorIgnored( const NDb::CRPGArmor *pArmor ) const;
 	bool CanRicochet() const;
-	int  CalcStructDmg( const NDb::CRPGArmor *pArmor ) const;
+	// retail @0x28f960. pWorld reaches the campaign difficulty multipliers; nAccumulated is the
+	// damage this attack already dealt (CObject's stage loop subtracts it; single-shot callers pass 0).
+	int  CalcStructDmg( NWorld::IWorld *pWorld, const NDb::CRPGArmor *pArmor, int nAccumulated ) const;
 	void MakeClickOfDeath( const CRay &r );
 };
 float GetAPASubstraction( float fEnter, float fExit, const NDb::CRPGArmor *pArmor );
@@ -73,7 +80,13 @@ float GetAPASubstraction( float fEnter, float fExit, const NDb::CRPGArmor *pArmo
 class IAttackable
 {
 public:
-	virtual int ProcessAttack( int nUserID, CAttackPortion *pAttack, NDb::CRPGArmor *pArmor ) = 0;
+	// retail: CReceivedDmg ProcessAttack( IWorld*, int, CAttackPortion*, const CVec3&, CRPGArmor* ),
+	// IAttackable's only virtual (slot 0); arg order proven at PerformThrowingAttackPortion @0x290780.
+	// vDir is the attack trajectory direction -- retail's replacement for CAttackPortion::rTtrajectory,
+	// which retail's CAttackPortion does not have. Return stays int: it IS retail's CReceivedDmg::nDmg
+	// (-1 sentinel included). The `type` half is unread here and not uniform per implementor -- see dossier.
+	virtual int ProcessAttack( NWorld::IWorld *pWorld, int nUserID, CAttackPortion *pAttack,
+		const CVec3 &vDir, NDb::CRPGArmor *pArmor ) = 0;
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 } // namespace

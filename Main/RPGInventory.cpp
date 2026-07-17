@@ -14,15 +14,20 @@ namespace NRPG
 class CInventory: public IInventory
 {
 	OBJECT_BASIC_METHODS(CInventory);
+	// retail NRPG::CInventory is PDB size 0x40 with EXACTLY {nActiveSlot@0x0c, pOwner@0x10,
+	// backpackMap@0x14, items@0x24, slots@0x30, pPK@0x3c} -- there is NO hand member, and the PDB has
+	// no CInventory::GetHandItem/SetHandItem symbol at all. operator& @0x29e900 emits tags
+	// {2,3,4,6,7,8}: tag 5 does not exist in retail, and no save object in any of the 9 slots carries
+	// one. The Jan03-era CObj<IInventoryItem> pHandItem + f.Add(5,...) are gone; the live hand item is
+	// CUnitServer::sHandItem (@+0x200, tag 33, setter @0x387b30) / CPlayer::sHandItem (tag 9).
 	ZDATA
 	int nActiveSlot;
 	CPtr<CUnit> pOwner;
 	CArray2D<bool> backpackMap;
-	CObj<IInventoryItem> pHandItem;
 	vector<SBackPackItem> items;
 	vector< CObj<IInventoryItem> > slots;
 	CDBPtr<NDb::CPanzerklein> pPK;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&nActiveSlot); f.Add(3,&pOwner); f.Add(4,&backpackMap); f.Add(5,&pHandItem); f.Add(6,&items); f.Add(7,&slots); f.Add(8,&pPK); return 0; }
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&nActiveSlot); f.Add(3,&pOwner); f.Add(4,&backpackMap); f.Add(6,&items); f.Add(7,&slots); f.Add(8,&pPK); return 0; }   // retail @0x29e900
 
 public:
 	CInventory( CUnit *pOwner = 0 );
@@ -42,10 +47,7 @@ public:
 	virtual IInventoryItem *GetActive() const;
 	virtual int GetActiveSlot() const;
 
-	virtual IInventoryItem *GetHandItem() const;
-	virtual void SetHandItem( IInventoryItem *pWhat );
-
-	virtual void SetPanzerklein( NDb::CPanzerklein *_pPK, IInventory *pPKInventory ); 
+	virtual void SetPanzerklein( NDb::CPanzerklein *_pPK, IInventory *pPKInventory );
 
 	virtual int GetPlaceBySubType( NDb::EItemSubType subType ) const;
 	virtual NDb::CRPGUniform* GetUniform() const;
@@ -178,6 +180,9 @@ void CInventory::ArrangeItems()
 bool CInventory::CanEquip( NDb::ESlot where, const IInventoryItem *pWhat ) const
 {
 	int nPKType = 0;
+	// retail @0x29d660 early-out: the inert CreateDummyItem wrapper can never be equipped
+	if ( CDynamicCast<IDummyItem>( pWhat ) )
+		return false;
 	CDynamicCast<IToolItem> pTool(pWhat);
 	if (pTool)
 	{
@@ -258,16 +263,6 @@ IInventoryItem* CInventory::Get( NDb::ESlot where ) const
 	if ( where < 0 || where >= NDb::N_SLOTS ) 
 		return 0; 
 	return slots[where]; 
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-IInventoryItem *CInventory::GetHandItem() const
-{
-	return pHandItem;
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-void CInventory::SetHandItem( IInventoryItem *pWhat )
-{
-	pHandItem = pWhat;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 int CInventory::GetActiveSlot() const

@@ -51,4 +51,7 @@ CAILog* CreateAILog()                                // @0x0045b660
 //
 using namespace NAI;
 //
-BASIC_REGISTER_CLASS( CAILog )
+// Retail saveload id 0x52822121 = NAI::CAILog (factory @0x497130); the id previously squatted by the
+// removed dev-only CAILogContainer. CAILog IS on the wire (CAICombatLogic::operator& tag 4 CPtr<CAILog>).
+// REGISTER_SAVELOAD_CLASS expands BASIC_REGISTER_CLASS, so no separate basic registration (LNK2005 otherwise).
+REGISTER_SAVELOAD_CLASS( 0x52822121, CAILog )

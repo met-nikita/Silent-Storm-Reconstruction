@@ -45,6 +45,26 @@ void StartRegisterSaveload();
 // -object data separated in chunks one chunk per object
 // c) can replace CMemoryStream with specialized objects to increase perfomance
 
+// --- save-load load-trace diagnostic (dev harness; off unless the -loadslot path enables it) ---
+// When enabled, CStructureSaver::Start tracks the top-level object it is reading and, on any load
+// exception, appends "THREW at object #<i> id=0x<id>" to _saveload.log so an unattended harness run
+// can name the class that broke the load. SaveLoadDiag() is a no-op when g_bSaveLoadDiag is false.
+extern bool g_bSaveLoadDiag;
+void SaveLoadDiag( const char *szFmt, ... );
+// True only while a CStructureSaver READ is tearing down its temporary object table (Finish). In that
+// window a deserialized object graph can still hold a smart-ptr to a sibling that was already freed
+// (a dangling ref in the resource/DG layer); releasing through it would touch freed+unmapped memory.
+// CObjectBase::ReleaseObj/Ref consult this to skip a release whose target is no longer mapped.
+extern bool g_bSaveLoadTeardown;
+// [HARNESS] wire audit: while READING a save, aggregate every divergence between what the stream
+// carries and what the reachable operator& tables consume, into _wireaudit.log --
+//   SIZE    a tag was read with a different byte size than the save carries (silent memcpy today),
+//   UNREAD  the save carries a tag the class never consumed (retail field dev doesn't know),
+//   MISS    dev asked for a tag (first instance) the save doesn't carry (dev-extra field).
+// This mechanically surfaces the Jan03-wire divergence family (swapped/shifted/retyped tags)
+// without gameplay repros. Off unless the harness enables it; zero cost in normal play.
+extern bool g_bWireAudit;
+
 // chunk with index 0 is used for system and should not be used in user code
 template<int N> struct SGenericNumberTemplate {};
 template<class T> class CArray2D;
@@ -77,7 +97,8 @@ private:
 	typedef std::list<CChunkLevel>::reverse_iterator CChunkLevelReverseIterator;
 	bool bIsReading;
 	// file format version. Stored as top-level chunk id 4 (value, 4 bytes). Absent in legacy
-	// files => v0. The release stamps v1; per-class operator& methods branch on GetVersion().
+	// files => v0. The release stamps v1 and packs the payload chunks 0/2/1 with CNetCompressor
+	// behind an "A3\0" marker chunk (id 3); the content layout is otherwise identical to v0.
 	int nVersion;
 	// maps objects addresses during save(first) to addresses during load(second) - during loading
 	// or serves as a sign that some object has been already stored - during storing
@@ -176,6 +197,38 @@ private:
 				DoDataVector( *p );
 			else
 				DoVector( *p );
+			FinishChunk();
+		}
+	// std::vector<bool> is bit-packed in this build (no addressable element storage), so the generic
+	// vector path above (&(*pVec)[0]) is ill-formed for it. This overload (more specialized, wins
+	// partial ordering) reproduces the release DoDataVector<bool> blob layout EXACTLY -- chunk 1 =
+	// int element count, chunk 2 = one raw byte per element (retail sizeof(bool) == 1) -- through a
+	// byte staging buffer. Consumer: NRPG::CStore::flagsSet (release tag 4, operator& @0x2b2a90).
+	template<class T>
+		void __cdecl AddInternal( const chunk_id idChunk, int nChunkNumber, T *p, std::vector<bool> *pVec )
+		{
+			if ( !StartChunk( idChunk, nChunkNumber ) )
+				return;
+			std::vector<bool> &data = *pVec;
+			int nSize = data.size();
+			Add( 1, &nSize );
+			std::vector<unsigned char> bytes( nSize > 0 ? nSize : 0 );
+			if ( IsReading() )
+			{
+				if ( nSize > 0 )
+					DataChunk( 2, &bytes[0], nSize, 1 );
+				data.clear();
+				data.resize( nSize );
+				for ( int i = 0; i < nSize; ++i )
+					data[i] = bytes[i] != 0;
+			}
+			else
+			{
+				for ( int i = 0; i < nSize; ++i )
+					bytes[i] = data[i] ? 1 : 0;
+				if ( nSize > 0 )
+					DataChunk( 2, &bytes[0], nSize, 1 );
+			}
 			FinishChunk();
 		}
 	template<class T,class T1, class T2, class T3, class T4>

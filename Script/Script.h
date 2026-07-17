@@ -266,7 +266,9 @@ public:
 
 	// Helper function
 	void Pop(int amount = 1)					{  lua_pop(m_state, amount);  }
-	bool CheckArgs( const char *szArgList, string sFuncName, vector<SLuaParams> *pParams );
+	// retail @0x3e6020: bMakeLog additionally captures a printable form of each arg into
+	// SLuaParams::s for the lua_showlog echo (NScript::ShowLuaLog)
+	bool CheckArgs( const char *szArgList, string sFuncName, vector<SLuaParams> *pParams, bool bMakeLog = false );
 
 	struct SRegFunction
 	{

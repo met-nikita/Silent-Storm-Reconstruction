@@ -14,7 +14,8 @@ enum ETrafic
 	TR_COVER = 2,
 	TR_PASS = 4,
 	TR_VISION = 8,
-	TR_ITEM_BLOCKER = 16
+	TR_ITEM_BLOCKER = 16,
+	TR_LADDER = 32       // retail PDB NDb::ETrafic; carried by the retail game.db ladder AI geometry
 };
 inline bool IsNoDamage( ETrafic trafic ) { return ( trafic & TR_DAMAGE ) == 0; }
 ////////////////////////////////////////////////////////////////////////////////////////////////////

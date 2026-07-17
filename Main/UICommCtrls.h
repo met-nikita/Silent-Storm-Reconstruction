@@ -4,6 +4,7 @@
 #pragma once
 #endif // _MSC_VER > 1000
 #include "../DBFormat/DataSound.h"
+#include "UIBaseCtrls.h"   // NUI::CText -- retail CEdit's base class
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 namespace NGScene
 {
@@ -39,7 +40,7 @@ const int
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // Common controls events
 const int
-	EVENT_LISTVIEW_ITEMSELECTED	=	0x00000100 | EVENT_FLAG_NOTIFY;
+	EVENT_LISTVIEW_ITEMSELECTED	=	0x00000101 | EVENT_FLAG_NOTIFY;	// retail 0x1000101 (senders @0x1ba890/@0x316890, receiver @0x3169e0)
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // Common controls flags
 const int
@@ -47,9 +48,14 @@ const int
 	ELV_ITEMSSELECTED_TRUE		= 0x000000001,
 	ELV_ITEMSSELECTED_FALSE		= 0x000000000;
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// CEdit
+// CEdit -- retail NUI::CEdit (UICommCtrls.obj, saveload id 0xB0241960, PDB sizeof 228): derives
+// from NUI::CText (NOT CWindow -- the Jan03 CWindow base with bActiveState/sTexRect was dropped in
+// retail). operator& @0x31b2d0: 1=CText base, 2=nSize, 3=nCursor, 4=eMode, 5=bCursorVisible (1B),
+// 6=sFlashTime, 7=wsText (string chunk), 8=wsFormat (string chunk), 9=sCursorInfo. The dev render
+// nodes (pSize/pTextString/pText) do not exist in retail and stay OFF-WIRE (rebuildable draw
+// caches; retail renders through the CText base IML instead).
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-class CEdit: public CWindow
+class CEdit: public CText
 {
 	OBJECT_NOCOPY_METHODS(CEdit);
 public:
@@ -61,26 +67,28 @@ public:
 	};
 
 private:
-	ZDATA_(CWindow)
+	ZDATA_(CText)
 	int nSize;
 	int nCursor;
 	EMode eMode;
-	bool bActiveState;
 	bool bCursorVisible;
-	SRect sTexRect;
 	STime sFlashTime;
 	wstring wsText;
 	wstring wsFormat;
 	////
 	SCursorInfo sCursorInfo;
+public:
+	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CText*)this); f.Add(2,&nSize); f.Add(3,&nCursor); f.Add(4,&eMode); f.Add(5,&bCursorVisible); f.Add(6,&sFlashTime); f.Add(7,&wsText); f.Add(8,&wsFormat); f.Add(9,&sCursorInfo); return 0; }
+
+private:
+	// Off-wire draw caches (dev render infra; absent from retail CEdit and from retail saves --
+	// both ctors create pSize/pTextString, Draw re-syncs them and lazily creates pText).
 	CObj<NGScene::CCTPoint> pSize;
 	CObj<NGScene::CCWString> pTextString;
 	CDGPtr< CFuncBase<NGScene::SText> > pText;
+
 public:
-	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CWindow*)this); f.Add(2,&nSize); f.Add(3,&nCursor); f.Add(4,&eMode); f.Add(5,&bActiveState); f.Add(6,&bCursorVisible); f.Add(7,&sTexRect); f.Add(8,&sFlashTime); f.Add(9,&wsText); f.Add(10,&wsFormat); f.Add(11,&sCursorInfo); f.Add(12,&pSize); f.Add(13,&pTextString); f.Add(14,&pText); return 0; }
-	
-public:
-	CEdit() {}
+	CEdit();
 	CEdit( const SWindowInfo &sInfo );
 	
 	EMode GetMode() const;
@@ -196,14 +204,19 @@ public:
 	bool ProcessMessage( const SEvent &sEvent );
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// CToolTip
+// (CToolTip is defined below, AFTER CFrame -- retail NUI::CToolTip derives from CFrame.)
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-class CToolTip: public CWindow
+// CFrame -- retail NUI::CFrame (saveload id 0xB024196D; ctors @0x1e5ea0/@0x316160, operator&
+// @0x1e66f0, Draw @0x3135f0): the nine-slice background frame widget, base of CTextFrame /
+// CFrameText (iGlobalMapUI) / CAckView in retail. The SWindowInfo ctor fills the nine slices with
+// the engine's standard frame skin (the same UI-texture ids 654..662 the dev CToolTip used).
+// operator&: 1=CWindow base, 2=pBackgroundUp .. 10=pBackgroundDownRight.
+////////////////////////////////////////////////////////////////////////////////////////////////////
+class CFrame: public CWindow
 {
-	OBJECT_NOCOPY_METHODS(CToolTip);
-private:
+	OBJECT_NOCOPY_METHODS(CFrame);
+protected:
 	ZDATA_(CWindow)
-	CObj<CMLText> pText;
 	CObj<CImageDraw> pBackgroundUp;
 	CObj<CImageDraw> pBackgroundDown;
 	CObj<CImageDraw> pBackgroundLeft;
@@ -214,10 +227,61 @@ private:
 	CObj<CImageDraw> pBackgroundDownLeft;
 	CObj<CImageDraw> pBackgroundDownRight;
 public:
-	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CWindow*)this); f.Add(2,&pText); f.Add(3,&pBackgroundUp); f.Add(4,&pBackgroundDown); f.Add(5,&pBackgroundLeft); f.Add(6,&pBackgroundRight); f.Add(7,&pBackgroundMiddle); f.Add(8,&pBackgroundUpLeft); f.Add(9,&pBackgroundUpRight); f.Add(10,&pBackgroundDownLeft); f.Add(11,&pBackgroundDownRight); return 0; }
+	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CWindow*)this); f.Add(2,&pBackgroundUp); f.Add(3,&pBackgroundDown); f.Add(4,&pBackgroundLeft); f.Add(5,&pBackgroundRight); f.Add(6,&pBackgroundMiddle); f.Add(7,&pBackgroundUpLeft); f.Add(8,&pBackgroundUpRight); f.Add(9,&pBackgroundDownLeft); f.Add(10,&pBackgroundDownRight); return 0; }
+
+public:
+	CFrame() {}                          // retail @0x1e5ea0: nine null slices
+	CFrame( const SWindowInfo &sInfo );  // retail @0x316160: fills the nine slices with the standard skin
+
+	void Draw( const STime &sTime, NGScene::I2DGameView *pView );   // retail @0x3135f0
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// CTextFrame -- retail NUI::CTextFrame (module UICommCtrls, saveload id 0xb024196e): a self-sizing
+// bordered panel = a CFrame (which owns the nine border slices) plus one CText markup label.
+// operator& @0x31b420: 1=CFrame base, 2=pText -- the border slices serialize through the base
+// (convergence W4: dev previously built it on CWindow with its own 9 slices at tags 3-11).
+// Differs from CToolTip in the retail-exact resize/clamp (SetText @0x3143c0 re-fits + re-clamps
+// INSIDE THE PARENT, not the fixed 1024x768 screen). Used by the tactical-state unit tooltip
+// (MakeUnitStateToolTip).
+////////////////////////////////////////////////////////////////////////////////////////////////////
+class CTextFrame: public CFrame
+{
+	OBJECT_NOCOPY_METHODS(CTextFrame);
+private:
+	ZDATA_(CFrame)
+	CObj<CText> pText;
+public:
+	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CFrame*)this); f.Add(2,&pText); return 0; }
 
 protected:
-	void DrawBackground( const STime &sTime, NGScene::I2DGameView *pView );
+	void UpdateSize();          // retail @0x313950: fit the frame around the label
+	void UpdatePosition();      // retail @0x314160: clamp the frame inside its parent
+
+public:
+	CTextFrame() {}
+	CTextFrame( const SWindowInfo &sInfo );   // retail @0x3163c0
+
+	void SetText( const wstring &wsText );   // retail @0x3143c0
+
+	void Draw( const STime &sTime, NGScene::I2DGameView *pView );   // retail @0x3143f0: re-fit + re-clamp, then CFrame::Draw
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// CToolTip -- retail NUI::CToolTip (saveload id 0xB0241964; ctors @0x319f70/@0x316510). Like
+// CTextFrame it is a CFrame (which owns the nine border slices) plus one CText markup label; the
+// SWindowInfo ctor chains CFrame(sInfo) to fill the slices, so the border round-trips through the
+// CFrame base. operator& @ (inlined): 1=CFrame base, 2=pText -- NOT the dev-legacy CWindow base with
+// its own 9 slices at tags 3-11, which mis-reads a retail save (the slices are nested inside the
+// CFrame base chunk at tag 1) -> null pBackground* -> CToolTip::Draw AV in CImageDraw::GetWindow.
+// Differs from CTextFrame in the clamp target: the tooltip re-fits + clamps to the 1024x768 SCREEN.
+////////////////////////////////////////////////////////////////////////////////////////////////////
+class CToolTip: public CFrame
+{
+	OBJECT_NOCOPY_METHODS(CToolTip);
+private:
+	ZDATA_(CFrame)
+	CObj<CText> pText;   // retail's tooltip text is a CText
+public:
+	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CFrame*)this); f.Add(2,&pText); return 0; }
 
 public:
 	CToolTip() {}
@@ -233,45 +297,6 @@ public:
 	void SetPosition( const SPoint &_sPosition );
 
 	void Draw( const STime &sTime, NGScene::I2DGameView *pView );
-};
-////////////////////////////////////////////////////////////////////////////////////////////////////
-// CTextFrame -- retail NUI::CTextFrame (module UICommCtrls, saveload id 0xb024196e): a self-sizing
-// 9-image bordered panel owning a CMLText markup label. Same shape/behaviour as CToolTip (retail's
-// CTextFrame is a CFrame + CObj<CText>; this dev tree has no CFrame, so it is built on CWindow with
-// the shared border set). Differs from CToolTip in the retail-exact resize/clamp (SetText @0x3143c0
-// re-fits + re-clamps INSIDE THE PARENT, not the fixed 1024x768 screen). Used by the tactical-state
-// unit tooltip (MakeUnitStateToolTip).
-////////////////////////////////////////////////////////////////////////////////////////////////////
-class CTextFrame: public CWindow
-{
-	OBJECT_NOCOPY_METHODS(CTextFrame);
-private:
-	ZDATA_(CWindow)
-	CObj<CMLText> pText;
-	CObj<CImageDraw> pBackgroundUp;
-	CObj<CImageDraw> pBackgroundDown;
-	CObj<CImageDraw> pBackgroundLeft;
-	CObj<CImageDraw> pBackgroundRight;
-	CObj<CImageDraw> pBackgroundMiddle;
-	CObj<CImageDraw> pBackgroundUpLeft;
-	CObj<CImageDraw> pBackgroundUpRight;
-	CObj<CImageDraw> pBackgroundDownLeft;
-	CObj<CImageDraw> pBackgroundDownRight;
-public:
-	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CWindow*)this); f.Add(2,&pText); f.Add(3,&pBackgroundUp); f.Add(4,&pBackgroundDown); f.Add(5,&pBackgroundLeft); f.Add(6,&pBackgroundRight); f.Add(7,&pBackgroundMiddle); f.Add(8,&pBackgroundUpLeft); f.Add(9,&pBackgroundUpRight); f.Add(10,&pBackgroundDownLeft); f.Add(11,&pBackgroundDownRight); return 0; }
-
-protected:
-	void DrawBackground( const STime &sTime, NGScene::I2DGameView *pView );
-	void UpdateSize();          // retail @0x313950: fit the frame around the label
-	void UpdatePosition();      // retail @0x314160: clamp the frame inside its parent
-
-public:
-	CTextFrame() {}
-	CTextFrame( const SWindowInfo &sInfo );
-
-	void SetText( const wstring &wsText );   // retail @0x3143c0
-
-	void Draw( const STime &sTime, NGScene::I2DGameView *pView );   // retail @0x3143f0
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CSlider
@@ -353,11 +378,12 @@ private:
 	{
 		ZDATA
 		int nID;
+		bool bHidden;   // retail SItem +0xc: hidden rows are selectable but never shown (operator& @0x31b0a0 tags 2/3/4)
 		CObj<CWindow> pWindow;
-		ZEND int operator&( CStructureSaver &f ) { f.Add(2,&nID); f.Add(3,&pWindow); return 0; }
+		ZEND int operator&( CStructureSaver &f ) { f.Add(2,&nID); f.Add(3,&bHidden); f.Add(4,&pWindow); return 0; }
 
-		SItem(): nID( -1 ) {}
-		SItem( int _nID, CWindow *_pWindow ): nID( _nID ), pWindow( _pWindow ) {}
+		SItem(): nID( -1 ), bHidden( false ) {}
+		SItem( int _nID, CWindow *_pWindow, bool _bHidden = false ): nID( _nID ), bHidden( _bHidden ), pWindow( _pWindow ) {}
 	};
 	ZDATA_(CWindow)
 	int nSelectedID;
@@ -375,6 +401,7 @@ public:
 	CListView( const SWindowInfo &sInfo );
 	
 	void AddItem( int nID, CWindow *pItem );
+	void AddHiddenItem( int nID, CWindow *pItem );   // retail @0x3179d0
 	void RemoveItem( int nID );
 	void RemoveAllItems();
 	int GetItemsCount() const;
@@ -432,6 +459,7 @@ public:
 	CComboBox( const SWindowInfo &sInfo );
 
 	void AddItem( int nID, const SInfo &sItem, int nTemplate = -1 );
+	void AddHiddenItem( int nID, const SInfo &sItem, int nTemplate = -1 );   // retail @0x318fa0: selectable but not listed
 	void RemoveAllItems();
 	bool GetItem( int nID, SInfo *pInfo );
 	void SetStateInfo( EState eState, const SInfo &sInfo );

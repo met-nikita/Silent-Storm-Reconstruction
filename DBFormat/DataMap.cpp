@@ -690,6 +690,7 @@ void CWaypointName::Import()
 void CWaypoint::Import()
 {
 	NDatabase::ImportField( "NameID", &pName );
+	NDatabase::ImportField( "Is3DPoint", &b3DPoint );
 	NDatabase::ImportField( "VariantID", &pVar );
 	if ( IsValid( pVar ) )
 		PushItem( &pVar->waypoints, this );
@@ -780,13 +781,17 @@ void AssignItems( L *p = 0 )
 			CDynamicCast<CRPGClip4Pers> pClip4Pers(pW);
 			if (pClip4Pers)
 				item.pAmmo = pClip4Pers->pAmmo;
+			// retail AssignItems @0x425760.. : every clone copies the record's difficulty gate onto
+			// the assignment (CRPGSomethingForPers<T>::pDifficulty / CRPGClip4Pers::pDifficulty).
+			item.pDifficulty = pW->pDifficulty;
 			pW->pPers->items.push_back(item);
 		}
 	}
 }
 void GiveItems()
 {
-	// give items
+	// give items (retail GiveItems @0x423d80 -- all ELEVEN ...4Pers record types, AssignItems clones
+	// @0x425760..0x426980 incl. the release-added Picklocks/EngGrenades join tables)
 	AssignItems<CRPGWeapon4Pers>();
 	AssignItems<CRPGClip4Pers>();
 	AssignItems<CRPGGrenade4Pers>();
@@ -796,6 +801,8 @@ void GiveItems()
 	AssignItems<CRPGMine4Pers>();
 	AssignItems<CRPGTool4Pers>();
 	AssignItems<CRPGKey4Pers>();
+	AssignItems<CRPGPicklock4Pers>();
+	AssignItems<CRPGEngGrenade4Pers>();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void BuildMapLinks( bool bTranslate )
@@ -838,6 +845,22 @@ void BuildMapLinks( bool bTranslate )
 				item.pModelActive = pW->pModelActive;
 				item.pModelInactive = pW->pModelInactive;
 				pW->pItem->looks.push_back(item);
+			}
+		}
+	}
+	// Panzerklein -> owner-pers reverse link + stat base (retail CPanzerklein::Import tail @0x4297e0
+	// scans RPGPers for pers->pPanzerklein == this; that needs RPGPers imported first, which our
+	// unordered_map table order doesn't guarantee -- resolve here after all imports; assign-only)
+	{
+		CDBTable<CRPGPers> *pTable = NDatabase::GetTable<CRPGPers>();
+		CDBIterator<CRPGPers> it( *pTable );
+		while ( it.MoveNext() )
+		{
+			CRPGPers *pPers = it.Get();
+			if ( IsValid( pPers->pPanzerklein ) )
+			{
+				pPers->pPanzerklein->pPers = pPers;
+				pPers->pPanzerklein->pChangeValues = pPers->pBaseValue;
 			}
 		}
 	}

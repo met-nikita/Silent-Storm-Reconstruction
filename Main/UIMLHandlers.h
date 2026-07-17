@@ -60,7 +60,7 @@ private:																					\
 	ZDATA																						\
 	ZEND int operator&( CStructureSaver &f ) { return 0; } \
 public:																						\
-	void Exec( IMLLayout *pLayout, const vector<wstring> &paramsSet )	\
+	void Exec( IML *pML, IMLLayout *pLayout, const vector<wstring> &paramsSet )	\
 	{																								\
 		SState sState = pLayout->GetState();					\
 		sState.Var = Value;														\
@@ -71,6 +71,7 @@ public:																						\
 DECALRE_SIMPLE_HANDLER( CLEFTHandler, eHAlign, SState::HORALIGN_LEFT )
 DECALRE_SIMPLE_HANDLER( CRIGHTHandler, eHAlign, SState::HORALIGN_RIGHT )
 DECALRE_SIMPLE_HANDLER( CCENTERHandler, eHAlign, SState::HORALIGN_CENTER )
+DECALRE_SIMPLE_HANDLER( CNOWRAPHandler, eHAlign, SState::HORALIGN_NOWRAP )   // retail Exec @0x323570 -- byte-identical to CCENTERHandler modulo the literal
 DECALRE_SIMPLE_HANDLER( CJUSTIFYHandler, eHAlign, SState::HORALIGN_JUSTIFY )
 DECALRE_SIMPLE_HANDLER( CWRAPLEFTHandler, eHAlign, SState::HORALIGN_WRAP_LEFT )
 DECALRE_SIMPLE_HANDLER( CWRAPRIGHTHandler, eHAlign, SState::HORALIGN_WRAP_RIGHT )
@@ -88,7 +89,7 @@ private:
 	ZEND int operator&( CStructureSaver &f ) { return 0; }
 
 public:
-	void Exec( IMLLayout *pLayout, const vector<wstring> &paramsSet )
+	void Exec( IML *pML, IMLLayout *pLayout, const vector<wstring> &paramsSet )
 	{
 		pLayout->AddCommand( CMD_BREAKLINE );
 	}
@@ -104,7 +105,7 @@ private:
 	ZEND int operator&( CStructureSaver &f ) { return 0; }
 
 public:
-	void Exec( IMLLayout *pLayout, const vector<wstring> &paramsSet )
+	void Exec( IML *pML, IMLLayout *pLayout, const vector<wstring> &paramsSet )
 	{
 		if ( paramsSet.size() != 3 )
 			return;
@@ -125,7 +126,7 @@ private:
 	ZEND int operator&( CStructureSaver &f ) { return 0; }
 
 public:
-	void Exec( IMLLayout *pLayout, const vector<wstring> &paramsSet )
+	void Exec( IML *pML, IMLLayout *pLayout, const vector<wstring> &paramsSet )
 	{
 		SState sState = pLayout->GetState();
 		if ( paramsSet.size() > 1 )
@@ -166,11 +167,66 @@ public:
 					sState.nOutlineBorder = _wtol( wsParam.c_str() );
 				else if ( wsID.compare( L"outlinecolor" ) == 0  )
 					sState.sOutlineColor = StringToColor( wsParam );
+				else if ( wsID.compare( L"forcefontsize" ) == 0 )
+					sState.bForceFontSize = true;   // retail @0x324710 tail: presence of the attribute sets the flag (value ignored)
 
 				nTemp += 3;
 			}
 		}
 		pLayout->SetState( sState );
+	}
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// CMINFONTSIZEHandler -- retail Exec @0x323e40 (saveload id 0xB3714190): <minfontsize size = N>.
+// Sets the SState floor the font resolver clamps up to (GetFontFormatInfo @0x721250). The
+// outline-reset prologue is the same two stores as CFONTHandler's (retail cloned the font handler,
+// VA 0x723ed6/0x723eda); only the "size" attribute is recognized, plain _wtol (no px/pt suffix).
+////////////////////////////////////////////////////////////////////////////////////////////////////
+class CMINFONTSIZEHandler: public IMLHandler
+{
+	OBJECT_BASIC_METHODS( CMINFONTSIZEHandler );
+private:
+	ZDATA
+	ZEND int operator&( CStructureSaver &f ) { return 0; }
+
+public:
+	void Exec( IML *pML, IMLLayout *pLayout, const vector<wstring> &paramsSet )
+	{
+		SState sState = pLayout->GetState();
+		if ( paramsSet.size() > 1 )
+		{
+			sState.sOutlineColor = sState.sColor;
+			sState.nOutlineBorder = 0;
+
+			int nTemp = 1;
+			while ( nTemp + 2 < (int)paramsSet.size() )
+			{
+				if ( paramsSet[nTemp + 1].compare( L"=" ) != 0 )
+					break;
+				if ( paramsSet[nTemp].compare( L"size" ) == 0 )
+					sState.nMinFontSize = _wtol( paramsSet[nTemp + 2].c_str() );   // retail VA 0x723fd9
+				nTemp += 3;
+			}
+		}
+		pLayout->SetState( sState );
+	}
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// CTABHandler -- retail Exec @0x3246f0 (saveload id 0xB3716161): <tab> appends a fresh
+// CMLTabObject (factory @0x320ba0) to the layout; the object sizes itself per reflow pass
+// (DynamicGenerate) to the gap up to the next multiple-of-4 ave-char tab stop.
+////////////////////////////////////////////////////////////////////////////////////////////////////
+class CTABHandler: public IMLHandler
+{
+	OBJECT_BASIC_METHODS( CTABHandler );
+private:
+	ZDATA
+	ZEND int operator&( CStructureSaver &f ) { return 0; }
+
+public:
+	void Exec( IML *pML, IMLLayout *pLayout, const vector<wstring> &paramsSet )
+	{
+		pLayout->AddObject( CreateIMLTabObject() );
 	}
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -184,7 +240,7 @@ private:
 	ZEND int operator&( CStructureSaver &f ) { return 0; }
 
 public:
-	void Exec( IMLLayout *pLayout, const vector<wstring> &paramsSet )
+	void Exec( IML *pML, IMLLayout *pLayout, const vector<wstring> &paramsSet )
 	{
 		int nWidth = -1, nHeight = -1;
 		int nBorder = 0;

@@ -74,6 +74,8 @@ public:
 	IPart( CPtrFuncBase<CObjectInfo> *pData, CPerMaterialCombiner *_pCombiner, bool _bIsSolid );
 	~IPart();
 	void SetCombiner( CPerMaterialCombiner *_pCombiner, bool bForceUpdate, bool bAnimated );
+	// retail @0x105df0: refresh, try one Recalc (inside CPtrFuncBase::GetValue) when the value is
+	// null/invalid, report whether the generated mesh exists. No null-node guards (see RefreshObjectInfo).
 	bool HasLoadedObjectInfo() { pObjInfo.Refresh(); return IsValid( pObjInfo->GetValue() ); }
 	void RefreshObjectInfo();
 	CObjectInfo* GetObjectInfo() { return pObjInfo->GetValue(); }

@@ -24,9 +24,8 @@ namespace NUI
 {
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CShowHintView -- the inner widget window. On EVENT_TEMPLATELOAD it wraps the template's "cancel" close
-// button + the "view" scrollable text (CScrollWindow<CMLText>) and pushes the hint title+body into it; on
-// EVENT_TEMPLATELOADCOMPLETE it binds the "scroll" bar. (CMLText::SetText defaults bProcessTAGs=true -- the
-// retail CShowHintView's SetText(text,true), so colour/format TAGs in the hint string are honoured.)
+// button + the "view" scrollable text (CScrollWindow<CText>) and pushes the hint body (prefixed with the
+// "Clue&Hint Format" markup string 0x4F22) into it; on EVENT_TEMPLATELOADCOMPLETE it binds the "scroll" bar.
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CShowHintView: public CWindow
 {
@@ -35,8 +34,8 @@ private:
 	ZDATA_(CWindow)
 	CDBPtr<NDb::CUIHint> pHint;
 	////
-	CObj<CMLText> pDescription;
-	CObj<CScrollWindow<CMLText> > pDescriptionView;
+	CObj<CText> pDescription;
+	CObj<CScrollWindow<CText> > pDescriptionView;
 	////
 	CObj<CFlashButton> pCloseButton;
 	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CWindow*)this); f.Add(2,&pHint); f.Add(3,&pDescription); f.Add(4,&pDescriptionView); f.Add(5,&pCloseButton); return 0; }
@@ -56,15 +55,22 @@ bool CShowHintView::ProcessMessage( const SEvent &sEvent )
 		{
 			pCloseButton = new CFlashButton( sEvent.pLoader->GetControl( "cancel" ) );
 
-			pDescriptionView = new CScrollWindow<CMLText>( sEvent.pLoader->GetControl( "view" ) );
+			pDescriptionView = new CScrollWindow<CText>( sEvent.pLoader->GetControl( "view" ) );
 			pDescription = pDescriptionView->GetClientWindow();
 
-			// retail @0x23acc0: the hint text is the localized title concatenated with the body
-			// (GetDBString(pHint->pTitle) + GetDBString(pHint->pString)).
+			// retail @0x23acc0: text = DB string 0x4F22 ("Clue&Hint Format" markup prefix,
+			// <font face=Courier size=16pt><color=0xFF5A5959>) + body only. pTitle is NOT rendered here --
+			// the body string carries its own title line.
 			if ( IsValid( pHint ) )
-				pDescription->SetText( GetDBString( pHint->pTitle ) + GetDBString( pHint->pString ) );
+				pDescription->SetText( GetDBString( 0x4F22 ) + GetDBString( pHint->pString ), true );
 			else
 				pDescription->SetText( L"<color=red>[ERROR]Hint not set" );
+
+			// retail @0x23acc0: fit the text to its content height, keeping the template width
+			SPoint sRealSize;
+			pDescription->GetRealSize( &sRealSize );
+			sRealSize.x = pDescription->GetSize().x;
+			pDescription->SetSize( sRealSize );
 			break;
 		}
 	case EVENT_TEMPLATELOADCOMPLETE:

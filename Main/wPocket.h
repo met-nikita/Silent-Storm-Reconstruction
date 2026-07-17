@@ -18,9 +18,11 @@ class CObjectServerBase;
 // only MASTER entries (units) additionally hold the M-ref (CMObj) -- plain world objects enter
 // non-master (PlaceUnitInPocket bMaster=true @0x00387fb0, PlaceObjectInPocket false @0x00387fd0).
 //
-// This is the standalone release class (compiles + registers). Rewiring CWorld to USE it -- superseding
-// the dev unit-only pocket and enabling object pocketing -- changes world serialization (chunk 44) and
-// is a follow-up that must be runtime save/load-validated.
+// WIRED UP (wave 3): CWorld now owns this as `CPtr<CPocket> pPocket` (retail +0x188), serialized at
+// world save tag 42 -- NOT 44 as an earlier note here guessed (44 is CObj<IHeightLayers>; the retail
+// operator& @0x378730 emits CallObjectSerialize<CPtr<NWorld::CPocket>> at tag 0x2a). The flat dev
+// `pocket`/`objectPocket` vectors are gone and every consumer goes through CWorld::GetPocket()
+// (@0x376f60, IWorld vtbl+0xd8), exactly as the release does. Pocket state now survives save/load.
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CPocket: public CObjectBase
 {

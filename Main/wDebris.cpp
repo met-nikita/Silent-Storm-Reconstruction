@@ -58,11 +58,13 @@ void CDFrozenItem::GetVisiblePos( vector<CVec3> *pRes ) const
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-int CDFrozenItem::ProcessAttack( int nUserID, NRPG::CAttackPortion *pAttack, NDb::CRPGArmor *pArmor )
+// retail @0x34a4b0: vDir unread, single-shot (nAccumulated = 0).
+int CDFrozenItem::ProcessAttack( NWorld::IWorld *pWorld, int nUserID, NRPG::CAttackPortion *pAttack,
+	const CVec3 &vDir, NDb::CRPGArmor *pArmor )
 {
 	if ( IsValid( pArmor ) && nVP > 0 )
 	{
-		int nDmg = pAttack->CalcStructDmg(pArmor);
+		int nDmg = pAttack->CalcStructDmg( pWorld, pArmor, 0 );
 		nVP = Max( 0, nVP - nDmg );
 		if ( nVP == 0 )
 			pTrash->itemsToRemove.push_back( this );
@@ -224,9 +226,9 @@ CDFrozenItem* CDebrisController::FindFrozenItem( int nDbID )
 	return 0;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-const int N_VISIBLE_FLOOR = -5;
 void CDebrisController::AddDebris( const SItemRenderInfo &_model, NAI::IAIMap *pAIMap, const CVec3 &ptCenter, const CQuat &q,
-	const CVec3 &velocity, CFuncBase<STime> *pTime, NRPG::IInventoryItem *_pItem, CObjectBase *pVisibilityParent )
+	const CVec3 &velocity, CFuncBase<STime> *pTime, bool bFallFromBody, CObjectBase *pVisibilityParent,
+	NRPG::IInventoryItem *pItem, int nFloor )
 {
 	if ( _model.pModel )
 	{
@@ -237,33 +239,34 @@ void CDebrisController::AddDebris( const SItemRenderInfo &_model, NAI::IAIMap *p
 	vector<SMassSphere> spheres;
 	CVec3 massCenter;
 	NAI::GetSpheres( _model.pModel, &spheres, &massCenter );
-	NAnimation::CASphereSet *pSphere = new NAnimation::CASphereSet( N_VISIBLE_FLOOR );
+	CVec3 boundCenter( 0, 0, 0 ), boundSize( 0.5f, 0.5f, 0.5f );
+	if ( _model.pModel )
+	{
+		boundCenter = _model.pModel->pGeometry->boundCenter;
+		boundSize = _model.pModel->pGeometry->boundSize;
+	}
+	// retail @0x74aef9: the sphere set itself starts on floor -2 (push -2), no ignore object;
+	// Step reassigns nFloor from the hit surfaces as it tumbles
+	NAnimation::CASphereSet *pSphere = new NAnimation::CASphereSet( spheres, boundCenter, boundSize, 0, -2 );
 	pSphere->pMap = pAIMap;
 	pSphere->pTime = pTime;
-	pSphere->InitSpheres( spheres );
-	if ( _model.pModel )
-		pSphere->InitBound( _model.pModel->pGeometry->boundCenter, _model.pModel->pGeometry->boundSize );
-	else
-		pSphere->InitBound( CVec3(0,0,0), CVec3(0.5f,0.5f,0.5f) );
-	pSphere->Init( pTime->GetValue(), ptCenter, q, velocity, false );
+	// retail @0x74af85: phase = PH_THROW_OUT + bFallFromBody; pItem drives the phys-case RTTI
+	pSphere->Init( pTime->GetValue(), ptCenter, q, velocity, false,
+		NAnimation::EPhysCase( NAnimation::PH_THROW_OUT + bFallFromBody ), pItem );
 	NAnimation::CSkeletonAnimator *pAnimator = new NAnimation::CSkeletonAnimator( 0 );
 	pAnimator->pTime = pTime;
 	pAnimator->AddAnimator( pTime->GetValue(), pSphere );
 
-	// retail AddDebris @0x34ade0 selects the render sync by the CObjectBase* visibility-parent, SEPARATE
-	// from the item: dropped inventory items (death loot) AND the item-less uniform cap bind to the
-	// fog-of-war-gated GetVisibleShowList(); explosion/grenade debris (no item, no parent) stays on the
-	// always-on list. The parent is stored on the CDItem so the gate SURVIVES physics-settle: retail
-	// Segment @0x34b4b0 reads it back (IVisible vtbl+8) and forwards `parent != 0` to AddFrozenItem
-	// @0x34b100 -- without it a fog-gated cap became unconditionally visible the moment it settled.
-	CDItem *pI = new CDItem( ( _pItem || pVisibilityParent ) ? GetVisibleShowList() : GetShowList(), _model, pAnimator, N_VISIBLE_FLOOR, _pItem, pVisibilityParent ); // CRAP nFloor
-	// retail AddDebris @0x74b04a: the fog-gated flying item is ALSO published into
-	// visibleDynamicItems so CUnitServer::UpdateVisible's dynamic-items loop (@0x7c5341, via
-	// GetVisibleDynamicItems) can LOS-reveal it in flight. Retail's publish gate is
-	// `pVisibilityParent != 0` alone (@0x74b04a `test ebp,ebp`) because retail DropItems @0x3502c0
-	// threads the parent for EVERY drop; dev callers still launch parent-less item drops, so the
-	// compound (pItem || parent) gate reproduces the same routing until every caller threads it.
-	if ( _pItem || pVisibilityParent )
+	// retail AddDebris @0x34ade0 selects the render sync by the CObjectBase* visibility-parent alone
+	// (@0x74b00f `test ebp,ebp`), SEPARATE from the item: every drop off a body threads the unit as
+	// parent (fog-gated list); knife/blast debris (no parent) stays on the always-on list. The parent
+	// is stored on the CDItem so the gate SURVIVES physics-settle: Segment @0x34b4b0 reads it back
+	// and forwards `parent != 0` to AddFrozenItem @0x34b100. The CDItem floor is the caller's nFloor.
+	CDItem *pI = new CDItem( pVisibilityParent ? GetVisibleShowList() : GetShowList(), _model, pAnimator, nFloor, pItem, pVisibilityParent );
+	// retail @0x74b04a: a fog-gated flying item is ALSO published into visibleDynamicItems so
+	// CUnitServer::UpdateVisible's dynamic-items loop (@0x7c5341) can LOS-reveal it in flight;
+	// the publish gate is `pVisibilityParent != 0` alone (`test ebp,ebp`).
+	if ( pVisibilityParent )
 		visibleDynamicItems.push_back( pI );
 	Add( pI, pSphere );
 }
@@ -282,10 +285,10 @@ void CDebrisController::ActivateDebris( const SSphere &sphere, NAI::IAIMap *pAIM
 		float fDist = fabs( vel );
 		Normalize( &vel ); vel += CVec3(0,0,1);
 		vel *= Max( 0.0f, 1 - sqr( fDist / sphere.fRadius ) );
-		// retail ActivateDebris @0x34a640 passes the frozen item's own CObjectBase as the
-		// visibility parent (disasm: the vbase-adjusted item pointer rides in the AddDebris call),
-		// so a blast-tossed item stays fog-gated + published as a dynamic vision candidate.
-		AddDebris( p->GetModel(), pAIMap, pos, QNULL, vel, pTime, p->GetInvItem(), p );
+		// retail ActivateDebris @0x34a640 tail (@0x74a7c6): bFallFromBody=false, the frozen item's
+		// own CObjectBase rides as the visibility parent (fog gate + dynamic vision candidate),
+		// and the relaunched debris keeps the item's own floor (item->GetFloor() pushed as nFloor).
+		AddDebris( p->GetModel(), pAIMap, pos, QNULL, vel, pTime, false, p, p->GetInvItem(), p->GetFloor() );
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -310,7 +313,8 @@ void CDebrisController::ActivateDebris( CDFrozenItem *pItem, NAI::IAIMap *pAIMap
 	}
 	CQuat q;
 	q.FromEulerMatrix( pItem->GetMatrix() );
-	AddDebris( pItem->GetModel(), pAIMap, pItem->GetPos(), q, VNULL3, pTime, pItem->GetInvItem(), pItem );
+	// retail @0x74a34c: bFallFromBody=false, parent=the item itself, nFloor=item->GetFloor()
+	AddDebris( pItem->GetModel(), pAIMap, pItem->GetPos(), q, VNULL3, pTime, false, pItem, pItem->GetInvItem(), pItem->GetFloor() );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CDFrozenItem* CDebrisController::AddFrozenItem( NAI::IAIMap *pMap, const SHMatrix &m, NRPG::IInventoryItem *pInvItem, const SItemRenderInfo &_model, int nFloor, bool bTemporaryVisible, bool bVisibleGated )
@@ -334,7 +338,30 @@ CDFrozenItem* CDebrisController::AddFrozenItem( NAI::IAIMap *pMap, const SHMatri
 			pMap->GetStabilityTrackers()->AddDebris( pWorldItem );
 	}
 	showFrozenItems.push_back( pWorldItem );
+	// retail @0x34b100 tail: a CLUE item's frozen form is additionally tracked on clueItems
+	// (save tag 8) -- gated by the RTDynamicCast<NRPG::IClueItem> on the inventory item.
+	if ( CDynamicCast<NRPG::IClueItem>( pInvItem ) )
+		clueItems.push_back( pWorldItem );
 	return pWorldItem;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail CDebrisController::GetClueObjects @0x34a870 (CWorld::GetClueItems @0x361520 forwards):
+// walk clueItems -- ERASE dead entries in place (null/zombie), append the live ones to *pRes.
+void CDebrisController::GetClueObjects( list<CPtr<CObjectBase> > *pRes )
+{
+	if ( !pRes )
+		return;
+	for ( list<CPtr<CDFrozenItem> >::iterator i = clueItems.begin(); i != clueItems.end(); )
+	{
+		CDFrozenItem *pItem = i->GetPtr();
+		if ( !IsValid( pItem ) )
+			i = clueItems.erase( i );   // prune the dead clue node (retail unlink + release)
+		else
+		{
+			pRes->push_back( CPtr<CObjectBase>( pItem ) );
+			++i;
+		}
+	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // retail public overload @0x34b340: (pMap, pos, rot, pInvItem, bool bTemporaryVisible, int nFloor);

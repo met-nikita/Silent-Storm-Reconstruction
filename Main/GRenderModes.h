@@ -11,12 +11,16 @@ namespace NGfx
 namespace NGScene
 {
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// ON THE WIRE (CGameView tag 25, CGScene tag 11). Values MUST match the retail PDB enum:
+// SHOW_PL_OVERDRAW=4, LIGHTMAPPED=5, BEST=6 -- dev previously lacked slot 4, so a retail save's
+// renderMode=6 (SRM_BEST) deserialized as SRM_LAST.
 enum ESceneRenderMode
 {
 	SRM_FASTEST,
 	SRM_SHOWOCCLUDERS,
 	SRM_SHOWLIGHTMAP,
 	SRM_SHOWSKYMAP,
+	SRM_SHOW_PL_OVERDRAW,
 	SRM_LIGHTMAPPED,
 	SRM_BEST,
 	SRM_LAST

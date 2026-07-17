@@ -31,6 +31,7 @@ class CAIAssassinReaction: public CAIReaction
 	OBJECT_BASIC_METHODS( CAIAssassinReaction );
 	CPtr<IAIUnit> pEnemy;       // +0x10  the tracked victim (re-picked from SAIUnitState when it dies / can't fight)
 	bool          bJustStarted; // +0x14  first pass after construction (suppresses the broke-out-of-hiding give-up)
+	int operator&( CStructureSaver &f ) { f.Add( 2, (CAIReaction*)this ); f.Add( 3, &pEnemy ); f.Add( 4, &bJustStarted ); return 0; }   // retail @0x1b860
 public:
 	CAIAssassinReaction(): bJustStarted( true ) {}
 	CAIAssassinReaction( IAIUnit *pUnit );   // @0x1b3a0 (pEnemy null, bJustStarted true)

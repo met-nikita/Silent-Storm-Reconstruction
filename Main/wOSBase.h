@@ -40,12 +40,16 @@ struct SObjectPlace
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CWorld;
+enum ETimeOfDay : int;   // defined in wMain.h (retail NDb::ETimeOfDay; TOD_ANYTIME=0)
 class CObjectServerBase: public IObject, public NRPG::IAttackable, public IVisObj
 {
 protected:
 	ZDATA
 	CObj<NRPG::IObject> pRPG;
 	CPtr<NDb::CObject> pDbObject;
+	// dev-internal runtime cache of pRPG's stage (refreshed at the top of every Visit); retail has NO such
+	// member (PDB: 12 members, size 124) and reads the stage through pRPG each time (GetDestroyStage @0x383c10),
+	// so it is OFF the wire -- retail operator& @0x375520 skips tag 4 (W5).
 	int nDestroyStage;
 	bool bLightMap;
 	CSyncSrcBind<IVisObj> bindGlobal;
@@ -60,8 +64,13 @@ protected:
 	// path A; serialized as chunk 13 in operator& below, matching retail operator& @0x375520, so an object
 	// saved mid-arm restores its pending explosion across load. CDBPtr default-ctors null.
 	CDBPtr<NDb::CRPGGrenade> pAttachedGrenade;
+	// retail @offset 104 (tag 14, NDb::ETimeOfDay): the light's time-of-day activity window, seeded from
+	// NDb::CFinalElement::eTimeOfDay by the map builder (retail ctor @0x3862e0); gates AddLights @0x383d50.
+	ETimeOfDay eLightActivity;
 public:
-	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&pRPG); f.Add(3,&pDbObject); f.Add(4,&nDestroyStage); f.Add(5,&bLightMap); f.Add(6,&bindGlobal); f.Add(7,&position); f.Add(8,&pWorld); f.Add(9,&tStageChange); f.Add(10,&tLastSound); f.Add(11,&vCreateFlags); f.Add(12,&bBorder); f.Add(13,&pAttachedGrenade); return 0; }
+	// retail operator& @0x375520: {2,3,5..13,14} -- tag 4 is a permanent gap (no nDestroyStage on the wire),
+	// tag 14 = eLightActivity (4-byte DataChunk).
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&pRPG); f.Add(3,&pDbObject); f.Add(5,&bLightMap); f.Add(6,&bindGlobal); f.Add(7,&position); f.Add(8,&pWorld); f.Add(9,&tStageChange); f.Add(10,&tLastSound); f.Add(11,&vCreateFlags); f.Add(12,&bBorder); f.Add(13,&pAttachedGrenade); f.Add(14,&eLightActivity); return 0; }
 protected:
 	void Kill( const CVec3 &ptDir );
 	bool CreateTransform( SFBTransform *pRes );
@@ -79,9 +88,11 @@ protected:
 		NDb::CAIGeometry *pGeometry, const SFBTransform &rv, NDb::CRPGArmor *pArmor, int nFloor );
 	int GetDecalID();
 public:
-	CObjectServerBase() {}
+	// old dev saves carry neither tag 4 nor tag 14 -- default both caches to a defined state (0 = TOD_ANYTIME)
+	CObjectServerBase(): nDestroyStage( 0 ), eLightActivity( ETimeOfDay(0) ) {}
+	// retail ctor @0x3862e0: eTimeOfDay (NDb::ETimeOfDay) sits between vCreateFlags and bBorder
 	CObjectServerBase( CWorld *pWorld, const SObjectPlace &pos, bool bLightMap,
-		NDb::CObject *pO, NRPG::IObject *pRPG, const vector<int> &vCreateFlags, bool _bBorder = false );
+		NDb::CObject *pO, NRPG::IObject *pRPG, const vector<int> &vCreateFlags, ETimeOfDay eTimeOfDay, bool _bBorder = false );
 	
 	bool CheckStability();
 	// retail @0x383fe0 / @0x384060 -- see wOSBase.cpp
@@ -89,7 +100,8 @@ public:
 	void RegisterForStability( NAI::IStabilityTrackers *pTrackers );
 
 	// NRPG::IAttackable
-	virtual int ProcessAttack( int nUserID, NRPG::CAttackPortion *pAttack, NDb::CRPGArmor *pArmor );
+	virtual int ProcessAttack( NWorld::IWorld *_pWorld, int nUserID, NRPG::CAttackPortion *pAttack,
+		const CVec3 &vDir, NDb::CRPGArmor *pArmor );
 	// IObject
 	virtual bool IsTargetable() const;
 	// IVisObj
@@ -146,8 +158,9 @@ protected:
 	void PrecacheAIGeom( IAIVisitor *p );
 public:
 	CAnimObjectServerBase() {}
+	// retail ctor @0x386510: eTimeOfDay appended after vCreateFlags
 	CAnimObjectServerBase( CWorld *pWorld, const SObjectPlace &pos, bool bLightMap,
-		NDb::CObject *pO, NRPG::IObject *pRPG, CFuncBase<STime> *_pTime, const vector<int> &vCreateFlags );
+		NDb::CObject *pO, NRPG::IObject *pRPG, CFuncBase<STime> *_pTime, const vector<int> &vCreateFlags, ETimeOfDay eTimeOfDay );
 
 	// IGetApproaches
 	virtual void GetApproaches( vector<NAI::SPathPlace> *pRes, NAI::IPathNetwork *pNet ) const;

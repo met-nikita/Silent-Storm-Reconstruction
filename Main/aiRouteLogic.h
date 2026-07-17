@@ -113,8 +113,8 @@ public:
 // into every command (CTaskCommand::SetUnitServer).
 CAIRouteLogic* CreateAIRouteLogic( IAIUnit *pUnit, const vector< CPtr<CTaskCommand> > &cmds, bool bCircled );
 // CreateAIStrafeToPositionLogic @0x9b8d0 -- strafe to `pos`: gated on a path to it at the wish pose, then
-// [change wish pose, change end pose, goto]. Not circled. (See the .cpp for the two documented dev<->release
-// divergences: the strafe prefix + the ChangeWishPose/ChangePose split.)
+// [change WISH pose, change end pose, goto(strafe)]. Not circled. (The strafe prefix and the retail
+// ChangeWishPose/ChangePose split are both in the family now -- see aiTaskCommand.h.)
 IAILogic* CreateAIStrafeToPositionLogic( IAIUnit *pUnit, const SPosition &pos, EPose wishPose, EPose endPose );
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // The composite route-logic factories (oracle: decomp/src/s2_routelogic.h ~880-1148). Each builds a
@@ -124,11 +124,11 @@ IAILogic* CreateAIStrafeToPositionLogic( IAIUnit *pUnit, const SPosition &pos, E
 // CreateAILookToPositionLogic @0x9a920 -- face `place`, then wait 3s. Not circled.
 IAILogic* CreateAILookToPositionLogic( IAIUnit *pUnit, const SPathPlace &place );
 // CreateAIMoveToPositionLogic @0x9aad0 -- gated on a path to `place` at movePose; queues [look at it,
-// wish-pose for the move, goto, end-pose]. Not circled. Inherits the strafe factory's two divergences
-// (ChangeWishPose~=ChangePose; the goto's strafe prefix elided -- absent GetAttackObject).
+// WISH-pose for the move (retail CreateRCChangeWishPose), goto (face-and-walk), end-pose]. Not circled.
 IAILogic* CreateAIMoveToPositionLogic( IAIUnit *pUnit, const SPathPlace &place, EPose movePose, EPose endPose, bool bCanFindNotExactPath );
-// CreateAIAlarmLogic @0x9b3d0 -- a scared, supported unit RUNs to a place beside its nearest ally, then the
-// CTaskCommandAlarm step raises the garrison. Gated on a runnable path to that place; else 0.
+// CreateAIAlarmLogic @0x9b3d0 -- a scared, supported unit RUNs to a place beside its nearest ally, waits a
+// beat (retail Wait(1)), then the CTaskCommandAlarm step raises the garrison. Gated on a runnable path to
+// that place; else 0.
 IAILogic* CreateAIAlarmLogic( IAIUnit *pUnit, IAIUnit *pEnemy );
 // CreateAILookRoundLogic @0x9ad50 -- change to `pose`, then a randomized look-around (nCount=6). Circled.
 IAILogic* CreateAILookRoundLogic( IAIUnit *pUnit, EPose pose );

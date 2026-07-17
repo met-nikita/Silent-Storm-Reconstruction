@@ -167,11 +167,17 @@ class CDynamicGeometryPart : public CGenericDynamicPart
 	OBJECT_NOCOPY_METHODS( CDynamicGeometryPart );
 	ZDATA_(CGenericDynamicPart)
 	CDGPtr<CFuncBase<SBound> > pBound;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CGenericDynamicPart*)this); f.Add(2,&pBound); return 0; }
+	// retail CDynamicGeometryPart::operator& @0x16b200 tag 3: the part's placement node (a CDGPtr at
+	// runtime -- Update @0x160250 Refresh()es it; the serializer writes its inner CObj). For a head
+	// part this is CreateLSHead's CMSRNode chain under the unit's head-bone filter.
+	CDGPtr<CFuncBase<SFBTransform> > pTransform;
+	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CGenericDynamicPart*)this); f.Add(2,&pBound); f.Add(3,&pTransform); return 0; }
 public:
 	CDynamicGeometryPart() {}
-	CDynamicGeometryPart( CPtrFuncBase<CObjectInfo> *pData, CFuncBase<SBound> *pAnim, IMaterial *_pMaterial, const SFullGroupInfo &_gInfo );
-	virtual ETransformType GetTransformType() const { return TT_NONE; }
+	CDynamicGeometryPart( CPtrFuncBase<CObjectInfo> *pData, CFuncBase<SFBTransform> *pPos, CFuncBase<SBound> *pAnim, IMaterial *_pMaterial, const SFullGroupInfo &_gInfo );
+	// retail @0x165d90: `return pTransform.pNode != 0` -- 0 (TT_NONE) or 1 (TT_SIMPLE, the matrix type).
+	virtual ETransformType GetTransformType() const { return pTransform.Get() ? TT_SIMPLE : TT_NONE; }
+	virtual const SFBTransform& GetSimplePos() { return pTransform->GetValue(); }
 	bool Update( CVolumeNode *pVolume, SStaticTrackers *pTrackers );
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -259,6 +265,11 @@ private:
 	SRenderGeometryInfo geometryInfo;
 	ZDATA
 	CDGPtr<CPerMaterialCombiner> pCombiner;
+	// retail CCombinedPart::operator& @0x168a70 serializes nFloorMask at tag 3 (int) right after pCombiner.
+	// Byte-walking real game.sav records confirms the save carries it (tags 2:4 3:4 4:32 5:4 6:32 7 8 9:4 10:1),
+	// and removing it reintroduced the PrecacheMaterials null-deref (GSceneInternal.cpp:1498) by shifting
+	// materials off its tag. This layout is verified-correct against the actual save bytes.
+	int nFloorMask;
 	CPartFlags lastNewFlags;
 	int nIgnoreMark;
 	CPartFlags ignoredParts;
@@ -266,11 +277,11 @@ private:
 	vector<CPtr<IMaterial> > materials;
 	EType partType;
 	bool bWasTnL;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&pCombiner); f.Add(3,&lastNewFlags); f.Add(4,&nIgnoreMark); f.Add(5,&ignoredParts); f.Add(6,&parts); f.Add(7,&materials); f.Add(8,&partType); f.Add(9,&bWasTnL); return 0; }
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&pCombiner); f.Add(3,&nFloorMask); f.Add(4,&lastNewFlags); f.Add(5,&nIgnoreMark); f.Add(6,&ignoredParts); f.Add(7,&parts); f.Add(8,&materials); f.Add(9,&partType); f.Add(10,&bWasTnL); return 0; }
 	void InitGeometry();
 public:
 
-	CCombinedPart() : nIgnoreMark(0) {}
+	CCombinedPart() : nFloorMask(0), nIgnoreMark(0) {}
 	CCombinedPart( SStaticTrackers *pTrackers, EType t );
 	CPerMaterialCombiner* GetCombiner() const { return pCombiner; }
 	IVBCombiner* GetVBCombiner() { return GetGeometryInfo()->pVertices; }
@@ -403,17 +414,36 @@ class CFakeParticleLMTexture : public CPtrFuncBase<NGfx::CTexture>
 {
 	OBJECT_NOCOPY_METHODS(CFakeParticleLMTexture);
 	ZDATA
-	CVec3 vAmbient;
+	// retail (@0x165010): the ambient is now a DG object EDGE, not a stored CVec3 -- it tracks the
+	// scene's CAmbientMean node so a save carries the reference and the texel refreshes through it.
+	CDGPtr<CFuncBase<CVec3> > pAmbient;
 	CDGPtr<CFuncBase<CVec3> > pColor;
 	DWORD dwNormalColor, dwParticleColor;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&vAmbient); f.Add(3,&pColor); f.Add(4,&dwNormalColor); f.Add(5,&dwParticleColor); return 0; }
-	bool NeedUpdate() { return pColor.Refresh(); }
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&pAmbient); f.Add(3,&pColor); f.Add(4,&dwNormalColor); f.Add(5,&dwParticleColor); return 0; }
+	// @0x1645f0: refresh pColor then pAmbient unconditionally, report either changed
+	bool NeedUpdate() { bool bColor = pColor.Refresh(); bool bAmbient = pAmbient.Refresh(); return bColor || bAmbient; }
 	void Recalc();
 public:
-	void SetAmbient( const CVec3 &_v ) { vAmbient = _v; Updated(); }
+	void SetAmbient( CFuncBase<CVec3> *_p ) { pAmbient = _p; }
 	void SetColor( CFuncBase<CVec3> *_pColor ) { pColor = _pColor; }
 	DWORD GetNormalColor() const { return dwNormalColor; }
 	DWORD GetParticleColor() const { return dwParticleColor; }
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail-new DG node (@0x163c30/@0x163c60/@0x1651c0): the arithmetic mean of the scene top+bottom
+// ambient colour nodes ((top+bottom)*0.5). Replaces the mean CGScene::SetAmbient used to inline.
+class CAmbientMean : public CFuncBase<CVec3>
+{
+	OBJECT_BASIC_METHODS(CAmbientMean);
+	ZDATA
+	CDGPtr<CFuncBase<CVec3> > pTopAmbient, pBottomAmbient;
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&pTopAmbient); f.Add(3,&pBottomAmbient); return 0; }
+protected:
+	bool NeedUpdate();
+	void Recalc();
+public:
+	CAmbientMean() {}
+	CAmbientMean( CFuncBase<CVec3> *_pTop, CFuncBase<CVec3> *_pBottom ): pTopAmbient(_pTop), pBottomAmbient(_pBottom) {}
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CDecalsManager;
@@ -449,7 +479,7 @@ OBJECT_BASIC_METHODS(CGScene);
 	int nCurrentIgnoreMark;
 	int nIgnoreListWasCalced;
 	SGroupSelect holdMask;
-	CObj<CCVec3> pAmbient;
+	CObj<CAmbientMean> pAmbient;   // retail: mean of pTopAmbient/pBottomAmbient (was CObj<CCVec3>)
 	CObj<CLightmapTracker> pLMTracker;
 	CLightState currentLightState;
 	vector<int> freeLightGroups;
@@ -465,8 +495,9 @@ OBJECT_BASIC_METHODS(CGScene);
 	CObj<CCVec3> pTopAmbient, pBottomAmbient;
 	// release save-format tags 33/34: animated top-ambient DG node + lighting-options bitmask.
 	// pTopAmbientAnimator is the release-new animated-ambient feature; this predecessor render
-	// never creates it (stays a null CObj -> serializes as a null ref). Save-format members only.
+	// never creates it (stays a null CObj -> serializes as a null ref).
 	CObj<CAmbientAnimator> pTopAmbientAnimator;
+	// bit 1 = scene receives no depth shadows (fast interface views), bit 2 = no CL updates
 	int nLightingOptions = 0;
 	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&trackers); f.Add(3,&pVolume); f.Add(4,&dynamicFrags); f.Add(5,&animatedParts); f.Add(6,&movingParts); f.Add(7,&lights); f.Add(8,&lines); f.Add(9,&selections); f.Add(10,&particles); f.Add(11,&renderMode); f.Add(12,&pCamera); f.Add(13,&pIgnoreStaticTrack); f.Add(14,&mHoldTransform); f.Add(15,&nCurrentIgnoreMark); f.Add(16,&nIgnoreListWasCalced); f.Add(17,&holdMask); f.Add(18,&pAmbient); f.Add(19,&pLMTracker); f.Add(20,&currentLightState); f.Add(21,&freeLightGroups); f.Add(22,&lightGroups); f.Add(23,&dynamicLightCache); f.Add(24,&pTransparentMaterial); f.Add(25,&pFakeParticleLM); f.Add(26,&bLightStateCalced); f.Add(27,&nFrameCounter); f.Add(28,&postprocessors); f.Add(29,&toBeLoaded); f.Add(30,&pDecalsManager); f.Add(31,&pTopAmbient); f.Add(32,&pBottomAmbient); f.Add(33,&pTopAmbientAnimator); f.Add(34,&nLightingOptions); return 0; }
 	int nSlowVolumeWalk;
@@ -559,7 +590,7 @@ public:
 	virtual CObjectBase* CreateGeometry( CPtrFuncBase<CObjectInfo> *pInfo, IMaterial *pMat, 
 		CFuncBase<vector<SHMatrix> > *pPlacement, CFuncBase<vector<NGfx::SCompactTransformer> > *_pMMXAnim, 
 		const SFullGroupInfo &_ginfo );
-	virtual CObjectBase* CreateDynamicGeometry( CPtrFuncBase<CObjectInfo> *pInfo, IMaterial *pMat, 
+	virtual CObjectBase* CreateDynamicGeometry( CPtrFuncBase<CObjectInfo> *pInfo, CFuncBase<SFBTransform> *pPlacement, IMaterial *pMat,
 		CFuncBase<SBound> *pBound, const SFullGroupInfo &_ginfo );
 	//
 	virtual CObjectBase* CreateParticles( CPtrFuncBase<CParticleEffect> *pInfo,
@@ -583,6 +614,8 @@ public:
 	void FreeLightGroup( int n ) { lightGroups[n] = 0; freeLightGroups.push_back( n ); }
 	virtual SGroupSelect GetLastMask() { return lastMask; }
 	virtual void PrecacheMaterials();
+	virtual void SetLightingOptions( int nOptions ) { nLightingOptions = nOptions; }   // retail @0x1673a0
+	virtual int GetLightingOptions() { return nLightingOptions; }                      // retail @0x167380
 	friend class CRenderWrapper;
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////

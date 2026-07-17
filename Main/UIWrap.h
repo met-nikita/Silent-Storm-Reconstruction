@@ -5,6 +5,9 @@
 #endif // _MSC_VER > 1000
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CFBTransform;
+class CTransformStack;
+struct SFBTransform;
+struct SHMatrix;
 namespace NGScene
 {
 	class CCTRect;
@@ -18,24 +21,29 @@ namespace NGScene
 namespace NUI
 {
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// CTextDraw
+class IML;   // UIML.h -- the markup layout object CTextDraw owns (retail)
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// CTextDraw -- retail NUI::CTextDraw (UIWrap.obj, saveload id 0xB0814160). IML-BASED in retail: the
+// text is laid out by one owned NUI::IML markup object (pML) instead of the old dev render nodes
+// (CCWString/CCTPoint/CFuncBase<SText> -- dropped, convergence W4). nSize caches the layout width
+// pushed into pML (0 = force a regenerate). operator& @0x32b300: 2=nSize, 3=sSize, 4=sRealSize,
+// 5=sPosition, 6=wsText (string chunk), 7=pML.
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CTextDraw: public CObjectBase
 {
 	OBJECT_BASIC_METHODS(CTextDraw);
 protected:
 	ZDATA
+	int nSize;
 	SPoint sSize;
 	SPoint sRealSize;
 	SPoint sPosition;
 	wstring wsText;
-	CObj<NGScene::CCWString> pTextString;
-	CDGPtr<NGScene::CCTPoint> pSize;
-	CDGPtr<CFuncBase<NGScene::SText> > pText;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&sSize); f.Add(3,&sRealSize); f.Add(4,&sPosition); f.Add(5,&wsText); f.Add(6,&pTextString); f.Add(7,&pSize); f.Add(8,&pText); return 0; }
+	CObj<IML> pML;
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&nSize); f.Add(3,&sSize); f.Add(4,&sRealSize); f.Add(5,&sPosition); f.Add(6,&wsText); f.Add(7,&pML); return 0; }
 
 protected:
-	void UpdateSize( NGScene::I2DGameView *pView );
+	void UpdateText( NGScene::I2DGameView *pView );   // retail @0x329680 (the old dev UpdateSize)
 
 public:
 	CTextDraw( const SPoint &sPosition = SPoint( 0, 0 ), const SPoint &sSize = SPoint( -1, -1 ), const wstring &wsText = L"" );
@@ -63,11 +71,13 @@ protected:
 	SRect sWindow;
 	SRect sTextureRect;
 	NGfx::SPixel8888 sColor;
-	CObj<NGScene::CRects> pRects;
-	CObj<NGScene::CCTRect> pWindow;
 	CDBPtr<NDb::CUITexture> pUITexture;
-	CObj<NGScene::CCRectLayout> pRectLayout;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&vScale); f.Add(3,&sWindow); f.Add(4,&sTextureRect); f.Add(5,&sColor); f.Add(6,&pRects); f.Add(7,&pWindow); f.Add(8,&pUITexture); f.Add(9,&pRectLayout); return 0; }
+	// retail CImageDraw::operator& @0x32b500 serializes ONLY {2 vScale, 3 sWindow, 4 sTextureRect,
+	// 5 sColor, 6 pUITexture} -- and the retail NUI::CImageDraw UDT is 60 bytes with exactly these
+	// five members. (The old dev retained-2D working members pRects/pWindow/pRectLayout, which retail
+	// does not even have, were removed with the CRects/CPosNode path in the W5 convergence wave;
+	// Draw renders from pUITexture directly.)
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&vScale); f.Add(3,&sWindow); f.Add(4,&sTextureRect); f.Add(5,&sColor); f.Add(6,&pUITexture); return 0; }
 
 public:
 	CImageDraw( const SRect &sWindow = SRect( 0, 0, 0, 0 ), NDb::CUITexture* pTexture = 0, const SRect &sTexRect = SRect( 0, 0, 0, 0 ), const NGfx::SPixel8888 &sColor = NGfx::SPixel8888( 0xFF, 0xFF, 0xFF, 0xFF ) );
@@ -82,6 +92,14 @@ public:
 	void Draw( CWindow *pWindow, const STime &sTime, NGScene::I2DGameView *pView );
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail UIWrap.obj free helpers behind CModelDraw::Draw:
+// MakeProjection @0x329710 -- the fixed UI-item projection (1024x768 virtual screen, FOV 60, z 0.1..300).
+// MakeModelTransform @0x329830 -- folds camera+model matrices and the widget's on-screen placement into
+// the single SFBTransform the created mesh follows (backward = identity).
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void MakeProjection( CTransformStack *pTS );
+void MakeModelTransform( SFBTransform *pRes, const SPoint &sPosition, const SPoint &sSize, const SHMatrix &sCameraTransform, const SHMatrix &sModelTransform );
+////////////////////////////////////////////////////////////////////////////////////////////////////
 // CModelDraw
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CModelDraw: public CObjectBase
@@ -92,7 +110,6 @@ protected:
 	SRect sWindow;
 	NGfx::SPixel8888 sColor;
 	CPtr<NDb::CModel> pModel;
-	CPtr<CFBTransform> pBaseTransform;
 	CObj<NGScene::IGameView> p3DView;
 	CObj<CObjectBase> pRender;
 	CObj<NGScene::CCFBTransform> pTransform;
@@ -103,7 +120,8 @@ protected:
 	SHMatrix sCameraTransform;
 
 public:
-	CModelDraw( const SRect &sWindow = SRect( 0, 0, 0, 0 ), NDb::CModel* pModel = 0, CFBTransform *pBaseTransform = 0 );
+	// retail @0x32a920 (both matrices start IDENTITY -- they are on the wire at tags 5/6)
+	CModelDraw( const SRect &sWindow = SRect( 0, 0, 0, 0 ), NDb::CModel* pModel = 0 );
 
 	const SRect& GetWindow() const;
 	void SetWindow( const SRect &sWindow = SRect( 0, 0, 0, 0 ) );
@@ -114,12 +132,8 @@ public:
 	NDb::CModel* GetModel() const;
 	void SetModel( NDb::CModel* pModel );
 
-	CFBTransform* GetTransform() const;
-	void SetTransform( CFBTransform *pBaseTransform );
-
-	// iSpecialView (release): setters over the existing fields ( sModelTransform,
-	// sCameraTransform, p3DView, bParentScene ) -- additive; existing callers use
-	// SetModel/SetTransform and are untouched.
+	// retail setters @0x32a390 / @0x3295b0 / @0x3295d0; the matrix setters raise bUpdated and
+	// Draw folds both matrices into pTransform via MakeModelTransform.
 	void SetScene( NGScene::IGameView *pView, bool bFast );
 	void SetModelTransform( const SHMatrix &sMatrix );
 	void SetCameraTransform( const SHMatrix &sMatrix );

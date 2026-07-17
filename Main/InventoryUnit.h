@@ -38,8 +38,11 @@ enum EUnitItemType
 	N_UNIT_ITEM_TYPES,
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void GetItemsBindPlaces( vector<IRenderVisitor::SBoundMesh> *pRes, NRPG::IUnitMissionInfo *p, 
-	bool bUndrawWeapon, NDb::CPanzerklein *pPanzerklein, bool bNoHeavyWeapon = false );
+// retail @0x21db20: bNoCap suppresses the uniform cap; bNoItems (dialog/portrait body pose)
+// attaches at most the cap and nothing else
+void GetItemsBindPlaces( vector<IRenderVisitor::SBoundMesh> *pRes, NRPG::IUnitMissionInfo *p,
+	bool bUndrawWeapon, NDb::CPanzerklein *pPanzerklein, bool bNoHeavyWeapon = false,
+	bool bNoCap = false, bool bNoItems = false );
 const char* GetBoneName( EUnitItemType t, NRPG::IInventoryItem *pItem, bool bIsPK = false );
 const char* GetBoneName( NDb::ESlot slot, NRPG::IUnitMissionInfo *pRPG, bool bUndrawWeapon );
 ////////////////////////////////////////////////////////////////////////////////////////////////////

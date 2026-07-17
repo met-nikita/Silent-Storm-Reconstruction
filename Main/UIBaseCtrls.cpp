@@ -16,22 +16,117 @@
 namespace NUI
 {
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// CText
+// CVALUEHandler -- retail NUI::CVALUEHandler (saveload id 0xB0241956): the <value id = X> markup
+// substitutor. Retail holds a CPtr<CText> (op& @0x312f80: tag 2) and its Exec @0x312eb0 INSERTS the
+// substituted string into the dispatching IML's parse stream at the caret (so the value text is
+// tokenized inline) instead of the old dev AddObject of a wstring text object.
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CText::CText( const SWindowInfo &sInfo ):
-	CWindow( sInfo )
+class CVALUEHandler: public IMLHandler
 {
-	pText = new CTextDraw( SPoint( 0, 0 ), sInfo.sSize );
+	OBJECT_BASIC_METHODS(CVALUEHandler);
+private:
+	ZDATA
+	CPtr<CText> pText;
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&pText); return 0; }
+
+public:
+	CVALUEHandler() {}
+	CVALUEHandler( CText *_pText ): pText( _pText ) {}
+
+	void Exec( IML *pML, IMLLayout *pLayout, const vector<wstring> &paramsSet )
+	{
+		if ( paramsSet.size() != 4 )
+			return;
+
+		wstring wsVal;
+		if ( pText->GetVal( paramsSet[3], &wsVal ) )
+			pML->GetStream()->InsertString( wsVal );   // parsed inline from the caret (retail)
+	}
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// CText -- retail bodies (see UIBaseCtrls.h banner).
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail ctor @0x312b60: CWindow(info); nSize = 0; empty wsText/valuesMap; pText = CreateML();
+// pText->SetHandler(L"value", new CVALUEHandler(this)).
+CText::CText( const SWindowInfo &sInfo ):
+	CWindow( sInfo ), nSize( 0 )
+{
+	pText = CreateML();
+	pText->SetHandler( L"value", new CVALUEHandler( this ) );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 const wstring& CText::GetText() const
 {
-	return pText->GetText();
+	return wsText;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CText::SetText( const wstring &_wsText )
+// retail SetText @0x3128d0: self-assign-guarded copy; nSize = 0 (force a layout regenerate); push
+// into the IML (retail always passes flag 0 -- bProcessTAGs is accepted for source compatibility).
+void CText::SetText( const wstring &_wsText, bool bProcessTAGs )
 {
-	pText->SetText( _wsText );
+	if ( &_wsText != &wsText )
+		wsText = _wsText;
+	nSize = 0;
+
+	pText->SetText( wsText, 0 );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+bool CText::GetVal( const wstring &szID, wstring *pVal )
+{
+	unordered_map<wstring,wstring>::const_iterator iTemp = valuesMap.find( szID );
+	if ( iTemp == valuesMap.end() )
+		return false;
+
+	*pVal = iTemp->second;
+	return true;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CText::SetVal( const wstring &szID, int nVal )
+{
+	WCHAR wsBuffer[128];
+	swprintf( wsBuffer, L"%d", nVal );
+	valuesMap[szID] = wsBuffer;
+
+	SetUpdated();
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CText::SetVal( const wstring &szID, float fVal )
+{
+	WCHAR wsBuffer[256];
+	swprintf( wsBuffer, L"%.2f", fVal );
+	valuesMap[szID] = wsBuffer;
+
+	SetUpdated();
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CText::SetVal( const wstring &szID, const wstring &wsVal )
+{
+	valuesMap[szID] = wsVal;
+
+	SetUpdated();
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+IML* CText::GetIML()
+{
+	return pText;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CText::SetUpdated()
+{
+	nSize = 0;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail GetRealSize @0x312760: refresh the layout for the live view, then map its measured size
+// back into virtual 1024x768 coordinates -- ROUNDED in retail ((x<<10)/vp.x via fistp).
+void CText::GetRealSize( SPoint *pRes )
+{
+	UpdateText( GetInterface()->GetView() );
+
+	*pRes = pText->GetSize();
+
+	CVec2 vScreenRect = GetInterface()->GetView()->GetViewportSize();
+	pRes->x = Float2Int( float( pRes->x * 1024 ) / vScreenRect.x );
+	pRes->y = Float2Int( float( pRes->y * 768 ) / vScreenRect.y );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CText::ProcessMessage( const SEvent &sEvent )
@@ -45,129 +140,9 @@ bool CText::ProcessMessage( const SEvent &sEvent )
 	return CWindow::ProcessMessage( sEvent );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail Draw @0x312820: refresh the layout, map to screen (ClientToScreen abort on false), render
+// the IML, then chain CWindow::Draw (inside the visible arm).
 void CText::Draw( const STime &sTime, NGScene::I2DGameView *pView )
-{
-	pText->SetSize( GetSize() );
-	pText->Draw( this, sTime, pView );
-
-	CWindow::Draw( sTime, pView );
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-// CVALUEHandler
-////////////////////////////////////////////////////////////////////////////////////////////////////
-class CVALUEHandler: public IMLHandler
-{
-	OBJECT_BASIC_METHODS(CVALUEHandler);
-private:
-	ZDATA
-	CPtr<CMLText> pText;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&pText); return 0; }
-
-public:
-	CVALUEHandler() {}
-	CVALUEHandler( CMLText *_pText ): pText( _pText ) {}
-
-	void Exec( IMLLayout *pLayout, const vector<wstring> &paramsSet )
-	{
-		if ( paramsSet.size() != 4 )
-			return;
-
-		wstring wsVal;
-		if ( pText->GetVal( paramsSet[3], &wsVal ) )
-			pLayout->AddObject( CreateIMLTextObject( wsVal ) );
-	}
-};
-////////////////////////////////////////////////////////////////////////////////////////////////////
-// CMLText
-////////////////////////////////////////////////////////////////////////////////////////////////////
-CMLText::CMLText( const SWindowInfo &sInfo ):
-	CWindow( sInfo ), nSize( 0 )
-{
-	pText = CreateML();
-	pText->SetHandler( L"value", new CVALUEHandler( this ) );
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-const wstring& CMLText::GetText() const
-{
-	return wsText;
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-void CMLText::SetText( const wstring &_wsText, bool bProcessTAGs )
-{
-	wsText = _wsText;
-	nSize = 0;
-
-	pText->SetText( _wsText, bProcessTAGs ? 0 : 0 /*IGNORE_TAGS*/ );
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-bool CMLText::GetVal( const wstring &szID, wstring *pVal )
-{
-	unordered_map<wstring,wstring>::const_iterator iTemp = valuesMap.find( szID );
-	if ( iTemp == valuesMap.end() )
-		return false;
-
-	*pVal = iTemp->second;
-	return true;
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-void CMLText::SetVal( const wstring &szID, int nVal )
-{
-	WCHAR wsBuffer[128];
-	swprintf( wsBuffer, L"%d", nVal );
-	valuesMap[szID] = wsBuffer;
-
-	SetUpdated();
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-void CMLText::SetVal( const wstring &szID, float fVal )
-{
-	WCHAR wsBuffer[256];
-	swprintf( wsBuffer, L"%.2f", fVal );
-	valuesMap[szID] = wsBuffer;
-
-	SetUpdated();
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-void CMLText::SetVal( const wstring &szID, const wstring &wsVal )
-{
-	valuesMap[szID] = wsVal;
-
-	SetUpdated();
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-IML* CMLText::GetIML()
-{
-	return pText;
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-void CMLText::SetUpdated()
-{
-	nSize = 0;
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-void CMLText::GetRealSize( SPoint *pRes )
-{
-	UpdateText( GetInterface()->GetView() );
-
-	*pRes = pText->GetSize();
-
-	CVec2 vScreenRect = GetInterface()->GetView()->GetViewportSize();
-	pRes->x = pRes->x * 1024 / vScreenRect.x;
-	pRes->y = pRes->y * 768 / vScreenRect.y;
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-bool CMLText::ProcessMessage( const SEvent &sEvent )
-{
-	if ( sEvent.nEvent == EVENT_TEMPLATECREATE )
-	{
-		if ( sEvent.pControl->pString )
-			SetText( sEvent.pControl->pString->szStr );
-	}
-
-	return CWindow::ProcessMessage( sEvent );
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-void CMLText::Draw( const STime &sTime, NGScene::I2DGameView *pView )
 {
 	UpdateText( pView );
 
@@ -182,10 +157,12 @@ void CMLText::Draw( const STime &sTime, NGScene::I2DGameView *pView )
 	CWindow::Draw( sTime, pView );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CMLText::UpdateText( NGScene::I2DGameView *pView )
+// retail UpdateText @0x312480: the layout width in screen pixels (ROUNDED in retail); regenerate
+// only on change.
+void CText::UpdateText( NGScene::I2DGameView *pView )
 {
 	CVec2 vScreenRect = pView->GetViewportSize();
-	int nNewSize = float( GetSize().x ) * vScreenRect.x / 1024.0f;
+	int nNewSize = Float2Int( float( GetSize().x ) * vScreenRect.x / 1024.0f );
 	if ( nNewSize != nSize )
 	{
 		nSize = nNewSize;
@@ -274,17 +251,7 @@ void CModel::SetModel( NDb::CModel *_pModel )
 	pModel->SetModel( _pModel );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CFBTransform* CModel::GetTransform() const
-{
-	return pModel->GetTransform();
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-void CModel::SetTransform( CFBTransform *pBaseTransform )
-{
-	pModel->SetTransform( pBaseTransform );
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-// iSpecialView (release) accessors -- thin forwarders into the owned CModelDraw.
+// retail thin forwarders into the owned CModelDraw @0x312670/0x312680/0x312690.
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CModel::SetScene( NGScene::IGameView *pView, bool bFast )
 {
@@ -327,7 +294,6 @@ void CModel::Draw( const STime &sTime, NGScene::I2DGameView *pView )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 using namespace NUI;
 REGISTER_SAVELOAD_CLASS( 0xB0241952, CText );
-REGISTER_SAVELOAD_CLASS( 0xB0241953, CMLText );
 REGISTER_SAVELOAD_CLASS( 0xB0241954, CImage );
 REGISTER_SAVELOAD_CLASS( 0xB0241955, CModel );
 REGISTER_SAVELOAD_CLASS( 0xB0241956, CVALUEHandler );

@@ -64,6 +64,9 @@ public:
 	// GetVisibilityArea @0x298840 -- dist^2 < eff^2 where eff is the same height-stretched, 2x-capped
 	// effective range MakeVisionQuery uses.
 	virtual bool IsWithinSightRange( const CVec3 &ptFrom, const CVec3 &ptTarget, float fRange ) = 0;
+	// retail CVisionTracker::UpdateVision @0x2c9510 (vision vtbl+0x2c): recalc changed cubes until one
+	// step exceeds fTime seconds; true = every changed cube recalced (the action-finish delayer probe).
+	virtual bool UpdateVision( float fTime ) = 0;
 	virtual EVoxelVisionState GetVision( int x, int y, int z ) = 0;
 	virtual void GetCoord( const CVec3 &vPoint, CTPoint3<int> *pRes ) = 0;
 	virtual void GetCenter( const CTPoint3<int> &p, CVec3 *pRes ) = 0;

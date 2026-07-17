@@ -50,11 +50,16 @@ private:
 	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CCommandExecute*)this); f.Add(2,&pItem); return 0; }
 
 public:
-	CExecReload( CUnitServer *_pUS = 0, NRPG::IInventoryItem *_pItem = 0 ): 
-		CCommandExecute(_pUS), pItem(_pItem)
+	CExecReload( CUnitServer *_pUS = 0, int nSlot = -1 ):
+		CCommandExecute(_pUS)
 	{
-		if ( !IsValid( pItem ) )
+		if ( !IsValid( pUS ) )
+			return;   // saveload path: operator& restores pItem
+		// retail CExecReloadWeapon ctor @0x394710: -1 = active weapon, else that slot's item
+		if ( nSlot == -1 )
 			pItem = pUS->GetUnitRPG()->GetInventory()->GetActive();
+		else
+			pItem = pUS->GetUnitRPG()->GetInventory()->Get( NDb::ESlot( nSlot ) );
 	}
 	int GetStartAP() const { return pUS->GetActionAP( NRPG::AC_RELOAD ); }
 	int GetActionAP() const { return pUS->GetActionAP( NRPG::AC_RELOAD ); }
@@ -65,7 +70,7 @@ public:
 		for ( int i = 0; i < 16; ++i )
 		{
 			pUS->GetWorld()->AddDebris( NDb::GetModel( nTestModelIDs[nTestModel] ), pUS->GetWorld()->GetAIMap(),
-				pUS->GetPosition().GetCP() + CVec3(0,0,1), QNULL, CVec3(1,0,20), pUS->GetWorld()->GetTime() );
+				pUS->GetPosition().GetCP() + CVec3(0,0,1), QNULL, CVec3(1,0,20), pUS->GetWorld()->GetTime(), false, 0, 0, -2 );
 			nTestModel = (nTestModel + 1) % N_TEST_MODELS;
 		}
 		// TEST}
@@ -100,7 +105,8 @@ public:
 			return UCR_OK;
 		}
 
-		return UCR_OK;
+		// retail CExecReloadWeapon::CanDoIt @0x394970: no weapon resolved -> NO_EQUIPMENT
+		return UCR_NO_EQUIPMENT;
 	}
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -142,7 +148,9 @@ public:
 					item.q.Rotate( &v, v );
 					velocity = 2 * v;
 				}
-				LaunchItem( pUS->GetWorld(), item, velocity );
+				// retail @0x7b5dfc: bFallFromBody=true (critical knocks the weapon off the body),
+				// the unit as visibility parent, the unit's floor (GetFloor @0x7b5df5)
+				LaunchItem( pUS->GetWorld(), item, velocity, true, (CObjectBase*)pUS, pUS->GetFloor() );
 				pUS->animator.SetWeaponAnimation( NDb::WT_DEFAULT );
 				pUS->animator.SetActiveItem( false );
 				pUS->animator.PlaceUnit( pUS->GetPosition() );
@@ -370,10 +378,16 @@ class CExecFly: public CCommandExecute
 	OBJECT_BASIC_METHODS(CExecFly);
 	ZDATA_(CCommandExecute)
 	NAI::SUnitPosition dst;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CCommandExecute*)this); f.Add(2,&dst); return 0; }
+	// retail @0x3b58d0 serializes ONLY tag 2 dst -- NO CCommandExecute base chunk (dev-extra tag 1 removed, W3)
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&dst); return 0; }
 public:
 	CExecFly() {}
-	CExecFly( CUnitServer *_pUS, const NAI::SUnitPosition &_dst ): CCommandExecute(_pUS), dst(_dst) {}
+	CExecFly( CUnitServer *_pUS, const NAI::SUnitPosition &_dst ): CCommandExecute(_pUS), dst(_dst)
+	{
+		// retail @0x3b33f0 tail: face the flight -- overwrite dst's direction with the 8-way
+		// direction from the unit's current place toward the destination
+		dst.pos.p.SetDirection( pUS->GetWorld()->GetPathNetwork()->GetDir( pUS->GetPosition().pos.p, dst.pos.p ) );
+	}
 	virtual void Run()
 	{
 		pUS->animator.Fly( pUS->GetPosition(), dst );
@@ -386,30 +400,8 @@ public:
 	}
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// CExecLeaveInventory
-////////////////////////////////////////////////////////////////////////////////////////////////////
-class CExecLeaveInventory: public CCommandExecute
-{
-	OBJECT_BASIC_METHODS(CExecLeaveInventory);
-public:
-	CExecLeaveInventory( CUnitServer *_pUS = 0 ): CCommandExecute(_pUS) {}
-	virtual void Run()
-	{
-		/*
-		CUnitAnimator &animator = pUS->animator;
-		NRPG::IUnitMission *pRPG = pUS->GetUnitRPG();
-		NRPG::IInventory *pInventory = pRPG->GetInventory();
-		const NAI::SUnitPosition &position = pUS->GetPosition();
-		if ( animator.IsActiveItem() && pInventory->GetActiveSlot() < 0 )
-			animator.SetActiveItem( false );
-		bool bActive = animator.IsActiveItem();
-		animator.SetWeaponAnimation( bActive ? pRPG->GetWeaponType() : NDb::WT_DEFAULT );
-		pUS->SetUndrawItem( !bActive );
-		animator.PlaceUnit( position );
-		*/
-		Finished();
-	}
-};
+// (CExecLeaveInventory REMOVED -- dead: never constructed, Run() was fully commented out, and its
+//  id 0x01122131 sits in a GAP of retail's exec block; retail has no leave-inventory exec)
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CExecSetActiveItem
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -534,7 +526,16 @@ public:
 				pInventory->TakeOff( NDb::ESlot( sClip.nSlot ) );
 				break;
 			case SItem::HAND:
-				pInventory->SetHandItem( 0 );
+				{
+					// retail CExecLoadWeapon::LoadClip @0x3949a0: the consumed in-hand clip is cleared
+					// by calling CUnitServer::SetHandItem (@0x387b30) DIRECTLY on the unit with an
+					// SItem whose only written field is eType = VACUUM (all five smart pointers are
+					// zeroed by the default ctor). Not the inventory -- retail's CInventory has no
+					// hand member -- and not through the player.
+					SItem sItem;
+					sItem.eType = SItem::VACUUM;
+					pUS->SetHandItem( sItem );
+				}
 				break;
 			case SItem::BACKPACK:
 				pInventory->Take( sClip.pItem );
@@ -645,21 +646,8 @@ public:
 	}
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// CExecNeedReload
-////////////////////////////////////////////////////////////////////////////////////////////////////
-class CExecNeedReload: public CCommandExecute
-{
-	OBJECT_BASIC_METHODS(CExecNeedReload);
-	ZDATA_(CCommandExecute)
-	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CCommandExecute*)this); return 0; }
-public:
-	CExecNeedReload( CUnitServer *_pUS = 0 ): CCommandExecute(_pUS) {}
-	virtual void Run()
-	{
-		pUS->GetWorld()->GetGlobalAck()->OnLastPieceOfAmmo( pUS );
-		Finished();
-	}
-};
+// (dev CExecNeedReload 0x52062175 REMOVED -- W5: dead pair with CCmdNeedReload, retail-absent; the
+// OnLastPieceOfAmmo ack rides the live CWorld::PlayAck path instead, see wUnitCommands.h)
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CExecWeaponJammed
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -864,6 +852,11 @@ CCommandExecute* CreateExecutor( CUnitServer *pUS, CCmd *pCmd, EUnitCommandResul
 	const NAI::SUnitPosition &position = pUS->GetPosition();
 
 	*pError = UCR_OK;
+	// retail CreateExecutor @0x3b37b0: a non-hero "wants to talk" command becomes a one-shot executor
+	// that throws CEventOnNotHeroWantsToTalk (drives the CAckNPCInteraction bark).
+	CDynamicCast<CCmdNotHeroWantsToTalk> pNotHeroTalk(pCmd);
+	if (pNotHeroTalk)
+		return new CExecNotHeroWantsToTalk(pUS);
 	CDynamicCast<CCmdFly> pCmdFly(pCmd);
 	if (pCmdFly)
 		return new CExecFly(pUS, pCmdFly->dst);
@@ -931,7 +924,7 @@ CCommandExecute* CreateExecutor( CUnitServer *pUS, CCmd *pCmd, EUnitCommandResul
 										else {
 											CDynamicCast<CCmdReload> pReload(pCmd);
 											if (pReload)
-												return CreateSimpleExec(new CExecReload(pUS, pReload->pItem), pError);
+												return CreateSimpleExec(new CExecReload(pUS, pReload->nSlot), pError);
 											else {
 												CDynamicCast<CCmdLoadWeapon> pLoadWeapon(pCmd);
 												if (pLoadWeapon)
@@ -945,10 +938,8 @@ CCommandExecute* CreateExecutor( CUnitServer *pUS, CCmd *pCmd, EUnitCommandResul
 														if (pTeleport)
 															return new CExecTeleport(pUS, pTeleport);
 														else {
-															CDynamicCast<CCmdNeedReload> pNeedReload(pCmd);
-															if (pNeedReload)
-																return new CExecNeedReload(pUS);
-															else {
+															// (CCmdNeedReload -> CExecNeedReload dispatch REMOVED -- W5: dead retail-absent pair)
+															{
 																CDynamicCast<CCmdWeaponJammed> pWeaponJammed(pCmd);
 																if (pWeaponJammed)
 																	return new CExecWeaponJammed(pUS);
@@ -968,8 +959,53 @@ CCommandExecute* CreateExecutor( CUnitServer *pUS, CCmd *pCmd, EUnitCommandResul
 																				CDynamicCast<CCmdTakePerk> pTakePerk(pCmd);
 																				if (pTakePerk)
 																					return CreateSimpleExec(new CExecTakePerk(pUS, pTakePerk->GetID()), pError);
-																				else if (CCommandExecute* pExec = CreateActionExecutor(pUS, pCmd, pError))
-																					return pExec;
+																				else {
+																					// retail CreateExecutor @0x3b37b0: create+activate runs as a QUEUE --
+																					// [optional stash move (bNeedMove: moveSource->moveTarget)] ->
+																					// create-and-slot -> set-active-item(nSlot).
+																					CDynamicCast<CCmdCreateAndActivateInventoryItem> pCreateActivate(pCmd);
+																					if (pCreateActivate)
+																					{
+																						CExecQueue *pQueue = new CExecQueue(pUS);
+																						if (pCreateActivate->GetNeedMove())
+																							pQueue->AddExecutor(new CExecMoveInventoryItem(pUS,
+																								new CCmdMoveInventoryItem(pCreateActivate->GetMoveSource(), pCreateActivate->GetMoveTarget())));
+																						pQueue->AddExecutor(new CExecCreateAndActivateInventoryItem(pUS, pCreateActivate));
+																						pQueue->AddExecutor(new CExecSetActiveItem(pUS, (NDb::ESlot)pCreateActivate->GetSlot()));
+																						return pQueue;
+																					}
+																					// retail @0x3b37b0 exchange arm: a QUEUE of the two symmetric moves + optional set-active.
+																					// (No dev-only CExecExchangeInventoryItems -- retail composes it from registered execs, so a
+																					// mid-exchange save serializes cleanly.) Each move's destination falls back to GROUND when
+																					// it is a backpack with no room (IInventoryInfo::FindPlace, vtbl+0x14 in the decomp).
+																					CDynamicCast<CCmdExchangeInventoryItems> pExchange(pCmd);
+																					if (pExchange)
+																					{
+																						NRPG::IInventory *pInventory = pUS->GetUnitRPG()->GetInventory();
+																						CExecQueue *pQueue = new CExecQueue(pUS);
+																						CTPoint<int> ptPlace;
+																						// 1) the displaced (in-hand) item -> the source's place (skipped when the hand is empty)
+																						if (IsValid(pExchange->GetTarget().pItem))
+																						{
+																							SItem sTo = pExchange->GetSource();
+																							if (sTo.eType == SItem::BACKPACK && !pInventory->FindPlace(pExchange->GetTarget().pItem, &ptPlace))
+																								sTo.eType = SItem::GROUND;
+																							pQueue->AddExecutor(new CExecMoveInventoryItem(pUS,
+																								new CCmdMoveInventoryItem(pExchange->GetTarget(), sTo)));
+																						}
+																						// 2) the source item -> the target's place (the hand slot)
+																						SItem sTo = pExchange->GetTarget();
+																						if (sTo.eType == SItem::BACKPACK && !pInventory->FindPlace(pExchange->GetSource().pItem, &ptPlace))
+																							sTo.eType = SItem::GROUND;
+																						pQueue->AddExecutor(new CExecMoveInventoryItem(pUS,
+																							new CCmdMoveInventoryItem(pExchange->GetSource(), sTo)));
+																						if (pExchange->GetActivate())
+																							pQueue->AddExecutor(new CExecSetActiveItem(pUS, (NDb::ESlot)pExchange->GetSlot()));
+																						return pQueue;
+																					}
+																					else if (CCommandExecute* pExec = CreateActionExecutor(pUS, pCmd, pError))
+																						return pExec;
+																				}
 																			}
 																		}
 																	}
@@ -999,12 +1035,11 @@ REGISTER_SAVELOAD_CLASS( 0x00122170, CExecReload )
 REGISTER_SAVELOAD_CLASS( 0x00722170, CExecCriticalLostWeapon )
 REGISTER_SAVELOAD_CLASS( 0x00722171, CExecAccidentalShot )
 REGISTER_SAVELOAD_CLASS( 0x01122130, CExecExplode )
-REGISTER_SAVELOAD_CLASS( 0x01122131, CExecLeaveInventory )
 REGISTER_SAVELOAD_CLASS( 0x01122133, CExecSetActiveItem )
 REGISTER_SAVELOAD_CLASS( 0x01122134, CExecSetWishPose )
 REGISTER_SAVELOAD_CLASS( 0x01122135, CExecTeleport )
 REGISTER_SAVELOAD_CLASS( 0x71723161, CExecFly )
-REGISTER_SAVELOAD_CLASS( 0x52062175, CExecNeedReload )
+// (0x52062175 CExecNeedReload REMOVED -- W5: dead pair with CCmdNeedReload, retail-absent)
 REGISTER_SAVELOAD_CLASS( 0x52062176, CExecWeaponJammed )
 REGISTER_SAVELOAD_CLASS( 0x52062177, CExecOrderConfirmation )
 REGISTER_SAVELOAD_CLASS( 0x52062178, CExecImpossibleToPerformAction )
@@ -1014,3 +1049,5 @@ REGISTER_SAVELOAD_CLASS( 0xB206217B, CExecUnloadWeapon )
 REGISTER_SAVELOAD_CLASS( 0x71912110, CExecSpendAPAndRegister )
 REGISTER_SAVELOAD_CLASS( 0xB1912111, CExecTakePerk )
 REGISTER_SAVELOAD_CLASS( 0xB1912112, CExecGrenadeMode )
+// retail saveload ids (serialization-convergence W1; s2_scratch docs/SERIALIZATION_CONVERGENCE.md)
+REGISTER_SAVELOAD_CLASS( 0xB3717160, CExecSetStrafe )

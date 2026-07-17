@@ -23,9 +23,11 @@ ETransitionType GetTransitionType( const IPathNetwork *pNet, const SPathPlace &s
 //	1b) moves are returned for all directions
 //	1c) moves are returned with final direction = 0, and with "not moving" flag
 // 2) Maybe there will be some kinda difference with crouch poses too.
-void GetNonStandartMoves( 
-		IPathNetwork *_pNet, const SPathPlace &src, bool bCheckSuicide, bool bMoveOnly, vector<SMove> *pRes,
-		int *pMovesCount, vector<char> *pDynLocks );
+// bNoClimb (retail GetUnitMoves 5th arg): suppress the CM_STAND climb emission -- set only by the
+// door-free re-route in NAI::FindPath (retail @0x8bd80; climb gate `!bMoveOnly && !bNoClimb`).
+void GetNonStandartMoves(
+		IPathNetwork *_pNet, const SPathPlace &src, bool bCheckSuicide, bool bMoveOnly, bool bNoClimb,
+		vector<SMove> *pRes, int *pMovesCount, vector<char> *pDynLocks );
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 }
 #endif

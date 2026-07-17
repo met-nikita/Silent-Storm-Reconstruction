@@ -1,6 +1,12 @@
 #include "StdAfx.h"
 #include "RPGAttackMech.h"
 #include "..\DBFormat\DataRPG.h"
+// complete types CalcStructDmg needs: IWorld::GetGlobalGame, CGlobalGame::pDifficulty,
+// CDBDifficulty::f{Enemy,Our}DamageMult, IUnitMissionInfo::IsAIPlayer.
+#include "..\DBFormat\DataDifficulty.h"
+#include "wInterface.h"
+#include "rpgGlobal.h"
+#include "RPGUnitInfo.h"
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 namespace NRPG
 {
@@ -57,15 +63,24 @@ bool CAttackPortion::CanRicochet() const
 	return !(nDmgType == 0 || nDmgType == 5);
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-int CAttackPortion::CalcStructDmg( const NDb::CRPGArmor *pArmor ) const
+// retail @0x28f960 (raw disasm authoritative: Ghidra aliases the running float through param_2).
+// Dev lacked the pMaterial gate, fStructDmgModifier (the member existed, nothing read it),
+// nAccumulated, and the difficulty multipliers. The multipliers are gated on the material being
+// HUMAN_BODY, so they scale flesh damage only -- never structural damage to objects/buildings.
+int CAttackPortion::CalcStructDmg( NWorld::IWorld *pWorld, const NDb::CRPGArmor *pArmor, int nAccumulated ) const
 {
 	ASSERT( pArmor != 0 );
-	if ( pArmor == 0 )
+	if ( pArmor == 0 || !IsValid( pArmor->pMaterial ) )
 		return 0;
 
 	// Old way
 /*	int nDmg = GetDmg2Armor( nDmgType, pArmor->pMaterial->nDR );
 	int nResDmg = !nDmg ? nDmg : ( pArmor->pMaterial->nVP / nDmg );*/
+
+	// retail does NOT null-check the CGlobalGame between the two derefs -- reproduced exactly.
+	NDb::CDBDifficulty *pDifficulty = 0;
+	if ( pWorld )
+		pDifficulty = pWorld->GetGlobalGame()->pDifficulty;
 
 	// New way
 	int nAPA = Max( nK / 10, 0 );
@@ -76,7 +91,19 @@ int CAttackPortion::CalcStructDmg( const NDb::CRPGArmor *pArmor ) const
 		nDmg = random.Get( nDmgMin, nDmgMax );
 	int nResDmg = nDmg + Min( nAPA - pArmor->pMaterial->nThreshold, 0 );
 	nResDmg = Max( nResDmg, 0 );
-	return nResDmg * fDamageCoeff;
+	float fRes = fStructDmgModifier * fDamageCoeff * nResDmg;
+	if ( nAccumulated != 0 )
+		fRes -= nAccumulated;
+	if ( pArmor->pMaterial->GetRecordID() == NDb::CRPGMaterial::HUMAN_BODY && IsValid( pAttacker ) && pDifficulty )
+	{
+		if ( pAttacker->IsAIPlayer() )
+			fRes *= pDifficulty->fEnemyDamageMult;
+		else
+			fRes *= pDifficulty->fOurDamageMult;
+	}
+	// saturate before the fistp so a runaway float cannot land on x87's integer-indefinite and flip
+	// negative. Float2Int is fld/fistp = retail's round-to-nearest-even (no fldcw truncate present).
+	return Float2Int( Max( 0.0f, Min( fRes, 1879048192.0f /* 0x70000000 */ ) ) );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CAttackPortion::MakeClickOfDeath( const CRay &ray )

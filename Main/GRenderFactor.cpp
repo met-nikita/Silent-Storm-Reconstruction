@@ -23,6 +23,34 @@ NGfx::CTexture* GetUniformBump()
 	return pUniformBump;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+static CObj<NGfx::CTexture> pBlackTexture;
+// retail @0x14f590: nSize x nSize CLAMP texture filled with a solid color
+void InitSolidTexture( CObj<NGfx::CTexture> *pRes, const NGfx::SPixel8888 &color, int nSize )
+{
+	*pRes = NGfx::MakeTexture( nSize, nSize, 1, NGfx::SPixel8888::ID, NGfx::REGULAR, NGfx::CLAMP );
+	NGfx::CTextureLock<NGfx::SPixel8888> lock( *pRes, 0, NGfx::INPLACE );
+	for ( int y = 0; y < nSize; ++y )
+	{
+		for ( int x = 0; x < nSize; ++x )
+			lock[y][x] = color;
+	}
+}
+// retail @0x14f6d0
+NGfx::CTexture* GetBlackTexture()
+{
+	if ( !IsValid( pBlackTexture ) )
+		InitSolidTexture( &pBlackTexture, NGfx::SPixel8888( 0, 0, 0, 0 ), 1 );
+	return pBlackTexture;
+}
+static CObj<NGfx::CTexture> pDefaultLightmap;
+// retail @0x14f750: 1x1 solid 0xFF000000, the CL stand-in for scenes with lighting-options bit 2
+NGfx::CTexture* GetDefaultLightmap()
+{
+	if ( !IsValid( pDefaultLightmap ) )
+		InitSolidTexture( &pDefaultLightmap, NGfx::SPixel8888( 0, 0, 0, 255 ), 1 );
+	return pDefaultLightmap;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 inline float ConvertToFloatCoord( int n, int nSize )
 {
 	if ( n == 0 )

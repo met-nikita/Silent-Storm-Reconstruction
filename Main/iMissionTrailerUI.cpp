@@ -79,7 +79,7 @@ bool CMissionTrailerUI::ProcessMessage( const SEvent &sEvent )
 			if ( ( pState->GetType() == NGame::IState::FORCED ) || ( pState->GetType() == NGame::IState::TEMPORARY ) )
 			{
 				SCursorInfo sStateCursor = pState->GetCursorInfo();
-				if ( sStateCursor.pTexture != GetInterface()->GetCursorInfo().pTexture )
+				if ( sStateCursor.pCursor != GetInterface()->GetCursorInfo().pCursor )
 				{
 					sStateCursor.wsText = L"";
 					GetInterface()->SetCursorInfo( sStateCursor );

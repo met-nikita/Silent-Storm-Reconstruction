@@ -399,7 +399,7 @@ bool CUnitInventoryPanelItem::ProcessMessage( const SEvent &sEvent )
 	case EVENT_TEMPLATELOAD:
 		{
 			pItemModel = new CShowItemModel( sEvent.pLoader->GetControl( "view" ) );
-			pItemModel->Set( pItem, NDb::CAMERA_SLOT );
+			pItemModel->Set( 0, 0, pItem, NDb::CAMERA_SLOT );   // retail @0x248a30: null view + null unit
 			break;
 		}
 	case EVENT_TEMPLATELOADCOMPLETE:
@@ -430,7 +430,7 @@ void CUnitInventoryPanelItem::Draw( const STime &sTime, NGScene::I2DGameView *pV
 	VirtualToScreen( &sSize, &sDummyRect );
 
 	CRectLayout sLayout;
-	sLayout.AddRect( 0, 0, CTRect<float>( 0, 0, sSize.x, sSize.y ) );
+	sLayout.AddRect( 0, 0, sSize.x, sSize.y, CTRect<float>( 0, 0, sSize.x, sSize.y ) );
 
 	CWindow::Draw( sTime, pView );
 }
@@ -506,7 +506,7 @@ void CUnitInventoryPanel::Draw( const STime &sTime, NGScene::I2DGameView *pView 
 	VirtualToScreen( &sSize, &sDummyRect );
 
 	CRectLayout sLayout;
-	sLayout.AddRect( 0, 0, CTRect<float>( 0, 0, sSize.x, sSize.y ) );
+	sLayout.AddRect( 0, 0, sSize.x, sSize.y, CTRect<float>( 0, 0, sSize.x, sSize.y ) );
 
 	pView->CreateDynamicClearRects( sLayout, sScrPosition, sScrWindow, 0 );
 
@@ -838,9 +838,9 @@ private:
 	CObj<NRPG::CUnit> pMerc;
 	////
 	CObj<CImage> pPhoto;
-	CObj<CMLText> pText;
-	CObj<CMLText> pCharacteristics;
-	CObj<CScrollWindow<CMLText> > pTextView;
+	CObj<CText> pText;
+	CObj<CText> pCharacteristics;
+	CObj<CScrollWindow<CText> > pTextView;
 	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CWindow*)this); f.Add(2,&pMerc); f.Add(3,&pPhoto); f.Add(4,&pText); f.Add(5,&pCharacteristics); f.Add(6,&pTextView); return 0; }
 
 public:
@@ -861,7 +861,7 @@ bool CUnitBiographyPanel::ProcessMessage( const SEvent &sEvent )
 		{
 			NDb::CRPGPers *pPers = IsValid( pMerc ) ? pMerc->GetPers() : 0;
 
-			pTextView = new CScrollWindow<CMLText>( sEvent.pLoader->GetControl( "view" ) );
+			pTextView = new CScrollWindow<CText>( sEvent.pLoader->GetControl( "view" ) );
 			pText = pTextView->GetClientWindow();
 			if ( IsValid( pText ) && IsValid( pPers ) )
 			{
@@ -873,7 +873,7 @@ bool CUnitBiographyPanel::ProcessMessage( const SEvent &sEvent )
 				pText->SetSize( SPoint( pText->GetSize().x, sRealSize.y ) );
 			}
 
-			pCharacteristics = new CMLText( sEvent.pLoader->GetControl( "characteristics" ) );
+			pCharacteristics = new CText( sEvent.pLoader->GetControl( "characteristics" ) );
 			if ( IsValid( pPers ) )
 				pCharacteristics->SetText( GetDBString( 0x4F22 ) + GetDBString( pPers->pCharacteristics ), true );
 			break;
@@ -1238,7 +1238,7 @@ void CTeamMngUI::Draw( const STime &sTime, NGScene::I2DGameView *pView )
 	VirtualToScreen( &sSize, &sDummyRect );
 
 	CRectLayout sLayout;
-	sLayout.AddRect( 0, 0, CTRect<float>( 0, 0, sSize.x, sSize.y ) );
+	sLayout.AddRect( 0, 0, sSize.x, sSize.y, CTRect<float>( 0, 0, sSize.x, sSize.y ) );
 
 	pView->CreateDynamicClearRects( sLayout, sScrPosition, sScrWindow, 0 );
 
@@ -1420,9 +1420,12 @@ void CTeamMngMenuInterface::RenderFrame()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CICMission
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CICTeamMngMenu::CICTeamMngMenu( NRPG::CGlobalPlayer *_pGlobalPlayer, IMission *_pMission ):
-	pGlobalPlayer( _pGlobalPlayer ), pMission( _pMission )
+CICTeamMngMenu::CICTeamMngMenu( NRPG::CGlobalPlayer *_pGlobalPlayer, IMission *_pMission, int _nID ):
+	pGlobalPlayer( _pGlobalPlayer ), pMission( _pMission ), nID( _nID )
 {
+	// retail ctor @0x245280 (W5): carries the queueing command's wait id (retail Exec @0x247ca0
+	// forwards it into CTeamMngMenuInterface; the dev interface has no id path yet -- stored here
+	// so the retail 3-arg call shape is in place).
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CICTeamMngMenu::Exec()

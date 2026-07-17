@@ -12,7 +12,6 @@
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 namespace NGame
 {
-static bool bCameraFollow = false;
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CUICmdExecContainer
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -56,22 +55,25 @@ int CUICmdLocatorExec::GetPriority() const
 	return pLocator->GetPriority();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// CUICmdCameraExec
+// CUICmdMoveCameraExec (retail iUIExec.obj: ctor @0x24eee0, SetTarget @0x24e9f0, Update @0x24e840,
+// Finished @0x24e6a0). W5: the retail multi-waypoint morph over a CUICmdScriptMoveCamera.
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CUICmdMoveCameraExec::CUICmdMoveCameraExec( NWorld::CUICmd *pCmd, 
-	IMission *_pMission, const ICamera::SCameraPos &_sTargetPos, STime _transitionTime ): 
-	CUICmdExec( pCmd ), pMission( _pMission ),
-	transitionTime( _transitionTime ), sMorphTime( 0 )
+CUICmdMoveCameraExec::CUICmdMoveCameraExec( NWorld::CUICmdScriptMoveCamera *_pCmd, IMission *_pMission ):
+	CUICmdLocatorExec( _pCmd ), pMission( _pMission ), pCmd( _pCmd ),
+	sMorphTime( 0 ), sTransitionTime( 0 ), iLastCamera( 0 )
 {
-	SetTarget( _sTargetPos );
+	// retail @0x24eee0: adopt + normalize the command's waypoints, sample the live camera as the
+	// first segment's start pose, then UNWRAP the sampled yaw to within +-pi of the FIRST waypoint
+	// -- NormalizeAngle is fmod (range (-2pi,2pi)), so DB records with multi-turn yaws (e.g. camera
+	// 3138 "StartCamera" yaw = -4pi) otherwise lerp a near-full-circle swirl on timed moves.
+	SetTarget( _pCmd->positions, _pCmd->transitionTime );
 	pMission->GetCamera()->GetPlacement( &sCameraPos );
 	NormalizePos( &sCameraPos );
-	// retail exec ctor @0x24eee0: UNWRAP the sampled start yaw to within +-pi of the target --
-	// NormalizeAngle is fmod (range (-2pi,2pi)), so DB records with multi-turn yaws (e.g. camera
-	// 3138 "StartCamera" yaw = -4pi) otherwise lerp a near-full-circle swirl on timed moves; the
-	// final pose was never affected (t=0 sets fCoeff=1 immediately).
-	float fYawDiff = sTargetPos.fYaw - sCameraPos.fYaw;
-	sCameraPos.fYaw += floorf( fabsf( fYawDiff ) / ( 2 * PI ) + 0.5f ) * Sign( fYawDiff ) * 2 * PI;
+	if ( !vTargetPositions.empty() )
+	{
+		float fYawDiff = vTargetPositions[0].fYaw - sCameraPos.fYaw;
+		sCameraPos.fYaw += floorf( fabsf( fYawDiff ) / ( 2 * PI ) + 0.5f ) * Sign( fYawDiff ) * 2 * PI;
+	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CUICmdMoveCameraExec::NormalizeAngle( float *pfAngle )
@@ -86,22 +88,44 @@ void CUICmdMoveCameraExec::NormalizePos( ICamera::SCameraPos *pPos )
 	NormalizeAngle( &pPos->fRoll );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CUICmdMoveCameraExec::SetTarget( const ICamera::SCameraPos &_sTargetPos )
+// retail @0x24e9f0: adopt the waypoints, store the PER-WAYPOINT transition, fmod-normalize the
+// pitch/yaw/roll of every waypoint.
+void CUICmdMoveCameraExec::SetTarget( const vector<ICamera::SCameraPos> &positions, STime _transitionTime )
 {
-	sTargetPos = _sTargetPos;
-	NormalizePos( &sTargetPos );
+	vTargetPositions = positions;
+	sTransitionTime = _transitionTime;
+	for ( int i = 0; i < (int)vTargetPositions.size(); ++i )
+		NormalizePos( &vTargetPositions[i] );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail @0x24e840: segment index = elapsed / sTransitionTime; past the last waypoint -> land
+// EXACTLY on it (sTransitionTime = 0 latches "done"). On a segment change the live camera is
+// re-sampled as the new start pose; within a segment lerp start->waypoint by the elapsed fraction.
 bool CUICmdMoveCameraExec::Update( const STime &sTime )
 {
 	if ( sMorphTime == 0 )
 		sMorphTime = sTime;
+	if ( vTargetPositions.empty() )
+		return true;   // defensive: retail would index waypoint -1 here (no producer queues an empty list)
 
-	float fCoeff;
-	if ( transitionTime <= 0 )
-		fCoeff = 1;
+	int nIdx;
+	if ( sTransitionTime == 0 )
+		nIdx = 0;
 	else
-		fCoeff = Min( float( sTime - sMorphTime ) / transitionTime, 1.f );
+		nIdx = int( ( sTime - sMorphTime ) / sTransitionTime );
+	if ( nIdx < 0 || nIdx >= (int)vTargetPositions.size() )
+	{
+		sTransitionTime = 0;
+		nIdx = (int)vTargetPositions.size() - 1;
+	}
+	const ICamera::SCameraPos &sTargetPos = vTargetPositions[nIdx];
+	if ( nIdx != iLastCamera )
+		pMission->GetCamera()->GetPlacement( &sCameraPos );   // new segment: re-sample the start pose
+	iLastCamera = nIdx;
+
+	float fCoeff = 1.0f;
+	if ( sTransitionTime != 0 )
+		fCoeff = float( ( sTime - sMorphTime ) % sTransitionTime ) / float( sTransitionTime );
 
 	ICamera::SCameraPos sNewCameraPos( sCameraPos );
 	sNewCameraPos.fRod = sTargetPos.fRod * fCoeff + sCameraPos.fRod * ( 1 - fCoeff );
@@ -111,64 +135,15 @@ bool CUICmdMoveCameraExec::Update( const STime &sTime )
 	sNewCameraPos.fFOV = sTargetPos.fFOV * fCoeff + sCameraPos.fFOV * ( 1 - fCoeff );
 	sNewCameraPos.ptAnchor = sTargetPos.ptAnchor * fCoeff + sCameraPos.ptAnchor * ( 1 - fCoeff );
 	pMission->GetCamera()->SetPlacement( sNewCameraPos );
-	return fCoeff == 1.0f;
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-void CUICmdMoveCameraExec::Cancel()
-{
-	pMission->GetCamera()->SetPlacement( sTargetPos );
+	return sTransitionTime == 0;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CUICmdMoveCameraExec::Finished()
 {
-	// release id-queue: post the finished command's id; CWorld::ExecuteCommand -> pOwnScript->RemoveUIActionID
-	// unblocks the lua WaitForUI(id) that queued this camera move (CameraMove/CameraSet).
+	// release id-queue @0x24e6a0: post the finished command's id; CWorld::ExecuteCommand ->
+	// pOwnScript->RemoveUIActionID unblocks the lua WaitForUI(id) that queued this camera move
+	// (CameraMove/CameraSet/CameraSequence).
 	pMission->Command( new NWorld::CCmdInterfaceEvent( GetCmd()->nID ) );
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-// CUICmdCameraExec
-////////////////////////////////////////////////////////////////////////////////////////////////////
-CUICmdFollowCameraExec::CUICmdFollowCameraExec( NWorld::CUICmd *pCmd, IMission *_pMission, NWorld::CUnit *_pUnit ):
-	CUICmdExec( pCmd ), pMission( _pMission ), pUnit( _pUnit )
-{
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-bool CUICmdFollowCameraExec::Update( const STime &sTime )
-{
-	if ( !pUnit->IsPerformingAction() )
-		return true;
-	if ( !pMission->GetActivePlayer()->IsUnitVisible( pUnit ) )
-		return true;
-	if ( !pMission->IsActionExecuted() || pMission->IsReady() )
-		return true;
-	if ( pMission->GetWorld()->GetCurrentPlayer() == pMission->GetActivePlayer()->GetPlayer() )
-		return true;
-
-	// GLUE FIX: the Jan03 body hard-SET the camera onto the unit's LIVE position AND FreezeCamera(true)
-	// EVERY frame while returning false, so the camera stayed glued to (and player control locked on) a
-	// moving unit for the whole action. Retail replaced it with a self-terminating, eased, non-freezing
-	// fly-to (CUICmdUnitCameraExec @0x24eae0). Reproduce that shape: nudge the camera toward the unit
-	// via the DESIRED-placement path (ScrollAnchor smoothed -> CCamera::Update eases the live camera in,
-	// player keeps control) ONCE and finish. No FreezeCamera, no per-frame re-pin.
-	ICamera::SCameraPos sCameraPos;
-	pMission->GetCamera()->GetPlacement( &sCameraPos );
-	CVec3 ptTarget;
-	pUnit->GetRealPosition( &ptTarget );
-	ptTarget.z = 0;
-	pMission->GetCamera()->ScrollAnchor( ptTarget - sCameraPos.ptAnchor, false, false );
-	pMission->SetCutFloor( pUnit->GetPosition().pos.GetFloor() );
-
-	return true;
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-void CUICmdFollowCameraExec::Cancel()
-{
-	pMission->FreezeCamera( false );
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-void CUICmdFollowCameraExec::Finished()
-{
-	pMission->FreezeCamera( false );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CUICmdUnitCameraExec (release iUIExec.obj: ctor @0x24f090, Update @0x24eae0, Cancel @0x24ee60,
@@ -206,6 +181,11 @@ bool CUICmdUnitCameraExec::Update( const STime &sTime )
 				return true;
 			if ( pMission->GetWorld()->GetCurrentPlayer() == pMission->GetActivePlayer()->GetPlayer() )
 				return true;                                // only the OTHER player's action
+			// release @0x24ebb8 (`mov esi,4` @0x24eb96): NEVER auto-show over a camera the user has
+			// taken. The selector only returns the cinematic camera while the user is hands-off, so
+			// GetCamera() != GetEnemyTurnCamera() IS "the user is driving". Deaths are exempt.
+			if ( pMission->GetCamera() != pMission->GetEnemyTurnCamera() )
+				return true;
 			if ( nPri == NWorld::PR_UNIT_ACTION && ( !IsValid( pShooter ) || !pShooter->IsPerformingAction() ) )
 				return true;
 			// (release @0x24eae0 also gates PR_UNIT_ACTION on mission[vtbl+0x134]->GetPlayer() != active player
@@ -254,180 +234,100 @@ void CUICmdUnitCameraExec::Finished()
 		pLockedCamera->SetLock( false );                    // release @0x24ee80: Lock(0)
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// CreateCameraExecutor @0x24f150 -- RTTI dispatch of a camera-locator command to its executor. The dev has
-// only the unit-camera family (the explosion CUICmdPointCamera and the script-move exec route elsewhere).
+// CUICmdExplosionCameraExec (retail iUIExec.obj: ctor @0x24f570, Update @0x24e6e0, Finished @0x24f550).
+// The blast auto-focus: frame the explosion point (rod = Max(current rod, 12), the producer's -100
+// nFloor sentinel resolves to the mission's current cut floor), optional slo-mo, 3 s dwell.
+////////////////////////////////////////////////////////////////////////////////////////////////////
+CUICmdExplosionCameraExec::CUICmdExplosionCameraExec( NWorld::CUICmdPointCamera *_pCmd, IMission *_pMission ):
+	CUICmdLocatorExec( _pCmd ), pMission( _pMission ), pCmd( _pCmd ), bDone( false ), tStart( 0 )
+{
+	// retail ctor @0x24f570 locks UNCONDITIONALLY (an original null-deref bug); guard like the
+	// unit-camera exec does.
+	pLockedCamera = pMission->GetCamera();
+	if ( IsValid( pLockedCamera ) )
+		pLockedCamera->SetLock( true );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+bool CUICmdExplosionCameraExec::Update( const STime &sTime )
+{
+	if ( !IsValid( pCmd ) || !IsValid( pMission ) )
+		return true;
+	// release @0x24e6e7 (`mov ebx,2` @0x24e6ea): the same "don't fight the user" veto as the unit
+	// exec, at PR_EXPLOSION. At exactly PR_EXPLOSION the cinematic camera is asked whether the user
+	// has signalled intent to take it (@0x24e730, cam vtbl+0x94) -- if so, yield too.
+	if ( GetPriority() < NWorld::PR_EXPLOSION && pMission->GetCamera() != pMission->GetEnemyTurnCamera() )
+		return true;
+	if ( GetPriority() == NWorld::PR_EXPLOSION && IsValid( pMission->GetEnemyTurnCamera() ) )
+	{
+		bool bJustWanted = false;
+		if ( pMission->GetEnemyTurnCamera()->UserWantedItToUnlock( &bJustWanted ) )
+			return true;
+	}
+	if ( bDone )
+		return pCmd->nExecTime * 1000 < sTime - tStart;   // retail: finish after nExecTime seconds
+	tStart = sTime;
+	bDone = true;
+	ICamera *pCamera = pMission->GetCamera();
+	if ( IsValid( pCamera ) )
+	{
+		// retail @0x24e6e0 first tick: rod = Max(stored placement rod, 12); nFloor < -10 (the
+		// producer's -100 sentinel) -> the controller's current cut floor; then the one-point
+		// best-point framing with the slo-mo ratio (bUseSloMo ? 3 : 1).
+		ICamera::SCameraPos sCameraPos;
+		pCamera->GetPlacement( &sCameraPos );
+		const float fRod = Max( sCameraPos.fRod, 12.0f );
+		int nFloor = pCmd->nFloor;
+		if ( nFloor < -10 )
+			nFloor = pMission->GetCutFloor();
+		pCamera->ShowPlacesFromBestPoint( pCmd->ptExplosion, pCmd->ptExplosion, nFloor, fRod,
+			pCmd->bUseSloMo ? 3 : 1, pCmd->fSloMoIncrProbability, false, false );
+	}
+	return false;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CUICmdExplosionCameraExec::Cancel()
+{
+	if ( IsValid( pLockedCamera ) )
+		pLockedCamera->SetLock( false );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CUICmdExplosionCameraExec::Finished()
+{
+	if ( IsValid( pLockedCamera ) )
+		pLockedCamera->SetLock( false );                    // retail @0x24f550
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// CreateCameraExecutor @0x24f150 -- RTTI dispatch of a camera-locator command to its executor
+// (retail order: UnitCamera, PointCamera, ScriptMoveCamera).
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CUICmdLocatorExec* CreateCameraExecutor( NWorld::CUICmdCameraLocator *pCmd, IMission *pMission )
 {
 	CDynamicCast<NWorld::CUICmdUnitCamera> pUnitCam( pCmd );
 	if ( pUnitCam )
 		return new CUICmdUnitCameraExec( pUnitCam, pMission );
+	CDynamicCast<NWorld::CUICmdPointCamera> pPointCam( pCmd );
+	if ( pPointCam )
+		return new CUICmdExplosionCameraExec( pPointCam, pMission );
+	CDynamicCast<NWorld::CUICmdScriptMoveCamera> pScriptMove( pCmd );
+	if ( pScriptMove )
+		return new CUICmdMoveCameraExec( pScriptMove, pMission );   // retail: the script camera move/sequence
 	return 0;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// CUICmdRestoreCameraExec
-////////////////////////////////////////////////////////////////////////////////////////////////////
-CUICmdRestoreCameraExec::CUICmdRestoreCameraExec( NWorld::CUICmd *pCmd, IMission *pMission ):
-	CUICmdMoveCameraExec( pCmd, pMission, ICamera::SCameraPos(), 0 )
-{
-	ICamera::SCameraPos sCameraPos;
-	pMission->GetCamera()->GetPlacement( &sCameraPos );
-	SetTarget( sCameraPos );
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-// CUICmdExecPlayDialog
-////////////////////////////////////////////////////////////////////////////////////////////////////
-class CUICmdExecPlayDialog: public CUICmdExec
-{
-	OBJECT_BASIC_METHODS( CUICmdExecPlayDialog )
-private:
-	ZDATA
-	ZPARENT( CUICmdExec )
-	CPtr<IMission> pMission;
-	vector< CPtr<NWorld::CAckEvent> > phrases;
-	vector< CPtr<NWorld::CUnit> > units;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(2,(CUICmdExec *)this); f.Add(3,&pMission); f.Add(4,&phrases); f.Add(5,&units); return 0; }
-	//
-public:
-	CUICmdExecPlayDialog() {}
-	CUICmdExecPlayDialog( NWorld::CUICmd *pCmd, IMission *_pMission, 	
-		const vector< CPtr<NWorld::CUnit> > &_units, const vector< CPtr<NWorld::CAckEvent> > &_phrases );
-	//
-	bool Update( const STime &sTime );
-};
-////////////////////////////////////////////////////////////////////////////////////////////////////
-CUICmdExecPlayDialog::CUICmdExecPlayDialog( NWorld::CUICmd *pCmd, IMission *_pMission, 	
-	const vector< CPtr<NWorld::CUnit> > &_units, const vector< CPtr<NWorld::CAckEvent> > &_phrases ):
-	units( _units ), phrases( _phrases ), pMission( _pMission )
-{
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-bool CUICmdExecPlayDialog::Update( const STime &sTime )
-{
-	return true;
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-// CUICmdExecContinueChapter
-////////////////////////////////////////////////////////////////////////////////////////////////////
-class CUICmdExecContinueChapter: public CUICmdExec
-{
-	OBJECT_BASIC_METHODS( CUICmdExecContinueChapter )
-private:
-	ZDATA
-	ZPARENT( CUICmdExec )
-	CPtr<IMission> pMission;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(2,(CUICmdExec *)this); f.Add(3,&pMission); return 0; }
-	//
-public:
-	CUICmdExecContinueChapter() {}
-	CUICmdExecContinueChapter( NWorld::CUICmd *pCmd, IMission *_pMission );
-	//
-	bool Update( const STime &sTime );
-};
-////////////////////////////////////////////////////////////////////////////////////////////////////
-CUICmdExecContinueChapter::CUICmdExecContinueChapter( NWorld::CUICmd *pCmd, IMission *_pMission ):
-		CUICmdExec( pCmd ), pMission( _pMission )
-{
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-bool CUICmdExecContinueChapter::Update( const STime &sTime )
-{
-	// Dead path under the script-driven exit (CMission::ExecWorldCommands now handles CUICmdContinueChapter
-	// directly, pre-empting this executor). Kept defensive: post the teardown command, NOT CICEndMission --
-	// CICEndMission now only re-fires OnRealExit, which would loop here.
-	NMainLoop::Command( new CICRealEndMission( pMission ) );
-	return true;
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-// CUICmdExecLoadTemplate
-////////////////////////////////////////////////////////////////////////////////////////////////////
-class CUICmdExecLoadTemplate: public CUICmdExec
-{
-	OBJECT_BASIC_METHODS( CUICmdExecLoadTemplate )
-private:
-	ZDATA
-	ZPARENT( CUICmdExec )
-	CPtr<IMission> pMission;
-	CPtr<NScenario::CScenarioZone> pZone;
-	int nTemplateID;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(2,(CUICmdExec *)this); f.Add(3,&pMission); f.Add(4,&pZone); f.Add(5,&nTemplateID); return 0; }
-	//
-public:
-	CUICmdExecLoadTemplate() {}
-	CUICmdExecLoadTemplate( NWorld::CUICmd *pCmd, 
-		IMission *_pMission, NScenario::CScenarioZone *_pZone, int _nTemplateID );
-	//
-	bool Update( const STime &sTime );
-};
-////////////////////////////////////////////////////////////////////////////////////////////////////
-CUICmdExecLoadTemplate::CUICmdExecLoadTemplate( NWorld::CUICmd *pCmd, 
-	IMission *_pMission, NScenario::CScenarioZone *_pZone, int _nTemplateID ):
-		CUICmdExec( pCmd ), pMission( _pMission ), nTemplateID( _nTemplateID ), pZone( _pZone )
-{
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-bool CUICmdExecLoadTemplate::Update( const STime &sTime )
-{
-	NMainLoop::Command( new CICBeginMission( pZone, 
-		nTemplateID, vector<string>(), pMission->GetRPGGame() ) );
-	return true;
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-// CUICmdExecShowStore
-////////////////////////////////////////////////////////////////////////////////////////////////////
-class CUICmdExecShowStore: public CUICmdExec
-{
-	OBJECT_BASIC_METHODS( CUICmdExecShowStore )
-private:
-	ZDATA_(CUICmdExec)
-	CPtr<IMission> pMission;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CUICmdExec*)this); f.Add(2,&pMission); return 0; }
-
-public:
-	CUICmdExecShowStore() {}
-	CUICmdExecShowStore( NWorld::CUICmd *pCmd, IMission *_pMission );
-
-	bool Update( const STime &sTime );
-};
-////////////////////////////////////////////////////////////////////////////////////////////////////
-CUICmdExecShowStore::CUICmdExecShowStore( NWorld::CUICmd *pCmd, IMission *_pMission ):
-	CUICmdExec( pCmd ), pMission( _pMission )
-{
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-bool CUICmdExecShowStore::Update( const STime &sTime )
-{
-	pMission->SetPanelState( PANEL_STORE | PANEL_INVENTORY, true );
-	return true;
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-// CUICmdExecShowTeamMng
-////////////////////////////////////////////////////////////////////////////////////////////////////
-class CUICmdExecShowTeamMng: public CUICmdExec
-{
-	OBJECT_BASIC_METHODS( CUICmdExecShowTeamMng )
-private:
-	ZDATA_(CUICmdExec)
-	CPtr<IMission> pMission;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CUICmdExec*)this); f.Add(2,&pMission); return 0; }
-
-public:
-	CUICmdExecShowTeamMng() {}
-	CUICmdExecShowTeamMng( NWorld::CUICmd *pCmd, IMission *_pMission );
-
-	bool Update( const STime &sTime );
-};
-////////////////////////////////////////////////////////////////////////////////////////////////////
-CUICmdExecShowTeamMng::CUICmdExecShowTeamMng( NWorld::CUICmd *pCmd, IMission *_pMission ):
-	CUICmdExec( pCmd ), pMission( _pMission )
-{
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-bool CUICmdExecShowTeamMng::Update( const STime &sTime )
-{
-	NMainLoop::Command( new CICTeamMngMenu( pMission->GetActivePlayer()->GetGlobalPlayer(), pMission ) );
-	return true;
-}
+// W5 serialization-convergence: the NGame per-command UICmdExec WRAPPERS are REMOVED. Retail's
+// iUIExec.obj registers EXACTLY three exec classes (0x50412162 CUICmdMoveCameraExec / 0x50412163
+// CUICmdUnitCameraExec / 0x00183130 CUICmdExplosionCameraExec) and executes the wrapped commands
+// INLINE in CMission::ExecWorldCommand @0x1fd8c0:
+//   * CUICmdExecContinueChapter 0x50412164 -- was already dead (iMission.cpp posts CICRealEndMission
+//     inline, exactly retail);
+//   * CUICmdExecLoadTemplate 0x51312182 / CUICmdExecShowStore 0xB1122090 / CUICmdExecShowTeamMng
+//     0xB1122091 -- now inline arms in CMission::ExecWorldCommands (CICBeginMission /
+//     SetPanelState(PANEL_STORE|PANEL_INVENTORY) / CICTeamMngMenu with the retail 3rd nID arg);
+//   * CUICmdExecPlayDialog 0x50412165 -- was registered but never created (dialogs are handled
+//     inline via CMissionDlgUI, matching retail);
+//   * CUICmdFollowCameraExec / CUICmdRestoreCameraExec (unregistered) -- died with the dev-only
+//     CUICmdUnit arm; retail's follow behaviour is the arbitrated CUICmdUnitCamera ->
+//     CUICmdUnitCameraExec path (already live).
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // MustReplaceCameraExecutor / IsVisibleByActivePlayer  (iUIExec free fns)
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -460,72 +360,26 @@ bool IsVisibleByActivePlayer( NWorld::CUnit *pUnit, IMission *pMission )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CUICmdExec* CreateExecutor(NWorld::CUICmd* pCmd, IMission* pMission)
 {
-	CDynamicCast<NWorld::CUICmdTurn> pTurn(pCmd);
-	if (!pTurn)
-	{
-		CDynamicCast<NWorld::CUICmdUnit> pUnit(pCmd);
-		if (pUnit)
-		{
-			NWorld::CUnit* pWUnit = pUnit->pUnit;
-			if (!bCameraFollow)
-				return 0;
-			if (!pWUnit->IsPerformingAction())
-				return 0;
-			if (!pMission->GetActivePlayer()->IsUnitVisible(pWUnit))
-				return 0;
-			if (!pMission->IsActionExecuted() || pMission->IsReady())
-				return 0;
-			if (pMission->GetWorld()->GetCurrentPlayer() == pMission->GetActivePlayer()->GetPlayer())
-				return 0;
-
-			CUICmdExecContainer* pContainer = new CUICmdExecContainer(pUnit);
-			pContainer->Add(new CUICmdFollowCameraExec(pUnit, pMission, pUnit->pUnit));
-			pContainer->Add(new CUICmdRestoreCameraExec(pUnit, pMission));
-			return pContainer;
-		}
-		else {
-			CDynamicCast<NWorld::CUICmdMoveCamera> pCamera(pCmd);
-			if (pCamera)
-				return new CUICmdMoveCameraExec(pCmd, pMission, pCamera->pos, pCamera->transitionTime);
-			else {
-				CDynamicCast<NWorld::CUICmdContinueChapter> pContinueChapter(pCmd);
-				if (pContinueChapter)
-					return new CUICmdExecContinueChapter(pCmd, pMission);
-				else {
-					CDynamicCast<NWorld::CUICmdLoadTemplate> pLoadTemplate(pCmd);
-					if (pLoadTemplate)
-						return new CUICmdExecLoadTemplate(pCmd, pMission, pLoadTemplate->pZone, pLoadTemplate->nTemplateID);
-					else {
-						CDynamicCast<NWorld::CUICmdShowStore> pShowStore(pCmd);
-						if (pShowStore)
-							return new CUICmdExecShowStore(pCmd, pMission);
-						else {
-							CDynamicCast<NWorld::CUICmdShowTeamMng> pShowTeamMng(pCmd);
-							if (pShowTeamMng)
-								return new CUICmdExecShowTeamMng(pCmd, pMission);
-						}
-					}
-				}
-			}
-		}
-	}
-	//
+	// W5: every per-command wrapper arm is gone -- retail executes these commands INLINE in
+	// CMission::ExecWorldCommand @0x1fd8c0, and camera-locator commands (incl. the script camera
+	// move) ride the dedicated pExecLocator slot via CreateCameraExecutor. Nothing builds a
+	// general-purpose executor any more; an unhandled command simply drains (retail shape).
 	return 0;
 }
-////////////////////////////////////////////////////////////////////////////////////////////////////
-START_REGISTER(iMissionExec)
-	REGISTER_VAR_EX( "ui_followcamera", NGlobal::VarBoolHandler, &bCameraFollow, 0, true )
-FINISH_REGISTER
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 //
 using namespace NGame;
 //
+// cast-only registration (W4.2 CMissionBase split): CMissionBase holds CObj<CUICmdLocatorExec>
+// while the type is only forward-declared in most translation units (menus derive CMissionBase
+// via CRenderBaseInterface); this provides the CastToObjectBase/CastToUserObject helpers for the
+// incomplete-type path. The class stays UNREGISTERED for saveload (abstract, like retail).
+BASIC_REGISTER_CLASS( CUICmdLocatorExec )
+// W5 serialization-convergence: registrations now == retail's exact 3-exec set (iUIExec $E31/$E33/
+// $E35). The five dev wrapper ids (0x50412164/0x50412165/0x51312182/0xB1122090/0xB1122091) are
+// REMOVED with their classes -- all absent from retail (see the wrapper-removal banner above).
 REGISTER_SAVELOAD_CLASS( 0x50412162, CUICmdMoveCameraExec )
-REGISTER_SAVELOAD_CLASS( 0x50412165, CUICmdUnitCameraExec )	// fresh id: retail 0x50412163 = kept CUICmdExecPlayDialog
-REGISTER_SAVELOAD_CLASS( 0x50412163, CUICmdExecPlayDialog )
-REGISTER_SAVELOAD_CLASS( 0x50412164, CUICmdExecContinueChapter )
-REGISTER_SAVELOAD_CLASS( 0x51312182, CUICmdExecLoadTemplate )
-REGISTER_SAVELOAD_CLASS( 0xB1122090, CUICmdExecShowStore )
-REGISTER_SAVELOAD_CLASS( 0xB1122091, CUICmdExecShowTeamMng )
+REGISTER_SAVELOAD_CLASS( 0x50412163, CUICmdUnitCameraExec )
+REGISTER_SAVELOAD_CLASS( 0x00183130, CUICmdExplosionCameraExec )

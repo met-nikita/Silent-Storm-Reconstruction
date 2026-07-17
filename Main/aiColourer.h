@@ -173,7 +173,7 @@ public:
 	CMapColourer() : nLocalColors(0) {}
 	void SetLayer(CNodesLayer* _pLayer, IAIMap* _pMap, int _nLayer) 
 	{ 
-		pMap = new CNodesLayerProxy(_pLayer, _pMap); 
+		pMap = new CNodesLayerProxy(_pLayer);
 		nLayer = _nLayer; 
 	}
 	void ConstructColouring( CPathNetwork* pNet );

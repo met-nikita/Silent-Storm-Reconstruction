@@ -40,7 +40,7 @@ struct STessPoint
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // Functions
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-//! Возвращает высоту земли в произвольной точке
+//! пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅ пїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅ
 float GetHeight( float fX, float fY, const STerrainInfo &sInfo )
 {
 	int nX = fX;
@@ -962,6 +962,124 @@ void CTerrain::Update( bool bVisible /* = true  */ )
 	for ( int i = 0; i < regions.size(); ++i )
 		if ( IsValid( regions[i] ) )
 			regions[i]->Update( bVisible );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail NGScene::Interpolate @0x140bf0 (scalar form of the MMX per-channel RGBA lerp):
+// result = clamp( round( c1 + (c2-c1)*f ), 0, 255 ) per byte. DrawExplosion always blends toward
+// black (c2=0), darkening by (1-f).
+static DWORD InterpolateColor( DWORD c1, DWORD c2, float f )
+{
+	DWORD nRes = 0;
+	for ( int ch = 0; ch < 4; ++ch )
+	{
+		const int a = int( ( c1 >> ( ch * 8 ) ) & 0xff );
+		const int b = int( ( c2 >> ( ch * 8 ) ) & 0xff );
+		const int v = Clamp( Float2Int( a + ( b - a ) * f ), 0, 255 );
+		nRes |= DWORD( v ) << ( ch * 8 );
+	}
+	return nRes;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail CTerrain::DrawExplosion @0x38ab50 (disasm-decoded): grass-only blast feedback. The base
+// terrain texture is untouched -- the visible soil scorch is the tracker's CDecal; this darkens
+// the grass colour, carves the density core and prunes blades, then invalidates the region.
+void CTerrain::DrawExplosion( const CVec3 &vCenter, float fRadius )
+{
+	if ( !IsValid( pInfo ) )
+		return;
+	STerrainInfo &info = pInfo->GetWritableInfo();
+	const int nHX = info.heightMap.GetXSize();
+	const int nHY = info.heightMap.GetYSize();
+	const float fWorldToColour = 0.8f;             // colour cell = 1.25 = 2*FP_GRID_STEP
+	const float fColourToWorld = 1.25f;
+	const float fWorldToGrid = 1.0f / FP_GRID_STEP; // 1.6; density cell = FP_GRID_STEP
+	const float fCore = fRadius * 0.4f;             // blast core (density clear + blade prune)
+	const float fCore2 = fCore * fCore;
+	//
+	// (1) scorch the grass-colour grid toward black by 1-(d/r)^4 within the full radius
+	const int cMinX = Max( 0, Float2Int( ( vCenter.x - fRadius ) * fWorldToColour ) );
+	const int cMinY = Max( 0, Float2Int( ( vCenter.y - fRadius ) * fWorldToColour ) );
+	const int cMaxX = Float2Int( ( vCenter.x + fRadius ) * fWorldToColour );
+	const int cMaxY = Float2Int( ( vCenter.y + fRadius ) * fWorldToColour );
+	for ( int nLayer = 0; nLayer < info.grass.size(); ++nLayer )
+	{
+		SGrassLayer &layer = info.grass[nLayer];
+		const int nMaxX = Min( layer.grassColor.GetXSize() - 1, cMaxX );
+		const int nMaxY = Min( layer.grassColor.GetYSize() - 1, cMaxY );
+		for ( int y = cMinY; y <= nMaxY; ++y )
+		{
+			for ( int x = cMinX; x <= nMaxX; ++x )
+			{
+				const int hx = Clamp( 2 * x, 0, nHX - 1 );   // colour cell -> height index
+				const int hy = Clamp( 2 * y, 0, nHY - 1 );
+				const float dx = vCenter.x - x * fColourToWorld;
+				const float dy = vCenter.y - y * fColourToWorld;
+				const float dz = vCenter.z - float( info.heightMap[hy][hx] ) * FP_TERRAIN_H_SCALE;
+				const float fDist = sqrt( dx * dx + dy * dy + dz * dz );
+				if ( fDist <= fRadius )
+				{
+					float q = fDist / fRadius;
+					q = q * q;
+					layer.grassColor[y][x] = InterpolateColor( layer.grassColor[y][x], 0, 1.0f - q * q );
+				}
+			}
+		}
+	}
+	//
+	// (2)+(3) clear grass density + prune blades inside the r*0.4 core
+	const int gMinX = Max( 0, Float2Int( ( vCenter.x - fRadius ) * fWorldToGrid ) );
+	const int gMinY = Max( 0, Float2Int( ( vCenter.y - fRadius ) * fWorldToGrid ) );
+	const int gMaxX = Float2Int( ( vCenter.x + fRadius ) * fWorldToGrid );
+	const int gMaxY = Float2Int( ( vCenter.y + fRadius ) * fWorldToGrid );
+	for ( int nLayer = 0; nLayer < info.grass.size(); ++nLayer )
+	{
+		SGrassLayer &layer = info.grass[nLayer];
+		const int nMaxX = Min( layer.grass.GetXSize() - 1, gMaxX );
+		const int nMaxY = Min( layer.grass.GetYSize() - 1, gMaxY );
+		for ( int y = gMinY; y <= nMaxY; ++y )
+		{
+			for ( int x = gMinX; x <= nMaxX; ++x )
+			{
+				const int hx = Clamp( x, 0, nHX - 1 );       // density cell index == height index
+				const int hy = Clamp( y, 0, nHY - 1 );
+				const float dx = vCenter.x - x * FP_GRID_STEP;
+				const float dy = vCenter.y - y * FP_GRID_STEP;
+				const float dz = vCenter.z - float( info.heightMap[hy][hx] ) * FP_TERRAIN_H_SCALE;
+				if ( dx * dx + dy * dy + dz * dz <= fCore2 )
+					layer.grass[y][x] = 0;
+			}
+		}
+		// blade prune: compact in place, dropping blades inside the core in 3D
+		vector<CVec2> &blades = layer.blades;
+		const int nCount = blades.size();
+		int nDst = 0;
+		for ( int nSrc = 0; nSrc < nCount; ++nSrc )
+		{
+			blades[nDst] = blades[nSrc];
+			const float dx = vCenter.x - blades[nSrc].x;
+			const float dy = vCenter.y - blades[nSrc].y;
+			const float fD2 = dx * dx + dy * dy;
+			++nDst;
+			if ( fD2 <= fCore2 )
+			{
+				const int hx = Clamp( Float2Int( blades[nSrc].x * fWorldToGrid ), 0, nHX - 1 );
+				const int hy = Clamp( Float2Int( blades[nSrc].y * fWorldToGrid ), 0, nHY - 1 );
+				const float dz = float( info.heightMap[hy][hx] ) * FP_TERRAIN_H_SCALE - vCenter.z;
+				if ( dz * dz + fD2 <= fCore2 )
+					--nDst;   // inside the core in 3D -> drop
+			}
+		}
+		if ( nDst < nCount )
+			blades.resize( nDst );
+	}
+	//
+	// (4) invalidate the affected grass region (density bbox grown by one cell each side)
+	CTRect<int> rect;
+	rect.minx = gMinX - 1;
+	rect.miny = gMinY - 1;
+	rect.maxx = gMaxX + 1;
+	rect.maxy = gMaxY + 1;
+	pInfo->UpdateRegionGrass( rect );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 }

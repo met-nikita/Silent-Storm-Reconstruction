@@ -32,7 +32,8 @@ enum EStoreFilter
 // one CItemsMap placement grid per filter category (itemsMapsSet). The active filter (eFilter) selects
 // which grid the forwarders dispatch to. This is DISTINCT from the UI's NUI::CStoreSlot
 // (iStorePanel.cpp), which open-codes its own EFilter + placeMap; CStore is the standalone model the
-// release factored out (additive -- nothing references it yet).
+// release factored out. Owned per-player: NRPG::CGlobalPlayer::pStore (save tag 3, retail
+// CGlobalPlayer::operator& @0x29cba0), constructed in the side-seeded player ctor path.
 //
 // Reconstructed from the matched-release decode (oracle: decomp/src/s2_rpgstore.h). This landing
 // covers the dependency-free surface, wired straight to the REAL CItemsMap API (no hooks): the ctor,
@@ -50,11 +51,11 @@ class CStore: public CObjectBase
 	vector<bool>               flagsSet;       // +0x14  per-category "panel dirty" flags
 	vector<SStoreItem>         itemsSet;       // +0x20  priced stock rows (reuses NRPG::SStoreItem)
 	vector< CObj<CItemsMap> >  itemsMapsSet;   // +0x2c  one placement grid per category
-	// flagsSet (release tag 4) is INTENTIONALLY not serialized: with this build's std::vector<bool>
-	// (bit-packed) the saveload framework's DoVector takes &data[i], which is ill-formed for the bit
-	// proxy and would not compile. flagsSet is a transient dirty-flag cache, so dropping it from the
-	// save image is behaviour-neutral for this additive (never-saved-yet) class.
-	ZEND int operator&( CStructureSaver &f ) { f.Add( 2, &pPlayer ); f.Add( 3, &eFilter ); f.Add( 5, &itemsSet ); f.Add( 6, &itemsMapsSet ); return 0; }
+	// Full release tag table (operator& @0x2b2a90): 2=pPlayer, 3=eFilter, 4=flagsSet
+	// (DoDataVector<bool>), 5=itemsSet, 6=itemsMapsSet. flagsSet serializes through the framework's
+	// dedicated std::vector<bool> path (BasicChunk1.h), which writes the exact retail
+	// DoDataVector<bool> blob layout despite this build's bit-packed vector<bool>.
+	ZEND int operator&( CStructureSaver &f ) { f.Add( 2, &pPlayer ); f.Add( 3, &eFilter ); f.Add( 4, &flagsSet ); f.Add( 5, &itemsSet ); f.Add( 6, &itemsMapsSet ); return 0; }
 
 public:
 	CStore() {}                                       // default (saveload New / DestroyContents)
@@ -71,6 +72,10 @@ public:
 	void SetSize( int newX, int newY );                                   // @0x2b0560 (vtbl +0x24)
 	CTPoint<int> GetSize();                                               // @0x2b0570 (vtbl +0x28)
 	void Take( IInventoryItem *item );                                    // @0x2b0630 (vtbl +0x10)
+	// direct stock-row access for the CPlayer store flow (retail funnels stock maintenance through
+	// CStore::Update/PlaceItem -- @0x2b0da0 is register-garbled/unrecovered in the oracle, so the
+	// dev regen logic operates on the rows directly until PlaceItem can be re-derived).
+	vector<SStoreItem>& ItemsSet() { return itemsSet; }
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 }

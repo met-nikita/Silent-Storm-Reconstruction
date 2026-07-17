@@ -126,18 +126,18 @@ public:
 // CUICmdPlaySound -- release-new: the script PlaySound/Play3DSound bindings queue this; when the mission
 // processes it (CMissionBase::ExecWorldCommand) it opens a channel on the mission's sound scene and parks
 // the live handle in pChannel so the StopSound binding can release (stop) it. Kept alive while playing by
-// the script's AddMiscObject holder. pChannel is runtime-only (not serialized).
+// the script's AddMiscObject holder. Retail serializes pChannel as a WEAK ref at tag 5 (@0x2f2e00).
 class CUICmdPlaySound: public CUICmd
 {
 	OBJECT_BASIC_METHODS( CUICmdPlaySound );
 	ZDATA
 public:
 	ZPARENT( CUICmd );
-	CObj<CObjectBase> pChannel;		// the live playing channel (null when stopped / not yet played)
+	CPtr<CObjectBase> pChannel;		// the live playing channel (null when stopped / not yet played; owned by the script holder)
 	CDBPtr<NDb::CSound> pSound;		// the DB sound to play
 	bool b3DSound;					// 3D (positional) vs 2D
 	CVec3 vPos;						// the 3D position (when b3DSound)
-	ZEND int operator&( CStructureSaver &f ) { f.Add(2,(CUICmd *)this); f.Add(3,&pSound); f.Add(4,&b3DSound); f.Add(5,&vPos); return 0; }
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,(CUICmd *)this); f.Add(3,&pSound); f.Add(4,&b3DSound); f.Add(5,&pChannel); f.Add(6,&vPos); return 0; }   // retail @0x2f2e00 (5=the live channel holder)
 	//
 	CUICmdPlaySound(): b3DSound( false ), vPos( 0, 0, 0 ) {}
 	CUICmdPlaySound( NDb::CSound *_pSound, bool _b3D ): CUICmd( UICP_HIGHEST ), pSound( _pSound ), b3DSound( _b3D ), vPos( 0, 0, 0 ) {}
@@ -155,7 +155,7 @@ public:
 	CObj<CObjectBase> pHandle;		// the live particle handle (null when stopped / not yet played)
 	CDBPtr<NDb::CTEffect> pEffect;	// the DB effect to play
 	CVec3 vPos;						// the world position to anchor the effect at
-	ZEND int operator&( CStructureSaver &f ) { f.Add(2,(CUICmd *)this); f.Add(3,&pEffect); f.Add(4,&vPos); return 0; }
+	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CUICmd *)this); f.Add(2,&pEffect); f.Add(3,&vPos); f.Add(4,&pHandle); return 0; }   // retail @0x2f3040 (base at tag 1; 4=the live handle)
 	//
 	CUICmdPlayEffect(): vPos( 0, 0, 0 ) {}
 	CUICmdPlayEffect( NDb::CTEffect *_pEffect, const CVec3 &_vPos ): CUICmd( UICP_HIGHEST ), pEffect( _pEffect ), vPos( _vPos ) {}
@@ -171,7 +171,7 @@ public:
 	ZPARENT( CUICmd );
 	CDBPtr<NDb::CTAmbientLight> pLight;	// the ambient-light DB record
 	bool bImmediate;					// release's second ctor arg (smooth vs immediate)
-	ZEND int operator&( CStructureSaver &f ) { f.Add(2,(CUICmd *)this); f.Add(3,&pLight); f.Add(4,&bImmediate); return 0; }
+	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CUICmd *)this); f.Add(2,&pLight); f.Add(3,&bImmediate); return 0; }   // retail @0x2ee690 (base at tag 1)
 	//
 	CUICmdSetAmbient(): bImmediate( false ) {}
 	CUICmdSetAmbient( NDb::CTAmbientLight *_pLight, bool _bImmediate ): CUICmd( UICP_HIGHEST ), pLight( _pLight ), bImmediate( _bImmediate ) {}
@@ -188,7 +188,7 @@ class CUICmdSetAmbientEffect: public CUICmd
 public:
 	ZPARENT( CUICmd );
 	CDBPtr<NDb::CTEffect> pEffect;	// the ambient effect DB record (null -> clear the current ambient effect)
-	ZEND int operator&( CStructureSaver &f ) { f.Add(2,(CUICmd *)this); f.Add(3,&pEffect); return 0; }
+	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CUICmd *)this); f.Add(2,&pEffect); return 0; }   // retail @0x2f2eb0 (base at tag 1)
 	//
 	CUICmdSetAmbientEffect() {}
 	CUICmdSetAmbientEffect( NDb::CTEffect *_pEffect ): CUICmd( UICP_HIGHEST ), pEffect( _pEffect ) {}
@@ -204,7 +204,7 @@ public:
 	ZPARENT( CUICmd );
 	CVec3 vColor;		// fade target colour (rgb)
 	STime sFadeTime;	// fade duration (ms)
-	ZEND int operator&( CStructureSaver &f ) { f.Add(2,(CUICmd *)this); f.Add(3,&vColor); f.Add(4,&sFadeTime); return 0; }
+	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CUICmd *)this); f.Add(2,&vColor); f.Add(3,&sFadeTime); return 0; }   // retail @0x2f2470 (base at tag 1)
 	//
 	CUICmdBeginFade(): vColor( 0, 0, 0 ), sFadeTime( 0 ) {}
 	CUICmdBeginFade( const CVec3 &_vColor, STime _sFadeTime ): CUICmd( UICP_HIGHEST ), vColor( _vColor ), sFadeTime( _sFadeTime ) {}
@@ -261,7 +261,7 @@ class CUICmdShowHint: public CUICmd
 public:
 	ZPARENT( CUICmd );
 	CDBPtr<NDb::CUIHint> pHint;		// +0x10: the hint DB record to show
-	ZEND int operator&( CStructureSaver &f ) { f.Add(2,(CUICmd *)this); f.Add(3,&pHint); return 0; }
+	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CUICmd *)this); f.Add(2,&pHint); return 0; }   // retail @0x2f2e70 (base at tag 1)
 	//
 	CUICmdShowHint() {}
 	CUICmdShowHint( NDb::CUIHint *_pHint ): CUICmd( UICP_HIGHEST ), pHint( _pHint ) {}
@@ -283,9 +283,9 @@ public:
 	CUICmdTutorialMode( bool _bTutorial ): CUICmd( UICP_HIGHEST ), bTutorial( _bTutorial ) {}
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// CUICmdFirstMissionMode -- SetFirstMissionMode(b) (retail @0x2ee200): the dispatch strips the 0x14 HUD
-// panels now + latches CMission::bSpecialFirstMissionMode (which makes future SetPanelState keep those
-// panels off). Fresh save id.
+// CUICmdFirstMissionMode -- SetFirstMissionMode(b) (retail @0x2ee200): the dispatch closes the medals/
+// biography panels (retail mask 0x14 in RETAIL bit values) + latches CMission::bSpecialFirstMissionMode
+// (which makes future SetPanelState keep those panels off). Fresh save id.
 class CUICmdFirstMissionMode: public CUICmd
 {
 	OBJECT_BASIC_METHODS( CUICmdFirstMissionMode );
@@ -326,7 +326,7 @@ public:
 	ZPARENT( CUICmd );
 	bool bMode;			// +0x10: true = may leave the zone, false = leaving is blocked
 	int nReason;		// +0x14: DB string id of the "can't leave" message (-1 = none)
-	ZEND int operator&( CStructureSaver &f ) { f.Add(2,(CUICmd *)this); f.Add(3,&bMode); f.Add(4,&nReason); return 0; }
+	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CUICmd *)this); f.Add(2,&nReason); f.Add(3,&bMode); return 0; }   // retail @0x2f2540 (base at 1; 2=nStringID, 3=bMode)
 	//
 	CUICmdLeaveZoneMode(): bMode( true ), nReason( -1 ) {}
 	CUICmdLeaveZoneMode( bool _bMode, int _nReason ): CUICmd( UICP_HIGHEST ), bMode( _bMode ), nReason( _nReason ) {}
@@ -341,7 +341,7 @@ class CUICmdPlayVideo: public CUICmd
 public:
 	ZPARENT( CUICmd );
 	string szFileName;	// +0x10: the .seq sequence file to play
-	ZEND int operator&( CStructureSaver &f ) { f.Add(2,(CUICmd *)this); f.Add(3,&szFileName); return 0; }
+	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CUICmd *)this); f.Add(2,&szFileName); return 0; }   // retail @0x2ec8e0 (base at tag 1)
 	//
 	CUICmdPlayVideo() {}
 	CUICmdPlayVideo( const string &_szFileName ): CUICmd( UICP_HIGHEST ), szFileName( _szFileName ) {}
@@ -349,20 +349,10 @@ public:
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // Camera control
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-class CUICmdMoveCamera: public CUICmd
-{
-	OBJECT_BASIC_METHODS( CUICmdMoveCamera );
-	ZDATA
-public:
-	ZPARENT( CUICmd );
-	ICamera::SCameraPos pos;
-	STime transitionTime;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(2,(CUICmd *)this); f.Add(3,&pos); f.Add(4,&transitionTime); return 0; }
-	//
-	CUICmdMoveCamera() {}
-	CUICmdMoveCamera(	const ICamera::SCameraPos &_pos, STime _transitionTime ):
-		CUICmd( UICP_CAMERAMOVE  ), pos( _pos ), transitionTime( _transitionTime ) {}
-};
+// (dev CUICmdMoveCamera 0x51402133 REMOVED -- W5 serialization-convergence: retail deleted the
+// class and reused its Jan03 id 0x51402130 for CUICmdScriptMoveCamera below; the lua CameraMove
+// binding now posts a single-waypoint CUICmdScriptMoveCamera exactly like retail luaCameraMove
+// @0x2ef8c0.)
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CUICmdScriptMoveCamera -- release-new: plays the camera through a list of waypoints over transitionTime.
 // Built by the CameraSequence / CameraMove script bindings; queued via CScript::AddUICommandWithID so the
@@ -418,6 +408,32 @@ public:
 		bUseSloMo( _bUseSloMo ), fSloMoIncrProbability( _fProb ) {}
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// CUICmdPointCamera (retail wMain.obj, 0x34 bytes, saveload id 0x71007380) -- "focus the camera on
+// this world point" (explosions; retail also produces it from the AI sound ping). Producers: both
+// CWorld::AddGrenadeExplosion overloads (PR_EXPLOSION, bUseSloMo = fWaveRadius > 2.99, prob =
+// fWaveRadius - 2, 3 s dwell, nFloor -100 = "resolve the current cut floor" sentinel). Consumed by
+// the mission's pExecLocator arbitration -> CUICmdExplosionCameraExec.
+////////////////////////////////////////////////////////////////////////////////////////////////////
+class CUICmdPointCamera: public CUICmdCameraLocator
+{
+	OBJECT_BASIC_METHODS( CUICmdPointCamera );
+	ZDATA_(CUICmdCameraLocator)
+public:
+	CVec3 ptExplosion;                  // +0x14
+	bool  bUseSloMo;                    // +0x20
+	float fSloMoIncrProbability;        // +0x24
+	bool  bNoZoom;                      // +0x28  carried for parity (no reader found in the retail exec)
+	int   nExecTime;                    // +0x2c  dwell, seconds
+	int   nFloor;                       // +0x30  -100 sentinel -> exec resolves the current cut floor
+	// retail operator& @0x3702e0 chunk order
+	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CUICmdCameraLocator*)this); f.Add(2,&ptExplosion); f.Add(3,&bUseSloMo); f.Add(4,&fSloMoIncrProbability); f.Add(5,&bNoZoom); f.Add(6,&nExecTime); f.Add(7,&nFloor); return 0; }
+	//
+	CUICmdPointCamera(): ptExplosion( VNULL3 ), bUseSloMo( false ), fSloMoIncrProbability( 0 ), bNoZoom( false ), nExecTime( 0 ), nFloor( -100 ) {}
+	CUICmdPointCamera( const CVec3 &_pt, int _nPriority, bool _bUseSloMo, float _fProb, bool _bNoZoom, int _nExecTime, int _nFloor ):
+		CUICmdCameraLocator( _nPriority ), ptExplosion( _pt ), bUseSloMo( _bUseSloMo ),
+		fSloMoIncrProbability( _fProb ), bNoZoom( _bNoZoom ), nExecTime( _nExecTime ), nFloor( _nFloor ) {}
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
 // CUICmdSetCameraClipDistance -- release-new: sets the camera near/far clip planes (CameraSetClipping binding).
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CUICmdSetCameraClipDistance: public CUICmd
@@ -435,27 +451,12 @@ public:
 		fMinDistance( _fMinDistance ), fMaxDistance( _fMaxDistance ) {}
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-class CUICmdTurn: public CUICmd
-{
-	OBJECT_BASIC_METHODS(CUICmdTurn);
-public:
-	ZDATA_(CUICmd)
-	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CUICmd*)this); return 0; }
-
-	CUICmdTurn(): CUICmd( UICP_TURN ) {}
-};
-////////////////////////////////////////////////////////////////////////////////////////////////////
-class CUICmdUnit: public CUICmd
-{
-	OBJECT_BASIC_METHODS(CUICmdUnit);
-public:
-	ZDATA_(CUICmd)
-	CPtr<CUnit> pUnit;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CUICmd*)this); f.Add(2,&pUnit); return 0; }
-
-	CUICmdUnit() {}
-	CUICmdUnit( CUnit *_pUnit ): CUICmd( UICP_UNIT ), pUnit( _pUnit ) {}
-};
+// (dev CUICmdTurn 0xB1011163 + CUICmdUnit 0x53115181 REMOVED -- W5 serialization-convergence: both
+// ids are ABSENT from retail (their Jan03 ids were repurposed for the retail camera commands).
+// CUICmdTurn had ZERO producers; CUICmdUnit's producers were already retired with retail proof
+// (wUnitMove.cpp CExecMove @0x3b83a0, wUnitServer.cpp @0x3bf470, wMain.cpp CheckInterrupt
+// @0x3684c0) and its sole consumer was the dev-only follow/restore camera arm (gone with W5's
+// iMissionExec wrapper removal). Retail's unit auto-focus is CUICmdUnitCamera 0xB1011162.)
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CUICmdAIUnitWillMove (aiCommander.obj: ctor @0x36020, operator& @0x36d80, MakeCopy @0x361c0,
 // DestroyContents @0x36250; registered @0x392b90, save id 0x02973150). The AI posts one each time the

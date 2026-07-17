@@ -537,11 +537,11 @@ void CShadowMapsShare::Refresh()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void DrawBorder( NGfx::CRenderContext *pRC, int nSize )
 {
-	CRectLayout borderLayout;
-	borderLayout.AddRect( 0, 0, CTRect<float>( 0, 0, nSize, 1 ) );
-	borderLayout.AddRect( 0, 0, CTRect<float>( 0, 0, 1, nSize ) );
-	borderLayout.AddRect( 0, nSize - 1, CTRect<float>( 0, 0, nSize, 1 ) );
-	borderLayout.AddRect( nSize - 1, 0, CTRect<float>( 0, 0, 1, nSize ) );
+	CRectLayout borderLayout;   // quad size == texrect dims (retail 6-arg AddRect; the scale-less layout)
+	borderLayout.AddRect( 0, 0, nSize, 1, CTRect<float>( 0, 0, nSize, 1 ) );
+	borderLayout.AddRect( 0, 0, 1, nSize, CTRect<float>( 0, 0, 1, nSize ) );
+	borderLayout.AddRect( 0, nSize - 1, nSize, 1, CTRect<float>( 0, 0, nSize, 1 ) );
+	borderLayout.AddRect( nSize - 1, 0, 1, nSize, CTRect<float>( 0, 0, 1, nSize ) );
 	NGfx::C2DQuadsRenderer qr( *pRC, CVec2( nSize, nSize ), NGfx::QRM_DEPTH_NONE|NGfx::QRM_NOCOLOR );
 	RenderRectLayout( &qr, 0, borderLayout );
 }
@@ -551,7 +551,7 @@ void SetAndClearRT( NGfx::CRenderContext *pRC, NGfx::CTexture *pTex, int nWriteM
 	pRC->SetTextureRT( pTex );
 	//pRC->ClearBuffers( 0 );//0xffffffff );
 	CRectLayout blackSquare;
-	blackSquare.AddRect( 0, 0, CTRect<float>( 0, 0, nSize, nSize), NGfx::SPixel8888(0,0,0,0) );
+	blackSquare.AddRect( 0, 0, nSize, nSize, CTRect<float>( 0, 0, nSize, nSize), NGfx::SPixel8888(0,0,0,0) );
 	ASSERT( nWriteMask );
 	pRC->SetColorWrite( (NGfx::EColorWriteMask)nWriteMask );
 	NGfx::C2DQuadsRenderer qr( *pRC, CVec2( nSize, nSize ), NGfx::QRM_OVERWRITE|NGfx::QRM_SOLID );

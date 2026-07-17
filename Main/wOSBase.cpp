@@ -36,13 +36,15 @@ static bool IsOccluder( NDb::CModel *pModel )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CObjectServerBase
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail ctor @0x3862e0: takes the element's NDb::ETimeOfDay and stores it into eLightActivity (@+104)
 CObjectServerBase::CObjectServerBase( CWorld *_pWorld, const SObjectPlace &_pos, bool _bLightMap,
-	NDb::CObject *_pDbO, NRPG::IObject *_pRPG, const vector<int> &_vCreateFlags, bool _bBorder )
+	NDb::CObject *_pDbO, NRPG::IObject *_pRPG, const vector<int> &_vCreateFlags, ETimeOfDay _eTimeOfDay, bool _bBorder )
 	: pWorld(_pWorld), position(_pos), bLightMap(_bLightMap), vCreateFlags(_vCreateFlags), bBorder( _bBorder )
 {
 	pRPG = _pRPG;
 	pDbObject = _pDbO;
 	nDestroyStage = 0;
+	eLightActivity = _eTimeOfDay;
 	tStageChange = 0;
 	tLastSound = pWorld->GetTime()->GetValue();
 	bindGlobal.Link( pWorld->GetActive(), this );
@@ -64,6 +66,12 @@ NDb::CDebrisMaterial* CObjectServerBase::GetDebrisMaterial() const
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CObjectServerBase::IsTargetable() const
 {
+	// NULL-record hardening (same policy as GetDecalID above): retail @0x383b20 derefs unguarded,
+	// but retail's data guarantees a live traced object always carries its record -- this tree can
+	// produce record-less object servers (default-ctor save path / degenerate map objects), and the
+	// cursor trace crashed on one (TraceCursor -> IsTargetable). No record == not a pick target.
+	if ( !pDbObject )
+		return false;
 	return pDbObject->bTargetable;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -275,14 +283,18 @@ void CObjectServerBase::AttachExplosion( NDb::CRPGGrenade *pGrenade )
 	pAttachedGrenade = pGrenade;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-int CObjectServerBase::ProcessAttack( int nUserID, NRPG::CAttackPortion *pAttack, NDb::CRPGArmor *pArmor )
+// retail @0x385130: forwards the incoming world to the NRPG side -- the seam that carries pWorld
+// down to CObject::ProcessAttack @0x2ad3f0. AddGrenadeExplosion below goes to this->pWorld
+// (member 72, disasm `mov ecx,[esi+0x40]`), so the param must not shadow it.
+int CObjectServerBase::ProcessAttack( NWorld::IWorld *_pWorld, int nUserID, NRPG::CAttackPortion *pAttack,
+	const CVec3 &vDir, NDb::CRPGArmor *pArmor )
 {
 	if ( !IsValid( this ) )
 		return false;
 	CDynamicCast<NRPG::IAttackable> pAtk( pRPG );
 	ASSERT( pAtk );
 	int nPrevStage = pRPG->GetDestroyStage();
-	int nRes = pAtk->ProcessAttack( nUserID, pAttack, pArmor );
+	int nRes = pAtk->ProcessAttack( _pWorld, nUserID, pAttack, vDir, pArmor );
 	if ( nPrevStage != pRPG->GetDestroyStage() )
 	{
 		// retail @0x785xxx stage-change block: MakeDestroySound @0x384100 (the throttled helper -- a burst of
@@ -353,6 +365,11 @@ int CObjectServerBase::ProcessAttack( int nUserID, NRPG::CAttackPortion *pAttack
 void CObjectServerBase::AddLights( IRenderVisitor *p, NDb::CContainerModel *pCont, const SFBTransform &rv )
 {
 	if ( !pCont )
+		return;
+	// retail @0x383d50: light emission is gated by the object's time-of-day activity window --
+	// active iff the object is ANYTIME, OR the world is ANYTIME, OR they match.
+	ETimeOfDay tod = pWorld->GetTimeOfDay();
+	if ( !( eLightActivity == TOD_ANYTIME || tod == TOD_ANYTIME || tod == eLightActivity ) )
 		return;
 	if ( pCont->ptPLightCr != VNULL3 )
 	{
@@ -431,27 +448,31 @@ void CObjectServerBase::Visit( IRenderVisitor *p )
 	AddObject( p, pDbObject, rv );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail @0x783c30: TS_COVER rides TR_DAMAGE (TR_COVER is never read); fully transparent
+// armor (fTransparency == 1) suppresses TS_VISION entirely; TR_LADDER -> TS_LADDER_PART.
 int GetMask( NDb::CAIGeometry *pAIGeometry, NDb::CRPGArmor *pArmor )
 {
-	int nMask = 0;
 	if ( !pAIGeometry )
 		return TS_VIRTUAL;
-	if ( pAIGeometry->traficability & NDb::TR_DAMAGE )
-		nMask |= TS_FRAGMENTED;
-	else
-		nMask |= TS_VIRTUAL;
+	int nMask = ( pAIGeometry->traficability & NDb::TR_DAMAGE ) ? ( TS_FRAGMENTED|TS_COVER ) : TS_VIRTUAL;
 	if ( pAIGeometry->traficability & NDb::TR_VISION )
 	{
-		nMask |= TS_VISION;
-		if ( pArmor && pArmor->pMaterial && pArmor->pMaterial->fTransparency > 0 )
-			nMask |= TS_VISION_SOLID;
+		float fTransparency = 0;
+		if ( pArmor && pArmor->pMaterial )
+			fTransparency = pArmor->pMaterial->fTransparency;
+		if ( fTransparency != 1.0f )
+		{
+			nMask |= TS_VISION;
+			if ( fTransparency > 0 )
+				nMask |= TS_VISION_SOLID;
+		}
 	}
 	if ( pAIGeometry->traficability & NDb::TR_PASS )
 		nMask |= TS_PASS_BLOCKER|TS_WEAPON_BLOCKER;
-	if ( pAIGeometry->traficability & NDb::TR_COVER )
-		nMask |= TS_COVER;
 	if ( pAIGeometry->traficability & NDb::TR_ITEM_BLOCKER )
 		nMask |= TS_ITEM_BLOCKER;
+	if ( pAIGeometry->traficability & NDb::TR_LADDER )
+		nMask |= TS_LADDER_PART;
 	return nMask;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -619,9 +640,10 @@ int CObjectServerBase::GetDBObjectID() const
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CAnimObjectServerBase
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail ctor @0x386510: eTimeOfDay appended after vCreateFlags, forwarded to the base ctor
 CAnimObjectServerBase::CAnimObjectServerBase( CWorld *pWorld, const SObjectPlace &pos, bool bLightMap,
-	NDb::CObject *pO, NRPG::IObject *pRPG, CFuncBase<STime> *_pTime, const vector<int> &vCreateFlags ) :
-	CObjectServerBase( pWorld, pos, bLightMap, pO, pRPG, vCreateFlags ), pTime(_pTime)
+	NDb::CObject *pO, NRPG::IObject *pRPG, CFuncBase<STime> *_pTime, const vector<int> &vCreateFlags, ETimeOfDay eTimeOfDay ) :
+	CObjectServerBase( pWorld, pos, bLightMap, pO, pRPG, vCreateFlags, eTimeOfDay ), pTime(_pTime)
 {
 	NDb::CContainerModel *pCont = pDbObject->pModels[nDestroyStage];
 	ASSERT(pCont);

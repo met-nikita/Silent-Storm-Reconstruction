@@ -5,6 +5,7 @@
 #include "wUnitServer.h"
 #include "RPGGame.h"
 #include "RPGGlobal.h"
+#include "RPGStore.h"    // NRPG::CStore -- the serialized vendor stock (CGlobalPlayer tag 3)
 #include "RPGUnitInfo.h"
 #include "wObject.h"
 #include "..\DBFormat\DataFormat.h"
@@ -19,7 +20,9 @@
 #include "GSceneUtils.h"
 #include "aiMap.h"
 #include "aiStability.h"
+#include "..\MiscDll\Commands.h"   // REGISTER_VAR_EX (game_eq_on_grenades)
 #include "wDebris.h"
+#include "wHintsFunc.h"  // NAI::FindClosePositionOnSurface @0x645b0
 #include "BuildingGrid.h"
 #include "GAnimation.h"
 #include "MakeBuilding.h"
@@ -41,7 +44,6 @@
 #include "..\DBFormat\DataTerrain.h"
 #include "..\DBFormat\DataRPG.h"
 #include "aiJob.h"
-#include "aiSignal.h"
 #include "A5Script.h"
 #include "scriptCallLua.h"
 #include "..\DBFormat\DataScenario.h"
@@ -90,6 +92,9 @@ const int N_SOUND_PARTICLE_ID = 48;
 const int N_SOUND_MARKER_MODEL_ID = 3899;   // @0x369110: the heard-not-seen noise-marker DB mesh (0xf3b)
 const int N_MAX_MOVE_TO_BLOCK_REAL_TIME = 10;
 const int N_STOREPLACE_WIDTH = 10; // If you change this, also you must change N_STORESLOT_DEFWIDTH in iStorePanel
+// retail @VA 0x9c7b04 "game_eq_on_grenades" (VarBoolHandler, default 0, saved): gates the
+// grenade-blast camera-shake event production in AddGrenadeExplosion.
+static bool bEQonGrenades = false;
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CWorld *pCurrentWorld = 0;
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -273,25 +278,32 @@ void CPlayer::GetUnitsRPGs( vector< CPtr<NRPG::IUnitMission> > *pRes ) const
 		pRes->push_back( units[k]->GetUnitRPG() );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-bool CPlayer::GetInHandItem( SItemInfo *pInfo ) const
+// retail CPlayer::GetInHandItem @0x386ae0 -- the player's in-hand item is the ownerless sHandItem
+// (tag 9) if it holds a live item, else the FIRST hand item found on an own unit that CanFight().
+// The whole SItem is copied out (SItem::operator=), so the item's drag ORIGIN (eType/nSlot/
+// sPosition) reaches the caller -- CExecMoveInventoryItem::GetActionType @0x3a7990 depends on it.
+//
+// The unit skip is CanFight(), NOT !IsDead(): @0x386ae0 dispatches the units' vtbl+0x44, and the
+// CUnitServer primary vftable (VA 0x8cd12c, the ??_7CUnitServer@NWorld@@6BIVisObj@1@@ at offset 0)
+// slot 17 reads 0x7c6840 = CUnitServer::CanFight @0x3c6840 = !IsDead() && !IsUnconscious()
+// (its own slots +0x3c / +0x40). So retail additionally skips UNCONSCIOUS units.
+bool CPlayer::GetInHandItem( SItem *pInfo ) const
 {
-	if ( IsValid( pInHandItem ) )
+	if ( IsValid( sHandItem.pItem ) )
 	{
-		pInfo->pItem = pInHandItem;
+		*pInfo = sHandItem;
 		return true;
 	}
 
 	for ( int nTemp = 0; nTemp < units.size(); nTemp++ )
 	{
-		CPtr<CUnit> pUnit = units[nTemp];
-		if ( pUnit->IsDead() )
+		CPtr<CUnitServer> pUnit = units[nTemp].GetPtr();
+		if ( !pUnit->CanFight() )
 			continue;
 
-		CPtr<NRPG::IInventoryItem> pItem = pUnit->GetRPG()->GetInventoryInfo()->GetHandItem();
-		if ( IsValid( pItem ) )
+		if ( IsValid( pUnit->GetHandItem().pItem ) )		// retail: pUnit+0x200 = CUnitServer::sHandItem
 		{
-			pInfo->pUnit = pUnit;
-			pInfo->pItem = pItem;
+			*pInfo = pUnit->GetHandItem();
 			return true;
 		}
 	}
@@ -299,13 +311,18 @@ bool CPlayer::GetInHandItem( SItemInfo *pInfo ) const
 	return false;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CPlayer::SetInHandItem( const SItemInfo &sInfo )
+// retail CPlayer::SetInHandItem @0x386e70 -- hand state belongs to the UNIT when there is one
+// (CUnitServer::SetHandItem @0x387b30, which also pins the item alive via pHandItemHolder);
+// only an ownerless item falls back to the player's own sHandItem (tag 9). NOT the inventory:
+// retail's NRPG::CInventory has no hand member at all (PDB size 0x40 = {nActiveSlot, pOwner,
+// backpackMap, items, slots, pPK}) and operator& @0x29e900 emits {2,3,4,6,7,8} -- no tag 5.
+void CPlayer::SetInHandItem( const SItem &sInfo )
 {
 	CDynamicCast<CUnitServer> pUS( sInfo.pUnit );
 	if ( IsValid( pUS ) )
-		pUS->GetUnitRPG()->GetInventory()->SetHandItem( sInfo.pItem );
+		pUS->SetHandItem( sInfo );
 	else
-		pInHandItem = sInfo.pItem;
+		sHandItem = sInfo;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CPlayer::GetStoreItems( list<CPtr<NRPG::IInventoryItem> > *pItems )
@@ -314,7 +331,11 @@ void CPlayer::GetStoreItems( list<CPtr<NRPG::IInventoryItem> > *pItems )
 		return;
 
 	int nGameRating = pGlobalGame->pScenarioTracker->GetMaxDifficulty();
-	list<NRPG::SStoreItem> &storeItemsList = pGlobalPlayer->storeItemsList;
+	// retail: the stock rows live on the player's serialized CStore (CGlobalPlayer tag 3), so the
+	// vendor stock survives save/load; the Jan03 transient storeItemsList is gone.
+	if ( !IsValid( pGlobalPlayer->pStore ) )
+		pGlobalPlayer->pStore = new NRPG::CStore( pGlobalPlayer );
+	vector<NRPG::SStoreItem> &storeItemsList = pGlobalPlayer->pStore->ItemsSet();
 
 	{
 		CDBTable<NDb::CRPGStoreItem> *pStoreItemsTable = NDatabase::GetTable<NDb::CRPGStoreItem>();
@@ -337,7 +358,7 @@ void CPlayer::GetStoreItems( list<CPtr<NRPG::IInventoryItem> > *pItems )
 				continue;
 
 			bool bFound = false;
-			for( list<NRPG::SStoreItem>::const_iterator iTemp = storeItemsList.begin(); iTemp != storeItemsList.end(); iTemp++ )
+			for( vector<NRPG::SStoreItem>::const_iterator iTemp = storeItemsList.begin(); iTemp != storeItemsList.end(); iTemp++ )
 			{
 				if ( iTemp->pStoreItem != pItem )
 					continue;
@@ -381,7 +402,7 @@ void CPlayer::GetStoreItems( list<CPtr<NRPG::IInventoryItem> > *pItems )
 		}
 	}
 
-	for( list<NRPG::SStoreItem>::iterator iTemp = storeItemsList.begin(); iTemp != storeItemsList.end(); iTemp++ )
+	for( vector<NRPG::SStoreItem>::iterator iTemp = storeItemsList.begin(); iTemp != storeItemsList.end(); iTemp++ )
 	{
 		if ( IsValid( iTemp->pStoreItem ) )
 		{
@@ -415,8 +436,10 @@ void CPlayer::GetStoreItems( list<CPtr<NRPG::IInventoryItem> > *pItems )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CPlayer::TakeStoreItem( NRPG::IInventoryItem *pItem )
 {
-	list<NRPG::SStoreItem> &storeItemsList = pGlobalPlayer->storeItemsList;
-	for( list<NRPG::SStoreItem>::iterator iTemp = storeItemsList.begin(); iTemp != storeItemsList.end(); iTemp++ )
+	if ( !IsValid( pGlobalPlayer->pStore ) )
+		return false;
+	vector<NRPG::SStoreItem> &storeItemsList = pGlobalPlayer->pStore->ItemsSet();
+	for( vector<NRPG::SStoreItem>::iterator iTemp = storeItemsList.begin(); iTemp != storeItemsList.end(); iTemp++ )
 	{
 		list<CObj<NRPG::IInventoryItem> >::iterator iItem = find( iTemp->itemsList.begin(), iTemp->itemsList.end(), pItem );
 		if ( iItem == iTemp->itemsList.end() )
@@ -435,7 +458,9 @@ void CPlayer::PlaceStoreItem( NRPG::IInventoryItem *pItem )
 	sItem.eType = NRPG::SStoreItem::NONE;
 	sItem.nRating = 0;
 	sItem.itemsList.push_back( pItem );
-	pGlobalPlayer->storeItemsList.push_back( sItem );
+	if ( !IsValid( pGlobalPlayer->pStore ) )
+		pGlobalPlayer->pStore = new NRPG::CStore( pGlobalPlayer );
+	pGlobalPlayer->pStore->ItemsSet().push_back( sItem );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CPlayer::GetUnitsThatCanFight( list< CPtr<CUnitServer> > *pRes ) const
@@ -487,11 +512,31 @@ CWorld::CWorld( NRPG::CGlobalGame *_pGlobalGame ):
 	pShowUnits = new CWorldSyncSrc;
 	pGlobalAck = new CGlobalAck();
 	pAIJobManager = NAI::CreateAIJobManager();
-	pAISignalManager = NAI::CreateAISignalManager( this );
 	pOwnScript = NScript::CreateScript( this );
 	pDiplomacy = NRPG::CreateGlobalDiplomacy();
 	RunAutoLoadScripts();
 	pMineTracker = new CMineTracker;
+	// retail @0x36a4b0 inlines `new CPocket` here (vftable + the two zeroed vectors at +0xc..+0x20).
+	// Only THIS ctor creates it -- the default ctor (@0x36a120) leaves pPocket null so the saveload
+	// path can install the one carried by save tag 42.
+	pPocket = new CPocket;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// NWorld::CWorld::GetDefaultLight @0x3620a0 -- pDefaultLight holds the ambient-light TEMPLATE record,
+// so every call re-rolls a fresh CAmbientLightReal off it through the variant roulette. Retail's guard
+// is `pDefaultLight != 0 && !(zombie bit)` == IsValid(); the SRand is a FUNCTION-LOCAL STATIC (the
+// decomp shows the MSVC7 magic-static init guard `_S35 & 1` around SRand::SRand), so the roulette
+// advances across calls rather than restarting -- reproduced verbatim. The variant filter is the
+// world's createFlags (retail calls it virtually, vtbl+0x100 = GetCreateFlags @0x376d80).
+// NB GetLight NEWs a CAmbientLightReal per call and returns it with refcount 0; every caller hands it
+// straight to CGameView::SetAmbient (@GView.cpp), which parks it in the CPtr pPrevLight and so takes
+// the hold. That is retail's ownership model, not an oversight here.
+NDb::CAmbientLightReal* CWorld::GetDefaultLight()
+{
+	if ( !IsValid( pDefaultLight ) )
+		return 0;
+	static SRand rand;
+	return pDefaultLight->GetLight( &rand, GetCreateFlags() );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CWorld::RunAutoLoadScripts()
@@ -548,7 +593,7 @@ CObjectServerBase *CWorld::AddObject( const SObjectPlace &pos,
 	if ( pDBObject->pDoor )
 	{
 		CWindowDoor *pWD = new CWindowDoor( this, pos,
-			mapElement.bLightmap, pDBObject, pRPGObject, GetTime(), mapElement.flags, mapElement.bOpen );
+			mapElement.bLightmap, pDBObject, pRPGObject, GetTime(), mapElement.flags, mapElement.eTimeOfDay, mapElement.bOpen );
 		if ( IsValid( mapElement.pGrenade ) )
 			if ( pPostInfo )
 				pPostInfo->traps.push_back( SDoorTrap( pWD, mapElement.pGrenade, mapElement.nDC ) );
@@ -568,7 +613,7 @@ CObjectServerBase *CWorld::AddObject( const SObjectPlace &pos,
 	}
 	else if ( pDBObject->pGun )
 	{
-		CCannon *pGun = new CCannon( this, pos, mapElement.bLightmap, pDBObject, pRPGObject, GetTime(), mapElement.flags );
+		CCannon *pGun = new CCannon( this, pos, mapElement.bLightmap, pDBObject, pRPGObject, GetTime(), mapElement.flags, mapElement.eTimeOfDay );
 		pResult = pGun;
 		objects.push_back( pGun );
 		miscObjects.push_back( pGun );
@@ -582,14 +627,14 @@ CObjectServerBase *CWorld::AddObject( const SObjectPlace &pos,
 		if ( IsValid( pCont->pModel->pSkeleton ) )
 		{
 			// anim passage object
-			pPassageObject = CreateAnimPassageObject( this, pos, mapElement.bLightmap, pDBObject, pRPGObject, 
-				GetTime(), mapElement.nPassageZoneID, mapElement.nPassageObjectID, mapElement.nAPRadius, mapElement.flags );
+			pPassageObject = CreateAnimPassageObject( this, pos, mapElement.bLightmap, pDBObject, pRPGObject,
+				GetTime(), mapElement.nPassageZoneID, mapElement.nPassageObjectID, mapElement.nAPRadius, mapElement.flags, mapElement.eTimeOfDay );
 		}
 		else
 		{
 			// "simple" passage object
-			pPassageObject = CreatePassageObject( this, pos, mapElement.bLightmap, pDBObject, pRPGObject, 
-					mapElement.nPassageZoneID, mapElement.nPassageObjectID, mapElement.nAPRadius, mapElement.flags );
+			pPassageObject = CreatePassageObject( this, pos, mapElement.bLightmap, pDBObject, pRPGObject,
+					mapElement.nPassageZoneID, mapElement.nPassageObjectID, mapElement.nAPRadius, mapElement.flags, mapElement.eTimeOfDay );
 		}
 		CDynamicCast<CObjectServerBase> pPassageObjectOS(pPassageObject);
 		if (pPassageObjectOS)
@@ -611,9 +656,9 @@ CObjectServerBase *CWorld::AddObject( const SObjectPlace &pos,
 			return 0;
 		CObjectServerBase *pBase;
 		if ( pCont->pModel && pCont->pModel->pSkeleton )
-			pBase = *objects.insert( objects.end(), new CAnimObjectServer( this, pos, mapElement.bLightmap, pDBObject, pRPGObject, GetTime(), mapElement.flags ) );
+			pBase = *objects.insert( objects.end(), new CAnimObjectServer( this, pos, mapElement.bLightmap, pDBObject, pRPGObject, GetTime(), mapElement.flags, mapElement.eTimeOfDay ) );
 		else
-			pBase = *objects.insert( objects.end(), new CObjectServer( this, pos, mapElement.bLightmap, pDBObject, pRPGObject, mapElement.flags, mapElement.bBorder ) );
+			pBase = *objects.insert( objects.end(), new CObjectServer( this, pos, mapElement.bLightmap, pDBObject, pRPGObject, mapElement.flags, mapElement.eTimeOfDay, mapElement.bBorder ) );
 		if ( pBase->NeedSegment() )
 			segmentObjects.push_back( pBase );
 		pResult = pBase;
@@ -680,7 +725,7 @@ CUnitServer* CWorld::AddUnit( const NAI::SPathPlace &aiPos,	NRPG::IUnitMission *
 		{
 			CPtr<CUnitServer> pPKServer = AddUnit( pUS->GetPosition().pos.p, NRPG::CreateUnit( pUnit->pPanzerklein ), 0 );
 			if ( pPKServer->WearAsPK( true ) )
-				pUS->FlipPanzerklein( pPKServer, false );
+				pUS->FlipPanzerklein( pPKServer, false, false );	// retail @0x366510: no unload, no inventory link
 		}
 	}
 	return pUS;
@@ -717,7 +762,7 @@ void CWorld::RemoveUnit( CUnitServer *pUnit )
 {
 	if ( !pUnit->IsEmptyPK() )
 	{
-		pUnit->Die( true );
+		pUnit->Die( false, true );   // retail @0x7636c9 Die(0,1): the silent removal flavor
 		GetPathNetwork()->Unlock( pUnit );
 		CPtr<CPlayer> pPlayer = pUnit->GetTBSPlayer();
 		RemoveUnitFromAI( pUnit );
@@ -817,6 +862,9 @@ struct SCompareInterruptStrength
 	}
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// game_tbs_on_enemy_spot (retail @0x9c7b14, default off, saved) -- registered in the wMain block below
+static bool bTBSOnEnemySpot = false;
+////////////////////////////////////////////////////////////////////////////////////////////////////
 void CWorld::CheckInterrupt( SInterruptInfo *info )
 {
 	// retail CWorld::CheckInterrupt @0x3684c0 opens with the same gate off IsSequence (IWorld
@@ -841,6 +889,11 @@ void CWorld::CheckInterrupt( SInterruptInfo *info )
 		}
 	}
 	CPlayer *pWhoseTurn = GetTBSCurrentPlayer();
+	// retail @0x3684c0: keep the RAW notice list -- the realtime no-interrupt tail scans it for
+	// the auto-TBS switches (the filter loop below erases from info->events)
+	list<SInterruptInfo::SNotice> rawEvents;
+	if ( pWhoseTurn == 0 )
+		rawEvents = info->events;
 	// determine interrupts strength
 	CPtr<IPlayer> pWhoPlayer = info->events.front().pWho->GetPlayer(); // interface convenience
 	list< CPtr<CUnitServer> > unitsToCancelAction; // interface convenience
@@ -855,18 +908,70 @@ void CWorld::CheckInterrupt( SInterruptInfo *info )
 		}
 		else
 		{
-			int nInteruptStr = i->pWho->GetUnitRPG()->CheckInterrupt( i->pWhom->GetUnitRPG(), i->bIsMutual, i->bWasShot );
-			if ( nInteruptStr < 0 || i->pWho->WasInterrupted( i->pWhom ) || !i->pWho->CanSpendAP( i->pWho->GetActionAP( NRPG::AC_MOVE_SIDE ) ) )
+			// retail NWorld::AddCheckedInterrupt @0x3621d0 gate order: WasInterrupted -> CanSpendAP(AC_MOVE_SIDE) -> CanFight -> roll last
+			if ( i->pWho->WasInterrupted( i->pWhom ) || !i->pWho->CanSpendAP( i->pWho->GetActionAP( NRPG::AC_MOVE_SIDE ) ) || !i->pWho->CanFight() )
 				i = info->events.erase( i );
 			else
 			{
-				i->fStrength = nInteruptStr;
-				++i;
+				int nInteruptStr = i->pWho->GetUnitRPG()->CheckInterrupt( i->pWhom->GetUnitRPG(), i->bIsMutual, i->bWasShot );
+				if ( nInteruptStr < 0 )
+					i = info->events.erase( i );
+				else
+				{
+					i->fStrength = nInteruptStr;
+					++i;
+				}
 			}
 		}
 	}
 	if ( info->events.empty() )
 	{
+		// retail @0x3684c0 (oracle s2_interrupt.h): real time + nothing interrupted -> the
+		// auto-turn-based scouting scan over the RAW notices
+		if ( pWhoseTurn == 0 )
+		{
+			bool bAISawHuman = false, bHumanSawAI = false;
+			CPlayer *pHumanPlayer = 0;
+			vector<CPlayer*> aiSpotters;
+			for ( list<SInterruptInfo::SNotice>::iterator i = rawEvents.begin(); i != rawEvents.end(); ++i )
+			{
+				CPlayer *pWhoP = i->pWho->GetTBSPlayer();
+				CPlayer *pWhomP = i->pWhom->GetTBSPlayer();
+				if ( NAI::IsAIPlayer( pWhoP ) )
+				{
+					if ( !NAI::IsAIPlayer( pWhomP ) && i->pWho->GetDiplomacyState( i->pWhom ) == NDb::DS_ENEMY )
+					{
+						bAISawHuman = true;
+						if ( find( aiSpotters.begin(), aiSpotters.end(), pWhoP ) == aiSpotters.end() )
+							aiSpotters.push_back( pWhoP );
+					}
+				}
+				else if ( NAI::IsAIPlayer( pWhomP ) && i->pWhom->GetDiplomacyState( i->pWho ) == NDb::DS_ENEMY )
+				{
+					bHumanSawAI = true;
+					pHumanPlayer = pWhoP;
+				}
+			}
+			if ( bHumanSawAI )
+			{
+				if ( bAISawHuman )
+				{
+					csSystem << CC_RED << "AI and human player saw each other, human player wants turn based automatically" << endl;
+					WantTurnBased( pHumanPlayer );
+					return;	// retail skips the cancel tail
+				}
+				if ( bTBSOnEnemySpot )
+				{
+					csSystem << CC_RED << "human player saw hostile AI, game_tbs_on_enemy_spot is set" << endl;
+					WantTurnBased( pHumanPlayer );
+					return;
+				}
+			}
+			// AI players that spotted a human enemy file the delayed want (50-segment countdown)
+			if ( IsRealTime() )
+				for ( int k = 0; k < aiSpotters.size(); ++k )
+					WillWantTBS( aiSpotters[k] );
+		}
 		if ( !unitsToCancelAction.empty() )
 		{
 			// interface convenience
@@ -926,7 +1031,9 @@ void CWorld::CheckInterrupt( SInterruptInfo *info )
 			pWhom = e.pWhom;
 		pWho->MarkInterrupted( e.pWhom );
 		info->events.pop_back();
-		AttachMiscObject( Create3DSound( pWho->GetPosition().GetEyePosition(), NDb::GetSound(11) ) ); // CRAP multiple sounds in one place, direct ID specified
+		// (retail CheckInterrupt @0x3684c0 dropped the Jan03 per-interrupter 3D scream --
+		// AttachMiscObject(Create3DSound(eye, NDb::GetSound(11))); the loop is dedup+MarkInterrupted only.
+		// The interrupt bark stays DB-driven via GetGlobalAck()->OnInterrupt below.)
 	}
 	//
 	// retail CheckInterrupt @0x3684c0 prints the interrupting group (csSystem << CC_RED << "Interrupt,
@@ -997,10 +1104,33 @@ void CWorld::MergeFriendlyPlayersVisibleSets()
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // retail vision-refresh delayer statics (bare file-scope globals in wMain.obj @0x5c7b05 / @0x5c7b08): reset by
-// UpdateVisible / cleared each CWorld::Segment. They gate the action-finish vision-recompute debounce
-// (retail CWorld::TryUpdateVisible @0x361610 -- the action-edge routing through it is a later parity step).
+// UpdateVisible / cleared each CWorld::Segment. They gate the action-finish vision-recompute debounce below.
 static bool bHasTriedUpdateVisible = false;
 static int  nFailedTryUpdateVisible = 0;
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail CWorld::TryUpdateVisible @0x361610, called once per action-finish falling edge (TTBSWorld::Segment).
+// false = the incremental vision recalc is behind -> the edge re-arms and holds the action window open;
+// true = every changed cube recalced (or the 21-segment budget spent) -> finish the action now. The AI-map
+// sync is the edge's own first step in retail (@0x76786f Sync(ST_NORMAL) before the latch/probe).
+bool CWorld::TryUpdateVisible()
+{
+	pAIMap->Sync();
+	if ( bHasTriedUpdateVisible )
+		return false;
+	if ( nFailedTryUpdateVisible > 20 )
+	{
+		DebugTrace( "vision recalc delayer failed\n" );   // retail's own trace @0x361622
+		return true;
+	}
+	++nFailedTryUpdateVisible;
+	if ( pRPGGame->UpdateVision( 0.02f ) )
+	{
+		bHasTriedUpdateVisible = false;
+		return true;
+	}
+	bHasTriedUpdateVisible = true;
+	return false;
+}
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // retail CWorld::UpdateVisible @0x366b60. A bForce==false call while a Segment is in progress is DEFERRED --
 // coalesced into bCallUpdateVisible and flushed once by CWorld::Segment's tail (@0x36bce0): retail's
@@ -1024,14 +1154,6 @@ void CWorld::UpdateVisible( bool bForce )
 		players[k]->UpdateVisible();
 	MergeFriendlyPlayersVisibleSets();
 	CheckInterrupt( &info );
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-void CWorld::ProcessAISignals()
-{
-	vector<CPtr<CPlayer> > players;
-	GetPlayersList( &players );
-	for ( int k = 0; k < players.size(); ++k )
-		players[k]->GetCommander()->ProcessAISignals();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CWorld::OnUnitAdded( CUnitServer *pUnit )
@@ -1233,7 +1355,10 @@ void CWorld::PlaceItemSlotsToMap( const ClueToSlot &clueToSlot )
 			{
 				// place onto the map
 				CQuat rot( ToRadian( i->second.pos.fRotation ), CVec3(0,0,1) );
-				CDFrozenItem *pFrozenItem = AddFrozenItem( GetAIMap(), i->second.pos.ptPos, rot, pItem, false, i->second.pos.nFloor );
+				// retail @0x748ba0: snap the slot position onto the surface below (no hit -> raw slot pos)
+				CVec3 ptOnSurface;
+				NAI::FindClosePositionOnSurface( GetAIMap(), i->second.pos.ptPos, &ptOnSurface );
+				CDFrozenItem *pFrozenItem = AddFrozenItem( GetAIMap(), ptOnSurface, rot, pItem, false, i->second.pos.nFloor );
 				if ( IsValid( pFrozenItem ) )
 				{
 					string szUpperName;
@@ -1366,8 +1491,10 @@ void CWorld::CreateAIUnits( const SMapInfo &mapInfo, const ClueToSlot &personClu
 		int nLevel = Max( 0, nMobsLevel + i->nRelativeLevel + pGlobalGame->pDifficulty->nAIUnitsLevel );
 		if ( !IsValid( i->pPers->pPanzerklein ) )
 		{
-			pRPG->GetRPGUnit()->Skills(NDb::ST_VP).Multiply( pGlobalGame->pDifficulty->fVPCoeff );
-			pRPG->GetRPGUnit()->Skills(NDb::ST_AP).Multiply( pGlobalGame->pDifficulty->fAPCoeff );
+			// retail CreateAIUnits @0x36b2b0: the difficulty coeffs scale the VP/AP cell caps
+			// directly (nMaxValue = ROUND(cur * coeff), live value clamped) -- not a multiplier.
+			pRPG->GetRPGUnit()->Skills(NDb::ST_VP).ScaleForDifficulty( pGlobalGame->pDifficulty->fVPCoeff );
+			pRPG->GetRPGUnit()->Skills(NDb::ST_AP).ScaleForDifficulty( pGlobalGame->pDifficulty->fAPCoeff );
 			pRPG->GetRPGUnit()->SetXPLevel( nLevel );
 			pRPG->SetDiplomacy( i->nDiplomacy );
 		}
@@ -1455,34 +1582,36 @@ void CWorld::CreateObjects( const SMapInfo &mapInfo, CPostWorldCreateInfo *pPost
 	}
 	for ( list<SMapRPGElement>::const_iterator i = mapInfo.rpgitems.begin(); i != mapInfo.rpgitems.end(); ++i )
 	{
-		if ( IsValid( i->pItem ) && IsValid( i->pItem->pSuccessor ) )
+		// retail loop 2 gate @0x7670e6: only the element's base DB item; a dead one skips silently
+		if ( !IsValid( i->pItem ) )
+			continue;
+		CDynamicCast<NDb::CRPGMine> pM(i->pItem->pSuccessor);
+		if (pM)
 		{
-			CDynamicCast<NDb::CRPGMine> pM(i->pItem->pSuccessor);
-			if (pM)
+			if ( i->bArmed )
 			{
-				if ( i->bArmed )
-				{
-					CPtr<CMine> pMine = new CMine( this, i->pos.ptPos, pM, i->nDC, i->pos.nFloor );
-					continue;
-				}
-			}
-			CQuat rot( ToRadian( i->pos.fRotation ), CVec3(0,0,1) );
-			// retail CreateObjects @0x366f30 loop 2: an item SPILLED FROM A CHEST is oriented with
-			// CQuat::FromEulerAngles(rot, bVertical ? -pi/2 : 0, pi/2) -- lying flat on its shelf
-			// (or standing upright in a vertical layout) instead of the ground item's plain z-spin.
-			if ( i->bFromChest )
-				rot.FromEulerAngles( ToRadian( i->pos.fRotation ), i->bVertical ? -FP_PI * 0.5f : 0.0f, FP_PI * 0.5f );
-			CVec3 ptPos = i->pos.ptPos + ptDeltaPos;
-			CDFrozenItem *pFrozenItem = AddFrozenItem( GetAIMap(), ptPos, rot, NRPG::CreateItem( i->pItem->pSuccessor ), false, i->pos.nFloor );
-			if ( IsValid( pFrozenItem ) )
-			{
-				string szUpperName;
-				MakeUpperName( i->szName, &szUpperName );
-				nameToObj[szUpperName] = CastToObjectBase( pFrozenItem );
+				CPtr<CMine> pMine = new CMine( this, i->pos.ptPos, pM, i->nDC, i->pos.nFloor );
+				continue;
 			}
 		}
-		else
-			ASSERT(0);
+		// retail CreateObjects loop 2 @0x7671ca: EVERY map-placed item is oriented with
+		// FromEulerAngles(yaw, bVertical ? -pi/2 : 0, pi/2) -- lying flat (upright only inside a
+		// vertical chest layout), NOT just chest spills; a plain z-spin leaves the model standing.
+		CQuat rot;
+		rot.FromEulerAngles( ToRadian( i->pos.fRotation ), i->bVertical ? -FP_PI * 0.5f : 0.0f, FP_PI * 0.5f );
+		CVec3 ptPos = i->pos.ptPos + ptDeltaPos;
+		// retail @0x767214: a null/dead successor still places a dummy wrapper of the base record
+		NRPG::IInventoryItem *pInvItem = IsValid( i->pItem->pSuccessor )
+			? NRPG::CreateItem( i->pItem->pSuccessor )
+			: NRPG::CreateDummyItem( i->pItem );
+		// retail @0x767223 threads bFromChest (elem+0x4e) as the bTemporaryVisible arg.
+		CDFrozenItem *pFrozenItem = AddFrozenItem( GetAIMap(), ptPos, rot, pInvItem, i->bFromChest, i->pos.nFloor );
+		if ( IsValid( pFrozenItem ) )
+		{
+			string szUpperName;
+			MakeUpperName( i->szName, &szUpperName );
+			nameToObj[szUpperName] = CastToObjectBase( pFrozenItem );
+		}
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1531,6 +1660,10 @@ void CWorld::CreateRandom( int nVariantID, const vector<string> &params,
 	bLeanAndMean = _bLeanAndMean;
 	pAIMap = NAI::CreateAIMap( this );
 	pPathNetwork = NAI::CreateNodesNetwork( pAIMap, pAIJobManager );
+	// retail CreateRandom @0x36d0b0: the explosion master is built right after the nodes network
+	// (NWorld::CreateExplosionMaster @0x355b40 = new CExplosionMaster(this)). W4 serialization-
+	// convergence: it segments and serializes like retail but nothing enqueues blasts into it yet.
+	pExplosionMaster = CreateExplosionMaster( this );
 	pRPGGame = NRPG::CreateGame( pAIMap, pPathNetwork );
 	ConvertFlags( &createFlags, params );
 
@@ -1591,6 +1724,11 @@ void CWorld::CreateRandom( int nVariantID, const vector<string> &params,
 		// before this point do not place units
 		pDeployedDeadUnitsPlayer = new CPlayer( L"Deployed dead units fake player", pGlobalGame, 0, -1 );
 		pDeployedDeadUnitsPlayer->SetCommander( new NWorld::CCommander );
+		// retail @0x76d756, this exact point (after the network is synced+coloured, before the AI
+		// units): the camera's height field. Must follow AddBuilding -- ComputeLayers rasterizes the
+		// path network's per-floor tiles, so an earlier call would see ground only.
+		pHeightLayers = CreateHeightLayers( mapInfo.terrain.nWidth, mapInfo.terrain.nHeight,
+			pTerrainInfo, pPathNetwork );
 		//
 		unordered_map< int, CPtr<CUnitServer> > idToUnit;
 		CreateAIUnits( mapInfo, personClueToSlot, nMobsLevel, &idToUnit );
@@ -1693,8 +1831,10 @@ void CWorld::CreateDefault()
 	//
 	pAIMap = NAI::CreateAIMap( this );
 	pPathNetwork = NAI::CreateNodesNetwork( pAIMap, pAIJobManager );
+	// retail CreateDefault @0x36dc30: same as CreateRandom -- the explosion master right after the nodes network
+	pExplosionMaster = CreateExplosionMaster( this );
 	pRPGGame = NRPG::CreateGame( pAIMap, pPathNetwork );
-	
+
 	nRootLayersGroup = pPathNetwork->CreateLayersGroup( 16, 16, CVec2(0,0), 0, 0 );
 
 	STerrainInfo sInfo;
@@ -1716,14 +1856,41 @@ void CWorld::CreateDefault()
 // full world graph but (a) each building's render parts need a refresh pass and (b) the world's
 // pGlobalGame is a WEAK CPtr with no owner inside the zone-save graph, so it loads dangling --
 // re-bind it to the LIVE session's global game before anything dereferences it.
-void CWorld::CreateRestored( NRPG::CGlobalGame *_pGlobalGame )
+// Save-load resume half of CreateRestored: runtime-only cache rebuild, NO turn restart.
+// Retail's load path (CICLoad::Exec @0x1f5fd0 / CICLoadFile::Exec @0x1f6830) runs no world restore at
+// all -- the deserialized TBS state resumes untouched. A realtime save stores bTurnDone=0 for every
+// live player, so running StartGame here made IsRealTimePossible (@0x364f10) fail ("player N has not
+// finished his turn") and falsely restarted a player turn: every realtime save loaded into turn-based.
+void CWorld::RestoreRuntimeCaches( NRPG::CGlobalGame *_pGlobalGame )
 {
-	nPartiesAdded = 0;
-
 	for ( list< CObj<CBuilding> >::iterator i = buildings.begin(); i != buildings.end(); ++i )
 		(*i)->Update();
 
 	pGlobalGame = _pGlobalGame;
+
+	// [post-load reconnect] each player's CAICommander (incl. the base CSequenceCommander) holds a
+	// CPtr<CWorld> pWorld + an embedded SAIState whose runtime back-refs a retail save does not fully
+	// restore (retail serializes IWorld*/pPlayer; this fork's CPtr<CWorld> resolves the IWorld*-identity ref
+	// to null). Re-establish them before StartGame/Segment runs, else GenerateCommand's GetWorld() null-derefs.
+	{
+		vector< CPtr<CPlayer> > playersList;
+		GetPlayersList( &playersList );
+		for ( int k = 0; k < playersList.size(); ++k )
+		{
+			CDynamicCast<NAI::CAICommander> pAICmd( IsValid( playersList[k] ) ? playersList[k]->GetCommander() : 0 );
+			if ( IsValid( pAICmd ) )
+				pAICmd->ReconnectWorld( this );
+		}
+	}
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail @0x36e100 -- ZONE-REENTER restore only (CMission::Initialize @0x200690 LoadWorld path):
+// rebind + StartGame (restarts the turn -- correct for a fresh zone entry, wrong for a save load).
+void CWorld::CreateRestored( NRPG::CGlobalGame *_pGlobalGame )
+{
+	nPartiesAdded = 0;
+
+	RestoreRuntimeCaches( _pGlobalGame );
 
 	StartGame();
 }
@@ -1977,32 +2144,35 @@ void CWorld::CreateSoundStuff( CUnitServer *pWho, vector<CObj<CTimedObject> > *s
 		return;
 	int nFloor = pWho->GetPosition().pos.GetFloor();
 	NDb::CModel *pModel = NDb::GetModel( N_SOUND_MARKER_MODEL_ID );
-	CTimedObject *pMarker = CreateDMesh( CastToObjectBase( pWho ), ptPos, pModel, nFloor );
+	CQuat rot( 0, CVec3( 0, 0, 1 ) );   // retail @0x369110: angle-0 marker rotation (degenerates to identity, byte-walk: tag 4 = (0,0,0,1))
+	CTimedObject *pMarker = CreateDMesh( CastToObjectBase( pWho ), ptPos, rot, pModel, nFloor );
 	pMarker->Attach( pShowUnits, this );
 	stuff->push_back( pMarker );
 	allSoundStuff.push_back( pMarker );   // weak ref (owning CObj lives in *stuff)
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CWorld::MakeAISound( NDb::CAISound *pAISound, CDumbUnitServer *_pWho, int nSoundType, NDb::CSound *pSound )
+C3DSound* CWorld::MakeAISound( NDb::CAISound *pAISound, CDumbUnitServer *_pWho, int nSoundType, NDb::CSound *pSound )
 {
 	CDynamicCast<CUnitServer> pWho( _pWho );
 	if ( !IsValid( pWho ) )
-		return;
+		return 0;
 	if ( !pWho->CanFight() )
-		return;
+		return 0;
 
 	CVec3 ptFrom = pWho->GetPosition().GetCP();
 
+	C3DSound *pCreatedSound = 0;   // retail: returned for the shooter's long-burst retention slot
 	vector<CObj<CTimedObject> > stuff;
 	//CTimedObject *pSound = _pSound;
 	if ( pSound == 0 )
 		pSound = pAISound->pSound;
 	if ( pSound )
 	{
-		CTimedObject *p = Create3DSound( ptFrom, pSound );
+		C3DSound *p = Create3DSound( ptFrom, pSound );
 		p->Attach( pShowUnits, this );
 		stuff.push_back( p );
 		pWho->AttachMiscObject( p );
+		pCreatedSound = p;
 	}
 	CreateSoundStuff( pWho, &stuff, pWho->GetPosition().GetCP() );
 	// DEBUG{
@@ -2032,7 +2202,6 @@ void CWorld::MakeAISound( NDb::CAISound *pAISound, CDumbUnitServer *_pWho, int n
 				{
 					// retail CWorld::MakeAISound: the hearer learns of the heard hostile (OnHearEnemy -> possibleEnemy).
 					NGlobal::ThrowEvent( NWorld::CEventOnHearEnemy( pTarget, pWho ) );
-					GetAISignalManager()->Add( NAI::CreateAIUnitSoundSignal( pWho, pTarget, pAISound->fRadius ) );
 				}
 				else if ( pAISound->fRadius > 30.0f )
 					NGlobal::ThrowEvent( NWorld::CEventOnHearAlly( pTarget, pWho ) );   // loud (>30) friendly sound -> ally-needs-help
@@ -2047,6 +2216,7 @@ void CWorld::MakeAISound( NDb::CAISound *pAISound, CDumbUnitServer *_pWho, int n
 				pTarget->ClearSound( pWho );
 		}
 	}
+	return pCreatedSound;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CWorld::MakeSound( const CVec3 &ptCenter, NDb::CSound *pSound )
@@ -2219,6 +2389,17 @@ void CWorld::ExecuteCommand( CCommand *_pCmd )
 			pOwnScript->RemoveUIActionID( pEvent->nID );
 	}
 	else {
+		// retail CWorld command drain (Segment @0x36bce0, the DCK_GAME_OVER leg): a CCmdDelayedCallGameOver
+		// is not executed -- its payload is stashed in pGameOverCall and the firing cap armed at
+		// now + nMaxDelay. It then fires on the hero-corpse settle (InformCorpseStop @0x362180) or at the
+		// cap (Segment tail watchdog).
+		CDynamicCast<CCmdDelayedCallGameOver> pDelayedGameOver(_pCmd);
+		if (pDelayedGameOver)
+		{
+			pGameOverCall = pDelayedGameOver->pGameOverCommand;
+			tMaxGameOverCall = GetTime()->GetValue() + pDelayedGameOver->nMaxDelay;
+			return;
+		}
 		CDynamicCast<CCmdCallScriptFunction> pCall(_pCmd);
 		if (pCall)
 			NScript::luaCallFunction(pCall->szFuncName, pCall->params);
@@ -2252,10 +2433,10 @@ void CWorld::ExecuteCommand( CCommand *_pCmd )
 							case IA_WEAPON_EMPTY:			GetGlobalAck()->OnLastPieceOfAmmo( pAckUS ); break;
 							case IA_CONFIRMATION:			GetGlobalAck()->OnOrderConfirmation( pAckUS ); break;
 							case IA_IMPOSSIBLE_TO_PERFORM:	GetGlobalAck()->OnImpossibleToPerformAction( pAckUS ); break;
-							default: break;					// IA_NO_PLACE_IN_INVENTORY: retail routes to a GlobalGame
-															// slot (+0x5c) with no IAck counterpart in this tree; no
-															// dev site dispatches it yet
-
+							// retail slot +0x5c is real: CWorld::PlayAck routes IA_NO_PLACE_IN_INVENTORY to
+							// CGlobalAck::OnNoPlaceInInventory @0x338c30 (a plain vAck broadcast).
+							case IA_NO_PLACE_IN_INVENTORY:	GetGlobalAck()->OnNoPlaceInInventory( pAckUS ); break;
+							default: break;
 							}
 						}
 						return;
@@ -2293,6 +2474,16 @@ CUICmd* CWorld::GetUICommand()
 	CUICmd* pCmd = uiCmdsList.front().Extract();
 	uiCmdsList.pop_front();
 	return pCmd;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail @0x363ff0: pop-front with ownership transfer, same idiom as GetUICommand/GetHitEvent
+CEarthQuakeEvent* CWorld::GetEarthQuakeEvent()
+{
+	if ( eventEarthQuakes.empty() )
+		return 0;
+	CEarthQuakeEvent* pEvent = eventEarthQuakes.front().Extract();
+	eventEarthQuakes.pop_front();
+	return pEvent;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CWorld::CheckForAcks()
@@ -2360,25 +2551,21 @@ void CWorld::GenerateDebris( NDb::CDebrisMaterial *pDebrisMaterial, const CVec3 
 		randVel.x = random.GetFloat(-1,1);
 		randVel.y = random.GetFloat(-1,1);
 		randVel.z = random.GetFloat(1,3);
-		AddDebris( pModel.GetPtr(), pAIMap, ptCenter + CVec3(0,0,1), QNULL, randVel, pTime );
+		// retail @0x762928: anonymous blast debris -- bFallFromBody=false, no parent, no item, floor -2
+		AddDebris( pModel.GetPtr(), pAIMap, ptCenter + CVec3(0,0,1), QNULL, randVel, pTime, false, 0, 0, -2 );
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail CWorld::CheckStability @0x361960 is UNITS-ONLY (and the unit body @0x3bf360 is an empty
+// no-op) -- there is NO world-level object-stability sweep in retail at all. Object/corpse/debris/
+// mine support-loss is exclusively event-driven through the NAI::CStabilityTrackers grid, whose
+// informs flush once per NORMAL map sync -- one support layer per flush, which is what paces the
+// visible collapse ripple. The old Jan03 while(bNeedRecalc) object fixpoint sweep here collapsed
+// the whole cascade silently in one frame (follow-ups #11) and snapped fragile wall-mounted
+// objects off at map load, where retail never runs any such check (#12). Callers (Explode,
+// OnAction, CreateRandom) match the retail inlined units loop @0x361a00/@0x361d10/@0x36d0b0.
 void CWorld::CheckStability()
 {
-	bool bNeedRecalc = true;
-	while ( bNeedRecalc )
-	{
-		pAIMap->Sync();
-		bNeedRecalc = false;
-		list< CObj<CObjectServerBase> >::const_iterator io;
-		for ( io = objects.begin(); io != objects.end(); )
-		{
-			CObjectServerBase *pTest = *io++;
-			if ( !pTest->CheckStability() )
-				bNeedRecalc = true;
-		}
-	}
 	list< CObj<CUnitServer> >::const_iterator iu;
 	for ( iu = units.begin(); iu != units.end(); ++iu )
 	{
@@ -2392,7 +2579,7 @@ void CWorld::Segment()
 	// retail CWorld::Segment @0x36bce0 top: begin per-segment vision-refresh coalescing. Every UpdateVisible()
 	// requested during this segment (SetPosition/MakeAISound/the action-finish edge/CheckSpot/...) is deferred
 	// into bCallUpdateVisible and flushed once at the tail below -- AFTER all of this segment's marker creation.
-	// Set BEFORE TTBSWorld::Segment() so its action-finish edge (wTurnBased.h:512 UpdateVisible()) defers too.
+	// Set BEFORE TTBSWorld::Segment() so its action-finish edge (wTurnBased.h UpdateVisible()) defers too.
 	bHasTriedUpdateVisible = false;
 	bDelayUpdateVisibleCalc = true;
 	bCallUpdateVisible = false;
@@ -2407,10 +2594,6 @@ void CWorld::Segment()
 		else
 			i = units.erase( i );
 	}
-	// release ResetBreakExplCalcs @0x3549f0: the per-segment explosion work budget is reset once per world
-	// segment (retail does it at the top of CExplosionMaster::Segment @0x3571d0) before the blast trackers
-	// in miscObjects run -- it is what postpones a big ring's damage to the next segment (see wExplTracker.cpp).
-	ResetBreakExplCalcs();
 	CallSegment( &miscObjects );
 	for ( list< CPtr<CObjectServerBase> >::iterator i = segmentObjects.begin(); i != segmentObjects.end(); )
 	{
@@ -2431,7 +2614,6 @@ void CWorld::Segment()
 	pGlobalAck->OnSegment();
 	NGlobal::ThrowEvent( CEventOnSegment() );   // per-segment broadcast (script-logic units count segments)
 	pAIJobManager->Segment();
-	pAISignalManager->Segment();
 	// BUG 2 (realtime reaction delay): tick the deferred realtime->TBS requests (retail CWorld::Segment
 	// @0x36bce0). Fire WantTurnBased when a countdown elapses; drop all pending requests once we are no longer
 	// real-time (turn-based already started, e.g. via a mutual sighting or a human interrupt).
@@ -2450,7 +2632,21 @@ void CWorld::Segment()
 					break;
 				}
 	}
+	// retail CWorld::Segment @0x36bce0: when the path network reports a change since the last
+	// segment (CheckUpdated @0x4c9a0, read-and-clear), broadcast TBS_GRID_INFO_UPDATED
+	// (GridInfoUpdated @0x375ca0) so locker units re-seat on the changed grid. This DELIVERS the
+	// event whose absence forced the old TBS_ACTION_FINISH grid-logic relocation in wUnitServer.cpp.
+	if ( pPathNetwork->CheckUpdated() )
+		GridInfoUpdated();
+
 	CheckForAcks();
+
+	// retail CWorld::Segment @0x36bce0: the explosion master runs between CheckForAcks and the vision
+	// flush (IExplosionMaster vtbl+0x18 == Segment). W5 serialization-convergence: AddGrenadeExplosion
+	// now enqueues blasts into it (vtbl+0x14 STD / +0x10 ENG) and its Segment is the literal retail
+	// pacing loop @0x3571d0 -- it resets the per-segment nBreakCalcs budget at its own top.
+	if ( IsValid( pExplosionMaster ) )
+		pExplosionMaster->Segment();
 
 	// retail CWorld::Segment @0x36bce0 tail flush (positioned exactly here -- after the ack/explosion processing
 	// CheckForAcks() mirrors, before the script tick): end the per-segment coalescing and run the single deferred
@@ -2471,6 +2667,24 @@ void CWorld::Segment()
 		NScript::luaCallFunction( "OnEnterZone", "" );
 		bFirstSegment = false;
 	}
+	// retail CWorld::Segment tail @0x36bce0 (the very last leg): the delayed game-over watchdog. Once
+	// tMaxGameOverCall expires the stashed call fires EVERY segment -- retail never clears pGameOverCall;
+	// the lua side (OnPlayerLose -> ShowLoseDialog) is expected to end the game. The hero-corpse-settled
+	// path (InformCorpseStop) normally fires it earlier.
+	if ( IsValid( pGameOverCall ) && tMaxGameOverCall < GetTime()->GetValue() )
+		NScript::luaCallFunction( pGameOverCall->szFuncName, pGameOverCall->params );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail CWorld::InformCorpseStop @0x362180 (raw disasm: CUnit-base vtbl+0x40 = GetRPG, then
+// IUnitMissionInfo vtbl+0x5c = IsHero -- NOT a "corpse settled" re-check): a settled corpse
+// (CParticleSkeleton::BeStopped -> WorldInformCorpseStop) that belongs to the HERO fires the stashed
+// game-over call immediately, instead of waiting out the 4000ms Segment-tail cap.
+void CWorld::InformCorpseStop( CUnitServer *pUS )
+{
+	if ( !pUS->GetRPG()->IsHero() )
+		return;
+	if ( IsValid( pGameOverCall ) )
+		NScript::luaCallFunction( pGameOverCall->szFuncName, pGameOverCall->params );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // ExecuteOwnScript -- the menu interfaces tick pOwnScript directly (outside Segment) to advance the
@@ -2549,9 +2763,9 @@ void CWorld::UpdateWorld( STime tScene, IPlayer *pPlayer )
 // stops rendering/colliding). The pocket's CObj keeps the object alive for the later restore.
 void CWorld::PlaceObjectInPocket( CObjectServerBase *pObject )
 {
-	if ( !IsValid( pObject ) || IsObjectInPocket( pObject ) )
+	if ( !IsValid( pObject ) || GetPocket()->IsObjectInPocket( pObject ) )
 		return;
-	PlaceSmthInPocket( pObject, false, objectPocket );
+	GetPocket()->PlaceObjectInPocket( pObject );
 	KillObject( pObject );
 	pObject->BeAddedToVisitiors( false );
 }
@@ -2560,19 +2774,14 @@ void CWorld::PlaceObjectInPocket( CObjectServerBase *pObject )
 // BeAddedToVisitiors(true) (rebind the vis sync), then drop the pocket hold.
 void CWorld::RestoreObjectFromPocket( CObjectServerBase *pObject )
 {
-	if ( !IsValid( pObject ) || !IsObjectInPocket( pObject ) )
+	if ( !IsValid( pObject ) || !GetPocket()->IsObjectInPocket( pObject ) )
 		return;
 	objects.push_back( pObject );
 	// retail AddObjectServerBase @0x3635b0: re-registration with the stability grid rides the
 	// world-list re-add
 	pObject->RegisterForStability( GetAIMap()->GetStabilityTrackers() );
 	pObject->BeAddedToVisitiors( true );
-	RemoveSmthFromPocket( pObject, objectPocket );
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-bool CWorld::IsObjectInPocket( CObjectServerBase *pObject ) const
-{
-	return IsSmthInPocket( pObject, objectPocket );
+	GetPocket()->RemoveObjectFromPocket( pObject );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CWorld::KillObject( CObjectServerBase *pOS )
@@ -2591,10 +2800,10 @@ void CWorld::KillObject( CObjectServerBase *pOS )
 	ActivateDebris( SSphere( pOS->GetPosition(), 5 ), GetAIMap(), pTime );*/
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CWorld::PerformRangedAttack( const NRPG::CAttackPortion &ap, const CRay &ray, const vector<NRPG::IAttackable*> &ignores, STime sCast, NDb::CModel *pTrailModel, float fTrailSpeed )
+void CWorld::PerformRangedAttack( const NRPG::CAttackPortion &ap, const CRay &ray, const vector<NRPG::IAttackable*> &ignores, STime sCast, NDb::CModel *pTrailModel, float fTrailSpeed, float fMaxRange )
 {
 	vector<NRPG::STrailPoint> trail;
-	pRPGGame->ProcessRangedAttackPortion( ap, ray, ignores, &trail );
+	pRPGGame->ProcessRangedAttackPortion( ap, ray, ignores, &trail, fMaxRange );
 
 	miscObjects.push_back( CreateBulletServer( this, trail, sCast, pTrailModel, fTrailSpeed ) );
 }
@@ -2703,13 +2912,29 @@ void CWorld::AddGrenadeExplosion( const CVec3 &vStartPosition, NDb::CRPGGrenade 
 	//AttachMiscObject( new CDFlash( vStartPosition + CVec3(0,0,5), CVec3(1,1,1), 10, 3 ) );
 	if ( pRPGGrenade->pSound.p[ nSoundType ] )
 		MakeSound( vStartPosition, pRPGGrenade->pSound.p[ nSoundType ]->GetSound( &rnd )->pSound );
-	GetAISignalManager()->Add( NAI::CreateAIGrenadeSoundSignal( vStartPosition ) );
-	// explosive-perk modifiers: a live thrower (grenade) seeds them from its perks inside the CVoxelExplTracker
-	// ctor; a pre-placed source (mine) passes the placer's stored modifiers via pMods (thrower is null by then).
-	miscObjects.push_back( new CVoxelExplTracker( vStartPosition, pRPGGrenade, pUnitServer, this, pIgnitionObject, pMods ) );
+	// retail @0x364610: the blast is ENQUEUED into the explosion master (IExplosionMaster vtbl+0x14)
+	// with an already-FILLED modifiers struct -- a pre-placed source (mine / trapped door) passes the
+	// PLACER's stored modifiers via pMods (the placer may be gone by detonation); a live thrower's
+	// explosive perks are Filled HERE (W5: moved from the dev tracker ctor -- retail's ctor @0x356ff0
+	// receives the struct filled).
+	SPerkMineModifiers sModifiers;
+	if ( pMods )
+		sModifiers = *pMods;
+	if ( IsValid( pUnitServer ) )
+		sModifiers.Fill( pUnitServer->GetRPG()->GetRPGUnit() );
+	if ( IsValid( pExplosionMaster ) )
+		pExplosionMaster->AddExplosion( vStartPosition, pIgnitionObject, pRPGGrenade, pUnitServer, sModifiers );
+	// retail tail @0x764739..0x764898: the camera-shake event (gated on game_eq_on_grenades,
+	// amplitude = fDecalRadius) + the UNCONDITIONAL explosion point-camera command
+	// (PR_EXPLOSION; slo-mo when fWaveRadius > 2.99, probability fWaveRadius - 2; 3 s dwell;
+	// nFloor -100 = resolve-current-floor sentinel).
+	if ( bEQonGrenades )
+		eventEarthQuakes.push_back( new CEarthQuakeEvent( pRPGGrenade->fDecalRadius, vStartPosition ) );
+	AddUICommand( new CUICmdPointCamera( vStartPosition, PR_EXPLOSION,
+		pRPGGrenade->fWaveRadius > 2.99f, pRPGGrenade->fWaveRadius - 2.0f, false, 3, -100 ) );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// retail @0x7648c0 (world vtbl+0x120): the ENGINEER-grenade blast. Same effect/sound/AI-signal
+// retail @0x7648c0 (world vtbl+0x120): the ENGINEER-grenade blast. Same effect/sound
 // preamble as the regular overload, read off the CRPGEngGrenade record's own switch arrays, then
 // the unified damage tracker (retail ctor @0x756ff0 takes the eng record + nEngSkill; the
 // wave/radius/damage/fragment math scales with the skill inside wExplTracker).
@@ -2731,8 +2956,20 @@ void CWorld::AddGrenadeExplosion( const CVec3 &vStartPosition, NDb::CRPGEngGrena
 		CreateParticle( vStartPosition, CQuat(random.GetFloat(0,10000),CVec3(0,0,1)), pRPGEngGrenade->pEffect.p[ nEffectType ]->GetEffect( &rnd ) );
 	if ( pRPGEngGrenade->pSound.p[ nSoundType ] )
 		MakeSound( vStartPosition, pRPGEngGrenade->pSound.p[ nSoundType ]->GetSound( &rnd )->pSound );
-	GetAISignalManager()->Add( NAI::CreateAIGrenadeSoundSignal( vStartPosition ) );
-	miscObjects.push_back( new CVoxelExplTracker( vStartPosition, 0, pUnitServer, this, pIgnitionObject, pMods, pRPGEngGrenade, nEngSkill ) );
+	// retail @0x3648c0: enqueue into the explosion master (IExplosionMaster vtbl+0x10, the ENG
+	// overload) with the modifiers Filled here like the regular overload (W5).
+	SPerkMineModifiers sModifiers;
+	if ( pMods )
+		sModifiers = *pMods;
+	if ( IsValid( pUnitServer ) )
+		sModifiers.Fill( pUnitServer->GetRPG()->GetRPGUnit() );
+	if ( IsValid( pExplosionMaster ) )
+		pExplosionMaster->AddExplosion( vStartPosition, pIgnitionObject, pRPGEngGrenade, pUnitServer, sModifiers, nEngSkill );
+	// retail tail @0x7649ee..0x764b4d: byte-for-byte the regular overload's shape, off the eng record
+	if ( bEQonGrenades )
+		eventEarthQuakes.push_back( new CEarthQuakeEvent( pRPGEngGrenade->fDecalRadius, vStartPosition ) );
+	AddUICommand( new CUICmdPointCamera( vStartPosition, PR_EXPLOSION,
+		pRPGEngGrenade->fWaveRadius > 2.99f, pRPGEngGrenade->fWaveRadius - 2.0f, false, 3, -100 ) );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CUnitServer* CWorld::GetUnitServer( string szName )
@@ -3128,7 +3365,7 @@ void CWorld::InitPlayerCorpseCarrying( CPlayer *pPlayer )
 				CPtr<CUnitServer> pCorpseUS = GetDeployedDeadUnit( pUS->GetPosition().pos.p, pCorpse, pOwner );
 				if ( IsValid( pCorpseUS ) )
 				{
-					CCmd *pTake = new CCmdTakeCorpseOnDeploy( pUS, pCorpseUS, !deployData.bCorpseAlive );
+					CCmd *pTake = new CCmdTakeCorpseOnDeploy( pUS, pCorpseUS );   // retail ctor @0x370090 is 2-arg (bDead dropped, W5)
 					pUS->Do( new CCmdSetCommand( pUS.GetPtr(), pTake ) );
 					pUS->Do( new CCmdSetCommand( pUS.GetPtr(), new CCmdContinue() ) );
 				}
@@ -3423,38 +3660,10 @@ void CWorld::ChangeUnitPlayer( CUnitServer *pUnit, CPlayer *pPlayer )
 	UpdateVisible();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CWorld::PlaceUnitInPocket( CUnitServer *pUnit )
-{
-	ASSERT( IsValid( pUnit ) );
-	ASSERT( !IsUnitInPocket( pUnit ) );
-	if ( IsValid( pUnit ) && !IsUnitInPocket( pUnit ) )
-		pocket.push_back( CWorld::SUnitPtrHolder( pUnit ) );
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-void CWorld::RemoveUnitFromPocket( CUnitServer *pUnit )
-{
-	ASSERT( IsValid( pUnit ) );
-	ASSERT( IsUnitInPocket( pUnit ) );
-	for ( vector<CWorld::SUnitPtrHolder>::iterator i = pocket.begin(); i != pocket.end(); )
-	{
-		if ( (*i).pCObjHolder.GetPtr() == pUnit )
-			i = pocket.erase( i );
-		else
-			++i;
-	}
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-bool CWorld::IsUnitInPocket( CUnitServer *pUnit ) const
-{
-	ASSERT( IsValid( pUnit ) );
-	for ( vector<CWorld::SUnitPtrHolder>::const_iterator i = pocket.begin(); i != pocket.end(); ++i )
-	{
-		if ( (*i).pCObjHolder.GetPtr() == pUnit )
-			return true;
-	}
-	//
-	return false;
-}
+// (CWorld::PlaceUnitInPocket / RemoveUnitFromPocket / IsUnitInPocket removed: retail has no such
+// methods -- the unit pocket lives in CPocket (@0x387fb0/@0x387e10/@0x387d10) and every caller goes
+// through GetPocket(). The dev ASSERTs that guarded them are intentionally NOT carried over: retail's
+// CPocket silently skips null/zombie/duplicate entries (@0x387e50).)
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 } // namespace NWorld
 
@@ -3462,3 +3671,10 @@ REGISTER_SAVELOAD_CLASS_NM( 0x0251101b, CWorld, NWorld );
 using namespace NWorld;
 REGISTER_SAVELOAD_CLASS( 0x02731131, CPlayer )
 BASIC_REGISTER_CLASS( CPostWorldCreateInfo )
+// retail wMainInit @0x76f1b0 registers three bools: game_forceturnbased (registered plain in
+// iOptionsMenu.cpp here), game_eq_on_grenades, game_tbs_on_enemy_spot.
+// (bTBSOnEnemySpot defined above CheckInterrupt -- the consumer @0x3684c0)
+START_REGISTER(wMain)
+	REGISTER_VAR_EX( "game_eq_on_grenades", NGlobal::VarBoolHandler, &bEQonGrenades, 0, true )   // retail @0x9c7b04 (default off, saved)
+	REGISTER_VAR_EX( "game_tbs_on_enemy_spot", NGlobal::VarBoolHandler, &bTBSOnEnemySpot, 0, true )   // retail @0x9c7b14 (default off, saved)
+FINISH_REGISTER

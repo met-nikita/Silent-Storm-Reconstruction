@@ -127,20 +127,22 @@ CScenarioClue *CScenarioFlowChartBase::GetClueByName( string _szName )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CScenarioClue *CScenarioFlowChartBase::GetClueByItemID( int nItemID )
 {
-	for ( vector< CObj<CScenarioClue> >::iterator clue = clues.begin(); clue != clues.end(); ++clue )
-		if ( (*clue)->GetDBClue()->nItemID == nItemID )
-			return *clue;
-	//
-	return 0;
+	// retail @0x2d6e60: a hash-map lookup, NOT a linear clues scan -- pers-carried clues
+	// (nPersID != 0) live only in persClues and are never returned from here; the stored
+	// pointer is returned without a liveness check, exactly like retail
+	unordered_map< int, CPtr<CScenarioClue> >::iterator pos = itemClues.find( nItemID );
+	if ( pos == itemClues.end() )
+		return 0;
+	return pos->second;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CScenarioClue *CScenarioFlowChartBase::GetClueByPersID( int nPersID )
 {
-	for ( vector< CObj<CScenarioClue> >::iterator clue = clues.begin(); clue != clues.end(); ++clue )
-		if ( (*clue)->GetDBClue()->nPersID == nPersID )
-			return *clue;
-	//
-	return 0;
+	// retail @0x2d6ea0: hash-map lookup in persClues (see GetClueByItemID)
+	unordered_map< int, CPtr<CScenarioClue> >::iterator pos = persClues.find( nPersID );
+	if ( pos == persClues.end() )
+		return 0;
+	return pos->second;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CScenarioClue *CScenarioFlowChartBase::GetClueByDBClue( NDb::CDBScenarioClue *pDBClue )
@@ -225,7 +227,7 @@ void CScenarioFlowChartBase::SetupLinks( CScenarioObjective *pObjective )
 	//
 	if ( pObjective->IsPlaced() )
 	{
-		// размещаем указатели на открываемые зоны
+		// place the pointers to the zones to open
 		pObjective->ClearZones();
 		vector< CPtr<NDb::CDBScenarioZone> > &zonesToOpen = pObjective->GetDBObjective()->zonesToOpen;
 		for ( vector< CPtr<NDb::CDBScenarioZone> >::iterator zone = zonesToOpen.begin();
@@ -241,7 +243,7 @@ void CScenarioFlowChartBase::SetupLinks( CScenarioObjective *pObjective )
 				}
 			}
 		}
-		// размещаем указатели на блокируемые зоны
+		// place the pointers to the zones to block
 		pObjective->ClearZonesToBlock();
 		vector< CPtr<NDb::CDBScenarioZone> > &zonesToBlock = pObjective->GetDBObjective()->zonesToBlock;
 		for ( vector< CPtr<NDb::CDBScenarioZone> >::iterator zone = zonesToBlock.begin();
@@ -269,7 +271,7 @@ void CScenarioFlowChartBase::Generate()
 		ASSERT( false );
 		return;
 	}
-	// размещаем clue-сы
+	// place the clues
 	vector< CPtr<CScenarioClue> > cluesToPlace;
 	for ( vector< CObj<CScenarioClue> >::const_iterator i = clues.begin(); i != clues.end(); ++i )
 		cluesToPlace.push_back( (*i).GetPtr() );
@@ -281,11 +283,11 @@ void CScenarioFlowChartBase::Generate()
 		PlaceClue( cluesToPlace[ n ] );
 		cluesToPlace.erase( cluesToPlace.begin() + n );
 	}
-	// размещаем objective-ы
+	// place the objectives
 	for ( vector< CObj<CScenarioObjective> >::iterator objective = objectives.begin(); 
 		objective != objectives.end(); ++objective )
 			PlaceObjective( *objective );
-	// размещаем objective-ы для состовных clues-ов
+	// place the objectives for composite clues
 	for ( vector< CObj<CScenarioObjective> >::iterator objective = objectives.begin(); 
 		objective != objectives.end(); ++objective )
 			if ( !(*objective)->IsPlaced() )
@@ -308,7 +310,7 @@ void CScenarioFlowChartBase::LoadItems()
 	zones.clear();
 	clues.clear();
 	objectives.clear();
-	// загружаем зоны
+	// load the zones
 	int nInnerID = 0;
 	CDBTable<NDb::CDBScenarioZone> *pZoneDBTable = NDatabase::GetTable<NDb::CDBScenarioZone>();
 	CDBIterator<NDb::CDBScenarioZone> zone(*pZoneDBTable);
@@ -322,21 +324,32 @@ void CScenarioFlowChartBase::LoadItems()
 			++nInnerID;
 		}
 	}
-	// загружаем улики
+	// load the clues
 	nInnerID = 0;
 	CDBTable<NDb::CDBScenarioClue> *pClueDBTable = NDatabase::GetTable<NDb::CDBScenarioClue>();
 	CDBIterator<NDb::CDBScenarioClue> clue(*pClueDBTable);
 	while ( pClueDBTable && clue.MoveNext() )
 	{
 		CDBPtr<NDb::CDBScenarioClue> pDBClue = clue.Get();
-		if ( IsValid( pDBClue ) && IsValid( pDBClue->pScenario ) && 
+		if ( IsValid( pDBClue ) && IsValid( pDBClue->pScenario ) &&
 			pDBClue->pScenario->GetRecordID() == nScenarioID )
 		{
-			clues.push_back( CreateScenarioClue( pDBClue, nInnerID ) );
-			++nInnerID;
+			// retail @0x2d8126: the created clue is validity-guarded, and (@0x2d8175) filed into
+			// exactly one carrier-id map -- pers clues by PersID, the rest (incl. nItemID == 0)
+			// by ItemID; operator[] overwrites an earlier clue with the same id, like retail
+			CScenarioClue *pClue = CreateScenarioClue( pDBClue, nInnerID );
+			if ( IsValid( pClue ) )
+			{
+				clues.push_back( pClue );
+				if ( pDBClue->nPersID != 0 )
+					persClues[ pDBClue->nPersID ] = pClue;
+				else
+					itemClues[ pDBClue->nItemID ] = pClue;
+				++nInnerID;
+			}
 		}
 	}
-	// загружаем действия
+	// load the actions
 	nInnerID = 0;
 	CDBTable<NDb::CDBScenarioObjective> *pObjectiveDBTable = NDatabase::GetTable<NDb::CDBScenarioObjective>();
 	CDBIterator<NDb::CDBScenarioObjective> objective(*pObjectiveDBTable);
@@ -350,7 +363,7 @@ void CScenarioFlowChartBase::LoadItems()
 			++nInnerID;
 		}
 	}
-	// загружаем ссылки на составные clue
+	// load the links to the composite clues
 	CDBTable<NDb::CDBScenarioObjective2Clue> *pObjective2ClueDBTable = NDatabase::GetTable<NDb::CDBScenarioObjective2Clue>();
 	CDBIterator<NDb::CDBScenarioObjective2Clue> objective2clue(*pObjective2ClueDBTable);
 	while ( pObjective2ClueDBTable && objective2clue.MoveNext() )
@@ -359,16 +372,16 @@ void CScenarioFlowChartBase::LoadItems()
 		CPtr<CScenarioObjective> pObjective = GetObjectiveByDBObjective( pDBObjective->pObjective );
 		CPtr<CScenarioClue> pClue = GetClueByDBClue( pDBObjective->pClue );
 		if ( !IsValid( pObjective ) || !IsValid( pClue ) )
-			continue; // не относятся к загружаемому сценарию
+			continue; // not related to the scenario being loaded
 		//
 		bool bNoError = find( pObjective->GetClues().begin(), pObjective->GetClues().end(), pClue ) == 
 			pObjective->GetClues().end();
-		ASSERT( bNoError ); // ошибка в базе
+		ASSERT( bNoError ); // error in the database
 		if ( !bNoError )
 			continue;
 		bNoError = find( pClue->GetParentObjectives().begin(), pClue->GetParentObjectives().end(), pObjective ) ==
 			pClue->GetParentObjectives().end();
-		ASSERT( bNoError ); // ошибка в базе
+		ASSERT( bNoError ); // error in the database
 		if ( !bNoError )
 			continue;
 		//

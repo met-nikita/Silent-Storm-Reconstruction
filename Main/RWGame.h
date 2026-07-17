@@ -40,6 +40,11 @@ namespace NLSHead
 namespace NRender
 {
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// game_selectionmode (v1.2-only int @0x9c70cc, default 0, saved): 0 = classic palette, 1 = flat
+// post-colorer palette, 2 = no selection visuals. Read by CSetRender::CreateSelection (v1.2
+// @0x6cbf60) and NGame::GetSelectionColor (v1.2 @0x5d6130).
+extern int nSelectionMode;
+////////////////////////////////////////////////////////////////////////////////////////////////////
 class IShowUnit: public CObjectBase
 {
 public:
@@ -59,16 +64,14 @@ public:
 	virtual NLSHead::CHeadInfo* CreateLSHeadInfo() { return 0; }
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-class IShowUnitHead: public CObjectBase
-{
-public:
-	virtual void SetSequence( NDb::CSequence *pSequence, NDb::CSequence *pExpression = 0 ) = 0;
-};
-////////////////////////////////////////////////////////////////////////////////////////////////////
 class IRenderGame: public CObjectBase
 {
 public:
-	virtual CObjectBase* Select( CObjectBase *pSelect, const CVec4 &vColor = CVec4( 0, 1, 1, 1 ) ) = 0;
+	// retail Select @0x2cc850 takes (target, colour, bIgnoreFloorMask) and packs them into an
+	// NRender::SSelectionInfo (PDB: 20 bytes) for the render sets; the flag makes the scene-side
+	// selection skip its floor-mask gate. Every decoded dev-era caller passes false (e.g. the
+	// bomb highlight in UpdateVisible, disasm @0x6cf22c `push 0`), hence the default.
+	virtual CObjectBase* Select( CObjectBase *pSelect, const CVec4 &vColor = CVec4( 0, 1, 1, 1 ), bool bIgnoreFloorMask = false ) = 0;
 
 	virtual CCTime* GetTime() = 0;
 	virtual NLSHead::CHeadsController* GetHeadController() const = 0;
@@ -94,7 +97,6 @@ IShowUnit* CreateShowUnit( NGScene::IGameView *pView, NRPG::CUnit *pUnit, CFuncB
 // cap shown) so existing callers keep their behavior. (The NRPG overload @0x2ce730 threads the same bools
 // into CFakeRPGUnit; no dev caller needs them yet, so its signature is left alone.)
 IShowUnit* CreateShowUnit( NGScene::IGameView *pView, NWorld::CUnit *pUnit, CFuncBase<STime>* pTime, IRenderGame *pRenderGame = 0, bool bItems = true, bool bPlayIdle = false, bool bShowCap = true );
-IShowUnitHead* CreateShowUnitHead( NGScene::IGameView *pView, NWorld::CUnit *pUnit, NLSHead::CHeadsController *pController, CFuncBase<SFBTransform> *pTransform );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 #endif

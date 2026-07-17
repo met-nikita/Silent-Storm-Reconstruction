@@ -219,7 +219,7 @@ CUnitAnimator::CUnitAnimator( CFuncBase<STime> *_pTime, const NAI::SUnitPosition
 	pFloor = new NGScene::CCInt(-5);
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CUnitAnimator::ChangeSkeleton( NDb::CSkeleton *_pSkeleton, bool bBecomePanzerklein	)
+void CUnitAnimator::ChangeSkeleton( NDb::CSkeleton *_pSkeleton, bool bBecomePanzerklein, bool bBoss, bool bTerrorPK )
 {
 	char cIdleBannedFlags = pAnimState->state.cIdleBannedFlags;
 	pSkeleton = _pSkeleton;
@@ -231,6 +231,15 @@ void CUnitAnimator::ChangeSkeleton( NDb::CSkeleton *_pSkeleton, bool bBecomePanz
 	pAnimState->state.pTerrain = pTerrainFunc;
 	pAnimState->state.cIdleBannedFlags = cIdleBannedFlags;
 	bHasPKSkeleton = bBecomePanzerklein;
+	// retail @0x33c8a0
+	if ( bBecomePanzerklein && bBoss )
+		nSpecialPKFlags |= NDb::CAnimation::BOSS;
+	else
+		nSpecialPKFlags &= ~NDb::CAnimation::BOSS;
+	if ( bBecomePanzerklein && bTerrorPK )
+		nSpecialPKFlags |= NDb::CAnimation::TERROR_PK;
+	else
+		nSpecialPKFlags &= ~NDb::CAnimation::TERROR_PK;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CUnitAnimator::GetHipPos( CVec3 *pRes )
@@ -487,7 +496,17 @@ void CUnitAnimator::CalculateAnimFlags( bool bUseItemFlags )
 		nAnimFlagsClassSex |= ( NDb::CAnimation::SCOUT << nClass );
 	}
 	nAnimFlagsClassSex |= pWorld->IsRealTime()? NDb::CAnimation::IN_REALTIME : NDb::CAnimation::IN_COMBAT;
-	
+	nAnimFlagsClassSex |= nSpecialPKFlags;
+	// retail @0x33afb0: a TERROR_PK skeleton keys clips on exactly {TerrorPK}, with the shooter
+	// pose bit remapped onto the TerrorShooter clips. NB the pAnimState poseWeapon mirror above
+	// intentionally keeps the pre-remap value (retail does not re-store it).
+	if ( nAnimFlagsClassSex & NDb::CAnimation::TERROR_PK )
+	{
+		nAnimFlagsClassSex = NDb::CAnimation::TERROR_PK;
+		if ( nAnimFlagsPoseWeapon & NDb::CAnimation::PK_WEAPON_SHOOTER )
+			nAnimFlagsPoseWeapon = ( nAnimFlagsPoseWeapon & ~NDb::CAnimation::PK_WEAPON_SHOOTER ) | NDb::CAnimation::PK_WEAPON_TERROR_SHOOTER;
+	}
+
 	pAnimState->state.nAnimFlagsClassSex = nAnimFlagsClassSex;
 	pSide = pAnimState->state.pSide = pPers->pSide;
 }

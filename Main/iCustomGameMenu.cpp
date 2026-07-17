@@ -65,17 +65,15 @@ public:
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CCustomGameItem::CCustomGameItem @0x1cf060
-// NOTE: the three captions are `GetDBString(markup) + NStr::ToUnicode( mod.szName )` (decomp shows
-// GetDBString + NStr::ToUnicode + nstl::operator+<unsigned short>). The caption markup DB ids are
-// garbled in the decomp; 0x2b79 (normal) / 0x2b7a (hover) are the main-menu hover-button markup ids
-// (iMainMenu.cpp) and are reused here. The per-state tint RGB 0x877d4d with rising alpha
-// 0x00/0x66/0xff IS recovered from the decomp (local_4=0x66877d4d, local_8=0xff877d4d).
+// Markup ids from raw disasm (0x5cf0cb/0x5cf12a/0x5cf185): 0x1d85 "Item - Normal" / 0x1d86
+// "Item - Hover" (Impact 24pt grey), NOT the main-menu 36pt markup. Per-state tint 0x877d4d with
+// alpha 0x00/0x66/0xff (disasm 0x5cf101/0x5cf15c/0x5cf1ba).
 CCustomGameItem::CCustomGameItem( const SWindowInfo &sInfo, const SModInfo &_mod ):
 	CHoverButton( sInfo ), mod( _mod ), bSelected( false )
 {
-	AddTextState( STATE_NORMAL,   GetDBString( 0x2b79 ) + NStr::ToUnicode( mod.szName ), NGfx::SPixel8888( 0x87, 0x7D, 0x4D, 0x00 ) );
-	AddTextState( STATE_HOVER,    GetDBString( 0x2b7a ) + NStr::ToUnicode( mod.szName ), NGfx::SPixel8888( 0x87, 0x7D, 0x4D, 0x66 ) );
-	AddTextState( STATE_SELECTED, GetDBString( 0x2b7a ) + NStr::ToUnicode( mod.szName ), NGfx::SPixel8888( 0x87, 0x7D, 0x4D, 0xFF ) );
+	AddTextState( STATE_NORMAL,   GetDBString( 0x1d85 ) + NStr::ToUnicode( mod.szName ), NGfx::SPixel8888( 0x87, 0x7D, 0x4D, 0x00 ) );
+	AddTextState( STATE_HOVER,    GetDBString( 0x1d86 ) + NStr::ToUnicode( mod.szName ), NGfx::SPixel8888( 0x87, 0x7D, 0x4D, 0x66 ) );
+	AddTextState( STATE_SELECTED, GetDBString( 0x1d86 ) + NStr::ToUnicode( mod.szName ), NGfx::SPixel8888( 0x87, 0x7D, 0x4D, 0xFF ) );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CCustomGameItem::Get @0x1ce000 -- &this->mod.
@@ -112,13 +110,13 @@ void CCustomGameItem::Draw( const STime &sTime, NGScene::I2DGameView *pView )
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CCustomGameItem::AddTextState @0x1ce240 -- byte-identical chain to CSaveLoadItem::AddTextState:
-// add the empty state window, lay an "iml-text" CMLText over it, size to {stateWidth, textHeight},
+// add the empty state window, lay an "iml-text" CText over it, size to {stateWidth, textHeight},
 // add a "hilight" CImage of the same size tinted by sColor, then grow self to enclose it.
 void CCustomGameItem::AddTextState( int nID, const wstring &wsText, const NGfx::SPixel8888 &sColor )
 {
 	CWindow *pWindow = AddState( nID );
 
-	CPtr<CMLText> pText = new CMLText( SWindowInfo( pWindow, SPoint( 0, 0 ), pWindow->GetSize(), "iml-text", STYLE_ENABLED | STYLE_VISIBLE ) );
+	CPtr<CText> pText = new CText( SWindowInfo( pWindow, SPoint( 0, 0 ), pWindow->GetSize(), "iml-text", STYLE_ENABLED | STYLE_VISIBLE ) );
 	pText->SetText( wsText );
 
 	SPoint sSize;
@@ -218,10 +216,10 @@ bool CCustomGameView::ProcessMessage( const SEvent &sEvent )
 		{
 			pAdd = new CComplexButton( sEvent.pLoader->GetControl( "add" ), 0, 0, 0, 0 );
 			pRemove = new CComplexButton( sEvent.pLoader->GetControl( "remove" ), 0, 0, 0, 0 );
-			// pAdd/pRemove->Set( GetUITexture(..), GetUITexture(..), NORMAL, "" ): the two arrow-icon DB
-			// texture ids are garbled in the decomp -> Set() with no icons (the template control art stands).
-			pAdd->Set();
-			pRemove->Set();
+			// arrow icons from raw disasm 0x5cf8a8..0x5cf925: add = UITexture 930 "Button - Right" /
+			// 937 "Button - RightD" (disabled), remove = 931 "Button - Left" / 936 "Button - LeftD"
+			pAdd->Set( NDb::GetUITexture( 930 ), NDb::GetUITexture( 937 ), CComplexButton::NORMAL, "" );
+			pRemove->Set( NDb::GetUITexture( 931 ), NDb::GetUITexture( 936 ), CComplexButton::NORMAL, "" );
 
 			pLeftListView = new CScrollWindow<CListView>( sEvent.pLoader->GetControl( "left" ) );
 			pLeftList = pLeftListView->GetClientWindow();
@@ -259,45 +257,35 @@ bool CCustomGameView::ProcessMessage( const SEvent &sEvent )
 	return CWindow::ProcessMessage( sEvent );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// CCustomGameView::RefreshModsList -- the EVENT_TEMPLATELOADCOMPLETE mod-enumeration tail. The release
-// decomp here is GARBLED (31 unreachable-block warnings; only the CModManager::GetAvailableMods /
-// GetActiveMods calls survive, the per-row list-building lost). HAND-AUTHORED to the documented intent
-// (verdict + answer key both delegate this whole tail): the active (already-selected) mods fill the
-// LEFT list; the remaining available mods fill the RIGHT list. Behaviour-neutral here -- nothing opens
-// this screen, and CModManager::Activate is a stub.
+// CCustomGameView::RefreshModsList -- the EVENT_TEMPLATELOADCOMPLETE tail, decoded from raw disasm
+// 0x5cf35f..0x5cf6c9 (the decompiler drops it as "unreachable"). ONE loop over the available mods:
+// each row keeps its available-vector index as its list id in EITHER list (ids stay unique across
+// both lists -- MoveItem reuses them verbatim), and goes LEFT if an active mod has the same
+// szDirectory, else RIGHT. Active mods no longer on disk are not shown (retail behaviour).
 void CCustomGameView::RefreshModsList()
 {
-	if ( !IsValid( pLeftList ) || !IsValid( pRightList ) )
-		return;
-
 	vector<SModInfo> availableMods;
 	CModManager::GetAvailableMods( &availableMods );
 	vector<SModInfo> *pActiveMods = CModManager::GetActiveMods();
 
-	int nID = 0;
-	for ( vector<SModInfo>::const_iterator iActive = pActiveMods->begin(); iActive != pActiveMods->end(); iActive++ )
+	for ( int nID = 0; nID < (int)availableMods.size(); nID++ )
 	{
-		pLeftList->AddItem( nID, new CCustomGameItem( SWindowInfo( pLeftList, SPoint( 0, 0 ), SPoint( pLeftList->GetSize().x, 0 ), "", STYLE_ENABLED | STYLE_VISIBLE ), (*iActive) ) );
-		nID++;
-	}
+		const SModInfo &mod = availableMods[nID];
 
-	nID = 0;
-	for ( vector<SModInfo>::const_iterator iAvail = availableMods.begin(); iAvail != availableMods.end(); iAvail++ )
-	{
-		bool bAlreadyActive = false;
+		bool bActive = false;
 		for ( vector<SModInfo>::const_iterator iActive = pActiveMods->begin(); iActive != pActiveMods->end(); iActive++ )
 		{
-			if ( iActive->szDirectory == iAvail->szDirectory )
+			if ( iActive->szDirectory == mod.szDirectory )
 			{
-				bAlreadyActive = true;
+				bActive = true;
 				break;
 			}
 		}
-		if ( !bAlreadyActive )
-		{
-			pRightList->AddItem( nID, new CCustomGameItem( SWindowInfo( pRightList, SPoint( 0, 0 ), SPoint( pRightList->GetSize().x, 0 ), "", STYLE_ENABLED | STYLE_VISIBLE ), (*iAvail) ) );
-			nID++;
-		}
+
+		if ( bActive )
+			pLeftList->AddItem( nID, new CCustomGameItem( SWindowInfo( pLeftList, SPoint( 0, 0 ), SPoint( pLeftList->GetSize().x, 0 ), "", STYLE_ENABLED | STYLE_VISIBLE ), mod ) );
+		else
+			pRightList->AddItem( nID, new CCustomGameItem( SWindowInfo( pRightList, SPoint( 0, 0 ), SPoint( pRightList->GetSize().x, 0 ), "", STYLE_ENABLED | STYLE_VISIBLE ), mod ) );
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -350,11 +338,9 @@ void CCustomGameUI::GetModsList( vector<SModInfo> *pMods )
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CCustomGameUI::ProcessMessage @0x1ce650 -- on template load (re)build the view + the bottom button
-// row, wiring a cancel (tooltip 0x4ded) and an apply (tooltip 0x4db6) hover button; every message
-// chains to the CWindow base whose result is returned.
-// NOTE: the cancel/apply CAPTION DB ids are garbled in the decomp; the markup 0x2b79/0x2b7a are the
-// main-menu hover-button markup ids, and the tooltip id doubles as the caption id (as the main menu's
-// customgame button does). The tooltip ids 0x4ded/0x4db6 ARE recovered from the decomp.
+// row; every message chains to the CWindow base whose result is returned.
+// Raw disasm 0x5ce7ff..0x5ce9f6: ids "cancel"/"apply", captions 0x2a8f "BACK" / 0x4db7 "APPLY" in the
+// 36pt menu markup 0x2b79/0x2b7a, tooltips 0x4ded/0x4db6 (the tooltip is NOT the caption).
 bool CCustomGameUI::ProcessMessage( const SEvent &sEvent )
 {
 	switch( sEvent.nEvent )
@@ -364,8 +350,8 @@ bool CCustomGameUI::ProcessMessage( const SEvent &sEvent )
 			pView = new CCustomGameView( sEvent.pLoader->GetControl( "view" ) );
 			pButtonsLine = new CButtonsLine( sEvent.pLoader->GetControl( "line" ) );
 
-			pButtonsLine->AddHoverButton( "", 0x4ded, GetDBString( 0x2b79 ) + GetDBString( 0x4ded ), GetDBString( 0x2b7a ) + GetDBString( 0x4ded ), L"" );
-			pButtonsLine->AddHoverButton( "", 0x4db6, GetDBString( 0x2b79 ) + GetDBString( 0x4db6 ), GetDBString( 0x2b7a ) + GetDBString( 0x4db6 ), L"" );
+			pButtonsLine->AddHoverButton( "cancel", 0x4ded, GetDBString( 0x2b79 ) + GetDBString( 0x2a8f ), GetDBString( 0x2b7a ) + GetDBString( 0x2a8f ), L"" );
+			pButtonsLine->AddHoverButton( "apply", 0x4db6, GetDBString( 0x2b79 ) + GetDBString( 0x4db7 ), GetDBString( 0x2b7a ) + GetDBString( 0x4db7 ), L"" );
 			break;
 		}
 	}
@@ -437,7 +423,7 @@ CCustomGameMenuInterface::CCustomGameMenuInterface():
 // CCustomGameMenuInterface::Initialize @0x1ceb40
 void CCustomGameMenuInterface::Initialize()
 {
-	pCursor = NUI::ICursor::Create( false );		// Create( false, { -1, -1 } )
+	pCursor = NUI::ICursor::Create( true, CVec2( -1, -1 ) );	// retail passes true (cl=1 @0x5ceb7d) -- cursor VISIBLE
 	pInterface = new NUI::CInterface( pCursor );
 
 	pMenuUI = new NUI::CCustomGameUI( NUI::SWindowInfo( pInterface, NUI::SPoint( 0, 0 ), NUI::SPoint( 1024, 768 ), "chargenUI", NUI::STYLE_ENABLED ) );

@@ -10,13 +10,10 @@ namespace NDb
 {
 	class CSequence;
 }
-namespace NWorld
-{
-	class CUnit;
-}
 namespace NLSHead
 {
 class CHeadAnimator;
+class CHeadInfo;
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CIdleHead -- the refcount-scoped ambient-idle token (release ctor @0x25dd20 / dtor @0x25dca0 /
 // operator& @0x25e1c0, reg 0x02353120). CHeadsController::PlayIdle lazily creates one per shown head
@@ -36,15 +33,18 @@ public:
 	virtual ~CIdleHead();
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// release SUnitHeadAnimator (PDB 12 bytes; operator& @0x25e820 tags 2/3/4): records are keyed by the
+// unit's per-unit CHeadInfo (the CObj the RPG unit serializes at tag 0x15), so a loaded retail save's
+// records resolve to the same CHeadInfo/CHeadAnimator objects the render parts and idle tokens reference.
 struct SUnitHeadAnimator
 {
 	ZDATA
-	CPtr<NWorld::CUnit> pUnit;
+	CPtr<CHeadInfo> pHead;
 	CObj<CHeadAnimator> pAnimator;
 	// release SUnitHeadAnimator::operator& @0x25e820 tag 4: the head's idle token (weak -- the render
 	// sync destinations own it, so it dies with the last view showing this head).
 	CPtr<CIdleHead> pIdler;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&pUnit); f.Add(3,&pAnimator); f.Add(4,&pIdler); return 0; }
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&pHead); f.Add(3,&pAnimator); f.Add(4,&pIdler); return 0; }
 };
 class CHeadsController: public CObjectBase
 {
@@ -53,24 +53,26 @@ class CHeadsController: public CObjectBase
 	vector<SUnitHeadAnimator> animators;
 	CTimeCounter timer;
 	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&animators); f.Add(3,&timer); return 0; }
+	// release GetInfo @0x25dc40: raw-pointer scan of the records by CHeadInfo.
+	SUnitHeadAnimator* GetInfo( CHeadInfo *pHeadInfo );
 public:
 	CHeadsController() {}
 
 	CCTime* GetTime();
 	void Advance( STime currentTime );
-	CHeadAnimator* GetAnimator( NWorld::CUnit *pUnit );
-	// release @0x25df90: (unit, lipsync seq, expression seq, cycle) -- the expression arms as the
+	// release @0x25de50: fetch-or-create the head's animator record, keyed by the unit's CHeadInfo.
+	CHeadAnimator* GetAnimator( CHeadInfo *pHeadInfo );
+	// release @0x25df90: (head info, lipsync seq, expression seq, cycle) -- the expression arms as the
 	// animator's MASK entry (the per-phrase facial emotion). The 2-arg form keeps the expression null.
-	void PlaySequence( NWorld::CUnit *pUnit, NDb::CSequence *pSeq, NDb::CSequence *pExpr, bool bCycle = false );
-	void PlaySequence( NWorld::CUnit *pUnit, NDb::CSequence *pSeq, bool bCycle = false ) { PlaySequence( pUnit, pSeq, 0, bCycle ); }
-	// release @0x25dda0: fetch-or-create the head's idle token (null when the head has no animator
-	// record yet). The caller must register the returned token into its render sync destination.
-	// KEYING DEVIATION: retail keys animator records by CHeadInfo*; this tree keys by NWorld::CUnit*
-	// (one head per unit -- behaviourally identical for every dev caller), so unit-keyed throughout.
-	CObjectBase* PlayIdle( NWorld::CUnit *pUnit );
+	void PlaySequence( CHeadInfo *pHeadInfo, NDb::CSequence *pSeq, NDb::CSequence *pExpr, bool bCycle = false );
+	void PlaySequence( CHeadInfo *pHeadInfo, NDb::CSequence *pSeq, bool bCycle = false ) { PlaySequence( pHeadInfo, pSeq, 0, bCycle ); }
+	// release @0x25dda0: fetch the head's idle token, re-creating it when missing/dying (no record is
+	// created here -- the render path's AddHead/GetAnimator made it first). The caller must register
+	// the returned token into its render sync destination.
+	CObjectBase* PlayIdle( CHeadInfo *pHeadInfo );
 	// release @0x25dc60: force a dead unit's head into the frozen death-mask idle. No dev caller yet
 	// (the world-side unit-death render path is a later parity target); kept for retail parity.
-	void KillHead( NWorld::CUnit *pUnit );
+	void KillHead( CHeadInfo *pHeadInfo );
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 }

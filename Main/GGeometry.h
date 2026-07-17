@@ -15,12 +15,20 @@ const int N_MAX_LIGHTMAP_SIDE = 32;
 const float F_MAX_LM_RESOLUTION = 20;
 const int N_LM_LODS = 5;
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// release SVertex (PDB NGScene::SVertex, 32 bytes): normal/texU/texV are stored
+// PRE-PACKED as NGfx::SCompactVector (one DWORD each, CalcCompactVector encoding),
+// NOT the predecessor's raw CVec3s (56 bytes). Field ORDER also differs from the
+// predecessor (tex moved last). This layout is the SAVE WIRE: CObjectInfo::SData
+// serializes verts as a raw DoDataVector blob (count + count*sizeof(SVertex)), so
+// retail saves carry 32-byte vertices (wire-audit @1.3.2.2 on the decal classes:
+// save N*32 vs dev read N*56). Producers pack via NGfx::CalcCompactVector;
+// consumers (CObjectInfo::AssignGeometry @0x5217a0) copy the packed DWORDs verbatim.
 struct SVertex
 {
-	CVec3 pos;
-	CVec3 normal;
-	CVec2 tex;
-	CVec3 texU, texV;
+	CVec3 pos;                        // +0x00
+	NGfx::SCompactVector normal;      // +0x0c packed
+	NGfx::SCompactVector texU, texV;  // +0x10/+0x14 packed tangent basis
+	CVec2 tex;                        // +0x18
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 const int N_VERTEX_TEX_SIZE = 2048;

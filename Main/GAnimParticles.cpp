@@ -14,6 +14,7 @@
 #include "GSceneUtils.h"
 #include "Bound.h"          // SBoundCalcer/SBound for the BeStopped resting corpse bound (retail @0xea4f0)
 #include "aiStability.h"    // IStabilityTrackers for the BeStopped corpse registration (retail @0xea4f0)
+#include "RPGItemInfo.h"    // IGrenadeItemInfo/IWeaponItemInfo RTTI for the Init physics-case (retail @0x4ebe00)
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // wOSBase.obj @0x347bd0 -- breakable-glass collider gate (defined in wOSBase.cpp). Declared here so the
 // particle-physics step can let flying debris pass THROUGH a breakable pane (and break it) instead of
@@ -255,11 +256,15 @@ void CAParticle::RestoreLine( vector<CVec3> parts, int nP1, int nP2, int nTarget
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 int CAParticle::operator&( CStructureSaver &f )
 {
+	// retail CAParticle::operator& @0xe1580 order is {2 nParticleBones, 3 particles, 4 restore, 5 sticks}
+	// (all DoDataVector). dev had 3/4/5 reordered (restore/sticks/particles) -> `restore` read the CVec3
+	// `particles` bytes as SRestoreBone (size mismatch) -> garbage restore/sticks -> RestoreTriangle indexes
+	// a wild bone (GAnimParticles.cpp:145) during a loaded unit's particle-skeleton animation. Match retail.
 	f.Add( 1, (CAnimator*)this );
 	f.Add( 2, &nParticleBones );
-	f.Add( 3, &restore );
-	f.Add( 4, &sticks );
-	f.Add( 5, &particles );
+	f.Add( 3, &particles );
+	f.Add( 4, &restore );
+	f.Add( 5, &sticks );
 	return 0;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1032,17 +1037,14 @@ bool CParticleSkeleton::NeedUpdate( STime t )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CASphereSet
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-const float F_MIN_TIME_STEP = DELTA_T * 0.05f;
-////////////////////////////////////////////////////////////////////////////////////////////////////
-CASphereSet::CASphereSet( int _nFloor ) : nFloor(_nFloor)
+// retail ctor @0x4eff40: spheres + bound + pIgnore + nFloor in one ctor (Jan03's InitSpheres/InitBound folded)
+CASphereSet::CASphereSet( const vector<SMassSphere> &_spheres, const CVec3 &_massCenter, const CVec3 &_boundSize,
+	CObjectBase *_pIgnore, int _nFloor )
+: nFloor(_nFloor), pIgnore(_pIgnore)
 {
-	fResistance = ITEMS_RESISTANCE;
-	fFriction = ITEMS_FRICTION;
-	bCollided = false;
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-void CASphereSet::InitSpheres( const vector<SMassSphere> &_spheres )
-{
+	massCenter = _massCenter;
+	boundSize = _boundSize;
+	nCollided = 0;
 	spheres = _spheres;
 	if ( spheres.empty() )
 	{
@@ -1055,12 +1057,6 @@ void CASphereSet::InitSpheres( const vector<SMassSphere> &_spheres )
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CASphereSet::InitBound( const CVec3 center, const CVec3 size )
-{
-	massCenter = center;
-	boundSize = size;
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
 void CASphereSet::AddSphere( const SSphere &sphere, float fMass )
 {
 	SMassSphere s;
@@ -1070,7 +1066,8 @@ void CASphereSet::AddSphere( const SSphere &sphere, float fMass )
 	spheres.push_back(s);
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CASphereSet::Init( STime t, const CVec3 &position, const CQuat &rotation, const CVec3 &velocity, bool bMassCenter )
+void CASphereSet::Init( STime t, const CVec3 &position, const CQuat &rotation, const CVec3 &velocity, bool bMassCenter,
+	EPhysCase ePhysCase, NRPG::IInventoryItem *pItem )
 {
 	// calc center of mass
 	fMass = 0;
@@ -1157,13 +1154,47 @@ void CASphereSet::Init( STime t, const CVec3 &position, const CQuat &rotation, c
 	tCurrent = t;
 	tLast = tCurrent + 15000;
 	bStopped = false;
+	// retail @0x4ebe00 tail: resolve the PhysParams record by case name (ePhysCase + item RTTI +
+	// long-object aspect test); Step/Calc/GetFrame read friction/resistance/DELTA_T from it
+	bool bGrenade = CDynamicCast<NRPG::IGrenadeItemInfo>( pItem ) != 0;
+	bool bWeapon = !bGrenade && CDynamicCast<NRPG::IWeaponItemInfo>( pItem ) != 0;
+	const char *pszCase = "Default";
+	if ( ePhysCase == PH_GRENADE_ATTACK )
+		pszCase = "GrenadeAttack";
+	else if ( ePhysCase == PH_THROW_OUT )
+	{
+		// @0x4ec683: one bound axis more than 4x longer than both others -> a rifle-like object
+		bool bLong = ( boundSize.x * 4 < boundSize.z && boundSize.y * 4 < boundSize.z )
+			|| ( boundSize.x * 4 < boundSize.y && boundSize.z * 4 < boundSize.y )
+			|| ( boundSize.y * 4 < boundSize.x && boundSize.z * 4 < boundSize.x );
+		if ( bLong )
+			pszCase = "LongWeaponThrowOut";
+		else if ( bGrenade )
+			pszCase = "GrenadeThrowOut";
+		else if ( bWeapon )
+			pszCase = "WeaponThrowOut";
+		else
+			pszCase = "ItemThrowOut";
+	}
+	else if ( ePhysCase == PH_FALL_FROM_BODY )
+	{
+		if ( bGrenade )
+			pszCase = "GrenadeFallFromBody";
+		else if ( bWeapon )
+			pszCase = "WeaponFallFromBody";
+		else
+			pszCase = "ItemFallFromBody";
+	}
+	csSystem << "Starting physics case " << pszCase << endl;
+	pPhys = NDb::GetDBPhysParams( pszCase );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CASphereSet::Calc( STime t )
 {
+	// retail @0x4f00e0: the step quantum comes from the resolved PhysParams record
 	while ( t >= tCurrent && !bStopped )
 	{
-		tCurrent += DELTA_T_DWORD;
+		tCurrent += pPhys->DELTA_T_DWORD;
 		Step();
 	}
 }
@@ -1181,7 +1212,7 @@ void CASphereSet::GetFrame( STime t, SSkeletonPose *pPose )
 	}
 	CVec3 posI;
 	CQuat rotI;
-	float fI = float(tCurrent - t) / DELTA_T_DWORD;
+	float fI = float(tCurrent - t) / pPhys->DELTA_T_DWORD;   // retail @0x4f0120: pPhys quantum
 	posI.Interpolate( pos, lastPos, fI );
 	rotI.Interpolate( rot, lastRot, fI );
 	(*pPose)[0].nParent = -1;
@@ -1211,13 +1242,20 @@ void CASphereSet::Step()
 	lastPos = pos;
 	lastRot = rot;
 
+	// retail @0x4ec7c0: the step timing comes from the PhysParams record resolved by Init
 	int nCycle = 0;
-	float fTimeLeft = DELTA_T;
+	float fTimeLeft = pPhys->DELTA_T;
+	const float F_MIN_TIME_STEP = pPhys->DELTA_T * 0.05f;
 	float fTimeStep = min( fTimeLeft, max( GetEnergy(), F_MIN_TIME_STEP ) );
+
+	// retail @0x4ec9a9: with a live ignore object (a thrown grenade) the query also collides units
+	int nMask = NWorld::TS_ITEM_BLOCKER;
+	if ( IsValid( pIgnore ) )
+		nMask |= NWorld::TS_UNITS;
 
 	CVec3 predict = PredictPosition( fTimeLeft, true );
 	SSphere check( (pos + predict) / 2.f, fBoundSize + fabs(pos - predict) / 2.f );
-	if ( !pMap->CalcIntersection( check.ptCenter, check.fRadius, NWorld::TS_ITEM_BLOCKER ) )
+	if ( !pMap->CalcIntersection( check.ptCenter, check.fRadius, nMask, pIgnore ) )
 	{
 		AdvanceIntegrator( fTimeLeft, true );
 		return;
@@ -1261,12 +1299,16 @@ void CASphereSet::Step()
 			for ( int i = 0; i < poss.size(); ++i )
 				sphereParticles.push_back( poss[i] );
 		}
-		NAI::PhysCollideInfo( pMap, poss, vels, &ress, NWorld::TS_ITEM_BLOCKER );
+		NAI::PhysCollideInfo( pMap, poss, vels, &ress, nMask );
 		vector<SCollision> colls;
 		for ( int i=0; i<ress.size(); ++i )
 		{
 			float fVel = fabs(vels[i]);
-			if ( fVel > 1e-3f && ress[i].fDist != NAI::FP_NO_COLLISION )
+			// retail @0x4ece29 contact filter: skip contacts with the ignore object until the first
+			// real collision (pIgnore && pSrc->pUserData == pIgnore && nCollided == 0)
+			if ( fVel > 1e-3f && ress[i].fDist != NAI::FP_NO_COLLISION
+				&& !( pIgnore.GetPtr() != 0 && ress[i].pSrc != 0
+					&& ress[i].pSrc->pUserData.GetPtr() == pIgnore.GetPtr() && nCollided == 0 ) )
 			{
 				SCollision c;
 				c.res = ress[i];
@@ -1315,12 +1357,12 @@ void CASphereSet::Step()
 				}
 				else
 				{
-					// normal
-					float fNormVelChange = - (1 + fResistance) * fScal;
+					// normal (retail @0x4ecfe9/@0x4ecfee: coefficients from the PhysParams record)
+					float fNormVelChange = - (1 + pPhys->fResistance) * fScal;
 					velChange = fNormVelChange * n;
 					// tangent
 					CVec3 tangVel = ptCollVel - fScal * n;
-					velChange += - fFriction * tangVel;
+					velChange += - pPhys->fFriction * tangVel;
 				}
 				//velChange = - ptCollVel;
 				// retail @0xec7c0 (CASphereSet::Step): if this contact is a breakable pane struck by the
@@ -1330,7 +1372,7 @@ void CASphereSet::Step()
 					continue;
 				ApplyCollision( ptColl, velChange );
 				bCollision = true;
-				bCollided = true;
+				++nCollided;   // retail @0x4ed188: counter, re-arms the pIgnore contact filter
 			}
 		}
 		if ( !bCollision )

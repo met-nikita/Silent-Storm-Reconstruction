@@ -25,7 +25,6 @@ class CSchemaObject: public CObjectBase
 public:
 	vector<CObj<CObjectBase> > pNodes;
 	vector<CObj<NGScene::CPolyline> > pLines;
-	vector<CObj<NGScene::CText> > pStrings;
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CObjectBase* ViewBuildingSchema( NGScene::IGameView *pScene, NBuilding::CSolidAndWallMap *pSWMap, int nBuildingID, NBuilding::CBuildingGrid *pBGrid, const SFBTransform &pos )
@@ -119,7 +118,6 @@ CObjectBase* ViewBuildingSchema( NGScene::IGameView *pScene, NBuilding::CSolidAn
 					break;
 			}
 		pObj->pNodes.push_back( pScene->CreateMesh( pSphere, color, pos * MakeTransform( ptPos )  ) );
-		//pObj->pStrings.push_back( p2DScene->CreateText( new NGScene::CCWString( L"AbCd" ), new NGScene::CCTRect( CTRect<int>( 5, 5, 50, 50 ) ), new NGScene::CCInt( 0 ) ) );
 	}
 	//
 	float fMax = -1;

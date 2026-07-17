@@ -8,6 +8,8 @@
 #include "..\DBFormat\DataInterface.h"
 #include "Interface.h"
 #include "UIWindow.h"
+#include "UICommCtrls.h"	// CToolTip -- CWindow::pToolTip is the typed retail CObj<CToolTip>
+#include "A5Script.h"		// NScript::CScript -- retail CWindow window-scripting members (eventsMap/pScript)
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 namespace NUI
 {
@@ -17,7 +19,8 @@ const int N_TOOLTIP_TIME = 500;
 // CWindow
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CWindow::CWindow( const SWindowInfo &sInfo ):
-	pParent( sInfo.pParent ), nStyle( sInfo.nStyle ), szID( sInfo.szID ), sSize( sInfo.sSize ), sPosition( sInfo.sPosition ), bActive( false )
+	pParent( sInfo.pParent ), nStyle( sInfo.nStyle ), szID( sInfo.szID ), sSize( sInfo.sSize ), sPosition( sInfo.sPosition ), bActive( false ),
+	bRequireUpdate( true ), sToolTipAnchor( 0, 0 ), eToolTipAnchorType( NDb::UIA_NONE )	// retail ctor defaults (oracle @s2_imissionui.h:1126)
 {
 	if ( IsValid( pParent ) )
 	{
@@ -26,8 +29,34 @@ CWindow::CWindow( const SWindowInfo &sInfo ):
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail NUI::CWindow::operator& @0xd4220 -- 2=nStyle, 3=bActive, 4=bRequireUpdate, 5=szID, 6=sSize,
+// 7=sPosition, 8=sInfo, 9=pParent, 10=pMouseFocus, 11=pToolTip, 12=pInterface, 13=listChildren,
+// 14=sToolTipAnchor, 15=eToolTipAnchorType, 16=eventsMap, 17=pScript. Out of line so CToolTip and
+// NScript::CScript are complete types here.
+int CWindow::operator&( CStructureSaver &f )
+{
+	f.Add( 2, &nStyle );
+	f.Add( 3, &bActive );
+	f.Add( 4, &bRequireUpdate );
+	f.Add( 5, &szID );
+	f.Add( 6, &sSize );
+	f.Add( 7, &sPosition );
+	f.Add( 8, &sInfo );
+	f.Add( 9, &pParent );
+	f.Add( 10, &pMouseFocus );
+	f.Add( 11, &pToolTip );
+	f.Add( 12, &pInterface );
+	f.Add( 13, &listChildren );
+	f.Add( 14, &sToolTipAnchor );
+	f.Add( 15, &eToolTipAnchorType );
+	f.Add( 16, &eventsMap );
+	f.Add( 17, &pScript );
+	return 0;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 CWindow::~CWindow()
 {
+	// retail @0x327920: RemoveChild(pParent, this) iff pParent is set and not ref-invalid (== IsValid).
 	if ( IsValid( pParent ) )
 		pParent->RemoveChild( this );
 }
@@ -66,14 +95,23 @@ void CWindow::AddChild( CWindow *pWindow )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CWindow::RemoveChild( CWindow *pWindow )
 {
-	list< CMObj<CWindow> >::iterator iTemp = find( listChildren.begin(), listChildren.end(), pWindow );
+	// retail NUI::CWindow::RemoveChild @0x327ac0: erase pWindow from the (vector) listChildren, then clear
+	// pWindow->pParent (releasing its ref). The find==end() guard is defensive: on a save whose deserialize
+	// left a child's pParent pointing at a window that does not actually list it, retail's raw vector erase
+	// would pop an unrelated last element; skipping keeps a live parent's container intact. (The former
+	// std::list here made the not-found erase(end()) free the list sentinel -> teardown heap-use-after-free;
+	// ASan 2026-07-14. Matching retail's vector removes that failure mode.)
+	vector< CMObj<CWindow> >::iterator iTemp = find( listChildren.begin(), listChildren.end(), pWindow );
 	ASSERT( iTemp != listChildren.end() );
-	listChildren.erase( iTemp );
+	if ( iTemp != listChildren.end() )
+		listChildren.erase( iTemp );
+	if ( pWindow )
+		pWindow->pParent = 0;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CWindow* CWindow::GetChildByID( const string &szID )
 {
-	for( list< CMObj<CWindow> >::iterator iTemp = listChildren.begin(); iTemp != listChildren.end(); iTemp++ )
+	for( vector< CMObj<CWindow> >::iterator iTemp = listChildren.begin(); iTemp != listChildren.end(); iTemp++ )
 	{
 		if ( (*iTemp)->GetWindowID() == szID )
 			return (*iTemp);
@@ -228,12 +266,32 @@ void CWindow::VirtualToScreen( SPoint *pPosition, SRect *pWindow )
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CWindow* CWindow::GetToolTip() const
+// retail @0x3275c0
+void CWindow::CreateClearRect( NGScene::I2DGameView *pView, float fZ )
+{
+	SRect sWindow;
+	SPoint sPosition;
+	if ( !ClientToScreen( &sPosition, &sWindow ) )
+		return;
+
+	SRect s2DWindow( sWindow );
+	SPoint s2DPosition( sPosition );
+	VirtualToScreen( &s2DPosition, &s2DWindow );
+
+	SPoint sRealSize( GetSize() );
+	VirtualToScreen( &sRealSize, 0 );
+
+	CRectLayout sLayout;
+	sLayout.AddRect( 0, 0, sRealSize.x, sRealSize.y, CTRect<float>( 0, 0, 0, 0 ) );
+	pView->CreateDynamicClearRects( sLayout, s2DPosition, s2DWindow, fZ );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+CToolTip* CWindow::GetToolTip() const
 {
 	return pToolTip;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CWindow::SetToolTip( CWindow *pWindow )
+void CWindow::SetToolTip( CToolTip *pWindow )
 {
 	ASSERT( pWindow->GetParent() == GetInterface() );
 	pToolTip = pWindow;
@@ -326,7 +384,7 @@ bool CWindow::ProcessMessage( const SEvent &sEvent )
 	case EVENT_MOUSEMOVE:
 		{
 			CPtr<CWindow> pHitWnd;
-			for ( list<CMObj<CWindow> >::iterator iTemp = listChildren.begin(); iTemp != listChildren.end(); iTemp++ )
+			for ( vector<CMObj<CWindow> >::iterator iTemp = listChildren.begin(); iTemp != listChildren.end(); iTemp++ )
 			{
 				if ( !(*iTemp)->HitTest( sEvent.nX, sEvent.nY ) )
 					continue;
@@ -342,7 +400,7 @@ bool CWindow::ProcessMessage( const SEvent &sEvent )
 				pMouseFocus = pHitWnd;
 			}
 
-			if ( sInfo.pTexture )
+			if ( sInfo.pCursor )
 				pInterface->SetCursorInfo( sInfo );
 
 			break;
@@ -365,11 +423,19 @@ bool CWindow::ProcessMessage( const SEvent &sEvent )
 		}
 	case EVENT_TEMPLATECREATE:
 		{
-			if ( IsValid( sEvent.pControl ) && IsValid( sEvent.pControl->pToolTip ) )
+			if ( IsValid( sEvent.pControl ) )
 			{
-				CToolTip *pToolTip = new CToolTip( SWindowInfo( GetInterface(), SPoint( 0, 0 ), SPoint( 0, 0 ), "", STYLE_ENABLED | STYLE_TRANSPARENT | STYLE_TOPMOST ) );
-				pToolTip->SetText( sEvent.pControl->pToolTip->szStr );
-				SetToolTip( pToolTip );
+				if ( IsValid( sEvent.pControl->pToolTip ) )
+				{
+					CToolTip *pToolTip = new CToolTip( SWindowInfo( GetInterface(), SPoint( 0, 0 ), SPoint( 0, 0 ), "", STYLE_ENABLED | STYLE_TRANSPARENT | STYLE_TOPMOST ) );
+					pToolTip->SetText( sEvent.pControl->pToolTip->szStr );
+					SetToolTip( pToolTip );
+				}
+
+				// retail @0x328250 TEMPLATECREATE tail (decomp lines control+0x90/0x94/0x98): the window
+				// ALWAYS copies the tooltip anchor from the originating control -- even without a tooltip.
+				sToolTipAnchor = sEvent.pControl->sToolTipAnchor;
+				eToolTipAnchorType = sEvent.pControl->toolTipAnchorType;
 			}
 
 			break;
@@ -410,8 +476,14 @@ bool CWindow::ProcessMessage( const SEvent &sEvent )
 	{
 	case EVENT_MOUSEMOVE:
 		{
-			pInterface->SetToolTipOwner( this );
-			return true;
+			// retail @0x328250 MOUSEMOVE tail: re-target the tooltip owner ONLY when this window
+			// actually owns a live tooltip (decomp gates on this->pToolTip before SetToolTipOwner).
+			if ( IsValid( pToolTip ) )
+			{
+				pInterface->SetToolTipOwner( this );
+				return true;
+			}
+			break;
 		}
 	}
 
@@ -420,8 +492,20 @@ bool CWindow::ProcessMessage( const SEvent &sEvent )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CWindow::Update( const STime &sTime, NGScene::I2DGameView *pView )
 {
-	for ( list< CMObj<CWindow> >::iterator iTemp = listChildren.begin(); iTemp != listChildren.end(); iTemp++ )
-		(*iTemp)->Update( sTime, pView );
+	// retail @0x3273d0 walks listChildren (a vector) BY INDEX, re-reading the bounds each step so a child's
+	// Update mutating the vector cannot invalidate the walk. The guard below is defensive: a rare deserialize
+	// can leave a wild/dangling child entry; retail has no guard, but keep it (verify the object AND its
+	// vtable are mapped before calling a virtual through the pointer -- IsValid alone would deref a wild ptr).
+	for ( int i = 0; i < (int)listChildren.size(); i++ )
+	{
+		CWindow *pChild = listChildren[i].GetPtr();
+		unsigned u = (unsigned)pChild;
+		if ( pChild == 0 || u < 0x00010000 || u >= 0x7f000000 || ( u & 3 ) )
+			continue;
+		if ( IsBadReadPtr( pChild, 4 ) || IsBadReadPtr( *(void**)pChild, 4 ) || !IsValid( listChildren[i] ) )
+			continue;
+		pChild->Update( sTime, pView );
+	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CWindow::Draw( const STime &sTime, NGScene::I2DGameView *pView )
@@ -472,27 +556,31 @@ void CWindow::BringWindowToTop( CWindow *pWindow )
 {
 	ASSERT( find( listChildren.begin(), listChildren.end(), pWindow ) != listChildren.end() );
 
+	// retail @0x327c20: hold a temp M-ref on pWindow, erase it from the (vector) listChildren, reinsert at
+	// front. Vector form of the former list remove()/push_front().
 	CMObj<CWindow> pKeepPointer( pWindow );
-	listChildren.remove( pWindow );
-	listChildren.push_front( pWindow );
+	vector< CMObj<CWindow> >::iterator iTemp = find( listChildren.begin(), listChildren.end(), pWindow );
+	if ( iTemp != listChildren.end() )
+		listChildren.erase( iTemp );
+	listChildren.insert( listChildren.begin(), pWindow );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CWindow::FormChildrenList( list< CPtr<CWindow> > *pList )
 {
 	pList->clear();
-	for ( list< CMObj<CWindow> >::iterator iTemp = listChildren.begin(); iTemp != listChildren.end(); iTemp++ )
+	for ( vector< CMObj<CWindow> >::iterator iTemp = listChildren.begin(); iTemp != listChildren.end(); iTemp++ )
 	{
 		if ( !(*iTemp)->GetStyle( STYLE_TOPMOST ) )
 			continue;
 		pList->push_back( (*iTemp).GetPtr() );
 	}
-	for ( list< CMObj<CWindow> >::iterator iTemp = listChildren.begin(); iTemp != listChildren.end(); iTemp++ )
+	for ( vector< CMObj<CWindow> >::iterator iTemp = listChildren.begin(); iTemp != listChildren.end(); iTemp++ )
 	{
 		if ( (*iTemp)->GetStyle( STYLE_TOPMOST ) || (*iTemp)->GetStyle( STYLE_BOTTOMMOST ) )
 			continue;
 		pList->push_back( (*iTemp).GetPtr() );
 	}
-	for ( list< CMObj<CWindow> >::iterator iTemp = listChildren.begin(); iTemp != listChildren.end(); iTemp++ )
+	for ( vector< CMObj<CWindow> >::iterator iTemp = listChildren.begin(); iTemp != listChildren.end(); iTemp++ )
 	{
 		if ( !(*iTemp)->GetStyle( STYLE_BOTTOMMOST ) || (*iTemp)->GetStyle( STYLE_TOPMOST ) )
 			continue;

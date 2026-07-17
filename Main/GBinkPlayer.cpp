@@ -273,4 +273,4 @@ IVideoPlayer* CreateVideoPlayer( const string &szName, int dwFlags )
 } // namespace NGScene
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 using namespace NGScene;
-REGISTER_SAVELOAD_CLASS( 0xB3380130, CBinkVideoPlayer );
+REGISTER_SAVELOAD_CLASS( 0xB3320170, CBinkVideoPlayer );

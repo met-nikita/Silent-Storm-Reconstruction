@@ -67,6 +67,7 @@ public:
 	NGlobal::CEventRegister< CAIEventTrackerImpl, NWorld::CEventOnUnitUnhide >                  regOnUnhide;
 	CPtr<NWorld::CUnitServer> pUnit;
 	CPtr<CAIEventTracker>     pInterface;
+	int operator&( CStructureSaver &f ) { f.Add( 2, &pUnit ); f.Add( 3, &pInterface ); return 0; }   // retail @0xac1c0 (the CEventRegisters resubscribe on load, not serialized)
 
 	CAIEventTrackerImpl();
 	CAIEventTrackerImpl( CAIEventTracker *_pInterface, NWorld::CUnitServer *_pUnit );
@@ -99,6 +100,7 @@ class CAIEventTracker: public CObjectBase
 	OBJECT_BASIC_METHODS(CAIEventTracker)
 public:
 	CObj<CAIEventTrackerImpl> pImpl;
+	int operator&( CStructureSaver &f ) { f.Add( 2, &pImpl ); return 0; }   // retail @0xac110
 
 	CAIEventTracker() {}
 	CAIEventTracker( NWorld::CUnitServer *pUS );

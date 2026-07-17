@@ -2,6 +2,7 @@
 #include "GSceneUtils.h"
 #include "GMemFormat.h"
 #include "RPGGlobal.h"
+#include "RPGStore.h"	// NRPG::CStore -- per-player vendor stock (retail side-seeded ctor @0x29a7c0 creates it)
 #include "RPGMerc.h"
 #include "..\DBFormat\DataMap.h"
 #include "..\DBFormat\DataRPG.h"
@@ -222,6 +223,11 @@ CGlobalPlayer* CreateGlobalPlayer()
 	};
 	//
 	CGlobalPlayer *pPlayer = new CGlobalPlayer();
+	// retail CreateGlobalPlayer() @0x29acf0 constructs via CGlobalPlayer(CSide* = NULL) @0x29a7c0:
+	// a null side falls back to GetDBSide(1) (disasm: mov ecx,1 / call GetDBSide) and every player
+	// gets its per-player store (step 6: pStore = new CStore(this)).
+	pPlayer->pSide = NDb::GetDBSide( 1 );
+	pPlayer->pStore = new CStore( pPlayer );
 	pPlayer->AddMerc( CreateMerc( NDb::GetPers(PC_SOLDIER), 0, true ) );
 	pPlayer->AddMerc( CreateMerc( NDb::GetPers(PC_GRENADER), 0, true ) );
 	pPlayer->AddMerc( CreateMerc( NDb::GetPers(PC_SNIPER), 0, true ) );
@@ -232,6 +238,12 @@ CGlobalPlayer* CreateGlobalPlayer( NDb::CSide* pSide )
 {
 	CGlobalPlayer *pPlayer = new CGlobalPlayer();
 	pPlayer->pSide = pSide;
+	// retail side-seeded ctor @0x29a7c0: step 5 -- a null side falls back to GetDBSide(1) (plain
+	// null check in the disasm); step 6 -- pStore = new CStore(this), the per-player store with a
+	// back-pointer to the owning player (save tag 3).
+	if ( pPlayer->pSide == 0 )
+		pPlayer->pSide = NDb::GetDBSide( 1 );
+	pPlayer->pStore = new CStore( pPlayer );
 
 	{
 		CDBTable<NDb::CRPGPers> *pPersTable = NDatabase::GetTable<NDb::CRPGPers>();
@@ -259,6 +271,10 @@ CGlobalPlayer* CreateGlobalPlayer( NDb::CSide* pSide )
 CGlobalPlayer* CreateGlobalPlayer( const vector<int> &personages )
 {
 	CGlobalPlayer *pPlayer = new CGlobalPlayer();
+	// retail CreateGlobalPlayer(vector<int>&) @0x29af80 also constructs via CGlobalPlayer(NULL)
+	// @0x29a7c0 -- default side GetDBSide(1) + the per-player store.
+	pPlayer->pSide = NDb::GetDBSide( 1 );
+	pPlayer->pStore = new CStore( pPlayer );
 	//
 	for ( int i = 0; i < personages.size(); ++i )
 	{

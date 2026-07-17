@@ -21,7 +21,7 @@ struct SJunctionHash
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 typedef unordered_map<CIVec3, CJunctionID, SJunctionHash> CJunctionHash;
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-struct SGroundHash // z не учитывается
+struct SGroundHash // z пїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ
 {
 	int operator() ( const CTPoint<int> &pt ) const { return pt.y << 16 | pt.x; }
 };
@@ -32,8 +32,9 @@ struct SJunction
 {
 	CVec3 pt;
 	bool  bGround;
+	bool  bCellar;   // retail: per-junction cellar bit for the far end of a node rod (AddNode @0xc9f80)
 
-	SJunction( const CVec3 &_pt, bool _bGr = false ): pt(_pt), bGround(_bGr) {}
+	SJunction( const CVec3 &_pt, bool _bGr = false, bool _bCellar = false ): pt(_pt), bGround(_bGr), bCellar(_bCellar) {}
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CBuildingSchema: public CObjectBase
@@ -56,25 +57,30 @@ class CBuildingSchema: public CObjectBase
 	void FindFree();
 	void ComputeMoments();
 
-	bool Destroy( CBuildingGrid *pGrid, CJunction *pJ, int nDepth = 0 );
+	// retail @0xc8f40 threads bEffects into DamageSpot -- stability-breaks of STABLE junctions /
+	// broken links feed the brokenSpots FX queue (dust bursts + collapse sounds); FREE-cluster
+	// removals stay silent (retail Recalc @0xc9670 passes false there).
+	bool Destroy( CBuildingGrid *pGrid, CJunction *pJ, int nDepth = 0, bool bEffects = false );
 	void CheckGroundHash( CJunction *pJ );
 	void CheckArtifacts();
 
 public:
 	CBuildingSchema();
 
-	CRod* AddRod( NDb::CRPGArmor *pArmor, SRodEdge ptLeft, SRodEdge ptRight, bool bCellarWall, bool bGround );
+	// retail @0xc9b60: no per-call cellar arg -- each SRodEdge carries its own bCellar
+	CRod* AddRod( NDb::CRPGArmor *pArmor, SRodEdge ptLeft, SRodEdge ptRight, bool bGround );
 
+	// retail @0xc9f80: the NODE end gets bCellarWall, each far end its SJunction's own bCellar
 	void AddNode( NDb::CRPGArmor *pArmor, const CVec3 &pt, bool bCellarWall, float fWeight, const vector<SJunction> &points, bool bFilled = true );
 	bool Recalc( CBuildingGrid *pGrid );
 
 	void Destroy(	CBuildingGrid *pGrid, const SPoint3 &pt );
 
 	void Reset();
-	void Start(); // сортирует узлы
+	void Start(); // пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅ
 	void Reserve( int nJuncs, int nRods );
 
-	// функции используемые при визуализации
+	// пїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ
 	const vector<CRod>& GetRods() const { return rods; }
 	const vector<CJunction>& GetJuncs() const { return juncs; }
 

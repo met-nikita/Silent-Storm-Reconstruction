@@ -45,7 +45,7 @@ class CAIViewer: public NMainLoop::IInterfaceBase
 	NInput::CBind cShowFragments, cShowLayVariants;
 	NInput::CBind cPathfindColouring;
 	NInput::CBind cRPGArmorMode;
-	NInput::CBind cVoxelTracer, cVoxelExpl;
+	NInput::CBind cVoxelTracer, cVoxelExpl, cVoxelExplStep, cVoxelExplFinal;
 	NInput::CBind cTSGoOver, cTSVision, cTSVirtual, cTSPick, cTSPassBlocker, cTSCover, cTSItemBlocker;
 	NInput::CBind cGetApproaches, cVoxelVision, cShowVisionCache;
 	enum EColorState
@@ -73,7 +73,8 @@ class CAIViewer: public NMainLoop::IInterfaceBase
 	bool bShowFragments, bShowLayVariants;
 	EColorState colorState;
 	CPtr<NRPG::IVisionTracker> pVision;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&pAIMap); f.Add(3,&pScene); f.Add(4,&objects); f.Add(5,&tracePoints); f.Add(6,&knots); f.Add(7,&voxels); f.Add(8,&voxelsCubes); f.Add(9,&traceLines); f.Add(10,&nCurrentLayer); f.Add(11,&pNetwork); f.Add(12,&bShowFragments); f.Add(13,&bShowLayVariants); f.Add(14,&colorState); f.Add(15,&pVision); return 0; }
+	CObj<NWorld::CVoxelExpl> pExplosion;   // retail CAIViewer tag 0x11 (operator& @0x19c170); tag 16 = pWaypoints (not modeled here)
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&pAIMap); f.Add(3,&pScene); f.Add(4,&objects); f.Add(5,&tracePoints); f.Add(6,&knots); f.Add(7,&voxels); f.Add(8,&voxelsCubes); f.Add(9,&traceLines); f.Add(10,&nCurrentLayer); f.Add(11,&pNetwork); f.Add(12,&bShowFragments); f.Add(13,&bShowLayVariants); f.Add(14,&colorState); f.Add(15,&pVision); f.Add(17,&pExplosion); return 0; }
 	// 
 	void Trace();
 	void TraceRay( const CRay &r, bool bTakeAll );
@@ -98,6 +99,9 @@ class CAIViewer: public NMainLoop::IInterfaceBase
 	void AddCube( list<CObj<NGScene::CPolyline> > *holder, CVec3 ptFirst, CVec3 ptSecond, CVec3 color );
 	void VerifyVoxelTracer();
 	void VerifyVoxelExpl();
+	void VerifyVoxelExplStep();
+	void VerifyVoxelExplFinal();
+	void RenderExplosionFront();
 	void ShowVisionCache();
 	void ShowObjects( EColorState newState );
 	void ShowGetApproaches();
@@ -122,7 +126,7 @@ CAIViewer::CAIViewer( NAI::IPathNetwork *_pNet, NRPG::IVisionTracker *_pVision )
 	bShowFragments(false), bShowLayVariants(false), colorState(NORMAL),
 	cRPGArmorMode("aiArmorMode"), cTSGoOver("aiTSGoOver"), cTSVision("aiTSVision"), cTSVirtual("aiTSVirtual"), cTSPick("aiTSPick"),
 	cTSPassBlocker("aiTSPassBlocker"), cTSCover("aiTSCover"), cTSItemBlocker("aiTSItemBlocker"), 
-	cVoxelTracer("aiVoxelTracer"), cVoxelExpl("aiVoxelExpl"), cGetApproaches("aiGetApproaches"),
+	cVoxelTracer("aiVoxelTracer"), cVoxelExpl("aiVoxelExpl"), cVoxelExplStep("aiExplStep"), cVoxelExplFinal("aiExplFinal"), cGetApproaches("aiGetApproaches"),
 	cVoxelVision("aiVoxelVision"), cShowVisionCache( "aiShowVisionCache" )
 {
 	pScene = NGScene::CreateNewView();
@@ -213,6 +217,10 @@ bool CAIViewer::ProcessEvent( const NInput::SEvent &eEvent )
 		VerifyVoxelTracer();
 	else if ( cVoxelExpl.ProcessEvent( eEvent ) )
 		VerifyVoxelExpl();
+	else if ( cVoxelExplStep.ProcessEvent( eEvent ) )
+		VerifyVoxelExplStep();
+	else if ( cVoxelExplFinal.ProcessEvent( eEvent ) )
+		VerifyVoxelExplFinal();
 	else if ( cGetApproaches.ProcessEvent( eEvent ) )
 		ShowGetApproaches();
 	else if ( cVoxelVision.ProcessEvent( eEvent ) )
@@ -388,39 +396,58 @@ void CAIViewer::AddCube( list<CObj<NGScene::CPolyline> > *holder,
 	holder->push_back( pScene->CreatePolyline( points, color ) );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail CAIViewer::RenderExplosionFront @0x195e50: green 0.06 spheres at the live front's cell centres
+void CAIViewer::RenderExplosionFront()
+{
+	if ( !IsValid( pExplosion ) )
+		return;
+	vector<CVec3> points;
+	pExplosion->GetFront( &points );
+	for ( int i = 0; i < (int)points.size(); ++i )
+		AddSphere( &voxels, points[i], 0.06f, CVec4( 0.2f, 1.0f, 0.2f, 1.0f ) );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail CAIViewer::VerifyVoxelExpl @0x195f70 (W5): seed a record-less blast at the cursor over a
+// fresh CExplosionSpace and render the seeded FRONT (the dev cube boxes died with CExplCube).
+// aiExplStep / aiExplFinal advance it.
 void CAIViewer::VerifyVoxelExpl()
 {
 	voxels.clear();
 	voxelsCubes.clear();
 	//
 	CVec3 ptCenter;
-	float fHalfSize = NWorld::F_CUBE_SIZE / 2.f;
-	CVec3 ptHalfSize = CVec3( fHalfSize, fHalfSize, fHalfSize );
 	GetPointUnderCursor( &ptCenter );
-	CObj<NWorld::CVoxelExpl> pExplosion = new NWorld::CVoxelExpl( ptCenter, 0, 0, 0, pAIMap, 0 );
-	//
+	pExplosion = new NWorld::CVoxelExpl( 0, ptCenter, 0, 0, 0, 0, 0,
+		NWorld::CreateExplosionSpace( pAIMap ), 0, 0 );
+	RenderExplosionFront();
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail CAIViewer::VerifyVoxelExplStep @0x196060: one flood-fill iteration, re-render the front
+void CAIViewer::VerifyVoxelExplStep()
+{
+	if ( !IsValid( pExplosion ) )
+		return;
+	if ( !pExplosion->IsFinished() )
+		pExplosion->MakeSingleIteration();
+	NWorld::ResetBreakExplCalcs();
+	voxels.clear();
+	RenderExplosionFront();
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail CAIViewer::VerifyVoxelExplFinal @0x1960a0: run the blast to completion, render the final
+// front + red 0.06 spheres at every touched voxel (GetTouchedObjects).
+void CAIViewer::VerifyVoxelExplFinal()
+{
+	if ( !IsValid( pExplosion ) )
+		return;
 	while ( !pExplosion->IsFinished() )
-		pExplosion->Segment();
-	//
-	for ( vector< CObj<NWorld::CExplCube> >::iterator cube = pExplosion->cubes.begin();
-		cube != pExplosion->cubes.end(); ++cube )
-	{
-		ptCenter = (*cube)->ptCenter;
-		AddCube( &voxelsCubes, ptCenter - ptHalfSize, ptCenter + ptHalfSize, CVec3( 0.8f, 0.8f, 1.0f ) );
-		//
-		/*
-		for ( int nX = 1; nX < NWorld::N_REAL_CUBE_SIZE - 1; ++nX )
-			for ( int nY = 1; nY < NWorld::N_REAL_CUBE_SIZE - 1; ++nY )
-				for ( int nZ = 1; nZ < NWorld::N_REAL_CUBE_SIZE - 1; ++nZ )
-				{
-//					if ( (*cube)->renderer.voxels[nX][nY][nZ].nObject > 0 )
-					if ( (*cube)->renderer.voxels[nX][nY][nZ].nIndex > 0 )
-						AddSphere( &voxels, (*cube)->GetVoxelCenter( nX, nY, nZ ), 0.05f, CVec4( 1, 0.3f, 0.3f, 1.0f ) );
-//					else
-//						AddSphere( &voxels, (*cube)->GetVoxelCenter( nX, nY, nZ ), 0.05f, CVec4( 1, 0.9f, 0.9f, 1.0f ) );
-				}
-				*/
-	}
+		pExplosion->MakeSingleIteration();
+	voxels.clear();
+	RenderExplosionFront();
+	vector<CVec3> touched;
+	pExplosion->GetTouchedObjects( &touched );
+	for ( int i = 0; i < (int)touched.size(); ++i )
+		AddSphere( &voxels, touched[i], 0.06f, CVec4( 1.0f, 0.0f, 0.0f, 1.0f ) );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CAIViewer::Step()
@@ -528,33 +555,33 @@ static CVec4 GetArmorColor( int nArmorID )
 {
 	switch ( nArmorID )
 	{
-	case 1: //Человек
+	case 1: //пїЅпїЅпїЅпїЅпїЅпїЅпїЅ
 		return CVec4(0.9f,0.9f,0.9f,1);
-	case 2: //Грунт
+	case 2: //пїЅпїЅпїЅпїЅпїЅ
 		return CVec4(0.5f,0.5f,0,1);
-	case 3: //Камень
+	case 3: //пїЅпїЅпїЅпїЅпїЅпїЅ
 		return CVec4(0.4f,0.4f,0.5f,1);
-	case 4: //Дерево
+	case 4: //пїЅпїЅпїЅпїЅпїЅпїЅ
 		return CVec4(0.6f,0.3f,0.1f,1);
-	case 5: //Кирпич
+	case 5: //пїЅпїЅпїЅпїЅпїЅпїЅ
 		return CVec4(1,0.2f,0,1);
-	case 7: //Листва
+	case 7: //пїЅпїЅпїЅпїЅпїЅпїЅ
 		return CVec4(0,1,0,0.8f);
-	case 8: //Стекло
+	case 8: //пїЅпїЅпїЅпїЅпїЅпїЅ
 		return CVec4(1,1,1,0.5f);
-	case 20: //Материя
+	case 20: //пїЅпїЅпїЅпїЅпїЅпїЅпїЅ
 		return CVec4(1,1,0,1);
-	case 21: //Сталь (корпус автомашины)
+	case 21: //пїЅпїЅпїЅпїЅпїЅ (пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ)
 		return CVec4(0,1,1,1);
-	case 22: //Бронесталь гомогенная
+	case 22: //пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ
 		return CVec4(0,0.6f,1,1);
-	case 23: //Бронесталь цементированная
+	case 23: //пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ
 		return CVec4(0,0,1,1);
-	case 24: //Черепица
+	case 24: //пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ
 		return CVec4(0.9f,0.6f,0.4f,1);
-	case 25: //Неразрушаемый
+	case 25: //пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ
 		return CVec4(1,0,1,1);
-	case 26: //Бетон особокрепкий (crap)
+	case 26: //пїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ (crap)
 		return CVec4(0.5f,0,0.5f,1);
 	}
 	return CVec4(0,0,0,1);

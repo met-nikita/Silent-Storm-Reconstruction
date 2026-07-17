@@ -6,6 +6,7 @@
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 #include "DataRPG.h"
 #include "DataMisc.h"	// CRPGPicklock, for the release-added RPGPicklocks4Pers join table
+#include "DataDifficulty.h"	// complete CDBDifficulty: the template's inline Import instantiates ImportField<CDBDifficulty> (typeid needs the full type)
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 namespace NDb
 {
@@ -27,10 +28,19 @@ class CRPGSomethingForPers : public CRPGLink4Pers
 public:
 	ZDATA_(CRPGLink4Pers)
 	CPtr<T> pItem;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CRPGLink4Pers*)this); f.Add(2,&pItem); return 0; }
+	// retail CRPGSomethingForPers<T> +0x1c (operator& @0x41cb70 tag 3; Import @0x412c10 tail column
+	// "DifficultyID"): the per-difficulty gate on a persona's inventory row -- which difficulty
+	// levels receive this item. One template member covers ALL ten ...4Pers typedef instantiations
+	// (retail instantiates this same single template).
+	CPtr<CDBDifficulty> pDifficulty;
+	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CRPGLink4Pers*)this); f.Add(2,&pItem); f.Add(3,&pDifficulty); return 0; }
 	virtual void Import()
 	{
+		// retail Import @0x412c10: the shared ImportItem inner body, then the DifficultyID tail
+		// column. (CRPGClip4Pers::Import @0x42eff0 does NOT import DifficultyID -- clips get theirs
+		// from the chunk stream only.)
 		ImportItem(this);
+		NDatabase::ImportField( "DifficultyID", &pDifficulty );
 	}
 };
 typedef CRPGSomethingForPers<CRPGWeapon> CRPGWeapon4Pers;

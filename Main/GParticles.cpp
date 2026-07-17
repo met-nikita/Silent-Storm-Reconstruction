@@ -29,6 +29,9 @@ void CParticleAnimator::Recalc()
 	value.fScale = pInstance->fScale;
 	value.fEndCycle = pInstance->fEndCycle;
 	value.pivot = pInstance->pivot;
+	// retail @0x143b50 hands the animator's filter down to the produced effect (last write of the
+	// frame-invariant group): `CVar5 = this->pFilter; *(CObj<IParticleFilter>*)(pValue+0x20) = CVar5;`
+	value.pFilter = pFilter;
 //	value.bAlphaAdd = (pInstance->alpha == NDb::CParticleInstance::A_ADDITIVE);
 	value.transform = pPlacement->GetValue().forward;
 	value.frames.clear();
@@ -348,3 +351,5 @@ using namespace NGScene;
 REGISTER_SAVELOAD_CLASS( 0x27041142, CParticleAnimator )
 REGISTER_SAVELOAD_CLASS( 0x125A1140, CGrassAnimator )
 REGISTER_SAVELOAD_CLASS( 0x11932170, CExplosionAnimator )
+// retail saveload id (serialization-convergence W2; operator& @0x146e50 landed in W3 -- GParticles.h)
+REGISTER_SAVELOAD_CLASS( 0x01063120, CRainAnimator )

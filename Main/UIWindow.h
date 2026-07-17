@@ -8,12 +8,17 @@ namespace NDb
 {
 	class CSound;
 }
+namespace NScript
+{
+	class CScript;		// retail CWindow window-scripting members (eventsMap/pScript, op& tags 16/17)
+}
 #include "..\MiscDll\LogStream.h"
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 namespace NUI
 {
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CInterface;
+class CToolTip;		// retail CWindow::pToolTip is a typed CObj<CToolTip> (UICommCtrls.h)
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // Window styles
 const int
@@ -56,17 +61,32 @@ protected:
 	ZDATA
 	int nStyle;
 	bool bActive;
+	bool bRequireUpdate;		// retail tag 4 (@0xd4220); retail CWindow::Update @0x3273d0 gates the lazy
+							// per-frame update on it -- the dev Update pipeline updates unconditionally,
+							// so this stays latched true here (serialized for save-format parity)
 	string szID;
 	SPoint sSize;
 	SPoint sPosition;
 	SCursorInfo sInfo;
 	CPtr<CWindow> pParent;
-	CObj<CWindow> pToolTip;
-	CPtr<CWindow> pMouseFocus;
+	CPtr<CWindow> pMouseFocus;	// retail member order/tags: 10=pMouseFocus, 11=pToolTip (dev had them swapped)
+	CObj<CToolTip> pToolTip;
 	CPtr<CInterface> pInterface;
-	list<CMObj<CWindow> > listChildren;
+	// retail listChildren is nstl::vector<CMObj<CWindow>> (AddChild/RemoveChild/~CWindow/Update all use
+	// _M_start/_M_finish; s2_uiwindow.h:25). It was a std::list here: std::list::erase(end()) frees the list
+	// SENTINEL node, so RemoveChild on a save-load-inconsistent parent freed a LIVE window's sentinel ->
+	// teardown heap-use-after-free (ASan 2026-07-14). A vector has no sentinel -> that failure mode is gone.
+	vector<CMObj<CWindow> > listChildren;
+	// retail window-scripting/tooltip tail (@0xd4220 tags 14-17). sToolTipAnchor/eToolTipAnchorType are
+	// copied from the originating NDb::CUIControl on EVENT_TEMPLATECREATE; eventsMap/pScript belong to
+	// the Lua "onmessage" window-scripting layer (this tree's lua build lacks lua_tocallinfo, so the
+	// maps stay empty at runtime -- serialized for save-format parity).
+	SPoint sToolTipAnchor;
+	NDb::EUIAnchor eToolTipAnchorType;
+	unordered_map<CPtr<NScript::CScript>,int,SPtrHash> eventsMap;
+	CObj<NScript::CScript> pScript;
 public:
-	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&nStyle); f.Add(3,&bActive); f.Add(4,&szID); f.Add(5,&sSize); f.Add(6,&sPosition); f.Add(7,&sInfo); f.Add(8,&pParent); f.Add(9,&pToolTip); f.Add(10,&pMouseFocus); f.Add(11,&pInterface); f.Add(12,&listChildren); return 0; }
+	ZEND int operator&( CStructureSaver &f );	// retail table @0xd4220 -- defined in UIWindow.cpp (needs CToolTip/NScript::CScript complete)
 
 protected:
 	void ActivateTest( int nX, int nY );
@@ -74,7 +94,10 @@ protected:
 	void FormChildrenList( list<CPtr<CWindow> > *pList );
 	
 public:
-	CWindow() {}
+	// retail SWindowInfo-ctor (@0x2112d0 family / oracle iMissionUI): bActive=false, bRequireUpdate=true,
+	// sToolTipAnchor=(0,0), eToolTipAnchorType=UIA_NONE, eventsMap empty, pScript null. The default ctor
+	// (serialization path) seeds the same deterministic state.
+	CWindow(): nStyle( 0 ), bActive( false ), bRequireUpdate( true ), sSize( 0, 0 ), sPosition( 0, 0 ), sToolTipAnchor( 0, 0 ), eToolTipAnchorType( NDb::UIA_NONE ) {}
 	CWindow( const SWindowInfo &sInfo );
 	virtual ~CWindow();
 
@@ -101,9 +124,11 @@ public:
 	bool ClientToScreen( SPoint *pPosition, SRect *pWindow, bool bSelf = true ) const;
 	void ScreenToClient( const SPoint &sScreenPos, SPoint *pPosition ) const;
 	void VirtualToScreen( SPoint *pPosition, SRect *pRes );
+	// retail @0x3275c0: full-window depth-clear quad (fZ=1 punches the 3D hole, fZ=0 restores)
+	void CreateClearRect( NGScene::I2DGameView *pView, float fZ );
 
-	CWindow* GetToolTip() const;
-	void SetToolTip( CWindow *pWindow );
+	CToolTip* GetToolTip() const;		// retail @0x327220: returns the typed CObj<CToolTip> member
+	void SetToolTip( CToolTip *pWindow );
 
 	const SCursorInfo& GetCursorInfo() const;
 	void SetCursorInfo( const SCursorInfo &sInfo );

@@ -506,102 +506,28 @@ void CScrollWindowBase::UpdateScrollers()
 		vValue.y = float( pVScroll->GetValue() ) / pVScroll->GetMaxValue();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// CUnitHead
-////////////////////////////////////////////////////////////////////////////////////////////////////
-CUnitHead::CUnitHead( const SWindowInfo &sInfo, NRender::IRenderGame *_pRender, float _fScale ):
-	CWindow( sInfo ), pRenderGame( _pRender ), fScale( _fScale )
-{
-	CTransformStack ts;
-	ts.Init();
-	//ts.Push( CQuat( -FP_PI2, CVec3(0,0,1) ) );
-	pTransform = new NGScene::CCFBTransform;
-	pTransform->Set( ts.Get() );
-
-	p3DView = NGScene::CreateNewFastInterfaceView();
-	NDb::CTAmbientLight *p = NDb::GetTAmbientLight(7);
-	SRand rnd;
-	p3DView->SetAmbient( p->GetLight( &rnd ), NGScene::IGameView::LT_INVENTORY );
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-void CUnitHead::SetUnit( NWorld::CUnit *pUnit )
-{
-	pHead = NRender::CreateShowUnitHead( p3DView, pUnit, pRenderGame->GetHeadController(), pTransform );
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-void CUnitHead::SetSequence( NDb::CSequence *pSequence, NDb::CSequence *pExpression )
-{
-	ASSERT( IsValid( pHead ) );
-	if ( !IsValid( pHead ) )
-		return;
-
-	pHead->SetSequence( pSequence, pExpression );
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-void CUnitHead::Draw( const STime &sTime, NGScene::I2DGameView *pView )
-{
-	// dev-only predecessor of CUnitView (retail has no CUnitHead). Draw order aligned to the
-	// retail CUnitView::Draw shape @0x1bf070: without a head the plain 2D window draws; with a
-	// head the 2D window/children draw LAST -- clear-rect(1.0) -> Flush -> 3D -> clear-rect(0.0)
-	// -> CWindow::Draw -- so template children are not wiped by the 3D depth punch.
-	if ( !IsValid( pHead ) )
-	{
-		CWindow::Draw( sTime, pView );
-		return;
-	}
-
-	SPoint sSize( (float)GetSize().x * p3DView->GetScreenRect().x / 1024.0f, (float)GetSize().y * p3DView->GetScreenRect().y / 768.0f );
-
-	SRect sWindow;
-	SPoint sPosition;
-	if ( !ClientToScreen( &sPosition, &sWindow ) )
-		return;
-
-	SRect s2DWindow( sWindow );
-	SPoint s2DPosition( sPosition );
-	VirtualToScreen( &s2DPosition, &s2DWindow );
-
-	CRectLayout sLayout;
-	sLayout.AddRect( 0, 0, CTRect<float>( 0, 0, s2DWindow.Width(), s2DWindow.Height() ) );
-	pView->CreateDynamicClearRects( sLayout, s2DPosition, s2DWindow, 1.0f );
-	pView->Flush();
-
-	CVec2 vPos( sPosition.x + sWindow.Width() / 2, sPosition.y + sWindow.Height() / 2 );
-	CTransformStack ts;
-	SHMatrix sMatrix;
-	MakeMatrix( &sMatrix, CVec3( 0, -5 / fScale, 0.048f ), QNULL, CVec3( 1, 1, 1 ) );
-	ts.Init();
-	ts.MakeProjective( CVec2( 1024, 768 ), 60, 0.1f, 1000 );
-	ts.SetCamera( sMatrix );
-
-	SHMatrix sShift;
-	Identity( &sShift);
-	sShift._14 = (float)( vPos.x - 512 ) / 512;
-	sShift._24 = (float)( 384 - vPos.y ) / 384;
-
-	SHMatrix sRes;
-	Multiply( &sRes, sShift, ts.Get().forward );
-	ts.Init( sRes );
-
-	NGScene::IGameView::SDrawInfo drawInfo;
-	drawInfo.pTS = &ts;
-	drawInfo.vOrigin = CVec2( sPosition.x / 1024.0f, sPosition.y / 768.0f );
-	drawInfo.vSize = CVec2( sWindow.Width() / 1024.0f, sWindow.Height() / 768.0f );
-	drawInfo.bOverlay = true;
-	p3DView->Draw( drawInfo );
-
-	pView->CreateDynamicClearRects( sLayout, s2DPosition, s2DWindow, 0.0f );
-
-	CWindow::Draw( sTime, pView );	// 2D window/children AFTER the depth punch (retail CUnitView order @0x1bf070)
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
 // CUnitView
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CUnitView::CUnitView( const SWindowInfo &sInfo, NRender::IRenderGame *_pRenderGame, float _fScale ):
-	CWindow( sInfo ), pRenderGame( _pRenderGame ), fScale( _fScale )
+	CWindow( sInfo ), pRenderGame( _pRenderGame ), fScale( _fScale ), fFOV( 60 ),
+	fAngle( 0 ), fYaw( 0 ), fPitch( 0 ), fDistance( 0 ), vAnchor( 0, 0, 0 )
 {
+	Identity( &sCamera );
 	p3DView = NGScene::CreateNewFastInterfaceView();
 
 	SetLight( NDb::GetTAmbientLight( 7 ) );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// Compose the serialized camera transform (sCamera) from the runtime orbit params. Mirrors the old
+// inline Draw math (MakeMatrix from yaw/pitch and the anchor-offset camera point); called by every
+// SetUnit so sCamera stays the single source Draw reads (and the one that round-trips through a save).
+void CUnitView::RecalcCamera()
+{
+	CVec3 vForwardDir;
+	CQuat q = CQuat( fYaw, V3_AXIS_Z ) * CQuat( fPitch, V3_AXIS_X );
+	q.GetYAxis( &vForwardDir );
+	CVec3 vCP( vAnchor - vForwardDir * fDistance );
+	MakeMatrix( &sCamera, fPitch, fYaw, 0, vCP );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CUnitView::SetUnit( NRPG::CUnit *pUnit, ECameraType eType )
@@ -632,6 +558,7 @@ void CUnitView::SetUnit( NRPG::CUnit *pUnit, ECameraType eType )
 	fPitch = sCameraParams.fPitch;
 	fDistance = sCameraParams.fDistance;
 	vAnchor = sCameraParams.vAnchor;
+	RecalcCamera();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CUnitView::SetUnit( NWorld::CUnit *pUnit, ECameraType eType )
@@ -662,6 +589,7 @@ void CUnitView::SetUnit( NWorld::CUnit *pUnit, ECameraType eType )
 	fPitch = sCameraParams.fPitch;
 	fDistance = sCameraParams.fDistance;
 	vAnchor = sCameraParams.vAnchor;
+	RecalcCamera();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // release @0x1c03d0: SetUnit(unit, camera, bItems, bShowCap, bPlayIdle). The three bools are threaded into
@@ -679,6 +607,7 @@ void CUnitView::SetUnit( NWorld::CUnit *pUnit, NDb::CDBCamera *pCamera, bool bIt
 	fPitch = pCamera->fPitch;
 	fDistance = pCamera->fDistance;
 	vAnchor = pCamera->vAnchor;
+	RecalcCamera();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // release CUnitView::SetUnit @0x1c0310: the NRPG::CUnit* global-camera variant FaceGen calls. Identical to the
@@ -697,6 +626,7 @@ void CUnitView::SetUnit( NRPG::CUnit *pUnit, NDb::CDBCamera *pCamera )
 	fPitch = pCamera->fPitch;
 	fDistance = pCamera->fDistance;
 	vAnchor = pCamera->vAnchor;
+	RecalcCamera();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CUnitView::SetLight( NDb::CTAmbientLight *pLight )
@@ -751,26 +681,21 @@ void CUnitView::Draw( const STime &sTime, NGScene::I2DGameView *pView )
 	VirtualToScreen( &sRealSize, &sDummyWindow );
 
 	CRectLayout sLayout;
-	sLayout.AddRect( 0, 0, CTRect<float>( 0, 0, sRealSize.x, sRealSize.y ) );
+	sLayout.AddRect( 0, 0, sRealSize.x, sRealSize.y, CTRect<float>( 0, 0, sRealSize.x, sRealSize.y ) );
 	pView->CreateDynamicClearRects( sLayout, s2DPosition, s2DWindow, 1.0f );
 	pView->Flush();
 
 	sTimer.Advance( true, GetTickCount() );
-	pInventoryUnit->Update( 0 );
+	pInventoryUnit->Update( fAngle );   // retail @0x1bf070 passes this->fAngle (tag 4; 0 for non-spinning hosts)
 
 	CVec2 vPos( sPosition.x + GetSize().x / 2, sPosition.y + GetSize().y / 2 );
-
-	CVec3 vForwardDir;
-	CQuat q = CQuat( fYaw, V3_AXIS_Z ) * CQuat( fPitch, V3_AXIS_X );
-	q.GetYAxis( &vForwardDir );
-
-	CVec3 vCP( vAnchor - vForwardDir * fDistance );
-	SHMatrix sCamera;
-	MakeMatrix( &sCamera, fPitch, fYaw, 0, vCP );
 
 	CTransformStack ts;
 	ts.Init();
 	ts.MakeProjective( CVec2( 1024, 768 ), fFOV * fScale, 0.1f, 300 );
+	// retail @0x1bf070: SetCamera( sCamera ) directly -- sCamera is the serialized camera transform,
+	// composed from the orbit params by RecalcCamera() (so it round-trips through a save and is valid
+	// on the first post-load frame before any SetUnit re-runs).
 	ts.SetCamera( sCamera );
 
 	SHMatrix sShift;
@@ -794,45 +719,41 @@ void CUnitView::Draw( const STime &sTime, NGScene::I2DGameView *pView )
 	CWindow::Draw( sTime, pView );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail @0x1c04c0: delegates to the CUnitView base ctor (which builds p3DView and applies the
+// GetTAmbientLight(7) inventory ambient -- exactly what this ctor's body used to do by hand) and
+// clears the interaction state. (Retail's base ctor takes an extra trailing bool; dev's converged
+// 3-arg CUnitView ctor covers the same setup.)
 CInteractiveUnitView::CInteractiveUnitView( const SWindowInfo &sInfo, NRender::IRenderGame *_pRender ):
-	CWindow( sInfo ), pRenderGame( _pRender ), bButtonDown( false ), fAngle( 0.0f ), sLastPoint( 0, 0 )
+	CUnitView( sInfo, _pRender ), bCapture( false ), bButtonDown( false ), fAngle( 0.0f ), sLastPoint( 0, 0 )
 {
-	p3DView = NGScene::CreateNewFastInterfaceView();
-
-	SRand rnd;
-	NDb::CTAmbientLight *p = NDb::GetTAmbientLight(7);
-	p3DView->SetAmbient( p->GetLight( &rnd ), NGScene::IGameView::LT_INVENTORY );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail has NO CInteractiveUnitView::SetUnit overloads (PDB) -- its callers pass the FULL-BODY
+// global DataCamera 5013 "InventoryCamera" themselves (CharGen disasm @0x5b55f2 `mov ecx,0x1395`,
+// same record as the inventory doll @0x5ee02e). These dev delegates keep the callers unchanged
+// while composing the same retail camera into the serialized sCamera the perspective Draw reads.
 void CInteractiveUnitView::SetUnit( NRPG::CUnit *pUnit )
 {
-	pInventoryUnit = 0;
-	if ( !IsValid( pUnit ) )
-		return;
-
-	pInventoryUnit = NRender::CreateShowUnit( p3DView, pUnit, sTimer.GetTime(), pRenderGame );
+	CUnitView::SetUnit( pUnit, NDb::GetDBCamera( 5013 ) );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CInteractiveUnitView::SetUnit( NWorld::CUnit *pUnit )
 {
-	pInventoryUnit = 0;
-	if ( !IsValid( pUnit ) )
-		return;
-
-	pInventoryUnit = NRender::CreateShowUnit( p3DView, pUnit, sTimer.GetTime(), pRenderGame );
+	CUnitView::SetUnit( pUnit, NDb::GetDBCamera( 5013 ), true, true, false );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// release: AdvFaceGen binds the unit view with a global DataCamera (5014) for a PERSPECTIVE head closeup
-// (the CUnitView::SetUnit @0x1c0310 idiom). The camera params switch Draw from the orthographic full-body view
-// (CharGen/inventory) to the perspective head view; fAngle still rotates the model interactively.
+// release: AdvFaceGen binds the unit view with a global DataCamera (5014) for a PERSPECTIVE head
+// closeup (the CUnitView::SetUnit @0x1c0310 idiom); composes sCamera via RecalcCamera.
 void CInteractiveUnitView::SetUnit( NRPG::CUnit *pUnit, NDb::CDBCamera *pCamera )
 {
 	pInventoryUnit = 0;
-	bHasCamera = false;
 	if ( !IsValid( pUnit ) )
 		return;
 
-	pInventoryUnit = NRender::CreateShowUnit( p3DView, pUnit, sTimer.GetTime(), pRenderGame );
+	// CUnitView::sTimer -- the clock CUnitView::Draw advances (retail @0x1c0310 reads the BASE sTimer;
+	// the derived shadow sTimer is wire-layout only, never Advanced -> a dead clock freezes every
+	// CSkeletonAnimator in the doll graph at its bind-time pose).
+	pInventoryUnit = NRender::CreateShowUnit( p3DView, pUnit, CUnitView::sTimer.GetTime(), pRenderGame );
 
 	if ( IsValid( pCamera ) )
 	{
@@ -841,10 +762,14 @@ void CInteractiveUnitView::SetUnit( NRPG::CUnit *pUnit, NDb::CDBCamera *pCamera 
 		fPitch = pCamera->fPitch;
 		fDistance = pCamera->fDistance;
 		vAnchor = pCamera->vAnchor;
-		bHasCamera = true;
+		RecalcCamera();
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail @0x1c0550: LBUTTONDOWN only ARMS the capture (bCapture + mouse capture); the spin proper
+// (bButtonDown) engages once the captured mouse strays more than 5px horizontally from the press
+// point, and each further move integrates 0.05 rad per pixel (dev previously span immediately on
+// button-down at 0.1/px and never serialized/used bCapture).
 bool CInteractiveUnitView::ProcessMessage( const SEvent &sEvent )
 {
 	switch( sEvent.nEvent )
@@ -853,23 +778,29 @@ bool CInteractiveUnitView::ProcessMessage( const SEvent &sEvent )
 		{
 			GetInterface()->SetCursorInfo( SCursorInfo() );
 
-			if ( !bButtonDown )
-				break;
+			const int nDX = sEvent.nX - sLastPoint.x;
+			if ( bCapture && ( nDX > 5 || nDX < -5 ) )
+				bButtonDown = true;
 
-			fAngle += float( sEvent.nX - sLastPoint.x ) / 10;
-			sLastPoint.x = sEvent.nX;
-			sLastPoint.y = sEvent.nY;
+			if ( bButtonDown )
+			{
+				const int nOldX = sLastPoint.x;
+				sLastPoint.x = sEvent.nX;
+				sLastPoint.y = sEvent.nY;
+				fAngle += float( sEvent.nX - nOldX ) * 0.05f;
+			}
 			break;
 		}
 	case EVENT_LBUTTONUP:
 		{
+			bCapture = false;
 			bButtonDown = false;
 			pMouseCapture = 0;
 			return true;
 		}
 	case EVENT_LBUTTONDOWN:
 		{
-			bButtonDown = true;
+			bCapture = true;
 			sLastPoint.x = sEvent.nX;
 			sLastPoint.y = sEvent.nY;
 			pMouseCapture = GetInterface()->CreateMouseCapture( this );
@@ -877,6 +808,7 @@ bool CInteractiveUnitView::ProcessMessage( const SEvent &sEvent )
 		}
 	case EVENT_MOUSECAPTURELOSE:
 		{
+			bCapture = false;
 			bButtonDown = false;
 			pMouseCapture = 0;
 			break;
@@ -888,75 +820,13 @@ bool CInteractiveUnitView::ProcessMessage( const SEvent &sEvent )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CInteractiveUnitView::Draw( const STime &sTime, NGScene::I2DGameView *pView )
 {
-	// release @0x1bf390: CInteractiveUnitView::Draw just stores the interactive angle and
-	// delegates to CUnitView::Draw @0x1bf070 -- so the no-unit fallback is the PLAIN window
-	// draw (template children still render), not an early-out that hides them.
-	if ( !IsValid( pInventoryUnit ) )
-	{
-		CWindow::Draw( sTime, pView );
-		return;
-	}
-
-	SRect sWindow;
-	SPoint sPosition;
-	if ( !ClientToScreen( &sPosition, &sWindow ) )
-		return;
-
-	SRect s2DWindow( sWindow );
-	SPoint s2DPosition( sPosition );
-	VirtualToScreen( &s2DPosition, &s2DWindow );
-
-	CRectLayout sLayout;
-	sLayout.AddRect( 0, 0, CTRect<float>( 0, 0, s2DWindow.Width(), s2DWindow.Height() ) );
-	pView->CreateDynamicClearRects( sLayout, s2DPosition, s2DWindow, 1.0f );
-	pView->Flush();
-
-	sTimer.Advance( true, GetTickCount() );
-	pInventoryUnit->Update( fAngle );
-
-	CTransformStack ts;
-	ts.Init();
-	if ( bHasCamera )
-	{
-		// Perspective head view from the DataCamera (AdvFaceGen, 5014), rotated interactively by fAngle
-		// (mirror of CUnitView::Draw).
-		CVec2 vPos( sPosition.x + GetSize().x / 2, sPosition.y + GetSize().y / 2 );
-		CVec3 vForwardDir;
-		CQuat q = CQuat( fYaw, V3_AXIS_Z ) * CQuat( fPitch, V3_AXIS_X );
-		q.GetYAxis( &vForwardDir );
-		CVec3 vCP( vAnchor - vForwardDir * fDistance );
-		SHMatrix sCamera;
-		MakeMatrix( &sCamera, fPitch, fYaw, 0, vCP );
-		ts.MakeProjective( CVec2( 1024, 768 ), fFOV, 0.1f, 300 );
-		ts.SetCamera( sCamera );
-		SHMatrix sShift;
-		Identity( &sShift );
-		sShift._14 = (float)( vPos.x - 512 ) / 512;
-		sShift._24 = (float)( 384 - vPos.y ) / 384;
-		SHMatrix sRes;
-		Multiply( &sRes, sShift, ts.Get().forward );
-		ts.Init( sRes );
-	}
-	else
-	{
-		// Orthographic full-body view (CharGen + the inventory model show) -- unchanged.
-		CVec2 vPos( ( sWindow.x2 + sWindow.x1 ) / 2, ( sWindow.y2 + sWindow.y1 ) / 2 + 190 );
-		SHMatrix sMatrix;
-		MakeMatrix( &sMatrix, ToRadian( 0 ), ToRadian( 90.0f ), 0, CVec3( 10, (float)( 512 - vPos.x ) * 5 / 1024, (float)( vPos.y - 384 ) * 3.75f / 768 ) );
-		ts.MakeParallel( 5, 3.75f, 0, 20 );
-		ts.SetCamera( sMatrix );
-	}
-
-	NGScene::IGameView::SDrawInfo drawInfo;
-	drawInfo.pTS = &ts;
-	drawInfo.vOrigin = CVec2( sPosition.x / 1024.0f, sPosition.y / 768.0f );
-	drawInfo.vSize = CVec2( sWindow.Width() / 1024.0f, sWindow.Height() / 768.0f );
-	drawInfo.bOverlay = true;
-	p3DView->Draw( drawInfo );
-
-	pView->CreateDynamicClearRects( sLayout, s2DPosition, s2DWindow, 0.0f );
-
-	CWindow::Draw( sTime, pView );
+	// retail @0x1bf390: copy the interactive spin into the base fAngle and delegate -- the doll
+	// renders through the SAME perspective path as every unit view (@0x1bf070: MakeProjective +
+	// the serialized sCamera). [The old dev-only ORTHO branch broke retail's HSR machinery:
+	// GetCoverRect's perspective math is undefined on an ortho w-row, so any view running with
+	// HSR_FAST (bFastMode=0 on the wire -- every RETAIL-save unit view) culled all doll parts.]
+	CUnitView::fAngle = fAngle;
+	CUnitView::Draw( sTime, pView );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CItemModel
@@ -990,11 +860,12 @@ static void MakeGrenadeToolTip( CToolTip *pToolTip, NDb::CRPGGrenade *pG )
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CShowItemModel::Set( NRPG::IInventoryItem* _pItem, NDb::ECameraType eCameraType, NWorld::CUnit* _pUnit )
+void CShowItemModel::Set( NGScene::IGameView *pView, NWorld::CUnit *_pUnit, NRPG::IInventoryItem *_pItem, NDb::ECameraType eCameraType )
 {
 	pItem = _pItem;
 	pUnit = _pUnit;
 
+	// retail @0x1c0f50 calls GetItemInfo unconditionally -- no null-item guard exists there.
 	CPtr<NDb::CRPGItem> pRPGItem( pItem->GetDBItem() );
 
 	SRand sRnd;
@@ -1007,11 +878,12 @@ void CShowItemModel::Set( NRPG::IInventoryItem* _pItem, NDb::ECameraType eCamera
 		q.GetYAxis( &vForwardDir );
 
 		CVec3 vCP( sCamera.vAnchor - vForwardDir * sCamera.fDistance );
-		SFBTransform res;
-		MakeMatrix( &res, sCamera.fPitch, sCamera.fYaw, sCamera.fRoll, vCP );
+		SHMatrix sCameraTransform;
+		MakeMatrix( &sCameraTransform, sCamera.fPitch, sCamera.fYaw, sCamera.fRoll, vCP );
 
+		SetScene( pView, true );
 		SetModel( pRPGItem->pModel->CreateModel( &sRnd ) );
-		SetTransform( new CFBTransform( res ) );
+		SetCameraTransform( sCameraTransform );
 	}
 
 	pToolTip = new CToolTip( SWindowInfo( GetInterface(), SPoint( 0, 0 ), SPoint( 0, 0 ), "", STYLE_ENABLED ) );
@@ -1234,6 +1106,7 @@ void CShowItemModel::Draw( const STime &sTime, NGScene::I2DGameView *pView )
 	CDynamicCast<NRPG::IMeleeWeaponItem> pMelee( pItem );
 	CDynamicCast<NRPG::IClipItem> pClip( pItem );
 	CDynamicCast<NRPG::IFirstAidItem> pFirstAid( pItem );
+	CDynamicCast<NRPG::IToolItem> pTool( pItem );
 	CDynamicCast<NRPG::IPicklockItem> pPicklock( pItem );
 
 	if ( pWeapon && IsValid( pWeapon->GetDBWeapon()->pWeaponType ) )
@@ -1264,12 +1137,19 @@ void CShowItemModel::Draw( const STime &sTime, NGScene::I2DGameView *pView )
 		if ( pCont )
 			pToolTip->SetVal( L"quantity", pCont->GetIncQuantity() );
 	}
+	else if ( pTool )
+	{
+		// Restored now that CToolItem IS a CItemContainer<CSimpleCharge> (retail shape). @0x1c07b0
+		// RTTI-chains IFirstAidItem -> IToolItem -> IPicklockItem and refreshes all three through the
+		// SAME vbtable+0x14 vbase call (IItemContainerInfo slot 0 = GetIncQuantity); tool and picklock
+		// share the "engquantity" key. Previously elided because the Jan03 non-container CToolItem had
+		// no per-tool charge count to report.
+		pToolTip->SetVal( L"engquantity", pTool->GetIncQuantity() );
+	}
 	else if ( pPicklock )
 	{
 		pToolTip->SetVal( L"engquantity", pPicklock->GetIncQuantity() );   // IPicklockItem IS IItemContainerInfo
 	}
-	// NOTE: retail tools carry CSimpleCharge charges (engquantity refresh); this fork's CToolItem is the
-	// Jan03 non-container shape, so there is no per-tool charge count to refresh -- elided.
 
 	CModel::Draw( sTime, pView );
 }
@@ -1298,8 +1178,27 @@ CObjectBase* CItemModel::GetTarget()
 // CSlot
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CSlot::CSlot( const SWindowInfo &sInfo, NGame::IMission *_pMission, int _nWidth, int _nHeight, NDb::ECameraType _eCameraType, bool _bAlwaysHilight ):
-	CWindow( sInfo ), pMission( _pMission ), nWidth( _nWidth ), nHeight( _nHeight ), eCameraType( _eCameraType ), bAlwaysHilight( _bAlwaysHilight ), bTrackMouse( false )
+	CActionDecorator<CWindow>( sInfo, _pMission ), pMission( _pMission ), nWidth( _nWidth ), nHeight( _nHeight ), eCameraType( _eCameraType ), bAlwaysHilight( _bAlwaysHilight ), bTrackMouse( false )
 {
+	// retail @0x1c3390: the decorator base carries the mission link too (stored twice, +0x84/+0x88),
+	// the hilight grid starts EMPTY (0x0; the default ctor's grid is 1x1), and the slot builds its
+	// shared 3D preview view with the standard inventory ambient -- the same GetTAmbientLight(7)
+	// idiom the sibling CUnitView/CInteractiveUnitView ctors use.
+	hilights.SetSizes( 0, 0 );
+	p3DView = NGScene::CreateNewFastInterfaceView();
+	SRand rnd;
+	p3DView->SetAmbient( NDb::GetTAmbientLight( 7 )->GetLight( &rnd ), NGScene::IGameView::LT_INVENTORY );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail @0x1be990: a slot participates in the action-decorator state routing only for the item-drag
+// state (CStateDragItem).
+bool CSlot::CanHandleState( NGame::IState *pState ) const
+{
+	CDynamicCast<NGame::CStateDragItem> pDrag( pState );
+	if ( pDrag )
+		return true;
+
+	return false;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CSlot::SetSize( const SPoint &sSize )
@@ -1313,8 +1212,15 @@ void CSlot::SetSize( const SPoint &sSize )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CSlot::SetSlotSize( int _nWidth, int _nHeight )
 {
+	// retail @0x1c3150 stores the dims, then SKIPS the whole rebuild when the grid is already this
+	// size (Jan03 always rebuilt). On save-load this is what preserves the DESERIALIZED hilight
+	// cells: their pImage refs point at the CImage children restored inside pHilight's subtree, and
+	// an unconditional rebuild would orphan them for fresh, unstyled images.
+	const bool bUnchanged = ( _nWidth == hilights.GetXSize() ) && ( _nHeight == hilights.GetYSize() );
 	nWidth = _nWidth;
 	nHeight = _nHeight;
+	if ( bUnchanged )
+		return;
 
 	hilights.SetSizes( nWidth, nHeight );
 	const SPoint &sSize = pSlotView->GetSize();
@@ -1330,12 +1236,16 @@ void CSlot::SetSlotSize( int _nWidth, int _nHeight )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CSlot::ProcessMessage( const SEvent &sEvent )
 {
+	// retail @0x1c53c0. Divergences from Jan03 (FOLLOW THE DECOMP): the MOUSEMOVE case only stores
+	// sMousePoint (the release dropped Jan03's SetCursorInfo(SCursorInfo()) -- the cursor is driven
+	// by the decorator/state routing below); TEMPLATELOADCOMPLETE additionally sets style bit 0x80
+	// on the view child before sizing the grid; and the base call is the CActionDecorator base,
+	// which is what routes drag events into the mission's CStateDragItem.
 	switch( sEvent.nEvent )
 	{
 	case EVENT_MOUSEMOVE:
 		{
 			sMousePoint = SPoint( sEvent.nX, sEvent.nY );
-			GetInterface()->SetCursorInfo( SCursorInfo() );
 			break;
 		}
 	case EVENT_MOUSEENTER:
@@ -1352,12 +1262,13 @@ bool CSlot::ProcessMessage( const SEvent &sEvent )
 		{
 			pHilight = GetUIWindow<CWindow>( this, "hilight" );
 			pSlotView = GetUIWindow<CWindow>( this, "view" );
+			pSlotView->SetStyle( 0x80, true );   // retail literal: a style bit added past the Jan03 set
 			SetSlotSize( nWidth, nHeight );
 			break;
 		}
 	}
 
-	return CWindow::ProcessMessage( sEvent );
+	return CActionDecorator<CWindow>::ProcessMessage( sEvent );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // retail NUI::IsCompatibleItems @0x1c0e00: the "weapon x clip" pairing test behind the drag-compat
@@ -1410,7 +1321,9 @@ void CSlot::Draw( const STime &sTime, NGScene::I2DGameView *pView )
 			SPoint sShift( 1 + ( sItemCellSize.x - sItemSize.x ) / 2, 1 + ( sItemCellSize.y - sItemSize.y ) / 2 );
 			SPoint sPosition( sItem.sPos.x * sCellSize.x + sShift.x, sItem.sPos.y * sCellSize.y + sShift.y );
 			CPtr<CItemModel> pItemModel = new CItemModel( SWindowInfo( pSlotView, sPosition, sItemSize, "icon", STYLE_ENABLED | STYLE_VISIBLE | STYLE_BOTTOMMOST ), pMission );
-			pItemModel->Set( sItem.pItem, eCameraType );
+			// retail @0x1c34d0: the icon renders in the SLOT'S shared p3DView (tag 13) via
+			// SetScene/bParentScene; GetUnit() is the slot vtbl+0x44 virtual.
+			pItemModel->Set( p3DView, GetUnit(), sItem.pItem, eCameraType );
 			newItemsSet[nTemp].pModel = pItemModel;
 //			newItemsSet[nTemp].pImage = IImage::Create( pView, SRect( sPosition.x, sPosition.y, sPosition.x + sItemSize.x, sPosition.y + sItemSize.y ), "icon", STYLE_ENABLED | STYLE_VISIBLE );
 //			newItemsSet[nTemp].pImage->SetImage( pTexture );
@@ -1447,7 +1360,7 @@ void CSlot::Draw( const STime &sTime, NGScene::I2DGameView *pView )
 		const bool bCanFight = IsValid( pUnit ) && pUnit->CanFight();
 		NRPG::IUnitMissionInfo *pRPG = IsValid( pUnit ) ? pUnit->GetRPG() : 0;
 
-		NWorld::IPlayer::SItemInfo sDragInfo;
+		NWorld::SItem sDragInfo;
 		NRPG::IInventoryItem *pDragItem = GetDragItem( &sDragInfo ) ? sDragInfo.pItem.GetPtr() : 0;
 
 		for ( int nTemp = 0; nTemp < itemsSet.size(); nTemp++ )
@@ -1532,7 +1445,10 @@ void CSlot::Draw( const STime &sTime, NGScene::I2DGameView *pView )
 		}
 	}
 
-	NWorld::IPlayer::SItemInfo sItemInfo;
+	// NOTE: the SItem built below deliberately carries eType = HAND -- it describes a prospective MOVE
+	// whose SOURCE is the hand, which is not the same thing as sItemInfo.eType (the in-hand item's
+	// drag ORIGIN, e.g. the slot it was pulled out of).
+	NWorld::SItem sItemInfo;
 	if ( bTrackMouse && GetDragItem( &sItemInfo ) )
 	{
 		SPoint sSize = sItemInfo.pItem->GetSize();
@@ -1593,7 +1509,29 @@ void CSlot::Draw( const STime &sTime, NGScene::I2DGameView *pView )
 		}
 	}
 
+	// retail @0x1c34d0 tail (VA 0x5c417f..0x5c441f): the 2D pass (children incl. every parent-scene
+	// item icon's transform fold) draws FIRST, then the slot draws its shared p3DView ONCE for all
+	// item meshes between the two depth-clear quads.
+	CTransformStack ts;
+	MakeProjection( &ts );
+
+	SRect sWindow;
+	SPoint sPosition;
+	if ( !ClientToScreen( &sPosition, &sWindow ) )
+		return;
+
 	CWindow::Draw( sTime, pView );
+	CreateClearRect( pView, 1.0f );
+	pView->Flush();
+
+	NGScene::IGameView::SDrawInfo drawInfo;
+	drawInfo.pTS = &ts;
+	drawInfo.vOrigin = CVec2( sWindow.x1 / 1024.0f, sWindow.y1 / 768.0f );
+	drawInfo.vSize = CVec2( sWindow.Width() / 1024.0f, sWindow.Height() / 768.0f );
+	drawInfo.bOverlay = true;
+	p3DView->Draw( drawInfo );
+
+	CreateClearRect( pView, 0.0f );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CSlot::GetInSlotPos( int nX, int nY, SPoint *pCoords )
@@ -1626,7 +1564,11 @@ void CSlot::GetItemInSlotPos( int nX, int nY, const SPoint &sItemSize, SPoint *p
 	pCoords->y = Min( nHeight - Min( nHeight, sItemSize.y ), Max( 0, Float2Int( ( float( sLocalSpaceCursor.y ) - float( sItemSize.y * sCellSize.y ) / 2 ) / sCellSize.y ) ) );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-bool CSlot::GetDragItem( NWorld::IPlayer::SItemInfo *pInfo )
+// retail NUI::CSlot::GetDragItem @0x1beb80: GetActivePlayer()->GetPlayer()->GetInHandItem(pInfo),
+// dispatched through IPlayer vtbl+0x30 (slot 12). Retail additionally gates on IMission vtbl+0x40
+// before touching the active player; that gate is absent here as it was before this change (a
+// pre-existing divergence, not part of the SItemInfo->SItem migration).
+bool CSlot::GetDragItem( NWorld::SItem *pInfo )
 {
 	return pMission->GetActivePlayer()->GetPlayer()->GetInHandItem( pInfo );
 }
@@ -1643,11 +1585,11 @@ NGame::IMission* CSlot::GetGame()
 struct SButtonsLineReflow
 {
 	CPtr<CWindow> pState;
-	CPtr<CMLText> pText;
+	CPtr<CText> pText;
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // Create one text state on a button and size both the state and the button to fit the caption.
-// Mirrors NUI::AddDynamicState @0x1c5500: a CMLText (markup text, so it measures its own natural
+// Mirrors NUI::AddDynamicState @0x1c5500: a CText (markup text, so it measures its own natural
 // size via GetRealSize) is placed in the new state window; the state is sized to text+8 x lineHeight,
 // and the button grows to fit its widest caption. (The binary's exact button-width formula is
 // Ghidra-ambiguous; fit-to-widest-caption is the observable behaviour -- buttons sized to their text.)
@@ -1655,7 +1597,7 @@ static void AddDynamicState( CButton *pButton, int nState, const wstring &wsText
 {
 	SButtonsLineReflow sEntry;
 	sEntry.pState = pButton->AddState( nState );
-	CMLText *pText = new CMLText( SWindowInfo( sEntry.pState, SPoint( 0, 0 ), SPoint( 1024, nLineHeight ), "text" ) );
+	CText *pText = new CText( SWindowInfo( sEntry.pState, SPoint( 0, 0 ), SPoint( 1024, nLineHeight ), "text" ) );
 	sEntry.pText = pText;
 	pText->SetText( wsText, true );
 
@@ -1769,7 +1711,6 @@ void CHoverCheckButton::OnAction()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 using namespace NUI;
 REGISTER_SAVELOAD_CLASS( 0xB2243951, CLineBar );
-REGISTER_SAVELOAD_CLASS( 0xB2243952, CUnitHead );
 REGISTER_SAVELOAD_CLASS( 0xB2243953, CImageNumber );
 REGISTER_SAVELOAD_CLASS( 0xB2243954, CFlashButton );
 REGISTER_SAVELOAD_CLASS( 0xB2243955, CHoverButton );
@@ -1783,4 +1724,5 @@ REGISTER_SAVELOAD_CLASS( 0xB224395A, CShrinkButton );
 REGISTER_SAVELOAD_CLASS( 0xB224395B, CComplexButton );
 REGISTER_SAVELOAD_CLASS( 0xB3620190, CComplexButtonFlash );
 REGISTER_SAVELOAD_CLASS( 0xB224395C, CInteractiveUnitView );
+REGISTER_SAVELOAD_CLASS( 0xB3915110, CSlotInfo );   // retail id ($E-registered, gen/classreg.json)
 REGISTER_SAVELOAD_CLASS( 0xb3601001, CButtonsLine );

@@ -15,8 +15,11 @@
 #include "..\DBFormat\DataFormat.h"
 #include "..\DBFormat\DataRPG.h"
 #include "..\DBFormat\DataAnimation.h"
+#include "..\DBFormat\DataLight.h"	// CAmbientLightReal (SyncWeather sun/rain reference lights)
 #include "GMatShare.h"
 #include "InventoryUnit.h"
+#include "..\MiscDll\Commands.h"      // REGISTER_VAR_EX (v1.2 game_selectionmode / game_showweathereffect)
+#include "..\FileIO\BasicChunk1.h"    // START_REGISTER / FINISH_REGISTER
 ///
 #include "GPostProcessors.h"
 #include "GGrass.h"
@@ -39,6 +42,11 @@ namespace NRender
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 const int N_FOV = 60;
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// v1.2-only config (registrar v1.2 @0x6cff40): game_selectionmode -> int @0x9c70cc (VarIntHandler,
+// default 0, saved), game_showweathereffect -> bool @0x97fec8 (VarBoolHandler, default 1, saved).
+int nSelectionMode = 0;
+static bool bShowWeatherEffect = true;
+////////////////////////////////////////////////////////////////////////////////////////////////////
 // ChooseBodyColor @0x2cb6b0 -- overwrite the body model's SKIN material slot (pMaterials[1] = the neck/hands skin)
 // with the chosen race's material, so the body skin tone tracks the FaceGen Nationality slider (in retail the head
 // FACE recolour ALSO recolours the neck/hands; the dev dropped this). Reads the race off the head's CComplexHead
@@ -60,17 +68,38 @@ void ChooseBodyColor( NDb::CModel *pModel, NLSHead::CHeadInfo *pHead )
 		pModel->pMaterials[1] = m;                     // index 1 = the skin slot (neck/hands)
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail NRender::SSelectionInfo (PDB: 20 bytes, vColor @+0, bIgnoreFloorMask @+16): the visual
+// description of a selection highlight. bIgnoreFloorMask makes the scene-side selection node skip
+// the per-face floor-mask/frame-skip gates (retail NGScene::CSelection +0x38); the dev scene node
+// has no such gate yet, so the flag is carried (save wire + CSelection state) but not consumed.
+struct SSelectionInfo
+{
+	CVec4 vColor;
+	bool bIgnoreFloorMask;
+
+	// retail CSelection default ctor @0x2cfa90 seeds ((0,1,1,1), false)
+	SSelectionInfo(): vColor( 0, 1, 1, 1 ), bIgnoreFloorMask( false ) {}
+	SSelectionInfo( const CVec4 &_vColor, bool _bIgnoreFloorMask ): vColor( _vColor ), bIgnoreFloorMask( _bIgnoreFloorMask ) {}
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
 class CSelection: public CObjectBase
 {
 	OBJECT_BASIC_METHODS( CSelection );
 public:
 	ZDATA
-	CVec4 vColor;
-	CObj<NGScene::CSelectionNode> pSelection;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&vColor); f.Add(3,&pSelection); return 0; }
+	SSelectionInfo selectionInfo;
+	// v1.2 widened the node slot: mode 0 stores the scene CSelectionNode, mode 1 the AddPostFilter
+	// handle (CreateSelection v1.2 @0x6cbf60 stores either at +0x20)
+	CObj<CObjectBase> pSelection;
+	// retail operator& @0x2d0600: tag 2 = the WHOLE 20-byte SSelectionInfo as ONE raw chunk
+	// (byte-walked retail saves: {2:20 3:4} on every instance), tag 3 = the scene node. The dev
+	// used to write only the 16-byte CVec4 -> the x123 all-slots SIZE divergence in the wire
+	// audit, and bIgnoreFloorMask was dropped on load.
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&selectionInfo); f.Add(3,&pSelection); return 0; }
 
-	CSelection() {}
-	CSelection( const CVec4 &_vColor, NGScene::CSelectionNode *_pSelection ): vColor( _vColor ), pSelection( _pSelection ) {}
+	CSelection() {}	// retail @0x2cfa90: selectionInfo default-constructs to ((0,1,1,1), false)
+	// retail @0x2cfaf0: copies the 20-byte info field-for-field + takes an owning node ref
+	CSelection( const SSelectionInfo &_info, CObjectBase *_pSelection ): selectionInfo( _info ), pSelection( _pSelection ) {}
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CSetRender: public COrdinarySyncDst<NWorld::IVisObj,CSetRender>, public NWorld::IRenderVisitor
@@ -92,7 +121,7 @@ public:
 	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(TParent*)this); f.Add(2,&pScene); f.Add(3,&pGrass); f.Add(4,&pTime); f.Add(5,&pAimTime); f.Add(6,&objects); f.Add(7,&selections); f.Add(8,&pHeadsController); f.Add(9,&unitFlashes); return 0; }
 private:
 	virtual void PostVisit( int nID, NWorld::IVisObj *pObject );
-	CSelection* CreateSelection( int nID, const CVec4 &vColor, CSelection *pSource = 0 );
+	CSelection* CreateSelection( int nID, const SSelectionInfo &info, CSelection *pSource = 0 );
 	void AddFilter( NGScene::IPostProcess *p, int nFloor );
 public:
 	CSetRender() {}
@@ -135,7 +164,7 @@ public:
 	virtual void FinishAlienStyle();
 	virtual void SetBaseFogHeight( float f );
 	//
-	CObjectBase* Select( CObjectBase *pSelect, const CVec4 &vColor = CVec4( 0, 1, 1, 1 ) );
+	CObjectBase* Select( CObjectBase *pSelect, const SSelectionInfo &info = SSelectionInfo() );
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CSetRender
@@ -146,20 +175,42 @@ void CSetRender::SetNewSource( CSyncSrc<NWorld::IVisObj> *_pSrc )
 	objects.clear();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CSelection* CSetRender::CreateSelection( int nID, const CVec4 &vColor, CSelection *pSource )
+// retail @0x2cb440 takes the full SSelectionInfo; on the reuse path it copies the WHOLE 20-byte
+// info (colour + floor-mask flag) into the existing CSelection. The scene call still hands over
+// only the colour: the dev IGameView::CreateSelection has no bIgnoreFloorMask parameter yet
+// (retail scene vtbl+0x40 takes it and stores it at NGScene::CSelection+0x38 for the mask gate).
+CSelection* CSetRender::CreateSelection( int nID, const SSelectionInfo &info, CSelection *pSource )
 {
 	const vector<CObj<CObjectBase> > &ob = GetObjects( nID );
 	vector<CObjectBase*> t;
 	for ( int k = 0; k < ob.size(); ++k )
 		t.push_back( ob[k] );
 
+	// v1.2 @0x6cbf60: game_selectionmode gates the node type -- 2 = no selection visuals at all,
+	// 1 = a flat premultiplied post-colorer over the unit's nodes (scene AddPostFilter, vtbl+0x90)
+	if ( nSelectionMode == 2 )
+		return pSource;
+	if ( nSelectionMode == 1 )
+	{
+		const CVec4 &c = info.vColor;
+		CObjectBase *pNode = pScene->AddPostFilter( t,
+			new NGScene::CPostColorer( new NGScene::CCVec4( CVec4( c.r * c.a, c.g * c.a, c.b * c.a, 0 ) ) ) );
+		if ( pSource )
+		{
+			pSource->selectionInfo = info;
+			pSource->pSelection = pNode;
+			return pSource;
+		}
+		return new CSelection( info, pNode );
+	}
+
 	if ( pSource )
 	{
-		pSource->vColor = vColor;
-		pSource->pSelection = pScene->CreateSelection( t, vColor );
+		pSource->selectionInfo = info;
+		pSource->pSelection = pScene->CreateSelection( t, info.vColor );
 		return pSource;
 	}
-	return new CSelection( vColor, pScene->CreateSelection( t, vColor ) );
+	return new CSelection( info, pScene->CreateSelection( t, info.vColor ) );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CSetRender::PostVisit( int nID, NWorld::IVisObj *pObject )
@@ -169,22 +220,22 @@ void CSetRender::PostVisit( int nID, NWorld::IVisObj *pObject )
 	objects[nID] = pObject;
 	CSelectionHash::iterator i = selections.find( pObject );
 	if ( i != selections.end() && IsValid( i->second ) )
-		CreateSelection( nID, i->second->vColor, i->second );
+		CreateSelection( nID, i->second->selectionInfo, i->second );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CObjectBase* CSetRender::Select( CObjectBase *pSelect, const CVec4 &_vColor )
+CObjectBase* CSetRender::Select( CObjectBase *pSelect, const SSelectionInfo &info )
 {
 	CSelectionHash::iterator iTemp = selections.find( pSelect );
 	if ( iTemp != selections.end() )
 	{
-		if ( IsValid( iTemp->second ) && iTemp->second->vColor == _vColor )
+		if ( IsValid( iTemp->second ) && iTemp->second->selectionInfo.vColor == info.vColor )
 			return iTemp->second;
 	}
 	for ( int k = 0; k < objects.size(); ++k )
 	{
 		if ( objects[k] == pSelect )
 		{
-			CSelection *pRes = CreateSelection( k, _vColor );
+			CSelection *pRes = CreateSelection( k, info );
 			selections[pSelect] = pRes;
 			return pRes;
 		}
@@ -368,14 +419,16 @@ void CSetRender::AddHead( NWorld::CUnit *pUnit, CFuncBase<SFBTransform> *pPositi
 	if ( !IsValid(pHeadsController) )
 		return;
 
-	NLSHead::CHeadAnimator *pAnimator = pHeadsController->GetAnimator(pUnit);
-	if ( !pAnimator )
-		return;
+	// retail 4-arg AddHead @0x2cda60: records are keyed by the unit's per-unit CHeadInfo (the render
+	// side resolves it -- CFakeWorldUnit::GetHeadInfo @0x2cf9c0); a null animator (no CHead record)
+	// still falls through so the hair / face meshes render (retail @0x2cd7f0 -> @0x188c90 skips only
+	// the head-skin part).
+	NLSHead::CHeadInfo *pHI = pUnit->GetHeadInfo();
+	NLSHead::CHeadAnimator *pAnimator = pHeadsController->GetAnimator( pHI );
 
 	bool bHasCap = pUnit->IsCapPresent();
 	// A committed advanced-FaceGen hero carries a baked face texture (CHeadInfo::pTexture); pass it so the head
 	// skin renders the recoloured texture instead of the base DB material.
-	NLSHead::CHeadInfo *pHI = pUnit->GetHeadInfo();
 	CPtrFuncBase<NGfx::CTexture> *pFaceTex = IsValid( pHI ) ? pHI->GetFaceTexture() : 0;
 	Register( pScene->CreateLSHead( pUnit->GetDBHead(), pAnimator, pHeadsController->GetTime(), pPosition, false, pUnit->GetHeadSeed(), bHasCap, room, pFaceTex, pHI ) );
 }
@@ -424,7 +477,8 @@ void CSetRender::AddHeadIdleAnimator( NWorld::CUnit *pUnit )
 {
 	if ( !IsValid( pHeadsController ) )
 		return;
-	CObjectBase *pIdler = pHeadsController->PlayIdle( pUnit );
+	// retail keys the record by the unit's CHeadInfo (controller PlayIdle @0x25dda0 takes CHeadInfo*).
+	CObjectBase *pIdler = pHeadsController->PlayIdle( pUnit->GetHeadInfo() );
 	if ( pIdler )
 		RegisterBase( pIdler );
 }
@@ -562,15 +616,17 @@ NLSHead::CHeadInfo* CFakeRPGUnit::CreateLSHeadInfo()
 	return 0;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail @0x2cb380: the angle-change branch is the ONLY body -- re-stand the EXISTING animation at
+// the new angle and re-front the sync bind so the scene re-Visits ONCE. (dev previously re-fronted
+// UNCONDITIONALLY every frame -> the FaceGen doll's mesh was destroyed+recreated per frame.)
 void CFakeRPGUnit::Update( float _fAngle )
 {
-	if ( fAngle != _fAngle)
+	if ( fAngle != _fAngle && IsValid( pAnimation ) )
 	{
 		fAngle = _fAngle;
 		pAnimation->SetStand( 0, CVec3( 0, 0, 0 ), fAngle );
+		bindGlobal.Update();
 	}
-
-	bindGlobal.Update();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CFakeRPGUnit::Visit( NWorld::IRenderVisitor *p )
@@ -603,67 +659,97 @@ void CFakeRPGUnit::Visit( NWorld::IRenderVisitor *p )
 class CFakeWorldUnit: public NWorld::IVisObj
 {
 	OBJECT_NOCOPY_METHODS(CFakeWorldUnit);
+	// Member set + order + tags = retail CFakeWorldUnit (PDB layout 0x4c bytes; operator&
+	// @0x2d3560). Byte-walked retail saves carry exactly
+	//   {2:4 3:1 4:1 5:4 7:12 8:4 9:4 10:4 11:4 12:1 13:1 14:1 15:4 16:1}
+	// -- note there is NO tag 6 (retail skips it). The old dev wire {2 nAnimFlags, 3 fAngle,
+	// 4 bindGlobal, 5 pAnimator, 6 pUnit, 7 pTime} misread every retail chunk from tag 3 on
+	// (the x26 SIZE/RAWSZ/UNREAD/MISS block in the wire audit).
 	ZDATA
-	int nAnimFlags;
-	float fAngle;
-	CSyncSrcBind<NWorld::IVisObj> bindGlobal;
-	CObj<NAnimation::CSkeletonAnimator> pAnimator;
-	CPtr<NWorld::CUnit> pUnit;
-	CPtr< CFuncBase<STime> > pTime;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&nAnimFlags); f.Add(3,&fAngle); f.Add(4,&bindGlobal); f.Add(5,&pAnimator); f.Add(6,&pUnit); f.Add(7,&pTime); return 0; }
-	bool bNoAnimationUpdate;	// non-serialized: set by PlayAnimation() to suppress Update's auto-pose reset
-	// release CFakeWorldUnit layout +0x0c/+0x0d/+0x31, seeded by ctor @0x2ce440 params 4-6. Runtime-only
-	// here (kept OUT of operator& to preserve the dev save format, same pattern as bNoAnimationUpdate);
-	// after a load they re-default and the owning view rebinds the show unit on the next SetUnit anyway.
-	//   bItems    -- pose with the active item's weapon anim flags (release Update @0x2cc1a0 gates the
-	//                weapon read on it; false = the bare-stand body pose the HUD face uses)
-	//   bPlayIdle -- stand animation type = INTERFACE_IDLE instead of POSE (release @0x2cbe30)
-	//   bShowCap  -- release Visit @0x2cc650 threads it into the bound-mesh build (cap suppression);
-	//                dev GetItemsBindPlaces has no cap flag yet, and every decoded retail caller of this
-	//                class passes true, so it is stored but not consumed by Visit for now
-	bool bItems;
-	bool bPlayIdle;
-	bool bShowCap;
-	// release CFakeWorldUnit 'sEndTime' (@0x2cbe30 tail: `sEndTime = anim->tLength + curTime`): expiry
-	// of the current stand/idle clip. Update (@0x2cc1a0) re-rolls the weighted-random clip ONLY when
-	// now passes it. Runtime-only (kept OUT of operator&, same as the flags above); after a load it
-	// re-defaults to 0 so the first Update re-rolls once -- harmless.
-	STime sEndTime;
+	int nAnimFlags;											// tag 2
+	// bItems  -- pose with the active item's weapon anim flags (retail Update @0x2cc1a0 gates the
+	//            weapon read on it; false = the bare-stand body pose the HUD face uses)
+	// bPlayIdle -- stand animation type = INTERFACE_IDLE instead of POSE (retail @0x2cbe30)
+	bool bItems;											// tag 3
+	bool bPlayIdle;											// tag 4
+	float fAngle;											// tag 5
+	CSyncSrcBind<NWorld::IVisObj> bindGlobal;				// tag 7 (subtree {2 pSync, 3 nID} = 12B)
+	CObj<NAnimation::CSkeletonAnimator> pAnimator;			// tag 8
+	CPtr<NWorld::CUnit> pUnit;								// tag 9
+	CDGPtr< CFuncBase<STime> > pTime;						// tag 10 (retail CDGPtr; wire = the owning CObj node)
+	// Live head-morph state (retail +0x2c, CPtr like retail): built by the ctor for a non-static,
+	// transformable complex head; driven by Set/GetLSHeadParam (retail @0x2cb260/@0x2cb240).
+	CPtr<NLSHead::CHeadTransformInfo> pHeadTransformInfo;	// tag 11
+	// bCanFight/bInPK -- the unit's live fight/PK state cached by CreateAnimation's commit
+	// (retail @0x2cbe30); joining the Update change-gate makes a downed/mounted unit re-pose.
+	bool bCanFight;											// tag 12
+	bool bShowCap;											// tag 13 (Visit passes !bShowCap as GetItemsBindPlaces' bNoCap)
+	bool bInPK;												// tag 14
+	// expiry of the current stand/idle clip (retail @0x2cbe30 tail: sEndTime = anim->tLength +
+	// curTime). Update re-rolls the weighted-random clip ONLY when now passes it.
+	STime sEndTime;											// tag 15
+	bool bNoAnimationUpdate;								// tag 16 (set by PlayAnimation() to suppress Update's auto-pose reset)
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&nAnimFlags); f.Add(3,&bItems); f.Add(4,&bPlayIdle); f.Add(5,&fAngle); f.Add(7,&bindGlobal); f.Add(8,&pAnimator); f.Add(9,&pUnit); f.Add(10,&pTime); f.Add(11,&pHeadTransformInfo); f.Add(12,&bCanFight); f.Add(13,&bShowCap); f.Add(14,&bInPK); f.Add(15,&sEndTime); f.Add(16,&bNoAnimationUpdate); return 0; }
+	//
+	void CreateAnimation( int nNewAnimFlags, int nAnimFlagsClassSex, float _fAngle, bool _bCanFight, bool _bInPK );
 public:
-	CFakeWorldUnit(): bNoAnimationUpdate( false ), bItems( true ), bPlayIdle( false ), bShowCap( true ), sEndTime( 0 ) {}
+	CFakeWorldUnit(): nAnimFlags( -1 ), bItems( true ), bPlayIdle( false ), fAngle( 0 ),
+		bCanFight( true ), bShowCap( true ), bInPK( false ), sEndTime( 0 ), bNoAnimationUpdate( false ) {}
 	CFakeWorldUnit( CSyncSrc<NWorld::IVisObj> *pSrc, NWorld::CUnit *_pUnit, CFuncBase<STime>* _pTime,
 		bool _bItems, bool _bPlayIdle, bool _bShowCap );
 
 	virtual void Visit( NWorld::IRenderVisitor *p );
 	void Update( float fAngle );
 	void PlayAnimation( NDb::CAnimation *pAnim, bool bLoop );
+
+	// Live head-morph accessors (retail @0x2cb240/@0x2cb260/@0x2cb280) -- same shape as the
+	// CFakeRPGUnit triple; CShowWorldUnit forwards its IShowUnit virtuals here.
+	float GetLSHeadParam( const char *szName );
+	void SetLSHeadParam( const char *szName, float fValue );
+	NLSHead::CHeadInfo* CreateLSHeadInfo();
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// release @0x2ce440: __thiscall(pSrc, pUnit, pTime, bool bItems, bool bPlayIdle, bool bShowCap)
+// release @0x2ce440: __thiscall(pSrc, pUnit, pTime, bool bItems, bool bPlayIdle, bool bShowCap).
+// Seeds nAnimFlags=-1, bCanFight=true, bInPK=false, bNoAnimationUpdate=false, then lazily builds
+// the live head-morph state, links the sync source and kicks the pose. (Retail leaves sEndTime
+// UNINITIALIZED here -- the guaranteed nAnimFlags mismatch short-circuits the change-gate before
+// it is read; the dev zero-init keeps that behaviour while staying deterministic.)
 CFakeWorldUnit::CFakeWorldUnit( CSyncSrc<NWorld::IVisObj> *pSrc,
 	NWorld::CUnit *_pUnit, CFuncBase<STime>* _pTime, bool _bItems, bool _bPlayIdle, bool _bShowCap )
 : pUnit( _pUnit ), pTime( _pTime ), fAngle( 0 ), nAnimFlags( -1 ), bNoAnimationUpdate( false ),
-	bItems( _bItems ), bPlayIdle( _bPlayIdle ), bShowCap( _bShowCap ), sEndTime( 0 )
+	bItems( _bItems ), bPlayIdle( _bPlayIdle ), bShowCap( _bShowCap ),
+	bCanFight( true ), bInPK( false ), sEndTime( 0 )
 {
+	// retail @0x2ce440 tail: a NON-static head whose complex-head record carries a valid,
+	// transformable NDb::CHead gets a live morph state over (complex head, time source).
+	NLSHead::CHeadInfo *pHI = pUnit->GetHeadInfo();
+	NDb::CComplexHead *pCH = pHI ? pHI->GetHead() : 0;
+	if ( ( !pHI || !pHI->IsStaticHead() ) && IsValid( pCH ) && IsValid( pCH->pHead ) && pCH->pHead->isTransformable )
+		pHeadTransformInfo = new NLSHead::CHeadTransformInfo( pCH, pTime );
+
 	bindGlobal.Link( pSrc, this );
 	Update( 0 );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail Update @0x2cc1a0: re-evaluate the pose key + the unit's live fight/PK state and rebuild
+// via CreateAnimation only on a material change OR when the current clip EXPIRES (`sEndTime <
+// now`). The expiry re-roll is what rotates the weighted INTERFACE_IDLE clips: CSkeleton::
+// GetAnimation random-picks per call (roulette over fRndWeight, DataFormat.cpp), so it must run
+// ONCE per clip lifetime -- never per frame, or the face flip-flops between clips.
+// NOTE: retail does NOT re-front bindGlobal here -- the sync update lives in CreateAnimation's
+// commit tail (@0x2cbe30), firing only when the animator was actually replaced. PlayAnimation
+// needs none at all (it schedules onto the EXISTING animator the scene already holds).
 void CFakeWorldUnit::Update( float _fAngle )
 {
-	if ( !IsValid( pUnit ) )
-	{
-		ASSERT(0);
+	if ( !IsValid( pUnit ) )	// retail @0x2cc1a0: silent guard (null or finalizing unit)
 		return;
-	}
-	if ( bNoAnimationUpdate )	// a PlayAnimation() override is active -> keep it, don't reset to the auto pose
-	{
-		bindGlobal.Update();
-		return;
-	}
+
+	pTime.Refresh();	// retail: once-per-frame CDGPtr refresh, then the frame-cached value
+	STime tNow = pTime->GetValue();
+
 	CPtr<NRPG::IInventoryItem> pActiveItem = pUnit->GetRPG()->GetInventoryInfo()->GetActive();
 	NDb::EWeaponType eWeaponType = NDb::WT_DEFAULT;
-	// release Update @0x2cc1a0: the active item's weapon shapes the pose only in item mode (bItems);
+	// retail Update @0x2cc1a0: the active item's weapon shapes the pose only in item mode (bItems);
 	// in body mode (the HUD face) the flags degrade to the bare-stand key.
 	const bool bHaveItem = bItems && IsValid( pActiveItem );
 	if ( bHaveItem )
@@ -675,52 +761,79 @@ void CFakeWorldUnit::Update( float _fAngle )
 	int nAnimFlagsClassSex = NDb::CAnimation::IN_REALTIME;
 	nAnimFlagsClassSex |=	pUnit->GetRPG()->GetRPGPers()->bIsFemale? NDb::CAnimation::SEX_FEMALE : NDb::CAnimation::SEX_MALE;
 
-	// release Update @0x2cc1a0: rebuild the animation only on a state change OR when the current clip
-	// EXPIRES (`sEndTime < now`). The expiry re-roll is what rotates the weighted INTERFACE_IDLE clips:
-	// CSkeleton::GetAnimation random-picks per call (roulette over fRndWeight, DataFormat.cpp), so it
-	// must run ONCE per clip lifetime -- never per frame, or the face flip-flops between clips.
-	STime tNow = pTime->GetValue();
-	if ( ( fAngle != _fAngle ) || ( nNewAnimFlags != nAnimFlags ) || ( sEndTime < tNow ) )
+	// retail @0x2cc1a0: the unit's live fight/PK state joins the change gate, so a unit going
+	// down (or into/out of a Panzerklein) re-poses even though the weapon key is unchanged.
+	const bool bFight = pUnit->CanFight();
+	const bool bPK = IsValid( pUnit->GetWearingDBPK() );
+
+	if ( !bNoAnimationUpdate	// a PlayAnimation() override is active -> keep it, don't reset to the auto pose
+		&& ( ( fAngle != _fAngle ) || ( nNewAnimFlags != nAnimFlags )
+			|| ( bCanFight != bFight ) || ( bInPK != bPK ) || ( sEndTime < tNow ) ) )
 	{
-		NDb::CModel* pModel = pUnit->GetModel();
-		pAnimator = new NAnimation::CSkeletonAnimator( pModel->pSkeleton );
-		pAnimator->pTime = pTime;
-		pAnimator->bServer = false;
-
-		// release CreateAnimation @0x2cbe30: EType = bPlayIdle ? INTERFACE_IDLE : POSE, then the
-		// three-key fallback chain (EType,flags,classSex) -> (EType,POSE_STAND) -> (POSE,POSE_STAND).
-		// The last leg rescues units whose skeleton has no InterfaceIdle clips (only skeleton 8 -- the
-		// human rig -- carries them; a PK-mounted unit falls back to its static stand pose).
-		// The new clip starts at tNow (retail passes curTime into CreateAnimation/AddAnimator/SetStand),
-		// so an expiry re-roll begins at the clip's first key instead of a mid-phase snap.
-		const NDb::CAnimation::EType eType = bPlayIdle ? NDb::CAnimation::INTERFACE_IDLE : NDb::CAnimation::POSE;
-
-		NAnimation::CAnimation *pAnimation;
-		pAnimation = pAnimator->CreateAnimation( pModel->pSkeleton->GetAnimation( eType, nNewAnimFlags, 0, nAnimFlagsClassSex ), tNow, true );
-		if ( !pAnimation )
-			pAnimation = pAnimator->CreateAnimation( pModel->pSkeleton->GetAnimation( eType, NDb::CAnimation::POSE_STAND ), tNow, true );
-		if ( !pAnimation && eType != NDb::CAnimation::POSE )
-			pAnimation = pAnimator->CreateAnimation( pModel->pSkeleton->GetAnimation( NDb::CAnimation::POSE, NDb::CAnimation::POSE_STAND ), tNow, true );
-
-		// release @0x2cbe30 tail: commit state ONLY on success, and store the REQUESTED flags
-		// (retail does `this->nAnimFlags = param_1` no matter which fallback leg supplied the clip).
-		// JITTER FIX: the old code stored the DEGRADED fallback key (POSE_STAND) into nAnimFlags, so
-		// whenever leg 1 missed (HUD face requests POSE_STAND|WEAPON_NONE = 0x101, the InterfaceIdle
-		// rows only carry 0x1) the change-gate mismatched every frame -> per-frame animator rebuild ->
-		// per-frame roulette re-roll flip-flopping between the two RndWeight>0 idle clips.
-		if ( pAnimation )
-		{
-			fAngle = _fAngle;
-			nAnimFlags = nNewAnimFlags;
-			pAnimator->AddAnimator( tNow, pAnimation );
-			pAnimation->SetStand( tNow, CVec3( 0, 0, 0 ), fAngle );
-			sEndTime = pAnimation->GetTime() + tNow;	// release @0x2cbe30: sEndTime = tLength + curTime
-		}
+		CreateAnimation( nNewAnimFlags, nAnimFlagsClassSex, _fAngle, bFight, bPK );
 	}
-
-	bindGlobal.Update();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail @0x2cbe30: __thiscall(nAnimFlags, nAnimFlagsClassSex, fAngle, bCanFight, bInPK). Builds a
+// FRESH CSkeletonAnimator and schedules the best matching clip:
+//   1. a unit that can no longer fight plays a fixed DB clip first (disasm @0x6cbf3b): animation
+//      4493 (0x118d) on the fight->downed TRANSITION (the stored bCanFight is still true), 4514
+//      (0x11a2) while it stays downed; non-looped, so the fall plays once and freezes.
+//   2. else/on failure the three-key fallback chain (EType,flags,classSex) -> (EType,POSE_STAND)
+//      -> (POSE,POSE_STAND), EType = bPlayIdle ? INTERFACE_IDLE : POSE (the last leg retries
+//      unconditionally in retail, a harmless repeat when EType == POSE). The last leg rescues
+//      units whose skeleton has no InterfaceIdle clips (only skeleton 8 -- the human rig --
+//      carries them; a PK-mounted unit falls back to its static stand pose).
+//   3. commit ONLY on success: cache bInPK/bCanFight/fAngle + the REQUESTED flags (retail stores
+//      param_1 no matter which fallback leg supplied the clip -- the JITTER FIX: storing the
+//      DEGRADED key made the change-gate mismatch every frame -> per-frame roulette re-roll),
+//      schedule at tNow, sEndTime = tLength + tNow, clear bNoAnimationUpdate, and re-front the
+//      sync source so the scene re-Visits the REPLACED animator.
+// Every clip starts at tNow (retail passes curTime into CreateAnimation/AddAnimator/SetStand), so
+// an expiry re-roll begins at the clip's first key instead of a mid-phase snap.
+void CFakeWorldUnit::CreateAnimation( int nNewAnimFlags, int nAnimFlagsClassSex, float _fAngle, bool _bCanFight, bool _bInPK )
+{
+	pTime.Refresh();
+	STime tNow = pTime->GetValue();
+
+	// retail @0x2cbe30: body mode reads the RPG unit's pers model (NRPG::CUnit+0x6c) -- a PK-wearing
+	// pilot shows the HUMAN in dialog/portrait views; item mode reads the live world model
+	NDb::CModel* pModel = bItems ? pUnit->GetModel() : pUnit->GetRPG()->GetModel();
+	pAnimator = new NAnimation::CSkeletonAnimator( pModel->pSkeleton );
+	pAnimator->pTime = pTime;
+	pAnimator->bServer = false;
+
+	const NDb::CAnimation::EType eType = bPlayIdle ? NDb::CAnimation::INTERFACE_IDLE : NDb::CAnimation::POSE;
+
+	NAnimation::CAnimation *pAnimation = 0;
+	if ( !_bCanFight )
+		pAnimation = pAnimator->CreateAnimation( NDb::GetAnimation( bCanFight ? 0x118d : 0x11a2 ), tNow, false );
+	if ( !IsValid( pAnimation ) )
+		pAnimation = pAnimator->CreateAnimation( pModel->pSkeleton->GetAnimation( eType, nNewAnimFlags, 0, nAnimFlagsClassSex ), tNow, true );
+	if ( !IsValid( pAnimation ) )
+		pAnimation = pAnimator->CreateAnimation( pModel->pSkeleton->GetAnimation( eType, NDb::CAnimation::POSE_STAND ), tNow, true );
+	if ( !IsValid( pAnimation ) )
+		pAnimation = pAnimator->CreateAnimation( pModel->pSkeleton->GetAnimation( NDb::CAnimation::POSE, NDb::CAnimation::POSE_STAND ), tNow, true );
+
+	if ( IsValid( pAnimation ) )
+	{
+		bInPK = _bInPK;
+		bCanFight = _bCanFight;
+		fAngle = _fAngle;
+		nAnimFlags = nNewAnimFlags;
+		pAnimator->AddAnimator( tNow, pAnimation );
+		pAnimation->SetStand( tNow, CVec3( 0, 0, 0 ), fAngle );
+		sEndTime = pAnimation->GetTime() + tNow;	// retail @0x2cbe30: sEndTime = tLength + curTime
+		bNoAnimationUpdate = false;
+		bindGlobal.Update();	// retail tail: re-front in the sync source ONLY on a rebuild
+	}
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail @0x2cb860: schedule a custom clip onto the EXISTING animator (the scene already holds
+// it, so no sync re-front is needed -- retail has none here). On success the clip's expiry is
+// recorded and bCanFight is forced true so the next auto-pose change-gate re-fires cleanly.
+// (The IsValid(pAnimator) leg is a dev guard: retail trusts pAnimator, but a default-constructed
+// dev instance can reach here before its first Update.)
 void CFakeWorldUnit::PlayAnimation( NDb::CAnimation *pAnim, bool bLoop )
 {
 	if ( !IsValid( pAnim ) || !IsValid( pAnimator ) )
@@ -729,15 +842,38 @@ void CFakeWorldUnit::PlayAnimation( NDb::CAnimation *pAnim, bool bLoop )
 		return;
 	}
 
+	pTime.Refresh();
 	STime tNow = pTime->GetValue();
 	NAnimation::CAnimation *pAnimation = pAnimator->CreateAnimation( pAnim, tNow, bLoop );
 	if ( IsValid( pAnimation ) )
 	{
 		pAnimator->AddAnimator( tNow, pAnimation );
+		sEndTime = pAnimation->GetTime() + tNow;	// retail @0x2cb860 tail: tLength + curTime
+		bCanFight = true;
 		bNoAnimationUpdate = true;
 	}
-
-	bindGlobal.Update();
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// Live head-morph accessors: retail @0x2cb240 / @0x2cb260 / @0x2cb280 -- IsValid-guarded calls
+// into the CHeadTransformInfo built by the ctor (same triple as CFakeRPGUnit's).
+float CFakeWorldUnit::GetLSHeadParam( const char *szName )
+{
+	if ( IsValid( pHeadTransformInfo ) )
+		return pHeadTransformInfo->GetMMTension( szName );
+	return 0;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CFakeWorldUnit::SetLSHeadParam( const char *szName, float fValue )
+{
+	if ( IsValid( pHeadTransformInfo ) )
+		pHeadTransformInfo->SetMMTension( szName, fValue );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+NLSHead::CHeadInfo* CFakeWorldUnit::CreateLSHeadInfo()
+{
+	if ( IsValid( pHeadTransformInfo ) )
+		return pHeadTransformInfo->CreateHeadInfo();
+	return 0;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CFakeWorldUnit::Visit( NWorld::IRenderVisitor *p )
@@ -748,8 +884,18 @@ void CFakeWorldUnit::Visit( NWorld::IRenderVisitor *p )
 		return;
 	}
 	vector<NWorld::IRenderVisitor::SBoundMesh> boundMeshes;
-	NWorld::GetItemsBindPlaces( &boundMeshes, pUnit->GetRPG(), 0, pUnit->GetWearingDBPK() );
-	p->AddMesh( pUnit->GetModel(), pAnimator, 0, boundMeshes, 0, 0, pUnit );
+	NWorld::GetItemsBindPlaces( &boundMeshes, pUnit->GetRPG(), 0, pUnit->GetWearingDBPK(), false,
+		!bShowCap, !bItems );
+	// retail @0x2cc650: showing an ITEM pose while the unit wears a HEADLESS Panzerklein suppresses
+	// the live head (the head sits inside the shell) -- the head info is dropped before AddMesh.
+	NWorld::CUnit *pHeadUnit = pUnit;
+	NDb::CPanzerklein *pDBPK = pUnit->GetWearingDBPK();
+	if ( bItems && IsValid( pDBPK ) && pDBPK->bHasNoHead )
+		pHeadUnit = 0;
+	// retail: the body pose (dialog/portrait) renders the PERS model; only the item pose renders
+	// the world model (the PK shell when piloted)
+	NDb::CModel *pMeshModel = bItems ? pUnit->GetModel() : pUnit->GetRPG()->GetModel();
+	p->AddMesh( pMeshModel, pAnimator, 0, boundMeshes, 0, 0, pHeadUnit );
 	// release @0x2cc650 tail: unconditionally arm the ambient facial idle (blink) token for the shown
 	// head, AFTER AddMesh's internal AddHead created the animator record. This is what makes the
 	// mission-HUD face (and every other shown world unit) blink between spoken sequences.
@@ -824,7 +970,13 @@ IShowUnit* CreateShowUnit( NGScene::IGameView *pView, NRPG::CUnit *pUnit, CFuncB
 {
 	CPtr<NLSHead::CHeadsController> pController;
 	if ( IsValid( pRenderGame ) )
+	{
+		// retail @0x2ce730: a valid render game REPLACES the caller's clock with the mission
+		// render clock (vtbl+0x14 GetTime) before taking its head controller -- post-load this is
+		// what keeps a show unit animating (the caller's private deserialized CCTime is dead).
+		pTime = pRenderGame->GetTime();
 		pController = pRenderGame->GetHeadController();
+	}
 	else
 		pController = new NLSHead::CHeadsController;
 
@@ -849,6 +1001,12 @@ public:
 	void Update( float fAngle );
 	void SetSequence( NDb::CSequence *pSequence, NDb::CSequence *pExpression = 0 );
 	void PlayAnimation( NDb::CAnimation *pAnim, bool bLoop );
+	// retail @0x2cb320 / @0x2cb2f0 / @0x2d1ff0: the live head-morph IShowUnit virtuals reach the
+	// wrapped CFakeWorldUnit's pHeadTransformInfo (retail reads pFakeUnit+0x2c directly; the dev
+	// forwards through the accessor triple, same as the CShowRPGUnit sibling).
+	void SetLSHeadParam( const char *szName, float fValue );
+	float GetLSHeadParam( const char *szName );
+	NLSHead::CHeadInfo* CreateLSHeadInfo();
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // release @0x2ce850: ctor(view, unit, time, controller, b1, b2, b3) forwards the three bools verbatim
@@ -870,7 +1028,8 @@ void CShowWorldUnit::Update( float fAngle )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CShowWorldUnit::SetSequence( NDb::CSequence *pSequence, NDb::CSequence *pExpression )
 {
-	pController->PlaySequence( pUnit, pSequence, pExpression );
+	// retail @0x2cb110: resolve the unit's per-unit CHeadInfo (NRPG::CUnit +0x90) for the controller key.
+	pController->PlaySequence( pUnit->GetHeadInfo(), pSequence, pExpression );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CShowWorldUnit::PlayAnimation( NDb::CAnimation *pAnim, bool bLoop )
@@ -878,61 +1037,74 @@ void CShowWorldUnit::PlayAnimation( NDb::CAnimation *pAnim, bool bLoop )
 	pFakeUnit->PlayAnimation( pAnim, bLoop );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+void CShowWorldUnit::SetLSHeadParam( const char *szName, float fValue )
+{
+	if ( IsValid( pFakeUnit ) )
+		pFakeUnit->SetLSHeadParam( szName, fValue );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+float CShowWorldUnit::GetLSHeadParam( const char *szName )
+{
+	return IsValid( pFakeUnit ) ? pFakeUnit->GetLSHeadParam( szName ) : 0;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+NLSHead::CHeadInfo* CShowWorldUnit::CreateLSHeadInfo()
+{
+	return IsValid( pFakeUnit ) ? pFakeUnit->CreateLSHeadInfo() : 0;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 // release @0x2ce9c0: CreateShowUnit(view, unit, time, renderGame, b1=bItems, b2=bPlayIdle, b3=bShowCap).
-// KNOWN DELTA: when the render game is valid, retail REPLACES the passed pTime with pRenderGame->GetTime()
-// (decomp: param_2->vtbl[0x14] before GetHeadController). The dev show units already animate correctly on
-// the caller-passed CUnitView timer (proven by the ack PlayAnimation bridge), so the pass-through is kept
-// rather than risking a clock swap across every unit-view host.
+// A valid render game REPLACES the passed pTime with pRenderGame->GetTime() (vtbl+0x14, before
+// GetHeadController) -- the show unit rides the MISSION render clock, not the caller's widget timer.
+// [The old "KNOWN DELTA" pass-through was the post-load doll killer: after a load the CUnitView's
+// deserialized private CCTime is not the live clock, so the rebuilt animator evaluated dead time and
+// the doll rendered black. Retail's swap makes every show unit follow the restored, live clock.]
 IShowUnit* CreateShowUnit( NGScene::IGameView *pView, NWorld::CUnit *pUnit, CFuncBase<STime>* pTime, IRenderGame *pRenderGame,
 	bool bItems, bool bPlayIdle, bool bShowCap )
 {
 	CPtr<NLSHead::CHeadsController> pController;
 	if ( IsValid( pRenderGame ) )
+	{
+		pTime = pRenderGame->GetTime();
 		pController = pRenderGame->GetHeadController();
+	}
 	else
 		pController = new NLSHead::CHeadsController;
 
 	return new CShowWorldUnit( pView, pUnit, pTime, pController, bItems, bPlayIdle, bShowCap );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// CShowUnitHead
-////////////////////////////////////////////////////////////////////////////////////////////////////
-class CShowUnitHead: public IShowUnitHead
-{
-	OBJECT_NOCOPY_METHODS(CShowUnitHead);
-	ZDATA
-	CPtr<NWorld::CUnit> pUnit;
-	CObj<CObjectBase> pRenderNode;
-	CPtr<NLSHead::CHeadsController> pController;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&pUnit); f.Add(3,&pRenderNode); f.Add(4,&pController); return 0; }
-public:
-	CShowUnitHead() {}
-	CShowUnitHead( NGScene::IGameView *pView, NWorld::CUnit *pUnit, NLSHead::CHeadsController *pController, CFuncBase<SFBTransform> *pTransform );
-
-	void SetSequence( NDb::CSequence *pSequence, NDb::CSequence *pExpression = 0 );
-};
-////////////////////////////////////////////////////////////////////////////////////////////////////
-CShowUnitHead::CShowUnitHead( NGScene::IGameView *pView, NWorld::CUnit *_pUnit, NLSHead::CHeadsController *_pController, CFuncBase<SFBTransform> *pTransform ):
-	pUnit( _pUnit ), pController( _pController )
-{
-	NLSHead::CHeadAnimator *pAnimator = pController->GetAnimator( pUnit );
-	// Portrait / inventory head: pass the committed hero's baked face texture so it shows the recoloured skin too.
-	NLSHead::CHeadInfo *pHI = pUnit->GetHeadInfo();
-	CPtrFuncBase<NGfx::CTexture> *pFaceTex = IsValid( pHI ) ? pHI->GetFaceTexture() : 0;
-	pRenderNode = pView->CreateLSHead( pUnit->GetDBHead(), pAnimator, pController->GetTime(), pTransform, true, pUnit->GetHeadSeed(), false, NGScene::SRoomInfo(), pFaceTex, pHI );
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-void CShowUnitHead::SetSequence( NDb::CSequence *pSequence, NDb::CSequence *pExpression )
-{
-	pController->PlaySequence( pUnit, pSequence, pExpression );
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-IShowUnitHead* CreateShowUnitHead( NGScene::IGameView *pView, NWorld::CUnit *pUnit, NLSHead::CHeadsController *pController, CFuncBase<SFBTransform> *pTransform )
-{
-	return new CShowUnitHead( pView, pUnit, pController, pTransform );
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
 // CRenderGame
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// Weather-light helpers (retail NRender free functions, RWGame.obj).
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail CopyLight @0x2cb940: clone a light record via MakeCopy, then replace the shallow-shared
+// GF2 sub-light with its own copy (so the clone can be mutated independently).
+static NDb::CAmbientLightReal* CopyLight( NDb::CAmbientLightReal *p )
+{
+	NDb::CAmbientLightReal *pRes = p->Duplicate();	// public OBJECT-macro clone (MakeCopy is protected)
+	if ( IsValid( p->pGF2Light ) )
+		pRes->pGF2Light = p->pGF2Light->Duplicate();
+	return pRes;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail MakeRainLight @0x2cad20: darken a light into its overcast variant IN PLACE --
+// ambient += 0.5 * diffuse, diffuse *= 0.25 (null-safe, retail checks too).
+static void MakeRainLight( NDb::CAmbientLightReal *p )
+{
+	if ( !p )
+		return;
+	p->vAmbientColor += p->vLightColor * 0.5f;
+	p->vLightColor *= 0.25f;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail Blend @0x2cada0: dst = f*a + (1-f)*b elementwise over the ambient + diffuse colours
+// (only those two triples; disasm touches offsets 0xc..0x20 exclusively).
+static void Blend( NDb::CAmbientLightReal *pDst, const NDb::CAmbientLightReal *pA, const NDb::CAmbientLightReal *pB, float f )
+{
+	pDst->vAmbientColor = pA->vAmbientColor * f + pB->vAmbientColor * ( 1.0f - f );
+	pDst->vLightColor   = pA->vLightColor   * f + pB->vLightColor   * ( 1.0f - f );
+}
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 struct SVisibleHolder
 {
@@ -969,22 +1141,36 @@ class CRenderGame: public IRenderGame, public SVisibleHolder
 	CObj<NGScene::CGrass> pGrass;
 	CObj<NLSHead::CHeadsController> pHeadsController;
 	list<SBombSelection> bombSelections;
+	// retail CRenderGame weather state (PDB +0xf0..+0x108; operator& @0x2d5110 tags 13/14/17/18/19):
+	//   wasWeather      -- the last IWorld::GetWeather() seen (SUNNY=0/SNOW=1/RAIN=2)
+	//   pWeatherEffect  -- the live precipitation renderable (rain/snow particles)
+	//   pSunLight       -- the scene's reference ambient light, latched lazily by SyncWeather
+	//   pRainLight      -- MakeRainLight'd copy of pSunLight (the overcast destination light)
+	//   tWeatherChange  -- world time the current 1500ms light cross-fade started (0 = idle)
+	NWorld::IWorld::EWeather wasWeather;
+	CObj<CObjectBase> pWeatherEffect;
 	// retail @0x2ceae0: the two sound mixers live IN CRenderGame -- pSound over the always-on
 	// GetActive() (world/misc sounds), pUnitSounds over GetUnits() (unit-emitted sounds --
 	// CDumbUnitServer::AttachMiscObject attaches voice/footstep C3DSounds to GetUnits), so
 	// UpdateVisible can re-point pUnitSounds at the same visibility-filtered source as rUnits.
 	CObj<NRender::IRenderSound> pSound;
 	CObj<NRender::IRenderSound> pUnitSounds;
-	// retail operator& @0x2d5110 tags: 15=pSound, 16=pUnitSounds (13/14 weather + 17-19
-	// sun/rain lights + tWeatherChange are retail members the dev doesn't carry yet).
-	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(SVisibleHolder*)this); f.Add(2,&testSpheres); f.Add(3,&pWorld); f.Add(4,&pScene); f.Add(5,&timer); f.Add(6,&r); f.Add(7,&rUnits); f.Add(8,&bPrevShowUnits); f.Add(9,&pPrevViewFrom); f.Add(10,&pGrass); f.Add(11,&pHeadsController); f.Add(12,&bombSelections); f.Add(15,&pSound); f.Add(16,&pUnitSounds); return 0; }
+	CObj<NDb::CAmbientLightReal> pSunLight;
+	CObj<NDb::CAmbientLightReal> pRainLight;
+	STime tWeatherChange;
+	// retail operator& @0x2d5110: {1 base, 2 testSpheres, 3 pWorld, 4 pScene, 5 timer, 6 r,
+	// 7 rUnits, 8 bPrevShowUnits, 9 pPrevViewFrom, 10 pGrass, 11 pHeadsController,
+	// 12 bombSelections, 13 wasWeather, 14 pWeatherEffect, 15 pSound, 16 pUnitSounds,
+	// 17 pSunLight, 18 pRainLight, 19 tWeatherChange} -- the audit's UNREAD 13/14/17/18/19.
+	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(SVisibleHolder*)this); f.Add(2,&testSpheres); f.Add(3,&pWorld); f.Add(4,&pScene); f.Add(5,&timer); f.Add(6,&r); f.Add(7,&rUnits); f.Add(8,&bPrevShowUnits); f.Add(9,&pPrevViewFrom); f.Add(10,&pGrass); f.Add(11,&pHeadsController); f.Add(12,&bombSelections); f.Add(13,&wasWeather); f.Add(14,&pWeatherEffect); f.Add(15,&pSound); f.Add(16,&pUnitSounds); f.Add(17,&pSunLight); f.Add(18,&pRainLight); f.Add(19,&tWeatherChange); return 0; }
 	//
 	void UpdateVisible( NWorld::IPlayer *pViewFrom, bool bShowUnits );
+	void SyncWeather();
 public:
-	CRenderGame() {}
+	CRenderGame(): wasWeather( NWorld::IWorld::WEATHER_SUNNY ), tWeatherChange( 0 ) {}	// retail default ctor zeroes the weather state
 	CRenderGame( NWorld::IWorld *_pWorld, NGScene::IGameView *_pScene, NSound::ISoundScene *_pSoundScene );
 
-	CObjectBase* Select( CObjectBase *pSelect, const CVec4 &vColor );
+	CObjectBase* Select( CObjectBase *pSelect, const CVec4 &vColor, bool bIgnoreFloorMask = false );
 
 	CCTime* GetTime() { return timer.GetTime(); }
 	NLSHead::CHeadsController* GetHeadController() const { return pHeadsController; }
@@ -999,7 +1185,8 @@ CRenderGame::CRenderGame( NWorld::IWorld *_pWorld, NGScene::IGameView *_pScene, 
 :
 r( _pWorld->GetActive(), _pScene ),
 rUnits( _pWorld->GetUnits(), _pScene ),
-pWorld(_pWorld), pScene(_pScene), bPrevShowUnits( true )
+pWorld(_pWorld), pScene(_pScene), bPrevShowUnits( true ),
+wasWeather( NWorld::IWorld::WEATHER_SUNNY ), tWeatherChange( 0 )
 {
 	r.SetTimer( timer.GetTime(), pWorld->GetAimTime() );
 	rUnits.SetTimer( timer.GetTime(), pWorld->GetAimTime() );
@@ -1034,15 +1221,19 @@ pWorld(_pWorld), pScene(_pScene), bPrevShowUnits( true )
 */
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CObjectBase* CRenderGame::Select( CObjectBase *pSelect, const CVec4 &vColor )
+// retail @0x2cc850 packs colour + floor-mask flag into an SSelectionInfo and probes the UNITS set
+// first (rUnits.Find, r.Find, rUnits.New, r.New). The dev CSetRender::Select folds Find+New per
+// set, so the retail order maps onto rUnits-then-r here.
+CObjectBase* CRenderGame::Select( CObjectBase *pSelect, const CVec4 &vColor, bool bIgnoreFloorMask )
 {
+	SSelectionInfo info( vColor, bIgnoreFloorMask );
 	CObjectBase* pSelection;
 
-	pSelection =  r.Select( pSelect, vColor );
+	pSelection = rUnits.Select( pSelect, info );
 	if ( pSelection )
 		return pSelection;
 
-	pSelection = rUnits.Select( pSelect, vColor );
+	pSelection = r.Select( pSelect, info );
 	if ( pSelection )
 		return pSelection;
 
@@ -1066,6 +1257,94 @@ void CRenderGame::UpdateSound( CTransformStack *pTS, STime currentTime )
 		pSound->Update( pTS, currentTime );
 	if ( IsValid( pUnitSounds ) )
 		pUnitSounds->Update( pTS, currentTime );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail @0x2cb9b0: drive the day's weather lighting + precipitation effect. Called from the
+// UpdateViewWorld tail (@0x2cf620, after both Syncs).
+//   1. lazy one-time init: pSunLight = the scene's current ambient (scene vtbl+0xa0 = the
+//      pPrevLight SetAmbient latched); pRainLight = MakeRainLight(CopyLight(sun)) with the GF2
+//      sub-light darkened too (disasm 0x6cba3f: MakeRainLight on the copy AND on copy->pGF2Light).
+//   2. weather unchanged + a cross-fade running (tWeatherChange != 0): elapsed >= 1500ms locks in
+//      the destination light (rain for SNOW/RAIN else sun) and stops the fade; otherwise
+//      SetAmbient(Blend(rain, sun, elapsed/1500)) -- inverted to 1-f when CLEARING so the rain
+//      light fades out (Blend weights its FIRST light by f; disasm 0x6cbadf: EAX=pRainLight).
+//   3. weather changed: stamp tWeatherChange/wasWeather and rebuild the precipitation effect.
+//      Retail (disasm 0x6cbb5f): RAIN -> pScene->CreateRain( NDb::GetParticleInstance(3407),
+//      GetTime(), new CParticleFilter( pWorld->GetHeightLayers(1) ) ); SNOW -> pScene->
+//      CreateParticles( NDb::GetTEffect(732)->GetEffect(&rnd), identity place, GetTime(), filter ).
+//      The dev scene has no CreateRain/CParticleFilter/height-layer plumbing yet, so the effect
+//      cannot be BUILT here; pWeatherEffect still round-trips the save wire (tag 14).
+// v1.2 @0x6cbb90 restructured step 3: ANY weather change just drops the effect + stamps, and a
+// trailing reconcile block (@0x6cbd73) compares IsValid(pWeatherEffect) against the new
+// game_showweathereffect toggle -- build for RAIN/SNOW when on, drop otherwise. The build arm is
+// blocked on the same missing scene factories; the drop arm is live.
+void CRenderGame::SyncWeather()
+{
+	if ( !IsValid( pSunLight ) )
+	{
+		pSunLight = pScene->GetPrevLight();
+		if ( IsValid( pSunLight ) )
+		{
+			pRainLight = CopyLight( pSunLight );
+			MakeRainLight( pRainLight );
+			MakeRainLight( pRainLight->pGF2Light );
+		}
+	}
+
+	NWorld::IWorld::EWeather eWeather = pWorld->GetWeather();
+	if ( wasWeather == eWeather )
+	{
+		if ( tWeatherChange != 0 && IsValid( pSunLight ) )
+		{
+			int nElapsed = (int)( timer.GetTime()->GetValue() - tWeatherChange );
+			const bool bWet = eWeather == NWorld::IWorld::WEATHER_SNOW || eWeather == NWorld::IWorld::WEATHER_RAIN;
+			if ( nElapsed >= 1500 )
+			{
+				// transition complete: lock in the destination light, stop the fade
+				NDb::CAmbientLightReal *pFinal = pSunLight;
+				if ( bWet )
+					pFinal = pRainLight;
+				pScene->SetAmbient( pFinal );
+				tWeatherChange = 0;	// v1.2: falls through to the reconcile tail (no early return)
+			}
+			else
+			{
+				if ( nElapsed < 0 )
+					nElapsed = 0;
+				float fFactor = nElapsed * ( 1.0f / 1500.0f );	// retail const 0x3a2ec33e
+				if ( !bWet )
+					fFactor = 1.0f - fFactor;	// clearing: the rain light fades OUT
+				CPtr<NDb::CAmbientLightReal> pWorking = CopyLight( pSunLight );
+				Blend( pWorking, pRainLight, pSunLight, fFactor );
+				if ( IsValid( pWorking->pGF2Light ) )
+					Blend( pWorking->pGF2Light, pRainLight->pGF2Light, pSunLight->pGF2Light, fFactor );
+				pScene->SetAmbient( pWorking );
+			}
+		}
+	}
+	else
+	{
+		// v1.2 @0x6cbb90: ANY weather change drops the effect + stamps; the tail rebuilds it
+		wasWeather = eWeather;
+		pWeatherEffect = 0;
+		tWeatherChange = timer.GetTime()->GetValue();
+	}
+
+	// v1.2 reconcile tail @0x6cbd73: keep the live effect in step with game_showweathereffect --
+	// build it for RAIN/SNOW when the toggle is on, drop it otherwise
+	bool bHaveEffect = IsValid( pWeatherEffect );
+	if ( bHaveEffect != bShowWeatherEffect )
+	{
+		if ( ( eWeather == NWorld::IWorld::WEATHER_RAIN || eWeather == NWorld::IWorld::WEATHER_SNOW ) && bShowWeatherEffect )
+		{
+			// retail builds the rain (scene vtbl+0x4c) / snow (vtbl+0x44) renderable here (see the
+			// function banner) -- blocked on the missing scene factories, so the effect stays absent
+		}
+		else
+		{
+			pWeatherEffect = 0;
+		}
+	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CRenderGame::UpdateVisible( NWorld::IPlayer *pViewFrom, bool bShowUnits )
@@ -1213,12 +1492,25 @@ void CRenderGame::UpdateViewWorld( bool bAdvanceTime, STime currentTime, NWorld:
 	// render them all
 	r.Sync();
 	rUnits.Sync();
+
+	// retail @0x2cf620 tail: after both Syncs the weather lighting/effect state is advanced.
+	// (Retail also prunes rUnits' expired unit-flashes here -- RemoveObsoleteFlashes @0x2cc0b0;
+	// nothing in this predecessor ever pushes a flash, so there is nothing to prune yet.)
+	SyncWeather();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 IRenderGame* CreateRenderGame( NWorld::IWorld *_pWorld, NGScene::IGameView *_pScene, NSound::ISoundScene *_pSoundScene )
 {
 	return new CRenderGame( _pWorld, _pScene, _pSoundScene );
 }
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// v1.2-only registrar (v1.2 @0x6cff40): game_selectionmode -> int @0x9c70cc (consumers: palette
+// dispatcher @0x5d6130 + CreateSelection @0x6cbf60) and game_showweathereffect -> bool @0x97fec8
+// (consumer: SyncWeather @0x6cbb90). Vars defined at the top of this namespace.
+START_REGISTER(RWGame)
+	REGISTER_VAR_EX( "game_selectionmode", NGlobal::VarIntHandler, &nSelectionMode, 0, true )
+	REGISTER_VAR_EX( "game_showweathereffect", NGlobal::VarBoolHandler, &bShowWeatherEffect, 1, true )
+FINISH_REGISTER
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 }
 using namespace NRender;
@@ -1228,6 +1520,5 @@ REGISTER_SAVELOAD_CLASS( 0x01941130, CRenderGame );
 REGISTER_SAVELOAD_CLASS( 0x01941131, CSelection );
 REGISTER_SAVELOAD_CLASS( 0x01941132, CShowWorldUnit );
 REGISTER_SAVELOAD_CLASS( 0x01941133, CFakeWorldUnit );
-REGISTER_SAVELOAD_CLASS( 0x01941134, CShowUnitHead );
 REGISTER_SAVELOAD_CLASS( 0x01941135, CShowRPGUnit );
 REGISTER_SAVELOAD_CLASS( 0x01941136, CFakeRPGUnit );

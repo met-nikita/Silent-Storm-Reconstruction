@@ -393,7 +393,7 @@ LUA_API void lua_startThread( lua_State *L, int nArgs )
 	//
 	CLuaThread *pOld = L->pCT;
 	ASSERT( pOld );
-	CLuaThread *pNew = lua_newThread( L );
+	CLuaThread *pNew = lua_newThread( L, "thread made by StartThread" );   // retail @0x3e2560: name 0x8ceec0
 	// get parameters from old thread
 	TObject *params = LObj(L, L->pCT->top - nArgs - 1);
 	// push parameters into a new thread
@@ -491,7 +491,7 @@ LUA_API void lua_executeThreads( lua_State *L )
 	if ( L->threads.empty() )
 	{
 		// we are in trouble :)
-		lua_newThread( L );
+		lua_newThread( L, "Thread to have at least one" );   // retail @0x3e2ed0: name 0x8cef60
 	}
 	// we must have at least one valid thread
 	lua_setThread( L, L->threads.front() );

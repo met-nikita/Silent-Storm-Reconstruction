@@ -50,19 +50,25 @@ class CLuaThread : public CObjectBase
 	OBJECT_NOCOPY_METHODS(CLuaThread);
 public:
 	ZDATA
-  StkId top;  // first free slot in the stack 
+  StkId top;  // first free slot in the stack
   StkId Cbase;  // base for current C function
-  vector<TObject> stack;  // stack base 
+  vector<TObject> stack;  // stack base
 	vector<SLuaVMState> executedCalls;
 	int thisThreadIsSleeping;
 	bool bErrorInThread;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&top); f.Add(3,&Cbase); f.Add(4,&stack); f.Add(5,&executedCalls); f.Add(6,&thisThreadIsSleeping); f.Add(7,&bErrorInThread); return 0; }
-	
-	CLuaThread();
+	// retail CLuaThread +0x34 (PDB, 7 members): the thread's debug name, save tag 8 (@0x3e0940).
+	// Disasm-proven creation names: "First thread" (lua_open), the FILENAME (lua_dofile),
+	// "Buffer thread" (lua_dobuffer), "Message thread" (message), "thread made by StartThread"
+	// (lua_startThread), "Thread to have at least one" (lua_executeThreads), the called function
+	// name (NScript::luaCallFunction).
+	string name;
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&top); f.Add(3,&Cbase); f.Add(4,&stack); f.Add(5,&executedCalls); f.Add(6,&thisThreadIsSleeping); f.Add(7,&bErrorInThread); f.Add(8,&name); return 0; }
+
+	CLuaThread( const char *szName = "" );   // retail ctor @0x3de050 takes the debug name
 	bool HasValidTop() const { return top >= 0 && top < stack.size(); }
 };
 
-CLuaThread* lua_newThread( lua_State *L );
+CLuaThread* lua_newThread( lua_State *L, const char *szName = "" );   // retail @0x3de190 (L, name)
 void lua_setThread( lua_State *L, CLuaThread *pThread );
 
 //////////////////////////////////////////////////////////////////////////
@@ -146,8 +152,12 @@ public:
 typedef list<CObj<CLuaThread> > CThreads;
 typedef unordered_map<TString, bool, TStringHash> CLuaStrings;
 //////////////////////////////////////////////////////////////////////////
-struct lua_State 
+struct lua_State
 {
+	// retail lua_State +0x00 (PDB, size 0xb4): the owning engine object, save tag 21 (@0x3de370).
+	// The retail ctor nulls it and the dtor releases it; no other retail writer was found in the
+	// decomp corpus (see the W3 convergence notes) -- it round-trips through the save stream.
+	CPtr<CObjectBase> pContext;
   // thread-specific state
 	CObj<CLuaThread> pCT; // current thread
   vector<char> Mbuffer;  // buffer

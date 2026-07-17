@@ -82,9 +82,9 @@
 //   iAutoPlayInit::iAutoPlayInit                    @0x19d550  (console "autoplay" cmd + autoplay_units/templates vars)
 //
 // DELIBERATE DEVIATIONS (documented; dev type/idiom differs from the MSVC7.1 release):
-//   * No CMissionBase: the release split CMission into CMissionBase+CMission; the dev keeps CMission : IMission
-//     with all members inline (CONVERGENCE_PROGRESS rules the split out of scope). CAutoPlayInterface derives
-//     the dev CMission directly, so byte-exact PDB layout (0x5a8) is not a goal -- this is functional parity.
+//   * CMissionBase: since serialization-convergence W4.2 the dev CMission IS split onto NGame::CMissionBase
+//     (iMission.h) with the retail tag tables; CAutoPlayInterface derives the dev CMission directly (byte-exact
+//     PDB layout 0x5a8 is still not a goal -- functional parity).
 //   * GameStep @0x19cc80 (the finished/progress>100/20-min watchdog) is NOT reconstructed: it walks the live
 //     world via opaque vtbl slots (collect NWorld::CPlayer, CPlayer-finished, GetGame()->GetProgress()) and
 //     resolves a DG CCTime node through CMissionBase::GetUITime -- none of which are surfaced as reachable dev
@@ -97,8 +97,11 @@
 //     and the release's private-flag writes (bLoseSignalSended / bHideInterface) + the pWorld vtbl[0x1f0] call
 //     (those CMission members are private in the dev and have no public setter). pGlobalGame/pWorld/pScene/
 //     pSoundScene are instead set, faithfully, by routing through the public CMission::Initialize(...).
-//   * Registration: CAutoPlayInterface is a transient attract-mode object (never serialized -- you cannot save
-//     during autoplay), so no save-id is registered; the generic CObjectBase cast path covers CObj<> usage.
+//   * Registration + serialization: retail registers CAutoPlayInterface under 0xB3723140 and serializes it
+//     (operator& @0x1a13e0: 1=CMission base, 2=bSignalSent, 3=sAutoPlayTime, 4=pLogoCursor, 5=pLogoInterface,
+//     6=pFlashImage). Registration landed in serialization-convergence W2, the operator& body in W3.
+//     Retail tag 6 is CObj<NUI::CFlashImage>; the dev member is the CObj<NUI::CWindow> parity placeholder
+//     (see above) -- the object reference serializes identically through the class registry.
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 namespace NGame
 {
@@ -121,6 +124,10 @@ class CAutoPlayInterface: public CMission
 
 public:
 	CAutoPlayInterface();
+
+	// retail @0x1a13e0: 1=CMission base, 2=bSignalSent, 3=sAutoPlayTime, 4=pLogoCursor,
+	// 5=pLogoInterface, 6=pFlashImage
+	int operator&( CStructureSaver &f ) { f.Add(1,(CMission*)this); f.Add(2,&bSignalSent); f.Add(3,&sAutoPlayTime); f.Add(4,&pLogoCursor); f.Add(5,&pLogoInterface); f.Add(6,&pFlashImage); return 0; }
 
 	bool Initialize();
 
@@ -318,3 +325,6 @@ START_REGISTER(iAutoPlay)
 	REGISTER_VAR( "autoplay_units", 0, NGlobal::CValue( L"968 970 974 1020 973 979 978 980 982 983 984 985 986 989 990 993 994 1000 996 997 998 999 1001 1004 1002 1003 1009 1008 1010 1011 1012 1013 1014 1016 1017 1018 1019" ), false )
 	REGISTER_VAR( "autoplay_templates", 0, NGlobal::CValue( L"4412 4413 4414" ), false )
 FINISH_REGISTER
+// retail saveload id (serialization-convergence W2; operator& @0x1a13e0 landed in W3)
+using namespace NGame;
+REGISTER_SAVELOAD_CLASS( 0xB3723140, CAutoPlayInterface )

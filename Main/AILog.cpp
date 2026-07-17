@@ -8,6 +8,7 @@
 #include "wInterface.h"
 #include "wUnitServer.h"
 #include "wUnitCommands.h"
+#include "wDebris.h"        // NWorld::CDFrozenItem (CAILogPickUpItem's retail item ref)
 
 #include "RPGUnitMission.h"
 #include "RPGItemInfo.h"
@@ -19,75 +20,6 @@
 
 namespace NAI
 {
-////////////////////////////////////////////////////////////////////////////////////////////////////
-//	CAILogContainer
-////////////////////////////////////////////////////////////////////////////////////////////////////
-class CAILogContainer: public IAILogContainer
-{
-	OBJECT_BASIC_METHODS(CAILogContainer)
-	ZDATA
-	list< CObj<IAILogRecord> > Records;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&Records); return 0; }
-public:
-	CAILogContainer() {}
-	// IAILogContainer
-	virtual void Add( IAILogRecord *pAILogRecord, bool bCommit = false );
-	virtual void Add( IAILogContainer *pAILogContainer );
-	virtual list< CObj<IAILogRecord> > *GetLogRecords();
-	// IAILogRecord
-	virtual void RollBack();
-	virtual void Commit();
-	virtual void GetCommands( list< CPtr<NWorld::CCommand> > *Commands );
-	virtual void Clear();
-	virtual bool IsEmpty();
-};
-////////////////////////////////////////////////////////////////////////////////////////////////////
-void CAILogContainer::Add( IAILogRecord *pAILogRecord, bool bCommit )
-{
-	Records.push_back(pAILogRecord); 
-	if ( bCommit )
-		pAILogRecord->Commit();
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-void CAILogContainer::Add( IAILogContainer *pAILogContainer )
-{
-	list< CObj<IAILogRecord> > *pRecords = pAILogContainer->GetLogRecords();
-	for ( list< CObj<IAILogRecord> >::iterator i = pRecords->begin(); i != pRecords->end(); ++i )
-		Add( *i );
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-list< CObj<IAILogRecord> > *CAILogContainer::GetLogRecords()
-{
-	return &Records;
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-void CAILogContainer::RollBack() 
-{  
-	for ( list< CObj<IAILogRecord> >::reverse_iterator i = Records.rbegin(); i != Records.rend(); ++i )
-		(*i)->RollBack();
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-void CAILogContainer::Commit()
-{ 
-	for ( list< CObj<IAILogRecord> >::iterator i = Records.begin(); i != Records.end(); ++i ) 
-		(*i)->Commit(); 
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-void CAILogContainer::GetCommands( list< CPtr<NWorld::CCommand> > *Commands )
-{
-	for ( list< CObj<IAILogRecord> >::iterator i = Records.begin(); i != Records.end(); ++i ) 
-		(*i)->GetCommands( Commands ); 
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-void CAILogContainer::Clear()
-{
-	Records.clear();
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-bool CAILogContainer::IsEmpty() 
-{ 
-	return Records.empty(); 
-}
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CAILogPosition
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -313,26 +245,6 @@ void CAILogSpendHP::Commit()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CAILogSpendHP::GetCommands( list< CPtr<NWorld::CCommand> > *Commands ) {}
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// CAILogHurt
-////////////////////////////////////////////////////////////////////////////////////////////////////
-CAILogHurt::CAILogHurt(	IAIUnit *_pAIUnit, int nHurtHP ): CAILogRecord(_pAIUnit)
-{
-	nOldHurtHP = pAIUnit->GetHurtHP();
-	nNewHurtHP = nOldHurtHP + nHurtHP;
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-void CAILogHurt::RollBack()
-{
-	pAIUnit->SetHurtHP( nOldHurtHP );
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-void CAILogHurt::Commit()
-{
-	pAIUnit->SetHurtHP( nNewHurtHP );
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-void CAILogHurt::GetCommands( list< CPtr<NWorld::CCommand> > *Commands ) {}
-////////////////////////////////////////////////////////////////////////////////////////////////////
 // CAILogChangeWeapon
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CAILogChangeWeapon::CAILogChangeWeapon(	IAIUnit *_pAIUnit, IAIInventoryItem *_pNewWeapon ):
@@ -406,48 +318,10 @@ void CAILogChangeWeapon::GetCommands( list< CPtr<NWorld::CCommand> > *Commands )
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// CAILogAddWeapon
-////////////////////////////////////////////////////////////////////////////////////////////////////
-CAILogAddWeapon::CAILogAddWeapon(	IAIUnit *_pAIUnit, CAIFireArmsWeapon *_pWeapon ):
-	CAILogRecord( _pAIUnit ), pWeapon( _pWeapon )
-{
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-void CAILogAddWeapon::RollBack()
-{
-	//pAIUnit->GetAIInventory()->RemoveWeapon( pWeapon );
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-void CAILogAddWeapon::Commit()
-{
-	//pAIUnit->GetAIInventory()->AddWeapon( pWeapon );
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-void CAILogAddWeapon::GetCommands( list< CPtr<NWorld::CCommand> > *Commands ) {}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-// CAILogAddWeaponClip
-////////////////////////////////////////////////////////////////////////////////////////////////////
-CAILogAddWeaponClip::CAILogAddWeaponClip(	IAIUnit *_pAIUnit, 
-	CAIFireArmsWeapon *_pWeapon, CAIFireArmsWeaponClip *_pClip ): CAILogRecord( _pAIUnit ), pWeapon( _pWeapon ), pClip( _pClip )
-{
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-void CAILogAddWeaponClip::RollBack()
-{
-	pWeapon->RemoveClip( pClip );
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-void CAILogAddWeaponClip::Commit()
-{
-	pWeapon->AddClip( pClip );
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-void CAILogAddWeaponClip::GetCommands( list< CPtr<NWorld::CCommand> > *Commands ) {}
-////////////////////////////////////////////////////////////////////////////////////////////////////
 // CAILogPickUpItem
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CAILogPickUpItem::CAILogPickUpItem(	IAIUnit *_pAIUnit, NRPG::IInventoryItem *_pItem ): 
-	CAILogRecord( _pAIUnit ), pItem( _pItem )
+CAILogPickUpItem::CAILogPickUpItem(	IAIUnit *_pAIUnit, NWorld::CDFrozenItem *_pItem, EPose _wishPose ):
+	CAILogRecord( _pAIUnit ), pItem( _pItem ), wishPose( _wishPose )
 {
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -457,14 +331,19 @@ void CAILogPickUpItem::Commit() {}
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CAILogPickUpItem::GetCommands( list< CPtr<NWorld::CCommand> > *Commands )
 {
+	if ( !IsValid( pItem ) )
+		return;
+	NRPG::IInventoryItem *pInvItem = pItem->GetInvItem();
+	if ( !IsValid( pInvItem ) )
+		return;
 	CPtr<NWorld::CUnitServer> pUnitServer = pAIUnit->GetUnitServer();
 	NRPG::IInventory *pInventory = pUnitServer->GetUnitRPG()->GetInventory();
 	NWorld::SItem From( pUnitServer, NWorld::SItem::GROUND );
-	From.pItem = pItem;
+	From.pItem = pInvItem;
 	From.pUnit = pUnitServer;
 	CTPoint<int> Position;
-	pInventory->FindPlace( pItem, &Position );
-	NWorld::SItem To( pUnitServer, NWorld::SItem::BACKPACK, Position, pItem );
+	pInventory->FindPlace( pInvItem, &Position );
+	NWorld::SItem To( pUnitServer, NWorld::SItem::BACKPACK, Position, pInvItem );
 	To.pUnit = pUnitServer;
 	//
 	Commands->push_back( new NWorld::CCmdSetCommand( pUnitServer,
@@ -493,17 +372,21 @@ CAILogThrowGrenade::CAILogThrowGrenade(	IAIUnit *_pUnit, CVec3 _ptTarget, CAIGre
 {
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CAILogThrowGrenade::RollBack() 
+void CAILogThrowGrenade::RollBack()
 {
+	// a5dll-only inverse of Commit (the planner's speculative-commit undo): re-add the existing
+	// wrapper to the unified items vector and put it back in hand.
 	CPtr<CAIInventory> pInventory = pAIUnit->GetAIInventory();
-	pInventory->AddGrenade( pGrenade );
+	pInventory->RestoreItem( pGrenade );
 	pInventory->SetCurrentItem( pGrenade );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CAILogThrowGrenade::Commit() 
+void CAILogThrowGrenade::Commit()
 {
+	// retail ModifyState @0x5c220: RemoveItem(pGrenade) + SetCurrentItem(0) on the unified
+	// CAIInventory (the record's own pGrenade CPtr keeps the wrapper alive).
 	CPtr<CAIInventory> pInventory = pAIUnit->GetAIInventory();
-	pInventory->RemoveGrenade( pGrenade );
+	pInventory->RemoveItem( pGrenade );
 	pInventory->SetCurrentItem( 0 );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -525,18 +408,18 @@ CAILogThrowKnife::CAILogThrowKnife( IAIUnit *_pAIUnit, IAIUnit *_pEnemy, CAIThro
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CAILogThrowKnife::RollBack()
 {
+	// a5dll-only inverse of Commit (mirrors CAILogThrowGrenade::RollBack).
 	CPtr<CAIInventory> pInventory = pAIUnit->GetAIInventory();
-	pInventory->AddThrowingWeapon( pWeapon );
+	pInventory->RestoreItem( pWeapon );
 	pInventory->SetCurrentItem( pWeapon );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CAILogThrowKnife::Commit()
 {
-	// retail ModifyState @0x45c7f0: RemoveItem(pWeapon) + SetCurrentItem(0). The a5dll CAIInventory keeps the
-	// knife in its typed throwingWeapons vector, so the generic retail RemoveItem maps to RemoveThrowingWeapon
-	// (mirrors CAILogThrowGrenade::Commit -> RemoveGrenade). The record's own pWeapon CPtr keeps the knife alive.
+	// retail ModifyState @0x5c7f0: RemoveItem(pWeapon) + SetCurrentItem(0) on the unified
+	// CAIInventory (the record's own pWeapon CPtr keeps the knife alive).
 	CPtr<CAIInventory> pInventory = pAIUnit->GetAIInventory();
-	pInventory->RemoveThrowingWeapon( pWeapon );
+	pInventory->RemoveItem( pWeapon );
 	pInventory->SetCurrentItem( 0 );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -548,27 +431,6 @@ void CAILogThrowKnife::GetCommands( list< CPtr<NWorld::CCommand> > *Commands )
 	NWorld::CCmd *pCmd = new NWorld::CCmdShootObject( pEnemy->GetUnitServer(), 0, HL_ANY );
 	Commands->push_back( new NWorld::CCmdSetCommand( pAIUnit->GetUnitServer(), pCmd ) );
 }
-////////////////////////////////////////////////////////////////////////////////////////////////////
-// CAILogExpediency
-////////////////////////////////////////////////////////////////////////////////////////////////////
-CAILogExpediency::CAILogExpediency(	IAIUnit *_pAIUnit, int nExpediency ):
-	CAILogRecord( _pAIUnit )
-{
-	nOldExpediency = pAIUnit->GetAdditionalExpediency();
-	nNewExpediency = nOldExpediency + nExpediency;
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-void CAILogExpediency::RollBack()
-{
-	pAIUnit->SetAdditionalExpediency( nOldExpediency );
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-void CAILogExpediency::Commit()
-{
-	pAIUnit->SetAdditionalExpediency( nNewExpediency );
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-void CAILogExpediency::GetCommands( list< CPtr<NWorld::CCommand> > *Commands ) {}
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CAILogChangeShootMode
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -613,27 +475,6 @@ void CAILogHide::GetCommands( list< CPtr<NWorld::CCommand> > *Commands )
 	Commands->push_back( 
 		new NWorld::CCmdSetCommand( pAIUnit->GetUnitServer(), new NWorld::CCmdHide() ) );
 }
-////////////////////////////////////////////////////////////////////////////////////////////////////
-// CAILogChangeMaxToHit
-////////////////////////////////////////////////////////////////////////////////////////////////////
-CAILogChangeMaxToHit::CAILogChangeMaxToHit( IAIUnit *_pAIUnit, int nMaxToHit ): 
-	CAILogRecord( _pAIUnit )
-{
-	nNewToHit = nMaxToHit;
-	nOldToHit = pAIUnit->GetMaxToHit();
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-void CAILogChangeMaxToHit::RollBack()
-{
-	pAIUnit->SetMaxToHit( nOldToHit );
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-void CAILogChangeMaxToHit::Commit()
-{
-	pAIUnit->SetMaxToHit( nNewToHit );
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-void CAILogChangeMaxToHit::GetCommands( list< CPtr<NWorld::CCommand> > *Commands ) {}
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
 /*
@@ -725,16 +566,10 @@ void CAILogCancelAction::GetCommands( list< CPtr<NWorld::CCommand> > *Commands )
 	Commands->push_back( new NWorld::CCmdCancel( pUS ) );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-IAILogContainer *CreateAILogContainer()
-{
-	return new CAILogContainer();
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
 }
 //
 using namespace NAI;
 //
-REGISTER_SAVELOAD_CLASS( 0x52822121, CAILogContainer );
 REGISTER_SAVELOAD_CLASS( 0x52822127, CAILogShot );
 REGISTER_SAVELOAD_CLASS( 0x52533166, CAILogMelee );
 REGISTER_SAVELOAD_CLASS( 0x52822122, CAILogPosition );
@@ -742,22 +577,17 @@ REGISTER_SAVELOAD_CLASS( 0x52822125, CAILogSpendAP );
 REGISTER_SAVELOAD_CLASS( 0x52822126, CAILogSpendHP );
 REGISTER_SAVELOAD_CLASS( 0x50732171, CAILogChangeWeapon );
 REGISTER_SAVELOAD_CLASS( 0x50732170, CAILogReloadWeapon );
-REGISTER_SAVELOAD_CLASS( 0x51362142, CAILogAddWeapon );
-REGISTER_SAVELOAD_CLASS( 0x51362143, CAILogAddWeaponClip );
 REGISTER_SAVELOAD_CLASS( 0x51362144, CAILogPickUpItem );
-REGISTER_SAVELOAD_CLASS( 0x51362145, CAILogDropItem );
+REGISTER_SAVELOAD_CLASS( 0x230654C0, CAILogDropItem );
 REGISTER_SAVELOAD_CLASS( 0x51362146, CAILogSpendAmmo );
-REGISTER_SAVELOAD_CLASS( 0x51362147, CAILogHurt );
 REGISTER_SAVELOAD_CLASS( 0x50732172, CAILogThrowGrenade );
 REGISTER_SAVELOAD_CLASS( 0x52533165, CAILogThrowKnife );
-REGISTER_SAVELOAD_CLASS( 0x50172150, CAILogExpediency );
 REGISTER_SAVELOAD_CLASS( 0x50872131, CAILogChangeShootMode );
-REGISTER_SAVELOAD_CLASS( 0x50972130, CAILogChangeMaxToHit );
 REGISTER_SAVELOAD_CLASS( 0x52612110, CAILogHide );
 REGISTER_SAVELOAD_CLASS( 0x50442130, CAILogUseCannon );
 REGISTER_SAVELOAD_CLASS( 0x50442131, CAILogExitCannon );
 REGISTER_SAVELOAD_CLASS( 0x51413190, CAILogShotPoint );
-REGISTER_SAVELOAD_CLASS( 0x51413191, CAILogHeal );
+REGISTER_SAVELOAD_CLASS( 0x53133090, CAILogHeal );
 REGISTER_SAVELOAD_CLASS( 0x23072480, CAILogLeavePK );
 REGISTER_SAVELOAD_CLASS( 0x23069ac1, CAILogWearPK );
 REGISTER_SAVELOAD_CLASS( 0x52253090, CAILogBeginSnipe );

@@ -278,7 +278,7 @@ bool CMissionDlgUI::ProcessMessage( const SEvent &sEvent )
 			unitViewsSet[2] = new CAnimUnitView( sEvent.pLoader->GetControl( "unitview3" ), pMission->GetRenderGame(), -N_DISPLACE_DISTANCE, NDb::GetDBCamera( N_UNITCAMERA_LEFT ) );
 			unitViewsSet[3] = new CAnimUnitView( sEvent.pLoader->GetControl( "unitview4" ), pMission->GetRenderGame(), N_DISPLACE_DISTANCE, NDb::GetDBCamera( N_UNITCAMERA_RIGHT ) );
 
-			pDialog = new CMLText( sEvent.pLoader->GetControl( "dialogtext" ) );
+			pDialog = new CText( sEvent.pLoader->GetControl( "dialogtext" ) );
 			break;
 		}
 	case EVENT_TEMPLATELOADCOMPLETE:

@@ -14,16 +14,19 @@ class CBuilding: public CObjectBase, public IAttackable
 	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&pGrid); return 0; }
 public:
 	CBuilding( NBuilding::CBuildingGrid *_pGrid = 0 ): pGrid(_pGrid) {}
-	virtual int ProcessAttack( int nUserID, CAttackPortion *pAttack, NDb::CRPGArmor *pArmor );
+	virtual int ProcessAttack( NWorld::IWorld *pWorld, int nUserID, CAttackPortion *pAttack,
+		const CVec3 &vDir, NDb::CRPGArmor *pArmor );
 	virtual bool IsDead() const { return false; }
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-int CBuilding::ProcessAttack( int nUserID, CAttackPortion *pAttack, NDb::CRPGArmor *pArmor )
+// retail @0x290490: vDir unread, single-shot (nAccumulated = 0).
+int CBuilding::ProcessAttack( NWorld::IWorld *pWorld, int nUserID, CAttackPortion *pAttack,
+	const CVec3 &vDir, NDb::CRPGArmor *pArmor )
 {
 	NBuilding::SPoint3 pt;
 	NBuilding::GetPieceHashCoords( nUserID, &pt );
 
-	int nDmg = pAttack->CalcStructDmg(pArmor);
+	int nDmg = pAttack->CalcStructDmg( pWorld, pArmor, 0 );
 	if ( pGrid->DamageSpot( pt, nDmg, true ) )   // retail: weapon/grenade/explosion hits feed the destruction FX
 	{
 		//csRPG << "Shoot destroy bulding node!\n";

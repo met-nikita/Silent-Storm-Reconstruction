@@ -281,8 +281,8 @@ void CEditorWorld::CreateRandom( int nVariantID, const vector<string> &params, b
 	bTerrainAlign = pBInfo->wallFragments.empty() && pBInfo->solidFragments.empty();
 	nMaxFloor = pBInfo->nMaxFloor;
 	CVec3 ptPos = VNULL3;
-	// при создании сетки ее размеры указываем по максимуму, т.к. мин\макс инфо значения могут меняться во время редактирования
-	pBuildingGrid->Setup( pVar->pTemplate->nWidth + 2, pVar->pTemplate->nHeight + 2, pBInfo->nMinFloor - 10, pBInfo->nMaxFloor + 10, VNULL2, MakeTransform( ptPos ) );
+	// when creating the grid, set its sizes to the maximum, because the min/max info values can change during editing
+	pBuildingGrid->Setup( pVar->pTemplate->nWidth + 2, pVar->pTemplate->nHeight + 2, pBInfo->nMinFloor - 10, pBInfo->nMaxFloor + 10, VNULL2 ); // retail Setup @0xc3a90 takes no transform
 	pBuildingGrid->ToggleStability();
 	vector<int> layers;
 	GetUserSettings().GetVisibleLayers( &layers );
@@ -1004,7 +1004,9 @@ void CEditorWorld::UpdateExplosions()
 		if ( !IsExplosion( pF ) )
 			continue;
 		CVec3 pt( pF->ptPos, NBuilding::WALL_HEIGHT * pF->nFloor + pF->fDZ );
-		pBuildingGrid->Explode( pt, pF->fPower, pF->fRadius );
+		// grid transform is a parameter now (retail @0xc3680); the editor grid was set up at the
+		// origin (Setup used MakeTransform(VNULL3) before the pos member was removed), so pass that
+		pBuildingGrid->Explode( MakeTransform( VNULL3 ), pt, pF->fPower, pF->fRadius );
 	}
 	ResetBuilding();
 }

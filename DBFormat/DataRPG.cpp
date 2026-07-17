@@ -11,6 +11,7 @@
 #include "DataInterface.h"
 #include "DataAck.h"
 #include "DataChest.h"
+#include "DataMisc.h"	// complete CUIHint for ImportField<CUIHint>("HintID") in CRPGItem::Import (typeid needs the full type)
 
 namespace NDb
 {
@@ -109,6 +110,11 @@ void CRPGItem::Import()
 
 	NDatabase::ImportField( "ArmorID", &pRPGArmor );
 	NDatabase::ImportField( "DestructionEffectID", &pDestructionEffect );
+	// retail CRPGItem::Import tail (oracle s2_dbimport.h:2727-2729): HintID / PlaceInHand / Cost.
+	// pStoreItem is NOT column-fed -- CRPGStoreItem::Import @0x428570 installs itself on it.
+	NDatabase::ImportField( "HintID", &pHint );
+	NDatabase::ImportField( "PlaceInHand", &bPlaceInHand );
+	NDatabase::ImportField( "Cost", &nCost );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CTRndModel* CRPGItem::GetItemModel( bool bActive, CRPGUniform *pUniform )
@@ -157,7 +163,10 @@ int CRPGItem::operator&( CStructureSaver &f )
 	f.Add( 15, &pSuccessor );
 	f.Add( 16, &pRPGArmor );
 	f.Add( 17, &pDestructionEffect );
+	f.Add( 18, &pHint );          // retail tag 0x12 (pHint) -- the item's UI hint record
+	f.Add( 19, &pStoreItem );     // retail tag 0x13 (pStoreItem) -- the store join record
 	f.Add( 20, &bPlaceInHand );   // retail tag 20 (bPlaceInHand @+0xc0); tag-tolerant append reads it from the retail game.db
+	f.Add( 21, &nCost );          // retail tag 0x15 (nCost) -- the item's store price
 
 	for ( int i = 0; i < CAMERA_MAX_VALUE; ++i )
 		f.Add( 24, &sCameras[i], i + 1 );
@@ -173,6 +182,9 @@ void CRPGStoreItem::Import()
 	NDatabase::ImportField( "ItemID",	&pItem );
 	NDatabase::ImportField( "SideID",	&pSide );
 	NDatabase::ImportField( "Quantity", &fQuantity );
+	// retail CRPGStoreItem::Import @0x428570 tail: install this store row on its item's pStoreItem.
+	if ( IsValid( pItem ) )
+		pItem->pStoreItem = this;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CRPGDmgToArmor
@@ -324,6 +336,8 @@ EWeaponType GetAnimationType( const string &szAWT )
 		return WT_KNIFE;
 	else if ( szAWT == "Katana" )
 		return WT_KATANA;
+	else if ( szAWT == "Machete" )
+		return WT_MACHETE;
 	else if ( szAWT == "MachineGun" )
 		return WT_MACHINE_GUN;
 	else if ( szAWT == "RLauncher" )
@@ -367,9 +381,9 @@ int CRPGWeapon::operator&( CStructureSaver &f )
 	f.Add(7,&nRecoil); 
 	f.Add(8,&nRoF); 
 	f.Add(9,&nDamageMod); 
-	f.Add(10,&pWeaponType); 
-	f.Add(11,&pAmmo); 
-	f.Add(12,&pItem); 
+	f.Add(10,&pWeaponType);
+	// retail @0x429bd0 skips tag 11 (goes 10 -> 0xc); pAmmo stays a DB-Import-fed member, off the wire (W5)
+	f.Add(12,&pItem);
 	f.Add(13,&pSound); 
 	f.Add(14,&pSoundBurst); 
 	f.Add(15,&pSoundReload); 
@@ -793,6 +807,9 @@ void CRPGPers::Import()
 	NDatabase::ImportField( "CameraDistance",	&sPortraitCamera.fDistance );
 	////
 	NDatabase::ImportField( "WearingPanzerkleinID", &pDefaultWearsPanzerklein );
+	// retail @0x429540 (+0x38): non-null = this pers IS a PK suit. IsEmptyPK @0x34eca0 reads it;
+	// without this import every PK spawn at CWorld::AddUnit took the manned-unit path (null-player crash).
+	NDatabase::ImportField( "IsPanzerkleinID", &pPanzerklein );
 	////
 	NDatabase::ImportField( "IsFemale", &bIsFemale );
 	NDatabase::ImportField( "Voice", &nVoice );
@@ -804,7 +821,9 @@ void CRPGPers::Import()
 	NDatabase::ImportField( "CanBeListed", &bCanBeListed );   // release CharGen model-override roll filter
 	NDatabase::ImportField( "WeaponInHand", &pHandWeapon );			// retail CRPGPers::Import @0x429540 -- in-hand loot chest
 	NDatabase::ImportField( "WeaponInBackpack", &pBackpackWeapon );	// retail CRPGPers::Import @0x429540 -- backpack loot chest
+	NDatabase::ImportField( "LongNameID", &pLongName );				// retail CRPGPers::Import @0x429540 -- long display name (between WeaponInBackpack and AckUnit)
 	NDatabase::ImportField( "AckUnit", &pAcksHolder );				// retail CRPGPers::Import @0x429540 -- voice-holder pers whose Acks rows this persona barks with
+	NDatabase::ImportField( "LongBurstSnd", &pLongBurstSnd );		// retail CRPGPers::Import @0x429540 -- long-burst voice sound (tail column)
 	////
 	NDatabase::ImportRelation( this, &scripts );
 }
@@ -918,6 +937,9 @@ void CRPGToHit::Import()
 	NDatabase::ImportField( "GrenadeWeightScaling", &constants.nGrenadeWeightScaling );
 	NDatabase::ImportField( "GrenadeWeightScalingBase", &constants.nGrenadeWeightScalingBase );
 	NDatabase::ImportField( "MaxGrenadeWeightDifference", &constants.nMaxGrenadeWeightDifference );
+	// retail Import @0x826f10 tail: the weapon-adaptation constants (column names from the retail .rdata)
+	NDatabase::ImportField( "MaxWeaponAdaptation", &constants.nMaxWeaponAdaptation );
+	NDatabase::ImportField( "WeaponAdaptationMultiplyer", &constants.fWeaponAdaptationMult );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CRPGAISoundConstants::Import()
@@ -983,6 +1005,7 @@ CAnimWeaponType* GetAnimWeaponType( int nAnimFlags )
 	return 0;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail @0x427160 jump tables; unknown types return 0 (retail has no assert path)
 int WeaponTypeToAnimFlags( EWeaponType type, bool bActive, bool bPK )
 {
 	if ( !bActive )
@@ -1003,6 +1026,8 @@ int WeaponTypeToAnimFlags( EWeaponType type, bool bActive, bool bPK )
 				return CAnimation::WEAPON_KNIFE;
 			case NDb::WT_KATANA:
 				return CAnimation::WEAPON_KATANA;
+			case NDb::WT_MACHETE:
+				return CAnimation::WEAPON_MACHETE;
 			case NDb::WT_MACHINE_GUN:
 				return CAnimation::WEAPON_MACHINE_GUN;
 			case NDb::WT_RLAUNCHER:
@@ -1011,8 +1036,6 @@ int WeaponTypeToAnimFlags( EWeaponType type, bool bActive, bool bPK )
 				return CAnimation::WEAPON_MINE_DETECTOR;
 			case NDb::WT_PLAZMAGUN:
 				return CAnimation::WEAPON_PLAZMAGUN;
-			default:
-				ASSERT( 0 );
 		}
 	}
 	else
@@ -1020,20 +1043,23 @@ int WeaponTypeToAnimFlags( EWeaponType type, bool bActive, bool bPK )
 		switch ( type )
 		{
 			case NDb::WT_DEFAULT:
-				return CAnimation::WEAPON_NONE;
+				return CAnimation::WEAPON_ITEM;
 			case NDb::WT_PISTOL:
 			case NDb::WT_RIFLE:
 			case NDb::WT_SUB_MACHINE_GUN:
 			case NDb::WT_MACHINE_GUN:
 			case NDb::WT_RLAUNCHER:
+			case NDb::WT_TERROR_SHOOTER:
 				return CAnimation::PK_WEAPON_SHOOTER;
 			case NDb::WT_KNIFE:
 			case NDb::WT_KATANA:
+			case NDb::WT_MACHETE:
 				return CAnimation::PK_WEAPON_SLASHER;
 			case NDb::WT_PK_PLAZMAGUN:
+			case NDb::WT_BOSS_PLAZMAGUN:
 				return CAnimation::PK_WEAPON_PLAZMAGUN;
-			default:
-				ASSERT( 0 );
+			case NDb::WT_TERROR_SPECIAL_GUN:
+				return CAnimation::PK_WEAPON_TERROR_GUN;
 		}
 	}
 	return 0;
@@ -1043,8 +1069,8 @@ int WeaponTypeToAnimFlags( EWeaponType type, bool bActive, bool bPK )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CPanzerklein::Import()
 {
-	NDatabase::ImportField( "PersID", &pPers );
-
+	// no "PersID" column in the retail db (chunk-verified): retail @0x4297e0 derives pPers by
+	// scanning RPGPers for pers->pPanzerklein == this; done in BuildMapLinks (import order there).
 	NDatabase::ImportField( "RicochetProb", &nRicochetProb );
 	NDatabase::ImportField( "MaxVP", &nMaxVP );
 	NDatabase::ImportField( "AddMoveAP", &nAddMoveAP );
@@ -1064,13 +1090,7 @@ void CPanzerklein::Import()
 		sprintf( buf, "AllowWeaponType%d", i );
 		NDatabase::ImportField( buf, &bAllowWeaponType[ i - 1 ] );
 	}
- 
-	ASSERT( IsValid( pPers ) );
-	if ( IsValid( pPers ) )
-	{
-		pPers->pPanzerklein = this;
-		pChangeValues = pPers->pBaseValue;
-	}
+	// pPers/pChangeValues resolved in BuildMapLinks (retail @0x4297e0 tail; needs RPGPers imported)
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CNationality
@@ -1140,7 +1160,14 @@ void CSide::Import()
   NDatabase::ImportField( "Nationality3MaleToolTip", &defaultPersToolTipsSet[4] );
   NDatabase::ImportField( "Nationality3FemaleToolTip", &defaultPersToolTipsSet[5] );
 	//// Interface
+	// retail CSide::Import @0x42a240 tail order (oracle s2_dbimport.h:2891-2897): ESCMenuBackground,
+	// UICMInfoBackgroundID, UICluePaperBackgroundID, UIMedalPaperContainerID, UIBaseFlag,
+	// UIBaseFlagActive, HeroDialogPersID. medals is NOT imported here -- CMedal records install
+	// themselves (CMedal::Import @0x42a110); pKIAPaper is chunk-stream-only (no column) in retail too.
   NDatabase::ImportField( "ESCMenuBackground", &pESCMenuBackground );
+  NDatabase::ImportField( "UICMInfoBackgroundID", &pChapterMapInfoBackground );
+  NDatabase::ImportField( "UICluePaperBackgroundID", &pCluePaperBackground );
+  NDatabase::ImportField( "UIMedalPaperContainerID", &pMedalPaperContainer );
   NDatabase::ImportField( "UIBaseFlag", &pBaseFlag );
   NDatabase::ImportField( "UIBaseFlagActive", &pBaseFlagActive );
   NDatabase::ImportField( "HeroDialogPersID", &pDialogHero );

@@ -14,6 +14,7 @@ namespace NRPG
 }
 namespace NWorld
 {
+	class CUnit;
 	class CUnitServer;
 }
 //
@@ -51,6 +52,15 @@ class CScenarioTracker: public CObjectBase
 	int nCluesOpenOrder;
 	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&bScenarioAvailable); f.Add(3,&pScenarioFlowChart); f.Add(4,&availableZones); f.Add(5,&finishedObjectives); f.Add(6,&blockedZones); f.Add(7,&takenClues); f.Add(8,&destroyedClues); f.Add(9,&nZonesOpenOrder); f.Add(10,&nCluesOpenOrder); return 0; }
 	//
+	// CanLeaveZone result cache (retail +0x60..+0x6c). TRANSIENT: retail operator& @0x3043d0 stops at tag 10.
+	bool bHasCalcedCanLeaveZone = false;
+	bool bPrevCanLeaveZone = false;
+	bool bPrevGameOver = false;
+	list< CPtr<CScenarioClue> > prevCluesInHands;
+	list< CPtr<CScenarioClue> > prevCluesToFind;
+	list< CPtr<CScenarioClue> > prevDestroyedClues;
+	void InvalidateLeaveZoneCache() { bHasCalcedCanLeaveZone = false; }
+	//
 	void PostCreateScenario();
 	bool IsObjectiveFinished( CScenarioObjective *pObjective ) const;
 	bool IsZoneContainsSomeClue( CScenarioZone *pZone ) const;
@@ -61,6 +71,11 @@ class CScenarioTracker: public CObjectBase
 		NDb::EScenarioObjectiveType type );
 	void JustFoundClue( CScenarioClue *pClue );
 	void JustOpenZone( CScenarioZone *pZone );
+	// retail @0x302a20: collect the scenario clues a pers carries (his own pers-clue when alive, both
+	// hand slots, the backpack, then the carried corpse's clues); bTake also removes the clue items.
+	void GetCluesFromPers( NRPG::CUnit *pPers, NRPG::CUnit *pCorpsePers, list< CPtr<CScenarioClue> > *pClues, bool bTake ) const;
+	// retail @0x302e40: clues currently in the squad's hands (per world unit: its pers + carried corpse).
+	void GetCluesInHand( const vector< CPtr<NWorld::CUnit> > &units, list< CPtr<CScenarioClue> > *pClues ) const;
 	//
 public:
 	CScenarioTracker();
@@ -96,6 +111,9 @@ public:
 	bool OnScenarioClueTaken( int nID, bool bUnit );
 	void OnScenarioClueDestroyed( int nID, bool bUnit );
 	void ProcessScenario( const vector< CPtr<NRPG::CUnit> > &units );
+	// retail @0x3030b0: may the squad leave pZone without making the scenario unwinnable? Writes the
+	// scenario-unwinnable flag (destroyed clues considered) into *pbGameOver.
+	bool CanLeaveZone( const vector< CPtr<NWorld::CUnit> > &units, CScenarioZone *pZone, bool *pbGameOver );
 	SRandomSeed GetRandomSeedForTemplate( int nTemplateID ) const;
 	CScenarioZone* GetZoneInWhichClueWasFound( CScenarioClue *pClue ) const;
 	void GetZonesWhichCanBeOpened( CScenarioClue *pClue, list< CPtr<CScenarioZone> > *pZones ) const;

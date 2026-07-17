@@ -2,7 +2,7 @@
 //
 #include "aiUnit.h"            // NAI::IAIUnit (GetUnitServer / GetUnitPosition / GetAP / GetHideProbability)
 #include "aiUnitState.h"       // NAI::SAIUnitState::pEnemy (CreateAICheckPositionLogic no-enemy gate)
-#include "aiTaskCommand.h"   // NAI::CTaskCommand + CTaskCommandGoto / CTaskCommandChangePose (reused command family)
+#include "aiTaskCommand.h"   // NAI::CTaskCommand + CTaskCommandGoto / CTaskCommandChangePose / CTaskCommandChangeWishPose (reused command family)
 #include "aiMisc.h"            // NAI::HasPath
 #include "wUnitServer.h"       // NWorld::CUnitServer: GetUnitPosition / HasCommand / GetWorld
 #include "wUnitCommands.h"     // NWorld::CCmd / CCmdSetCommand (the CCmd->CCommand wrap) / CCmdLook
@@ -27,9 +27,9 @@ namespace NAI
 {
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CTaskCommandLookToPosition::Do @0x99840 -- if the unit's current place is valid, turn toward the stored
-// target place (the path network's closest spoke from here to there) and queue a CCmdLook. Mirrors the dev
-// CTaskCommandChangeDirection::Do (GetPosition -> SetDirection -> queue a CCmd) but resolves the direction
-// toward a target place via IPathNetwork::GetClosestDir and emits CCmdLook rather than a PF_USE_DIR path.
+// target place (the path network's closest spoke from here to there) and queue a CCmdLook. Mirrors
+// CTaskCommandChangeDirection::Do (retail CRouteCommandLook @0x99740: GetPosition -> SetDirection ->
+// CCmdLook) but resolves the direction toward a target place via IPathNetwork::GetClosestDir.
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CTaskCommandLookToPosition::Do()
 {
@@ -142,6 +142,8 @@ int CTaskCommandAlarm::operator&( CStructureSaver &f )
 	return 0;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail CAIRouteLogic::operator& @0x9f7d0 (id 0x51443110): {2 CAILogic base, 3 bCircled 1B,
+// 4 routeCommands DoVector<CObj<CRouteCommand>>, 5 nCurrentCommand int4, 6 bContinueCommand 1B} -- tag-exact.
 int CAIRouteLogic::operator&( CStructureSaver &f )
 {
 	f.Add( 2, (CAILogic*)this );
@@ -176,12 +178,11 @@ bool CAIRouteLogic::IsCurrentCommandFinished()
 	return bRes;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// @0x9a170: advance past finished steps (OnCommandFinished / OnTaskStarted bracketing, wrap when circled),
-// pull the next world command from the current step into the logic's queue (wrapped CCmd->CCommand), and
-// finish the logic once an uncircled route runs out. Routes shorter than 2 commands never circle. The
-// CAILogic base calls this from GetCommand() whenever its command queue is empty.
-//   (dev<->release: the release step lifecycle calls OnCommandStarted; the dev CTaskCommand exposes
-//    OnTaskStarted as the per-step start hook -- mapped by name.)
+// @0x9a170: advance past finished steps (OnCommandFinished / OnCommandStarted bracketing -- retail
+// CRouteCommand vtbl+0xc / +0x10 -- wrap when circled), pull the next world command from the current step
+// into the logic's queue (wrapped CCmd->CCommand), and finish the logic once an uncircled route runs out.
+// Routes shorter than 2 commands never circle. The CAILogic base calls this from GetCommand() whenever its
+// command queue is empty.
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CAIRouteLogic::GenerateCommand()
 {
@@ -199,7 +200,7 @@ void CAIRouteLogic::GenerateCommand()
 			if ( bCircled && nCurrentCommand == n )
 				nCurrentCommand = 0;
 			if ( IsCommandInRange() )
-				routeCommands[nCurrentCommand]->OnTaskStarted();
+				routeCommands[nCurrentCommand]->OnCommandStarted();
 		}
 		bContinueCommand = false;
 		if ( IsCommandInRange() )
@@ -246,7 +247,7 @@ void CAIRouteLogic::Pause()
 	if ( IsCommandInRange() )
 		routeCommands[nCurrentCommand]->OnCommandFinished();
 	nCurrentCommand = j;
-	routeCommands[j]->OnTaskStarted();
+	routeCommands[j]->OnCommandStarted();   // retail @0x98d10: vtbl+0x10 on the rewound Goto
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // @0x9a680
@@ -272,18 +273,15 @@ CAIRouteLogic* CreateAIRouteLogic( IAIUnit *pUnit, const vector< CPtr<CTaskComma
 // @0x9b8d0: strafe to a position. Gated on a path to it at the wish pose; queues [wish-pose, end-pose,
 // goto]. Not circled.
 //
-// TWO documented dev<->release divergences (build-validation scope), both rooted in the dev tree being
-// the PREDECESSOR command family:
-//   1. STRAFE PREFIX -- NOW RESTORED. The release CRouteCommandGoto (@0x99280) prefixes a CCmdStrafe so the
-//      unit side-steps while keeping its facing, unless it is running or is inside a Panzerklein. The gate
-//      was NOT the assumed (absent) GetAttackObject -- it is CUnitServer::GetWearingDBPK (slot +0x34, present
-//      in the dev), i.e. "am I wearing a PK". CTaskCommandGoto now carries a bStrafe flag and emits
-//      CCmdStrafe(bStrafe) before CCmdPath under that gate (see CTaskCommandGoto::Do); the Strafe factory
-//      passes bStrafe=true, the Move factory false.
-//   2. ChangeWishPose ~= ChangePose. The release splits the pose step into ChangeWishPose (wish pose only)
-//      and ChangePose (wish pose + in-place re-pose). The dev tree has only CTaskCommandChangePose; it is
-//      reused for the wish-pose step too (it additionally emits a PF_USE_POSE re-pose path -- harmless for a
-//      movement pose).
+// Both former dev<->release divergences are RESOLVED:
+//   1. STRAFE PREFIX. The release CRouteCommandGoto (@0x99280) prefixes a CCmdStrafe so the unit side-steps
+//      while keeping its facing, unless it is running or is inside a Panzerklein (CUnitServer::GetWearingDBPK,
+//      slot +0x34). CTaskCommandGoto carries the bStrafe flag and emits CCmdStrafe(bStrafe) before CCmdPath
+//      under that gate; the Strafe factory passes bStrafe=true, the Move factory false.
+//   2. ChangeWishPose vs ChangePose. The release splits the pose step: CTaskCommandChangeWishPose (retail
+//      CRouteCommandChangeWishPose @0x99600, id 0x2305EC00 -- wish pose only, re-path only for a PK wearer)
+//      is now in the family, and this factory uses it for the movement pose exactly like retail
+//      (CreateRCChangeWishPose callers: @0x9aad0/@0x9b8d0/@0xa24e0/@0xa2720).
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 IAILogic* CreateAIStrafeToPositionLogic( IAIUnit *pUnit, const SPosition &pos, EPose wishPose, EPose endPose )
 {
@@ -292,7 +290,7 @@ IAILogic* CreateAIStrafeToPositionLogic( IAIUnit *pUnit, const SPosition &pos, E
 	if ( !HasPath( pUnit, pUnit->GetUnitPosition().pos.p, pos.p, wishPose, false ) )
 		return 0;
 	vector< CPtr<CTaskCommand> > cmds;
-	cmds.push_back( new CTaskCommandChangePose( wishPose ) );   // release: ChangeWishPose (see divergence #2)
+	cmds.push_back( new CTaskCommandChangeWishPose( wishPose ) );   // retail CreateRCChangeWishPose (@0x9b8d0)
 	cmds.push_back( new CTaskCommandChangePose( endPose ) );
 	cmds.push_back( new CTaskCommandGoto( pos, true ) );        // strafe to cover (retail @0x99280: CCmdStrafe before CCmdPath)
 	return CreateAIRouteLogic( pUnit, cmds, false );
@@ -327,8 +325,7 @@ IAILogic* CreateAILookToPositionLogic( IAIUnit *pUnit, const SPathPlace &place )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // @0x9aad0: gated on a path to `place` at movePose; queues [look at it, wish-pose for the move, goto (to the
 // place's world position), end-pose]. Not circled. The HasPath `from` is the unit's current place (the decode
-// hook supplied it implicitly). This is the MOVE variant, so its goto passes bStrafe=false (face-and-walk);
-// only the ChangeWishPose~=ChangePose divergence remains (see the strafe factory's divergence note above).
+// hook supplied it implicitly). This is the MOVE variant, so its goto passes bStrafe=false (face-and-walk).
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 IAILogic* CreateAIMoveToPositionLogic( IAIUnit *pUnit, const SPathPlace &place, EPose movePose, EPose endPose, bool bCanFindNotExactPath )
 {
@@ -340,7 +337,7 @@ IAILogic* CreateAIMoveToPositionLogic( IAIUnit *pUnit, const SPathPlace &place, 
 	SPosition go = GetPos( place, pUS->GetWorld()->GetPathNetwork() );
 	vector< CPtr<CTaskCommand> > cmds;
 	cmds.push_back( new CTaskCommandLookToPosition( place ) );
-	cmds.push_back( new CTaskCommandChangePose( movePose ) );   // release: ChangeWishPose (see strafe divergence #2)
+	cmds.push_back( new CTaskCommandChangeWishPose( movePose ) );   // retail CreateRCChangeWishPose (@0x9aad0)
 	cmds.push_back( new CTaskCommandGoto( go, false ) );        // move-to-position: face-and-walk (not strafe), cf. @0x99280
 	cmds.push_back( new CTaskCommandChangePose( endPose ) );
 	return CreateAIRouteLogic( pUnit, cmds, false );
@@ -378,13 +375,14 @@ IAILogic* CreateAIAlarmLogic( IAIUnit *pUnit, IAIUnit *pEnemy )
 		return 0;
 	SPosition go = GetPos( place, pNet );
 	vector< CPtr<CTaskCommand> > cmds;
-	cmds.push_back( new CTaskCommandChangePose( RUN ) );          // EPose RUN = 3
+	cmds.push_back( new CTaskCommandChangePose( RUN ) );          // EPose RUN = 3 (retail CreateRCChangePose here, not wish)
 	cmds.push_back( new CTaskCommandGoto( go, false ) );          // run to the ally (face-and-walk)
 	cmds.push_back( new CTaskCommandLookToPosition( place ) );
-	// NOTE: retail's route has a Wait(1) before the Alarm, but the dev's flag-based CTaskCommandWait::IsEndOfUnitTurn
-	// depends on OnNewTurn() which CAIRouteLogic never propagates (the route path, unlike the old CTask path, doesn't
-	// call it) -- inside a route the Wait would never complete in TBS, so the Alarm would never fire. Drop the cosmetic
-	// 1-turn pause; the Alarm fires immediately on arrival (after the look). The garrison alert is identical.
+	// retail @0x9b3d0: a 1-second/1-turn pause before the alarm (disasm `mov ecx,1; call CreateRCWait`).
+	// Restored now that CTaskCommandWait is the retail computed-state wait (OnCommandStarted captures the
+	// turn id, so the pause completes on the next turn boundary inside a route -- the old flag-based wait
+	// that never completed here is gone).
+	cmds.push_back( new CTaskCommandWait( 1 ) );
 	cmds.push_back( new CTaskCommandAlarm( pEnemy->GetUnitServer() ) );   // raise the garrison on arrival
 	return CreateAIRouteLogic( pUnit, cmds, false );
 }

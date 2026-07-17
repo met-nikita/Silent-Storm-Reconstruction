@@ -19,32 +19,64 @@
 namespace NUI
 {
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail NUI::ConvertLineBreaks @0x31bc30 (same local copy as iShowClue.cpp / iMissionUI.cpp)
+static wstring ConvertLineBreaks( const wstring &szStr )
+{
+	wstring szRet;
+	for ( wstring::const_iterator i = szStr.begin(); i != szStr.end(); )
+	{
+		switch ( wchar_t(*i) )
+		{
+			case L'\n':
+				szRet += L"<br>";
+				break;
+			case L'\r':
+				szRet += L"<br>";
+				++i;
+				if ( i != szStr.end() && *i == L'\n' )
+					++i;
+				continue;
+			case 133: // ellipsis symbol
+				szRet += L"...";
+				break;
+			default:
+				szRet += *i;
+				break;
+		}
+		++i;
+	}
+	return szRet;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 // CCluesUI
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-class CCluesItem: public CButton
+// retail NUI::CJournalItem (save id 0xB0820131 unchanged); stores the resolved description CString
+// (operator& @0x1bdc30 tag 2 = CDBPtr<NDb::CString>), not the clue itself
+class CJournalItem: public CButton
 {
-	OBJECT_NOCOPY_METHODS(CCluesItem)
+	OBJECT_NOCOPY_METHODS(CJournalItem)
 private:
 	ZDATA_(CButton)
-	CPtr<NScenario::CScenarioClue> pClue;
+	CDBPtr<NDb::CString> pDescription;
 	////
-	CObj<CMLText> pText;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CButton*)this); f.Add(2,&pClue); f.Add(3,&pText); return 0; }
+	CObj<CText> pText;
+	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CButton*)this); f.Add(2,&pDescription); f.Add(3,&pText); return 0; }
 
 protected:
 	void OnAction();
 
 public:
-	CCluesItem() {}
-	CCluesItem( const SWindowInfo &sInfo, NScenario::CScenarioClue *_pClue, const wstring &wsText );
+	CJournalItem() {}
+	CJournalItem( const SWindowInfo &sInfo, const wstring &wsText, NDb::CString *_pDescription );
 
-	NScenario::CScenarioClue* Get() const;
+	NDb::CString* Get() const;
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CCluesItem::CCluesItem( const SWindowInfo &sInfo, NScenario::CScenarioClue *_pClue, const wstring &wsText ):
-	CButton( sInfo ), pClue( _pClue )
+// retail @0x1bafe0
+CJournalItem::CJournalItem( const SWindowInfo &sInfo, const wstring &wsText, NDb::CString *_pDescription ):
+	CButton( sInfo ), pDescription( _pDescription )
 {
-	pText = new CMLText( SWindowInfo( this, SPoint( 0, 0 ), GetSize(), "iml-text", STYLE_ENABLED | STYLE_VISIBLE ) );
+	pText = new CText( SWindowInfo( this, SPoint( 0, 0 ), GetSize(), "iml-text", STYLE_ENABLED | STYLE_VISIBLE ) );
 	pText->SetText( wsText );
 
 	SPoint sSize;
@@ -55,12 +87,13 @@ CCluesItem::CCluesItem( const SWindowInfo &sInfo, NScenario::CScenarioClue *_pCl
 	pText->SetSize( sSize );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-NScenario::CScenarioClue* CCluesItem::Get() const
+NDb::CString* CJournalItem::Get() const
 {
-	return pClue;
+	return pDescription;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CCluesItem::OnAction()
+// retail @0x1ba890
+void CJournalItem::OnAction()
 {
 	SendMessage( GetParent(), SEvent( EVENT_LISTVIEW_ITEMSELECTED, this ) );
 }
@@ -75,24 +108,27 @@ private:
 	{
 		ORDER,
 		ZONE_CLUES,
-		ZONE_POINT
+		ZONE_POINT,
+		SHOW_HINTS
 	};
 	ZDATA_(CWindow)
 	CPtr<NRPG::CGlobalGame> pGame;
+	//// retail: four CComplexButton icon buttons (@0x1bc020), incl. the 4th hints filter
+	CObj<CComplexButton> pSortByDate;
+	CObj<CComplexButton> pSortByZone;
+	CObj<CComplexButton> pSortByPoint;
+	CObj<CComplexButton> pShowHints;
 	////
-	CObj<CHoverButton> pSortByDate;
-	CObj<CHoverButton> pSortByZone;
-	CObj<CHoverButton> pSortByPoint;
-	////
-	CObj<CMLText> pDescription;
-	CObj<CScrollWindow<CMLText> > pDescriptionView;
+	CObj<CText> pDescription;
+	CObj<CScrollWindow<CText> > pDescriptionView;
 	////
 	CObj<CListView> pList;
 	CObj<CScrollWindow<CListView> > pListView;
 	////
 	CPtr<CImage> pSelection;
 	CObj<CFlashButton> pCloseButton;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CWindow*)this); f.Add(2,&pGame); f.Add(3,&pSortByDate); f.Add(4,&pSortByZone); f.Add(5,&pSortByPoint); f.Add(6,&pDescription); f.Add(7,&pDescriptionView); f.Add(8,&pList); f.Add(9,&pListView); f.Add(10,&pSelection); f.Add(11,&pCloseButton); return 0; }
+	// retail operator& @0x1bd9f0: pShowHints is tag 6, shifting the rest to 7..12
+	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CWindow*)this); f.Add(2,&pGame); f.Add(3,&pSortByDate); f.Add(4,&pSortByZone); f.Add(5,&pSortByPoint); f.Add(6,&pShowHints); f.Add(7,&pDescription); f.Add(8,&pDescriptionView); f.Add(9,&pList); f.Add(10,&pListView); f.Add(11,&pSelection); f.Add(12,&pCloseButton); return 0; }
 
 protected:
 	void GenerateList( EFilter eFilter );
@@ -123,14 +159,18 @@ bool CCluesUI::ProcessMessage( const SEvent &sEvent )
 			if ( sEvent.szID == "view" )
 			{
 				int nID = pList->GetSelectedItem();
-				CPtr<CCluesItem> pItem = dynamic_cast<CCluesItem*>( pList->GetItem( pList->GetSelectedItem() ) );
+				CPtr<CJournalItem> pItem = dynamic_cast<CJournalItem*>( pList->GetItem( pList->GetSelectedItem() ) );
 				if ( IsValid( pItem ) )
 				{
-					CPtr<NDb::CString> pClueDescription = pGame->pScenarioTracker->GetClueDescriptionFromObjective( pItem->Get() );
-					if ( IsValid( pClueDescription ) )
-						pDescription->SetText( pClueDescription->szStr );
-					else
-						pDescription->SetText( L"<color=red>[ERROR]Description not set" );
+					// retail @0x1bc020: DB string 20258 ("Clue&Hint Format" markup,
+					// <font face=Courier size=16pt><color=0xFF5A5959>) + line-break-converted description
+					pDescription->SetText( GetDBString( 20258 ) + ConvertLineBreaks( GetDBString( pItem->Get() ) ), true );
+
+					// retail @0x1bc020: fit the text to its content height, keeping the template width
+					SPoint sRealSize;
+					pDescription->GetRealSize( &sRealSize );
+					sRealSize.x = pDescription->GetSize().x;
+					pDescription->SetSize( sRealSize );
 				}
 
 				return true;
@@ -150,6 +190,11 @@ bool CCluesUI::ProcessMessage( const SEvent &sEvent )
 				GenerateList( ZONE_POINT );
 				return true;
 			}
+			else if ( sEvent.szID == "show_hints" )
+			{
+				GenerateList( SHOW_HINTS );
+				return true;
+			}
 
 			break;
 		}
@@ -160,20 +205,22 @@ bool CCluesUI::ProcessMessage( const SEvent &sEvent )
 			pListView = new CScrollWindow<CListView>( sEvent.pLoader->GetControl( "view" ) );
 			pList = pListView->GetClientWindow();
 
-			pDescriptionView = new CScrollWindow<CMLText>( sEvent.pLoader->GetControl( "description" ) );
+			pDescriptionView = new CScrollWindow<CText>( sEvent.pLoader->GetControl( "description" ) );
 			pDescription = pDescriptionView->GetClientWindow();
 
-			pSortByDate = new CHoverButton( sEvent.pLoader->GetControl( "sort_bydate" ) );
-			pSortByDate->AddTextState( CHoverButton::STATE_NORMAL, GetDBString( 7049 ) + GetDBString( 7051 ) );
-			pSortByDate->AddTextState( CHoverButton::STATE_HOVER, GetDBString( 7050 ) + GetDBString( 7051 ) );
+			// retail @0x1bc020: icon buttons -- corner frames UITexture 566 "Unselected" / 408 "Selected",
+			// icons 757 wristwatch / 758 map / 759 magnifier / 760 lightbulb
+			pSortByDate = new CComplexButton( sEvent.pLoader->GetControl( "sort_bydate" ), 0, 0, NDb::GetUITexture( 566 ), NDb::GetUITexture( 408 ) );
+			pSortByDate->Set( NDb::GetUITexture( 757 ), 0, CComplexButton::UNCHECKED, "" );
 
-			pSortByZone = new CHoverButton( sEvent.pLoader->GetControl( "sort_byzone" ) );
-			pSortByZone->AddTextState( CHoverButton::STATE_NORMAL, GetDBString( 7049 ) + GetDBString( 7052 ) );
-			pSortByZone->AddTextState( CHoverButton::STATE_HOVER, GetDBString( 7050 ) + GetDBString( 7052 ) );
+			pSortByZone = new CComplexButton( sEvent.pLoader->GetControl( "sort_byzone" ), 0, 0, NDb::GetUITexture( 566 ), NDb::GetUITexture( 408 ) );
+			pSortByZone->Set( NDb::GetUITexture( 758 ), 0, CComplexButton::UNCHECKED, "" );
 
-			pSortByPoint = new CHoverButton( sEvent.pLoader->GetControl( "sort_bypoint" ) );
-			pSortByPoint->AddTextState( CHoverButton::STATE_NORMAL, GetDBString( 7049 ) + GetDBString( 7053 ) );
-			pSortByPoint->AddTextState( CHoverButton::STATE_HOVER, GetDBString( 7050 ) + GetDBString( 7053 ) );
+			pSortByPoint = new CComplexButton( sEvent.pLoader->GetControl( "sort_bypoint" ), 0, 0, NDb::GetUITexture( 566 ), NDb::GetUITexture( 408 ) );
+			pSortByPoint->Set( NDb::GetUITexture( 759 ), 0, CComplexButton::UNCHECKED, "" );
+
+			pShowHints = new CComplexButton( sEvent.pLoader->GetControl( "show_hints" ), 0, 0, NDb::GetUITexture( 566 ), NDb::GetUITexture( 408 ) );
+			pShowHints->Set( NDb::GetUITexture( 760 ), 0, CComplexButton::UNCHECKED, "" );
 
 			GenerateList( ORDER );
 			break;
@@ -198,7 +245,7 @@ void CCluesUI::Draw( const STime &sTime, NGScene::I2DGameView *pView )
 	bool bVisible = false;
 	if ( nID != -1 )
 	{
-		CPtr<CCluesItem> pItem = dynamic_cast<CCluesItem*>( pList->GetItem( nID ) );
+		CPtr<CJournalItem> pItem = dynamic_cast<CJournalItem*>( pList->GetItem( nID ) );
 		if ( IsValid( pItem ) )
 		{
 			const SPoint &sSize = pItem->GetSize();
@@ -239,6 +286,12 @@ void CCluesUI::GenerateList( EFilter eFilter )
 {
 	pList->RemoveAllItems();
 
+	// retail @0x1bb930: the active filter's button gets the checked (selected-frame) state
+	pSortByDate->SetChecked( eFilter == ORDER );
+	pSortByZone->SetChecked( eFilter == ZONE_CLUES );
+	pSortByPoint->SetChecked( eFilter == ZONE_POINT );
+	pShowHints->SetChecked( eFilter == SHOW_HINTS );
+
 	switch( eFilter )
 	{
 	case ORDER:
@@ -264,10 +317,11 @@ void CCluesUI::GenerateList( EFilter eFilter )
 			int nCount = 0;
 			for( list< CPtr<NScenario::CScenarioZone> >::const_iterator iZone = zonesList.begin(); iZone != zonesList.end(); iZone++ )
 			{
-				AddSeparator( NStr::ToUnicode( (*iZone)->GetDBZone()->sSmallDescription ), &nCount );
+				// retail @0x1bb930: separator = the zone's localized pName CString, not sSmallDescription
+				AddSeparator( GetDBString( (*iZone)->GetDBZone()->pName ), &nCount );
 				GenerateListByZone( *iZone, cluesList, &nCount );
 			}
-			AddSeparator( L"Results", &nCount );
+			AddSeparator( GetDBString( 19811 ), &nCount );	// retail @0x1bb930: string 19811 "Separator - Result"
 			GenerateListByZone( 0, cluesList, &nCount );
 
 			break;
@@ -284,11 +338,25 @@ void CCluesUI::GenerateList( EFilter eFilter )
 			int nCount = 0;
 			for( list< CPtr<NScenario::CScenarioZone> >::const_iterator iZone = zonesList.begin(); iZone != zonesList.end(); iZone++ )
 			{
-				AddSeparator( NStr::ToUnicode( (*iZone)->GetDBZone()->sSmallDescription ), &nCount );
+				AddSeparator( GetDBString( (*iZone)->GetDBZone()->pName ), &nCount );
 				GenerateListByPoint( *iZone, cluesList, &nCount );
 			}
-			AddSeparator( L"Results", &nCount );
+			AddSeparator( GetDBString( 19811 ), &nCount );
 			GenerateListByPoint( 0, cluesList, &nCount );
+
+			break;
+		}
+	case SHOW_HINTS:
+		{
+			// retail @0x1bb930 case 3: list the campaign's collected UI hints (CGlobalGame::hintsSet);
+			// item text = title, stored description = the hint's full pString
+			int nCount = 0;
+			for( vector< CDBPtr<NDb::CUIHint> >::const_iterator iHint = pGame->hintsSet.begin(); iHint != pGame->hintsSet.end(); ++iHint )
+			{
+				wstring wsText = GetDBString( 20994 ) + NStr::Format( L"%d. %s", nCount + 1, GetDBString( (*iHint)->pTitle ).c_str() );
+				pList->AddItem( nCount, new CJournalItem( SWindowInfo( pList, SPoint( 0, 0 ), SPoint( pList->GetSize().x, 0 ), "", STYLE_ENABLED | STYLE_VISIBLE ), wsText, (*iHint)->pString ) );
+				nCount++;
+			}
 
 			break;
 		}
@@ -299,8 +367,9 @@ void CCluesUI::AddSeparator( const wstring &wsText, int *pConut )
 {
 	int &nCount = (*pConut);
 
-	CPtr<CMLText> pText = new CMLText( SWindowInfo( pList, SPoint( 0, 0 ), SPoint( pList->GetSize().x, 0 ), "", STYLE_ENABLED | STYLE_VISIBLE ) );
-	pText->SetText( wsText );
+	CPtr<CText> pText = new CText( SWindowInfo( pList, SPoint( 0, 0 ), SPoint( pList->GetSize().x, 0 ), "", STYLE_ENABLED | STYLE_VISIBLE ) );
+	// retail @0x1ba9b0: DB string 20993 ("Journal Headers" markup, <font face=Courier size=18pt><color=FF2E4051>)
+	pText->SetText( GetDBString( 20993 ) + wsText, true );
 
 	SPoint sSize;
 	pText->GetRealSize( &sSize );
@@ -311,17 +380,18 @@ void CCluesUI::AddSeparator( const wstring &wsText, int *pConut )
 	nCount++;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail @0x1bb1a0: wsAdd is passed by the callers but never used
 void CCluesUI::GenerateListSimple( int nNum, const wstring &wsAdd, const list<CPtr<NScenario::CScenarioClue> > &cluesList, int *pConut )
 {
 	int &nCount = (*pConut);
 
 	for( list<CPtr<NScenario::CScenarioClue> >::const_iterator iTemp = cluesList.begin(); iTemp != cluesList.end(); iTemp++ )
 	{
-		WCHAR wsBuffer[1024];
-		swprintf( wsBuffer, L"<font face=Courier size=18pt><color=FF2E4051>%d. %s", nNum, GetDBString( (*iTemp)->GetDBClue()->pDescription ).c_str() );
+		// DB string 20994 ("Jornal ListItems Format" markup, <font face=Courier size=16pt><color=0xFF5A5959>)
+		wstring wsTemp = GetDBString( 20994 ) + NStr::Format( L"%d. %s", nNum, GetDBString( (*iTemp)->GetDBClue()->pDescription ).c_str() );
 
-		wstring wsTemp( wsAdd + wsBuffer );
-		pList->AddItem( nCount, new CCluesItem( SWindowInfo( pList, SPoint( 0, 0 ), SPoint( pList->GetSize().x, 0 ), "", STYLE_ENABLED | STYLE_VISIBLE ), (*iTemp), wsTemp ) );
+		// the item stores the resolved objective-description CString for the "view" panel
+		pList->AddItem( nCount, new CJournalItem( SWindowInfo( pList, SPoint( 0, 0 ), SPoint( pList->GetSize().x, 0 ), "", STYLE_ENABLED | STYLE_VISIBLE ), wsTemp, pGame->pScenarioTracker->GetClueDescriptionFromObjective( *iTemp ) ) );
 		nCount++;
 		nNum++;
 	}
@@ -490,8 +560,8 @@ void CICClues::Exec()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 using namespace NUI;
 REGISTER_SAVELOAD_CLASS( 0xB0820130, CCluesUI );
-REGISTER_SAVELOAD_CLASS( 0xB0820131, CCluesItem )
-REGISTER_SAVELOAD_TEMPL_CLASS( 0xB0820132, CScrollWindow<CMLText>, CScrollWindow );
+REGISTER_SAVELOAD_CLASS( 0xB0820131, CJournalItem )
+REGISTER_SAVELOAD_TEMPL_CLASS( 0xB0820132, CScrollWindow<CText>, CScrollWindow );
 REGISTER_SAVELOAD_TEMPL_CLASS( 0xB0820133, CScrollWindow<CListView>, CScrollWindow );
 using namespace NGame;
 REGISTER_SAVELOAD_CLASS( 0xB082013A, CCluesInterface );

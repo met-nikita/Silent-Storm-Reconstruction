@@ -44,17 +44,19 @@ CAIRouteWaypoint::CAIRouteWaypoint( IPathNetwork *pPathNetwork, CMapWaypoint *pM
 	// GetDistance( GetPos(hero), GetWaypointPos(wp) ) <= 2 could never fire. The earlier
 	// native-arm filter fix (aiNearestPosition.cpp) never applied to script waypoints
 	// because this ctor did not take the native arm.
-	pos = GetNearestNativePosition( pMapWaypoint->pos.ptPos, pPathNetwork );
+	// Retail @0x496000: a 3D waypoint (db Is3DPoint, e.g. the FF flying-boss B-grid) is fly-snapped
+	// from its raw world origin -- pos stays default-constructed so MakeFlyPos's preserved bits
+	// (direction 7, moving) match retail's; a ground snap would fake altitude 0 and direction 0.
+	if ( pMapWaypoint->b3DWaypoint )
+		MakeFlyPos( pMapWaypoint->pos.ptPos, pPathNetwork, &pos );
+	else
+		pos = GetNearestNativePosition( pMapWaypoint->pos.ptPos, pPathNetwork );
 	commands = pMapWaypoint->commands;
 	ptPos = pMapWaypoint->pos.ptPos;
 }
 //////////////////////////////////////////////////////////////////////////////////////
 // retail @0x496000 -- the offset-map / 3D-aware waypoint ctor used by NWorld::CWaypointsHolder
-// (release wMainWaypoints). Same as the 2-arg form except it snaps onto the nearest NATIVE cell
-// (GetNearestNativePosition, like RecalcPosition) instead of GetNearestPosition, and -- when
-// b3DWaypoint is set -- onto a 3D-fly cell. The dev CMapWaypoint has no b3DWaypoint field (adding it
-// would change the map save format), so the only caller (CWaypointsHolder::AddWaypoint) always passes
-// b3D == false; the 3D-fly snap branch is deferred to the native snap until the 3D-waypoint map seam lands.
+// (release wMainWaypoints). Same as the 2-arg form except the explicit b3D arm.
 CAIRouteWaypoint::CAIRouteWaypoint( IPathNetwork *pPathNetwork, CMapWaypoint *pMapWaypoint, bool b3DWaypoint )
 {
 	ASSERT( IsValid( pPathNetwork ) );
@@ -64,9 +66,11 @@ CAIRouteWaypoint::CAIRouteWaypoint( IPathNetwork *pPathNetwork, CMapWaypoint *pM
 	//
 	szName = pMapWaypoint->pName->szName;
 	ptPos = pMapWaypoint->pos.ptPos;                         // retail vOrigin @0x2c
-	pos = GetNearestNativePosition( ptPos, pPathNetwork );   // retail b3D==false branch
+	if ( b3DWaypoint || pMapWaypoint->b3DWaypoint )
+		MakeFlyPos( ptPos, pPathNetwork, &pos );
+	else
+		pos = GetNearestNativePosition( ptPos, pPathNetwork );
 	commands = pMapWaypoint->commands;
-	(void)b3DWaypoint; // 3D-fly snapping deferred (see note above)
 }
 //////////////////////////////////////////////////////////////////////////////////////	
 const NWorld::SObjectPlace CAIRouteWaypoint::GetObjectPlace( int nAngle ) const

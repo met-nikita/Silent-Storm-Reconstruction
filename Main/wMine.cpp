@@ -53,10 +53,13 @@ void CMine::Visit( IAIVisitor *p )
 	p->AddHull( pModel->pGeometry->pAIGeometry, pos, pModel->pRPGArmor, nFloor, nMask );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-int CMine::ProcessAttack( int nUserID, NRPG::CAttackPortion *pAttack, NDb::CRPGArmor *pArmor )
+// retail @0x37e580: a hit just sets the mine off and reports the -1 "no damage" sentinel
+// (disasm 0x77e58e: {nDmg=-1, RD_UNKNOW}). Dev returned 0.
+int CMine::ProcessAttack( NWorld::IWorld *pWorld, int nUserID, NRPG::CAttackPortion *pAttack,
+	const CVec3 &vDir, NDb::CRPGArmor *pArmor )
 {
 	GoBoom();
-	return 0;
+	return -1;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CVec3 CMine::GetMinePos() 

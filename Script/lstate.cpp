@@ -75,7 +75,7 @@ LUA_API lua_State *lua_open (int stacksize) {
   L->allowhooks = 1;
 	L->nGCticks = 0;
 	L->nNoWait = 0;
-	CLuaThread *pThr = lua_newThread( L );
+	CLuaThread *pThr = lua_newThread( L, "First thread" );   // retail @0x3de250: name 0x8cee70
 	lua_setThread( L, pThr );
 	f_luaopen( L, &stacksize );
   L->nGCAvoid = 0;
@@ -95,11 +95,13 @@ LUA_API void lua_close (lua_State *L) {
   delete L;
 }
 //////////////////////////////////////////////////////////////////////////
-CLuaThread::CLuaThread()
+// retail ctor @0x3de050: takes the thread's debug name (save tag 8)
+CLuaThread::CLuaThread( const char *szName )
 {
   Cbase = 0;
 	thisThreadIsSleeping = 0;
 	bErrorInThread = false;
+	name = szName ? szName : "";
   stack.resize( DEFAULT_STACK_SIZE, TObject() );
 	Cbase = top = 0;
 }
@@ -110,9 +112,10 @@ void lua_setThread( lua_State *L, CLuaThread *pThread )
 	L->pCT = pThread;
 }
 //////////////////////////////////////////////////////////////////////////
-CLuaThread* lua_newThread( lua_State *L )
+// retail @0x3de190: lua_newThread(L, name) -- every retail creation site passes a name (disasm-proven)
+CLuaThread* lua_newThread( lua_State *L, const char *szName )
 {
-	CLuaThread* pThr = new CLuaThread;
+	CLuaThread* pThr = new CLuaThread( szName );
 	L->threads.push_back( pThr );
 	return pThr;
 }
@@ -158,6 +161,7 @@ int lua_State::operator&( CStructureSaver &f )
 
 	lua_AddHook( &callhook, f, 19 );
 	lua_AddHook( &linehook, f, 20 );
+	f.Add( 21, &pContext );   // retail @0x3de370 tag 0x15: the owning engine object (lua_State +0x00)
 	return 0;
 }
 

@@ -253,8 +253,11 @@ void CIconBarSet::CreateButton( int nNormalIcon, int nDisabledIcon, CComplexButt
 	CPtr<CToolTip> pToolTip = pButton->GetToolTip();
 	pToolTip->SetText( GetDBString( nToolTipID ) );
 
-	if ( sActionInfo.bOk )
-		pToolTip->SetVal( L"ap", sActionInfo.nActionAP );
+	// retail CIconBarSet::CreateButton @0x250310: the AP number is shown only when the action is OK,
+	// SOME unit reported an AP (nMaxAP != -1) AND the whole selection agrees on it (nMinAP == nMaxAP);
+	// a mixed selection shows "N/A".
+	if ( sActionInfo.bOk && sActionInfo.nMaxAP != -1 && sActionInfo.nMinAP == sActionInfo.nMaxAP )
+		pToolTip->SetVal( L"ap", sActionInfo.nMaxAP );
 	else
 		pToolTip->SetVal( L"ap", L"N/A" );
 
@@ -660,6 +663,9 @@ void CForcedIconBarSet::Update()
 CUnitIconsBar::CUnitIconsBar( const SWindowInfo &sInfo, NGame::IMission *_pMission ):
 	CWindow( sInfo ), pMission( _pMission ), iconsSet( 8 ), eLastSet( NGame::EActionIconsSet( -1 ) )
 {
+	// ORIGINAL BUG (confirmed by retail ctor decomps @0x252420/@0x2536f0): nTrackWeaponModeChanges
+	// is deliberately NOT initialized -- retail leaves it as raw heap garbage until Draw's first
+	// world-state mismatch syncs it. trackSelectionChanges default-constructs empty like retail.
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CUnitIconsBar::SetIconBar( CIconBarSet *pIcons )
@@ -694,6 +700,25 @@ bool CUnitIconsBar::ProcessMessage( const SEvent &sEvent )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CUnitIconsBar::Draw( const STime &sTime, NGScene::I2DGameView *pView )
 {
+	// retail @0x2528b0 refresh-on-change preamble (runs BEFORE the FORCED gating): a change of the
+	// selection set -- or, only if the selection is unchanged (else-if), a change of
+	// GetUnitsWorldState() (mission vtbl+0xa0 @0x1fc770; the tracked value behind the retail PDB
+	// name nTrackWeaponModeChanges: the ST_* state follows the held weapon) -- snaps the icon set
+	// back to AIS_MAIN and latches the new value.
+	int nWorldState = pMission->GetUnitsWorldState();
+	vector<CPtr<NGame::IUnitTracker> > selectionSet;
+	pMission->GetSelectedUnits( &selectionSet );
+	if ( selectionSet != trackSelectionChanges )
+	{
+		pMission->SetActionIconsSet( NGame::AIS_MAIN );
+		trackSelectionChanges = selectionSet;
+	}
+	else if ( nWorldState != nTrackWeaponModeChanges )
+	{
+		pMission->SetActionIconsSet( NGame::AIS_MAIN );
+		nTrackWeaponModeChanges = nWorldState;
+	}
+
 	if ( pMission->GetState()->GetType() == NGame::IState::FORCED )
 		pMission->SetActionIconsSet( NGame::AIS_FORCED );
 	else if ( pMission->GetActionIconsSet() == NGame::AIS_FORCED )

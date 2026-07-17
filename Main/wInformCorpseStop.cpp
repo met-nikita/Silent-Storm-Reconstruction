@@ -15,7 +15,9 @@ namespace NWorld
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void WorldInformCorpseStop( CUnitServer *pUS )
 {
-	pUS->GetWorld()->InformCorpseStop( pUS );
+	// dispatch through the public IWorld slot (retail: call [vtbl+0x1f8]) -- the CWorld override
+	// itself sits in the class's private tail like every OBJECT_BASIC_METHODS-following member.
+	static_cast<IWorld*>( pUS->GetWorld() )->InformCorpseStop( pUS );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 }  // namespace NWorld

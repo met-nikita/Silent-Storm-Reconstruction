@@ -36,7 +36,9 @@ class CAIFireArmsWeapon;
 // CUnitArea - the set of grid places reachable within nAPRadius AP from a centre place. A combat logic
 // bound to an area (via CAIAttackPlaceSource::pArea) only considers places inside it, so a unit "holds"
 // the area instead of roaming. Release ctor @0x004747f0, Prepare @0x00474880 (a PrepareAllPaths flood),
-// IsInArea @0x00473e30 (a hashed-place lookup). `keys` is the prepared in-area set (transient).
+// IsInArea @0x00473e30 (a hashed-place lookup). `places` is the prepared in-area set, keyed on the
+// normalized GetHash key and SERIALIZED (release operator& @0x00474e60 tag 6), so a loaded area gates
+// exactly like the saved one without a re-flood.
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CUnitArea: public CObjectBase
 {
@@ -46,13 +48,13 @@ class CUnitArea: public CObjectBase
 	SPathPlace                place;        // centre
 	int                       nAPRadius;
 	int                       wishPose;     // EPose the flood assumes (stored for fidelity)
+	unordered_map<unsigned long, int> places; // in-area set keyed on GetHash (release hash_map<ulong,int> @+0x1c, tag 6)
 	ZEND int operator&( CStructureSaver &f );
-	vector<int>               keys;         // sorted SPathPlace::GetData() of in-area places (transient; built by Prepare)
 public:
 	CUnitArea(): nAPRadius( 0 ), wishPose( 0 ) {}
 	CUnitArea( NWorld::CUnitServer *_pUS, const SPathPlace &_place, int _nAPRadius, int _wishPose );
 	bool Prepare();                            // (re)flood the reachable set from the centre
-	bool IsInArea( const SPathPlace &p ) const; // true if p is in the area (empty/un-prepared -> no gate)
+	bool IsInArea( const SPathPlace &p ) const; // true if p is in the prepared set (empty set matches nothing, as release)
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // IAIActionPlaceSource - abstract source of candidate action-places (the type held by CAICombatLogic

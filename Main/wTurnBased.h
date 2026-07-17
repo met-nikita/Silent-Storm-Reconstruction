@@ -15,6 +15,12 @@ enum ETBSEvent
 	TBS_ACTION_FINISH,
 	TBS_CANCEL_ACTION,
 	TBS_RECALC_COMMAND,
+	// retail ETBSEvent value 10 (transient runtime event, never serialized, so the enumerator order
+	// here is internal): broadcast by CTBSWorld::GridInfoUpdated @0x375ca0 when the path network
+	// reported a change (CWorld::Segment -> CPathNetwork::CheckUpdated @0x4c9a0). The per-unit
+	// handler (CUnitServer::OnTBSEvent @0x3c2a90 case 10) re-seats a locker unit whose tile went
+	// non-passable / whose ground height drifted.
+	TBS_GRID_INFO_UPDATED,
 	// retail ETBSEvent (its value differs in the binary; transient runtime event, never serialized, so the
 	// enumerator order here is internal). A global situation change / interrupt broadcasts THIS, not
 	// TBS_CANCEL_ACTION: a unit caught MID-MOVE must be snapped to a clean grid cell and have its move
@@ -157,8 +163,39 @@ class CTBSWorld
 	bool bWasAction;
 	bool bFirstTurn;
 	int nActionLag;
+	// retail CTBSWorld+0x1c (save tag 8). Write-only in retail too: the ctor (@0x375960) and
+	// OnPassControl (@0x372bf0, at its tail) clear it, FetchPlayerCommands (@0x371610) sets it when the
+	// fetched command's player IS the stack-top owner -- and NOTHING ever reads it back except
+	// operator& (@0x37b300). Carried purely so the tag-8 chunk round-trips (wire-audit UNREAD 1.8:
+	// retail wrote 1 byte every slot, this fork consumed none).
+	bool bHasCommandFromCurrentPlayer;
 public:
-	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&pSkippableCount); f.Add(3,&pActiveCount); f.Add(4,&interrupts); f.Add(5,&addInterrupts); f.Add(6,&players); f.Add(7,&nLastPlayerID); f.Add(8,&nTurnPlayerID); f.Add(9,&bWasAction); f.Add(10,&bFirstTurn); f.Add(11,&nActionLag); return 0; }
+	// retail v1.2 save convergence: retail's CTBSWorld::operator& (@0x37b300) serializes
+	// {2=interrupts, 3=players, 4=nLastPlayerID, 5=nTurnPlayerID, 6=bFirstTurn, 7=events,
+	// 8=bHasCommandFromCurrentPlayer}. Tag 8 is now carried (see the member above).
+	// Tag 7 (Add<STBSEvent>(7,&events), retail +0x18) is the DEFERRED STBSEvent queue drained by
+	// CWorld::ProcessTBSEvents (@0x3675d0) from Segment (@0x36bce0). This fork deliberately applies
+	// STBSEvents SYNCHRONOUSLY at each queue site (GridInfoUpdated/OnPassControl above), so it owns no
+	// such list and the tag is graceful-skipped (the format is tag-addressed + length-prefixed).
+	// This costs NOTHING on the wire: the queue is drained inside Segment, so it is empty at every
+	// save point -- byte-walking all 9 v1.2 slots shows CWorld chunk 1 tag 7 with length 0 in every
+	// one. Modelling it would mean porting the whole deferred pump, not just the field.
+	// The action-counter state (pSkippableCount/pActiveCount/bWasAction/nActionLag) is NOT on retail's
+	// CTBSWorld base -- retail refactored it into a standalone CActionTracker sub-object serialized at
+	// CWorld tag 4 (operator& @0x37a020); CWorld emits it through ActionTrackerChunk() below. The
+	// addInterrupts rebuild list is transient and retail never serializes it.
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&interrupts); f.Add(3,&players); f.Add(4,&nLastPlayerID); f.Add(5,&nTurnPlayerID); f.Add(6,&bFirstTurn); f.Add(8,&bHasCommandFromCurrentPlayer); return 0; }   // tag 7 (events) skipped -- see above
+	// retail CActionTracker (CWorld save tag 4) wire adapter: {2=pSkippableCount, 3=pActiveCount,
+	// 4=bWasAction, 5=nActionLag}. Pointer-holder so CWorld (which cannot see these private fields)
+	// can emit the chunk without reparenting.
+	struct SActionTrackerChunk
+	{
+		CPtr<CActionCounter> *pSkip, *pActive;
+		bool *pbWasAction;
+		int *pnActionLag;
+		int operator&( CStructureSaver &f ) { f.Add(2,pSkip); f.Add(3,pActive); f.Add(4,pbWasAction); f.Add(5,pnActionLag); return 0; }
+	};
+	SActionTrackerChunk ActionTrackerChunk() { SActionTrackerChunk c = { &pSkippableCount, &pActiveCount, &bWasAction, &nActionLag }; return c; }
 private:
 	TPlayer* GetNextPlayer( int nMinimal )
 	{
@@ -221,6 +258,20 @@ private:
 			StartPlayerTurn( pNext );
 		}
 	}
+public:
+	// retail CTBSWorld::GridInfoUpdated @0x375ca0: queue STBSEvent{10} for the deferred pump. The dev
+	// tree applies STBSEvents synchronously at the queue site (established pattern, see OnPassControl
+	// below), so this broadcasts TBS_GRID_INFO_UPDATED to every player's units directly.
+	void GridInfoUpdated()
+	{
+		for ( TPlayerList::iterator i = players.begin(); i != players.end(); ++i )
+		{
+			const vector< CMObj<TUnit> > &pUnits = (*i)->GetPlayerUnits();
+			for ( unsigned int k = 0; k < pUnits.size(); ++k )
+				if ( IsValid( pUnits[k].GetPtr() ) )
+					pUnits[k]->OnTBSEvent( TBS_GRID_INFO_UPDATED );
+		}
+	}
 	void RecalcCurrentPlayerCommands()
 	{
 		// retail @0x36f850 three-way (disasm-proven, runs during sequences on action-finish edges):
@@ -272,6 +323,7 @@ private:
 		RecalcCurrentPlayerCommands();
 		for ( TPlayerList::iterator i = players.begin(); i != players.end(); ++i )
 			(*i)->GetCommander()->OnPassControl( pCurrentPlayer );
+		bHasCommandFromCurrentPlayer = false;   // retail @0x372bf0 tail (after the STBSEvent{9} queue push)
 	}
 	// (EndOfTurn moved to the public section -- retail vtbl+0x1c is public; luaEndSequence calls it.)
 	void FetchPlayerCommands( TPlayer *pPlayer, bool bAllowNotSkippable )
@@ -287,13 +339,12 @@ private:
 				EndOfTurn();
 				break;
 			}
-			else if ( CDynamicCast<CCmdQuitGame>(pCmd) )
+			// retail @0x371610: flagged for every non-EndOfTurn command fetched from the stack-top
+			// owner. A SIDE EFFECT, not a branch -- the dispatch below must still run.
+			if ( pPlayer == GetTBSCurrentPlayer() )
+				bHasCommandFromCurrentPlayer = true;
+			// (CCmdQuitGame dispatch REMOVED -- W5: the never-constructed ASSERT(0) stub died with the class)
 			{
-				ASSERT( 0 );// not implemented yet
-				EndOfTurn();
-				break;
-			}
-			else {
 				CDynamicCast<CCmdCheat> pCheatCmd(pCmd);
 				if (pCheatCmd)
 					pPlayer->SetCheat(pCheatCmd->nCheatMask, pCheatCmd->bState);
@@ -450,10 +501,16 @@ public:
 		bWasAction = false;
 		bFirstTurn = false;
 		nActionLag = 0;
+		bHasCommandFromCurrentPlayer = false;   // retail ctor @0x375960
 	}
 	virtual void UpdateVisible( bool bForce = false ) = 0;
+	// retail CWorld::TryUpdateVisible @0x361610: action-finish vision-recalc delayer probe; true = finish now.
+	virtual bool TryUpdateVisible() = 0;
 	CActionCounter* GetSkippableCounter() { bWasAction = true; return RenewActionCounter( &pSkippableCount ); }
 	CActionCounter* GetActiveCounter( int _nLag = 0 ) { nActionLag = Max( _nLag, nActionLag ); bWasAction = true; return RenewActionCounter( &pActiveCount ); }
+	// retail IsAction @0x370030 also ORs bWasAction -- there bWasAction is re-latched BEFORE the read
+	// (SyncAction @0x36f660), so the term equals the current state; here bWasAction is the previous-segment
+	// edge latch (bWasAction && !IsAction() below), so adding it would make the falling edge never fire.
 	bool IsAction() const { return IsValid( pSkippableCount ) || IsValid( pActiveCount ) || nActionLag > 0; }
 	bool IsSkippableAction() const { return IsValid( pSkippableCount ) && nActionLag == 0; }
 	bool IsFirstTurn() const { return bFirstTurn || IsRealTime(); }
@@ -563,11 +620,25 @@ public:
 
 		if ( bWasAction && !IsAction() )
 		{
-			UpdateVisible();
-			RecalcCurrentPlayerCommands();
-			OnAction( false );
-			for ( TPlayerList::const_iterator k = players.begin(); k != players.end(); ++k )
-				(*k)->OnTBSEvent( TBS_ACTION_FINISH );//OnActionFinish();
+			// retail ProcessTBSEvents @0x3675d0 falling edge: the finish is DEFERRED while the incremental
+			// vision recalc is behind (TryUpdateVisible @0x361610 == false, once per segment).
+			if ( !TryUpdateVisible() )
+			{
+				// re-arm: renew-and-kill the active counter so ONLY nActionLag holds the window open
+				// (retail GetActiveCounter(2)+SyncAction with two lag ticks per segment == 1 lag here).
+				{
+					CObj<CActionCounter> pTemp = GetActiveCounter( 1 );
+				}
+				OnAction( true );   // retail's only live OnAction(true): idle-ban + PathNetwork freeze held
+			}
+			else
+			{
+				OnAction( false );
+				UpdateVisible();
+				for ( TPlayerList::const_iterator k = players.begin(); k != players.end(); ++k )
+					(*k)->OnTBSEvent( TBS_ACTION_FINISH );//OnActionFinish();
+				RecalcCurrentPlayerCommands();
+			}
 		}
 		if ( !addInterrupts.empty() )
 		{
@@ -657,8 +728,13 @@ public:
 				// pick commands from current player regarding current units
 				FetchPlayerCommands( interrupts.back().pPlayer, true );
 			}
-			else
-				OnAction( true );
+			// NO OnAction(true) here -- retail FetchNewCommands @0x372950 does NOTHING mid-action
+			// (disasm 0x7729aa: bIsAction!=0 falls straight to ret). Retail's rising-edge OnAction(true)
+			// in ProcessTBSEvents @0x3675d0 is structurally dead for normal actions too: taking a counter
+			// (GetSkippableCounter @0x3708f0 / GetActiveCounter @0x370990) already sets bWasAction=1, so
+			// the edge flip-flop @0x767816 never sees 0->1. The Jan03 per-segment OnAction(true) that sat
+			// here banned E_NO_IDLE_ON_ACTION on every unit for the whole action = all bystanders frozen
+			// mid-pose during any TB move/shot (runtime-proven vs retail via d_idle_animation).
 		}
 		bWasAction = IsAction();
 	}

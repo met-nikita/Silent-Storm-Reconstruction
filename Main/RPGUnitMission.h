@@ -19,6 +19,7 @@ namespace NWorld
 {
 	class CUnit;
 	class CUnitServer;
+	class IWorld;   // ProcessAttack/CalcStructDmg thread the world down to the difficulty multipliers
 }
 namespace NDb
 {
@@ -85,25 +86,37 @@ public:
 	virtual void Kill() = 0;
 	virtual bool IsDead() const = 0;
 	virtual IInventory* GetInventory() const = 0;
-	virtual bool CreateAttack( vector<CAttackPortion> *pRes, bool bSpendAmmo, 
-		bool bAnonymous = true, IUnitMissionInfo *pTarget = 0, bool bBackStab = false ) = 0;
-	virtual int ProcessAttack( int nUserID, CAttackPortion *pAttack, NDb::CRPGArmor *pArmor ) = 0;
-	virtual void Seat() = 0;
-	virtual void Stand() = 0;
+	// retail @0x6c2100 takes a 6th bool (ret 0x18): bAdaptWeapon gates the weapon-familiarity tail
+	// (CUnit::UseWeapon) -- the shoot execs pass nBulletGone==0 (adapt once per shot), melee passes true.
+	virtual bool CreateAttack( vector<CAttackPortion> *pRes, bool bSpendAmmo,
+		bool bAnonymous = true, IUnitMissionInfo *pTarget = 0, bool bBackStab = false,
+		bool bAdaptWeapon = true ) = 0;
+	// NOTE: this is a SECOND, genuinely different ProcessAttack contract -- IUnitMission does not
+	// derive from IAttackable, and retail's IUnitMission form takes NO CVec3 (PDB: "class
+	// NRPG::CReceivedDmg __thiscall NRPG::CUnitMission::ProcessAttack(class NWorld::IWorld *,int,
+	// class NRPG::CAttackPortion *,class NDb::CRPGArmor *)") where IAttackable's takes one. Only
+	// pWorld is added here, and only so it reaches CalcStructDmg @0x28f960. CDumbUnitServer::
+	// ProcessAttack @0x350e20 is the seam between the two contracts. On the int return see the
+	// IAttackable banner in RPGAttackMech.h -- it is retail's CReceivedDmg::nDmg, -1 sentinel and all.
+	virtual int ProcessAttack( NWorld::IWorld *pWorld, int nUserID, CAttackPortion *pAttack,
+		NDb::CRPGArmor *pArmor ) = 0;
+	// retail @0x2c5a70/@0x2c5a80: the Jan03 bSitting Seat()/Stand() pair became a ref-counted
+	// nMotionless (several motionless sources may overlap); CanMove() == (nMotionless == 0).
+	virtual void ApplyMotionless() = 0;
+	virtual void ReleaseMotionless() = 0;
 	virtual bool CanMove() const = 0;
 	virtual void Reload() = 0;
 	virtual bool LoadWeapon( IWeaponItemInfo *pWeapon, IClipItem *pClip ) = 0;
 	virtual bool UnloadWeapon( IWeaponItemInfo *pWeapon ) = 0;
-	virtual void StartAttack() = 0;					// Burst
-	virtual void NextBullet() = 0;					// Burst
-	virtual int  GetNBullets() const = 0;		// Burst
+	// (Jan03 StartAttack/NextBullet/GetNBullets are GONE in retail -- the bullet index is a
+	// parameter threaded through the to-hit chain; the shoot exec owns the burst cursor.)
 	virtual void AddLastCritical( NDb::ECritical eCA ) = 0; // for Criticals
 	virtual void GetLastCriticals( vector<NDb::ECritical> *pResCritical ) = 0;
 	virtual bool HasCritical( NDb::ECritical eCritical, CCritical** ppCritical = 0 ) const = 0;
 	virtual void UseTwoHanded( bool bUse ) = 0;
 	virtual bool CanUseTwoHanded() const = 0;
-	virtual void Blind( bool bBlind ) = 0;
-	virtual void Deaf( bool bDeaf ) = 0;
+	// (Jan03 Blind/Deaf are GONE in retail -- CBlindCritical/CDeafCritical @0x294da0/@0x294e00
+	// only record themselves via AddLastCritical; no perception members exist.)
 	virtual int GetRPGPersID() const = 0;
 	virtual void SetCannonItem( IWeaponItem *pItem ) = 0;
 	virtual IWeaponItem* GetCannonItem() const = 0;
@@ -167,11 +180,16 @@ public:
 	// CUnitServer ctor. Appended NON-PURE at the vtable tail (dev<->release order is name-dispatched) so
 	// other IUnitMission implementors keep building; CUnitMission overrides it.
 	virtual void SetGlobalGame( CGlobalGame *p ) {}
+	// Getter counterpart: the release reads the campaign difficulty record through the world's global
+	// game (e.g. the called-shots gate pDifficulty->bHeadshotShouldKill in the to-hit paths). Appended
+	// NON-PURE at the vtable tail like SetGlobalGame; CUnitMission overrides it.
+	virtual CGlobalGame* GetGlobalGame() const { return 0; }
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 float GetCubesArea( const CVec3 &ptPos, vector<CVec3> *pCubes );
 int GetHLPenalty( NAI::EHitLocation hl );
 float GetVPPenalty( int nVP, int nHealedVP, int nMaxVP );
+float GetHeadshotMultiplier( NAI::EHitLocation hl );   // @0x2b6ca0 (defined in RPGToHit.cpp; shared with GetMeleeToHit)
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // Weapon-class dispatch of the to-hit/cover pipeline. Was file-local to RPGUnitMission.cpp; the
 // release shares it across the RPGToHit users (RealCalcTileCovers @0x2b4700 picks the melee-swing
@@ -193,13 +211,15 @@ EToHitType GetToHitType( const NWorld::CUnit *pAttacker );
 // IUnitMissionInfo::Get*ToHit interface. Each RTTI-casts the firing unit to its CUnitServer, picks the
 // EToHitType from the held weapon and builds the matching ToHitCalcer (defined in RPGUnitMission.cpp;
 // friends of CUnitMission). bNight is wired false here (CWorld::IsNight absent -- documented elision).
+// retail RPGUnitGetToHit @0x2b4ae0 takes the bullet index as a PARAMETER (the mission-side
+// Jan03 nBullet cursor does not exist in retail); callers pass their burst-loop index.
 int GetToHit( const NWorld::CUnit *pAttacker, NAI::EPose curPose, int nDistance, const CVec3 &ptAttacker,
 	const NAI::SPosition &posTarget, NAI::EHitLocation eHL, int nExtraAP, const NWorld::CUnit *pTarget,
 	const vector<int> &accessibleHLs, int nHitCover, bool bFirstRound,
-	const CVec3 &ptIllumination = CVec3(1,1,1), bool bBackstab = false );
+	const CVec3 &ptIllumination = CVec3(1,1,1), bool bBackstab = false, int nBullet = 0 );
 int GetTileToHit( const NWorld::CUnit *pAttacker, NAI::EPose curPose, int nDistance, const CVec3 &ptAttacker,
 	CVec3 ptTilePos, NAI::ETileHitLocation eHitLocation, int nExtraAP, int nHitCover, bool bFirstRound,
-	const CVec3 &ptIllumination = CVec3(1,1,1) );
+	const CVec3 &ptIllumination = CVec3(1,1,1), int nBullet = 0 );
 int GetGrenadeToHit( const NWorld::CUnit *pAttacker, NAI::EPose curPose, int nDistance, const CVec3 &ptAttacker,
 	bool bFirstRound, CVec3 ptTilePos, const CVec3 &ptIllumination = CVec3(1,1,1) );
 int GetRLauncherToHit( const NWorld::CUnit *pAttacker, NAI::EPose curPose, int nDistance, const CVec3 &ptAttacker,

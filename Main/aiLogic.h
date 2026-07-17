@@ -35,6 +35,9 @@ struct SCyclingTracker
 	int nSame;
 	SCyclingTracker() : nSame( 0 ) {}
 	void Init( const SPlaceWithAP &p ) { place = p; nSame = 0; }
+	// retail NAI::SCyclingTracker::operator& @0x18410: {2 place (SPlaceWithAP chunk), 3 nSame int4}.
+	// CAILogic serializes the tracker as ONE nested tag-6 chunk (33 bytes in the retail saves).
+	int operator&( CStructureSaver &f ) { f.Add( 2, &place ); f.Add( 3, &nSame ); return 0; }
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // IAILogic - abstract command-driven behaviour interface (14-slot vtable, verified).
