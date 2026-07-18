@@ -16,13 +16,13 @@ https://github.com/nival/Silent-Storm
   <table>
     <tr>
       <td colspan="3" align="center">
-        <img width="200" alt="image" src="https://github.com/user-attachments/assets/fff39b1f-1c8c-42d4-9b68-ca73cb45d51f" />
+        <img width="300" alt="Screenshot 2026-07-17 143626" src="https://github.com/user-attachments/assets/a7fa15d4-6be7-491d-abf9-882c63bd00cd" />
       </td>
     </tr>
     <tr>
       <td colspan="3" align="center">
-        <img width="200" alt="image" src="https://github.com/user-attachments/assets/483a8f95-eada-4e40-8d54-f18576291676" />
-        <img width="200" alt="image" src="https://github.com/user-attachments/assets/ab4f9895-265b-4b83-af60-c0e8401f29be" />
+        <img width="300" alt="Screenshot 2026-07-18 143925" src="https://github.com/user-attachments/assets/b7021f4c-839f-48cc-a508-4541a851f195" />
+        <img width="300" alt="Screenshot 2026-07-18 144009" src="https://github.com/user-attachments/assets/731740e4-74d0-41db-940a-5c687bb2fbd5" />
       </td>
     </tr>
   </table>
