@@ -27,6 +27,8 @@ public:
 
 	CSoundInstance() {}
 	CSoundInstance( NDb::CSoundInstance *_pInstance, STime t, CFuncBase<STime> *_pTime, CFuncBase<CVec3> *pPos, const vector<int> &flags );
+
+	void Pause( bool bPause );	// retail @0x308eb0 leg: freeze/resume the instance's channel
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CSoundEffect: public CObjectBase
@@ -41,6 +43,7 @@ public:
 	CSoundEffect( NDb::CSoundEffect *pEff, STime stBeginTime, CFuncBase<STime> *pTime, CFuncBase<CVec3> *pPos, const vector<int> &flags );
 
 	bool Update();
+	void Pause( bool bPause );	// retail @0x308eb0: forward to every live CSoundInstance
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 }

@@ -2544,7 +2544,7 @@ void CExecSetTrap::Run()
 	ASSERT( CanDoIt( pUS->GetPosition() ) == UCR_OK );
 
 	pUS->DoAction( NRPG::AC_TRAP_OBJECT );
-	pUS->animator.OpenWindowDoor( pUS->GetPosition() );
+	pUS->animator.SetMine( pUS->GetPosition(), false );	// @0x33f5a0 -- MINE_OBJECT (0x44): trap on object/door
 	StartAction( pUS->GetWorld(), NORMAL );
 //	NDb::CAISound *pAISound = NDb::GetAISound( 20 ); // click
 //	pUS->GetWorld()->MakeAISound( pAISound, pUS, 0, 0 );
@@ -2772,7 +2772,7 @@ void CExecSetMine::Run()
 	ASSERT( CanDoIt( pUS->GetPosition() ) == UCR_OK );
 
 	pUS->DoAction( NRPG::AC_SET_MINE );
-	pUS->animator.OpenWindowDoor( pUS->GetPosition() );
+	pUS->animator.SetMine( pUS->GetPosition(), true );	// @0x33f5a0 -- MINE_TILE (0x43): mine in ground tile
 	StartAction( pUS->GetWorld(), NORMAL );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -3461,7 +3461,10 @@ EUnitCommandResult CExecPlayAnimation::CanDoIt( const NAI::SUnitPosition &from, 
 void CExecPlayAnimation::Run()
 {
 	StartAction( pUS->GetWorld(), NORMAL );
-	pUS->animator.PlayCustomAnimation( pUS->GetPosition(), nDBAnimationID );
+	// retail @0x3a1cb0: the freeze flag rides through to PlayCustomAnimation (@0x73f4c0) -- was
+	// DROPPED, so a scripted freeze-pose command (bFreezeAfterLastFrame) returned to idle when the
+	// clip ended (EFirst commander snapped back to lying-against-tree after the fall-to-side).
+	pUS->animator.PlayCustomAnimation( pUS->GetPosition(), nDBAnimationID, bFreezeAfterLastFrame );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // @0x3a7d10 — retail AnimationFinished is BYTE-FOR-BYTE identical to Cancel @0x3a7d40:

@@ -349,6 +349,9 @@ void CSetRender::AddMesh( NDb::CModel *pModel, CFuncBase<NAnimation::SSkeletonPo
 		pO->pLocators = pLocators;*/
 			
 		Register( pScene->CreateMesh( m.pModel, pFilter, fakeRoom ) );
+		// retail @0x2ccf60: bound-mesh hand/item effect glued to the same bind bone (welder repair 0x698)
+		if ( IsValid( m.pEffect ) )
+			Register( pScene->CreateParticles( m.pEffect, m.tBeginEffect, pTime, pFilter, room, 0 ) );
 	}
 
 	if ( pHead )
@@ -1178,7 +1181,7 @@ public:
 	void UpdateViewWorld( bool bAdvanceTime, STime currentTime, NWorld::IPlayer *pViewFrom, bool bShowAllUnits );
 	void FastUpdate( STime currentTime );
 	void ResetTiming();
-	void UpdateSound( CTransformStack *pTS, STime currentTime );
+	void UpdateSound( bool bAdvanceTime, CTransformStack *pTS, STime currentTime );
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CRenderGame::CRenderGame( NWorld::IWorld *_pWorld, NGScene::IGameView *_pScene, NSound::ISoundScene *_pSoundScene )
@@ -1202,8 +1205,8 @@ wasWeather( NWorld::IWorld::WEATHER_SUNNY ), tWeatherChange( 0 )
 	// retail @0x2ceae0 tail: two mixers, sources mirroring r/rUnits (GetActive / GetUnits)
 	if ( _pSoundScene )
 	{
-		pSound = CreateRenderSound( pWorld->GetActive(), _pSoundScene );
-		pUnitSounds = CreateRenderSound( pWorld->GetUnits(), _pSoundScene );
+		pSound = CreateRenderSound( pWorld->GetActive(), _pSoundScene, pWorld );
+		pUnitSounds = CreateRenderSound( pWorld->GetUnits(), _pSoundScene, pWorld );
 	}
 /*
 	if ( pScene != 0 )
@@ -1251,12 +1254,12 @@ void CRenderGame::ResetTiming()
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // retail @0x2cb1c0
-void CRenderGame::UpdateSound( CTransformStack *pTS, STime currentTime )
+void CRenderGame::UpdateSound( bool bAdvanceTime, CTransformStack *pTS, STime currentTime )
 {
 	if ( IsValid( pSound ) )
-		pSound->Update( pTS, currentTime );
+		pSound->Update( bAdvanceTime, pTS, currentTime );
 	if ( IsValid( pUnitSounds ) )
-		pUnitSounds->Update( pTS, currentTime );
+		pUnitSounds->Update( bAdvanceTime, pTS, currentTime );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // retail @0x2cb9b0: drive the day's weather lighting + precipitation effect. Called from the

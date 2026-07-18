@@ -178,18 +178,24 @@ void CDumbUnitServer::Visit( IRenderVisitor *p )
 		GetItemsBindPlaces( &boundMeshes, pRPG, bUndrawWeapon, GetWearingDBPK(), bNoHeavyWeapon, !CanFight() );
 	// release @0x752380 (UnitHoldItem -> SetHandModel): feed the script hand-held model to the render visitor on
 	// the "Item" bind bone -- replace an existing "Item"-bound mesh's model if there is one, else add a new bound
-	// mesh. (The release also carried a hand EFFECT here; the dev SBoundMesh has no effect field -> elided.)
-	if ( IsValid( pHandModel ) )
+	// mesh. Retail also binds the hand EFFECT (SetHandEffect: healer welder 0x698) onto the same "Item" bone.
+	if ( IsValid( pHandModel ) || IsValid( pHandEffect ) )
 	{
 		bool bFound = false;
 		for ( vector<IRenderVisitor::SBoundMesh>::iterator i = boundMeshes.begin(); i != boundMeshes.end(); ++i )
 			if ( i->pszBindBone && strcmp( i->pszBindBone, "Item" ) == 0 )
 			{
-				i->pModel = pHandModel;
+				if ( IsValid( pHandModel ) )
+					i->pModel = pHandModel;
+				if ( IsValid( pHandEffect ) )
+				{
+					i->pEffect = pHandEffect;
+					i->tBeginEffect = tBeginHandEffect;
+				}
 				bFound = true;
 				break;
 			}
-		if ( !bFound )
+		if ( !bFound && IsValid( pHandModel ) )
 			boundMeshes.push_back( IRenderVisitor::SBoundMesh( pHandModel, "Item" ) );
 	}
 	NGScene::CLightGroup *pGroup = p->MakeGroup();
@@ -550,6 +556,14 @@ void CDumbUnitServer::FallAsIfDead( const CVec3 &ptDir, bool bDropItemsFromBackP
 	pWorld->UpdateVisible();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail @0x34ec90: install the bloody-death flag, returning the prior value.
+bool CDumbUnitServer::SetBloodyDeath( bool b )
+{
+	bool bOld = bBloodyDeath;
+	bBloodyDeath = b;
+	return bOld;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 void CDumbUnitServer::KillUnit( const CVec3 &ptDir )
 {
 	if ( IsDead() )
@@ -560,6 +574,18 @@ void CDumbUnitServer::KillUnit( const CVec3 &ptDir )
 	//
 	if ( !bUnconscious )
 	{
+		if ( bBloodyDeath )   // retail @0x350cd0: scripted/loaded bloody death -> gib instead of fall
+		{
+			// ack holder's death sound, played DETACHED in the world (vs the attached PlaySound below)
+			NDb::CRPGPers *pAckPers = pRPG->GetRPGUnit()->GetAckHolder();
+			if ( !pAckPers )
+				pAckPers = pRPG->GetRPGPers();
+			if ( pAckPers )
+				pWorld->MakeSound( position.GetCenter(), NDb::GetSound( pAckPers->pSoundDeath ) );
+			BlowUp();          // UNCONDITIONAL -- no CanBlowUp gate on this path
+			OnLifeLost();
+			return;
+		}
 		FallAsIfDead( ptDir, true, true );   // retail @0x350cd0: killed -> drop backpack + play death anim
 		PlaySound( pRPG->GetRPGPers()->pSoundDeath );
 	}
@@ -583,6 +609,27 @@ void CDumbUnitServer::MakeUnconscious( const CVec3 &ptDir, bool bFromScript, boo
 		PlaySound( pRPG->GetRPGPers()->pSoundDeath );
 	OnLifeLost();   // retail tail: vtbl+0x24
 }
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail @0x3515a0: bring the rendered unit down to whatever its RPG persona now reports. The
+// direction passed to KillUnit/FallAsIfDead in retail is an uninitialised stack CVec3 that both
+// ignore (they use VNULL3 internally) -- VNULL3 is the faithful transcription.
+void CDumbUnitServer::SyncConscious()
+{
+	if ( pRPG->IsDead() && !IsDead() )                 // 0x7515ab/0x7515b9
+	{
+		KillUnit( VNULL3 );                            // 0x7515c7
+		return;
+	}
+	if ( pRPG->IsUnconscious() && !IsUnconscious() && CanFight() )   // 0x7515d6/0x7515e4/0x7515ef
+	{
+		OnUnitMadeUnconscious( false );                // 0x7515fc (vtbl+0x10, arg 0)
+		FallAsIfDead( VNULL3, false, true );           // 0x75160a (dir,false,bPlayDeathAnim=true)
+		PlaySound( pRPG->GetRPGPers()->pSoundDeath );  // 0x751614+0x28 -> 0x75161f
+		OnLifeLost();                                  // 0x751628 (vtbl+0x24)
+	}
+}
+// NOTE: the unconscious branch is exactly MakeUnconscious(VNULL3,false,true) (dev wDumbUnit.cpp:571);
+// retail inlines it (no call to 0x350dc0), so this transcription matches the disasm 1:1.
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CDumbUnitServer::BlowUp()
 {

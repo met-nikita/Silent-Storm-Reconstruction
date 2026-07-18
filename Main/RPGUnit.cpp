@@ -377,6 +377,28 @@ int CUnit::GetAckPersID() const
 	return GetRPGPersID();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail NRPG::CUnit::GetAckHolder @0x2ba8f0, POINTER form (KillUnit bloody arm): the pers* whose ACK
+// rows this unit's barks use, or NULL. Hero + valid side -> first voice-matched donor in
+// defaultPersesSet (else NULL); everyone else -- and a hero with no side -- uses pPers->pAcksHolder.
+NDb::CRPGPers* CUnit::GetAckHolder() const
+{
+	if ( bHero )
+	{
+		NDb::CSide *pSide = pPers->pSide;	// plain extraction (no ternary over CPtr -- UAF)
+		if ( IsValid( pSide ) )
+		{
+			for ( int k = 0; k < pSide->defaultPersesSet.size(); ++k )
+			{
+				NDb::CRPGPers *p = pSide->defaultPersesSet[k];
+				if ( IsValid( p ) && p->nVoice == nVoice )
+					return p;
+			}
+			return 0;
+		}
+	}
+	return pPers->pAcksHolder;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 // SetHead @0x2bb970 -- replace the unit's live head info from a CComplexHead template, seeding the
 // fresh CHeadInfo deterministically from this unit's address (per-unit head randomization).
 void CUnit::SetHead( NDb::CComplexHead *pNewHead )

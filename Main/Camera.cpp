@@ -15,6 +15,7 @@
 #include "aiMap.h"                    // NAI::IAIMap::Trace / CFloorsSet / SInterval (occlusion ray -- CanSeeOneRay)
 #include "wTSFlags.h"                 // NWorld::TS_VISION (the vision trace-set flag)
 #include "..\Misc\RandomGen.h"        // SRand (the framing's rod fan-sweep roll)
+#include "RPGGlobal.h"                // NRPG::CGlobalGame::nSloMoTimes (the slo-mo repeat-offender tax)
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // BUG 4 -- camera sensitivity / invert config consumer. Retail UpdateCameraFromConfig @0xcd180 pushes the
 // game_camerasensivity / game_scrollsensivity floats and the four invert flags into the per-command input
@@ -24,6 +25,11 @@
 // camera at construction so it applies from game start.
 // ORIGINAL BUG (retail @0xcd180): the two scroll axes are cross-wired -- camera_strafe (horizontal pan) is
 // inverted by game_invertscrollY, camera_forward (vertical pan) by game_invertscrollX. Ported verbatim.
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail bCheatSloMo @0x98db10 ("cheat_slomo" console var, registered below): gates the random
+// cinematic slow-motion in ShowPlacesFromBestPoint. Default off = the whole slo-mo chain is inert,
+// exactly like retail normal play.
+static bool bCheatSloMo = false;
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 static void UpdateCameraFromConfig()
 {
@@ -42,6 +48,8 @@ static void UpdateCameraFromConfig()
 static void CommandCameraUpdate( const string &, const vector<wstring> &, void * ) { UpdateCameraFromConfig(); }
 START_REGISTER(Camera)
 	REGISTER_CMD( "camera_update", CommandCameraUpdate )
+	// retail CameraInit @0xcfc50: "cheat_slomo" -> bCheatSloMo, VarBoolHandler, default 0, NOT saved
+	REGISTER_VAR_EX( "cheat_slomo", NGlobal::VarBoolHandler, &bCheatSloMo, 0, false )
 FINISH_REGISTER
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CBaseCamera
@@ -491,6 +499,9 @@ public:
 
 	float GetAccelerationFactor( float fAcceleration ) const;   // release @0xcbe70
 
+	// release @0xd0500: the larger of the FOV-effect and slo-mo dividers
+	virtual int GetSloMoRatio() const { return Max( fov.nSloMo, sloMo.nSloMo ); }
+
 	void Update( const STime &sTime );
 	virtual void SetWorld( NWorld::IWorld *_pWorld ) { pWorld = _pWorld; }
 	virtual void SetView( NGScene::IGameView *_pView ) { pView = _pView; }
@@ -680,17 +691,34 @@ void CCamera::FollowUnit( CObjectBase *pUnit )
 	sMaxFollowUnitTime = sLastTime + 10000;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// ShowPlacesFromBestPoint @0xcf1c0: reset the cinematic state, try to frame both points, else fan-sweep
-// around ptA for a single visible pose. (The random cinematic slo-mo -- nSloMoRatio>1 && bCheatSloMo -- is
-// gated by the slo-mo cheat, which this dev build has no camera support for, so that branch stays inert; the
-// framing search below is independent of it.)
+// ShowPlacesFromBestPoint @0xcf1c0: reset the cinematic state, roll the cheat-gated random slo-mo,
+// try to frame both points, else fan-sweep around ptA for a single visible pose.
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CCamera::ShowPlacesFromBestPoint( const CVec3 &ptA, const CVec3 &ptB, int nFloor, float fRodIn,
 	int nSloMoRatio, float fDivisor, bool bKeepFollow, bool bForceRod )
 {
+	SRand rndSloMo;                                                         // retail: fn-head SRand (self-seeded, no shared-RNG shift)
 	sloMo.nSloMo = 1; fov.nSloMo = 1; fov.fFOV = 35.0f; fov.fRoll = 0.0f;   // (1) reset
 	if ( !bKeepFollow )
 		pFollowUnit = 0;                                                     // (2) release follow
+
+	// retail @0xcf1c0 slo-mo roll: window = nSloMoTimes/3 + 2 (a repeat-offender tax -- the more
+	// slo-mos fired, the rarer they get), shrunk by fDivisor>1 (round-to-nearest); fires only on
+	// roll==0 AND the cheat_slomo console var; 4000ms lease, expiry in CCamera::Update.
+	if ( IsValid( pWorld ) && IsValid( pWorld->GetGlobalGame() ) )
+	{
+		int nWindow = pWorld->GetGlobalGame()->nSloMoTimes / 3 + 2;
+		if ( fDivisor > 1.0f )
+			nWindow = (int)( (float)nWindow / fDivisor + 0.5f );
+		if ( nSloMoRatio > 1 && rndSloMo.Get( nWindow ) == 0 && bCheatSloMo )
+		{
+			if ( sloMo.nSloMo < 2 )
+				++pWorld->GetGlobalGame()->nSloMoTimes;
+			sloMo.nSloMo = nSloMoRatio;
+			sloMo.tOn = 0;
+			sloMo.tMaxLen = 4000;
+		}
+	}
 
 	SCameraPos backup = sDesiredPlacement;                                  // (5) backup
 	bool bSame = ( ptB.x == ptA.x && ptB.y == ptA.y && ptB.z == ptA.z );
@@ -913,6 +941,19 @@ void CCamera::Update( const STime &sTime )
 	// release CCamera::Update @0xcd930 OPENS with the base quake integrator (call 0x4ccc80 disasm
 	// @0x4cd93e) -- the earthquake delta advances on every tactical-camera frame.
 	UpdateEarthQuakes( sTime );
+	// retail @0x4cd948: tick the slo-mo lease -- the first update stamps tOn; past tMaxLen the
+	// ratio resets and the desired pose SNAPS back to the live one (rep movsd +0x44 -> +0xfc),
+	// cancelling whatever the cinematic still had pending.
+	if ( sloMo.nSloMo != 1 )
+	{
+		if ( sloMo.tOn == 0 )
+			sloMo.tOn = (int)sTime;
+		else if ( sTime - (STime)sloMo.tOn > sloMo.tMaxLen )
+		{
+			sloMo.nSloMo = 1;
+			sDesiredPlacement = sPlacement;
+		}
+	}
 	// release @0xcd930: user input mutates the DESIRED placement; the tail then eases the live
 	// placement toward it (Approach2DesiredPlacement @0xcb710). The release terrain legs (averaged-
 	// height anchor easing + CorrectPlacement) need the world/view height grids the camera cannot
@@ -1067,7 +1108,23 @@ void CCamera::Update( const STime &sTime )
 					fAttenuation += ( (float)sDelta / 250.0f ) * fTarget;
 				if ( fAttenuation > fTarget )
 					fAttenuation = fTarget;
+				const float fSavedYaw = sPlacement.fYaw;	// retail @0x4cdec7: captured BEFORE the approach
 				Approach2DesiredPlacement( &sPlacement, sCopy, (float)sDelta * fAttenuation, 0.2f );
+				// retail @0x4cdefa (LOCKED path only): while the cheat slo-mo is live, the approach's
+				// yaw ease is UNDONE and both yaws instead orbit at PI/4000 rad/ms toward the desired
+				// side, wrapped at PI -- the slow cinematic pan around the kill.
+				// (nSloMo<2 runs retail's follow-unit leg here instead -- UNPORTED, see DIVERGENCES.)
+				if ( sloMo.nSloMo >= 2 )
+				{
+					const float fStep = ( ( sDesiredPlacement.fYaw < fSavedYaw ) ? -FP_PI : FP_PI ) / 4000.0f * (float)sDelta;
+					sPlacement.fYaw = fSavedYaw + fStep;
+					sDesiredPlacement.fYaw += fStep;
+					if ( sPlacement.fYaw > FP_PI || sDesiredPlacement.fYaw > FP_PI )
+					{
+						sPlacement.fYaw -= FP_2PI;
+						sDesiredPlacement.fYaw -= FP_2PI;
+					}
+				}
 			}
 		}
 	}

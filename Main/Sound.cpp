@@ -169,6 +169,21 @@ public:
 	virtual void SetMusic( NDb::CMusic *pMusic );
 	virtual void FadeOutMusic();
 
+	// retail @0x304d80 (ISoundScene vtbl+0x28): freeze/resume every live channel -- effects, 3D
+	// sounds, 2D sounds, in that order. The music stream is NOT touched (retail menus keep music).
+	virtual void Pause( bool bPause )
+	{
+		for ( list< CPtr<CSoundEffect> >::iterator i = effects.begin(); i != effects.end(); ++i )
+			if ( IsValid( *i ) )
+				(*i)->Pause( bPause );
+		for ( list< CPtr<CSound> >::iterator i = sounds.begin(); i != sounds.end(); ++i )
+			if ( IsValid( *i ) )
+				NFMSound::Pause( (*i)->pSound, bPause );
+		for ( list< CPtr<CSound2D> >::iterator i = sounds2D.begin(); i != sounds2D.end(); ++i )
+			if ( IsValid( *i ) )
+				NFMSound::Pause( (*i)->pSound, bPause );
+	}
+
 	virtual void Draw( CTransformStack *pTS );
 
 private:

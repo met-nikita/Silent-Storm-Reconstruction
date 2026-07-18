@@ -137,8 +137,8 @@ const CVec4& GetSelectionColor( int nIndex )
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // retail NGame::SayAckForAll @0x1d96d0: an ORDER handler pairs its ShowError/success with a
-// per-selected-unit NWorld::CCmdPlayAck dispatched on the ONE-ARG mission Command channel
-// (mission vtbl+0x2c -> world commander queue -> CWorld::ExecuteCommand -> CGlobalAck). It must
+// per-selected-unit NWorld::CCmdPlayAck dispatched on the mission EVENTS channel
+// (mission vtbl+0x2c DoEvent -> commander events -> Segment drain -> ExecuteCommand -> CGlobalAck). It must
 // NOT use Command(unit, cmd): that wraps the ack in CCmdSetCommand -> CUnitServer::Do, which
 // CANCELS the unit's running executor (the "orders die after one step" regression).
 // Retail success barks (IA_CONFIRMATION) exist ONLY for orders that move the unit somewhere:
@@ -148,7 +148,7 @@ static void SayAckForAll( IMission *pMission, NWorld::EInterfaceAcks eAck )
 	vector< CPtr<NGame::IUnitTracker> > unitsSet;
 	pMission->GetSelectedUnits( &unitsSet );
 	for ( vector< CPtr<NGame::IUnitTracker> >::iterator i = unitsSet.begin(); i != unitsSet.end(); ++i )
-		pMission->Command( new NWorld::CCmdPlayAck( (*i)->GetUnit(), eAck ) );
+		pMission->DoEvent( new NWorld::CCmdPlayAck( (*i)->GetUnit(), eAck ) );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // EUnitCommandResult -> Wide String

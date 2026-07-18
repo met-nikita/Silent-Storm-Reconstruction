@@ -96,13 +96,29 @@ private:
 	{
 		for ( TUnitList::iterator i = visible.begin(); i != visible.end(); ++i )
 		{
-			if ( !(*i)->CanFight() )
+			// retail @0x7713f2: a corpse on someone's shoulders is not surfaced into the
+			// persistent set (CUnit vtbl+0x24 == GetCorpseCarrier).
+			if ( !(*i)->CanFight() && !(*i)->GetCorpseCarrier() )
 			{
 				if ( !IsInSet( addToVisible, *i ) )
 				{
 					addToVisible.push_back( *i );
 				}
 			}
+		}
+	}
+	// retail CPlayerBaseVision<CUnitServer>::EraseCarriedCorpses @0x3704e0 (ret 4; `this` in ecx is
+	// never read -- the method only filters the list handed in). Callers must run EraseInvalidRefs
+	// first: the CanFight() dispatch @0x7704f5 has no validity check.
+	void EraseCarriedCorpses( TUnitList *pList )
+	{
+		for ( TUnitList::iterator i = pList->begin(); i != pList->end(); )
+		{
+			TUnit *p = *i;
+			if ( !p->CanFight() && p->GetCorpseCarrier() )
+				i = pList->erase( i );
+			else
+				++i;
 		}
 	}
 	void AddVisibleTrapsToAddVisible()
@@ -154,10 +170,17 @@ public:
 		prevTrappedObjects = trappedObjects;
 
 		AddVisibleCorpsesToAddVisible();
+		// retail @0x7726e6 / @0x7726ee: prune the persistent corpse memory before it seeds
+		// `visible` -- dead refs first (EraseCarriedCorpses dereferences unguarded).
+		EraseInvalidRefs( &addToVisible );
+		EraseCarriedCorpses( &addToVisible );
 		visible = addToVisible;
 		
 		AddVisibleTrapsToAddVisible();
 		trappedObjects = addToVisibleTraps;
+		// retail @0x772713 (`lea ecx,[edi+0xc]`): visibleObjects is persistent and never cleared;
+		// dead refs are pruned here, exactly as the unit-level sibling does (wUnitServer.cpp:1272).
+		EraseInvalidRefs( &visibleObjects );
 		// retail UpdateVisible @0x3726b0: the per-update temporary set restarts empty, then a FOURTH
 		// per-watcher MergeSets folds each fighting watcher's tempVisibleObjects in (decomp-confirmed
 		// additions (b)+(c) over the Jan03 shape -- see s2_scratch/src/s2_playervision.h).

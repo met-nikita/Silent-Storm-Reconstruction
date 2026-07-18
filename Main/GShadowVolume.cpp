@@ -413,7 +413,8 @@ void MakeInvisibleElementsList( IRender *pRender, CTransformStack *pTS,
 	const SGroupSelect &_mask, const CVec2 &screenSize, CIgnorePartsHash *pIgnore,
 	CObj<IHZBuffer> *pHZBuffer )
 {
-	CPartsRender pr( Max( 4, (int)screenSize.x / 2 ), Max( 4, (int)screenSize.y / 2 ) );
+	// retail @0x176d50: width x/2 clamped [4,400], height y/2 clamped [4,300]
+	CPartsRender pr( Min( 400, Max( 4, (int)screenSize.x / 2 ) ), Min( 300, Max( 4, (int)screenSize.y / 2 ) ) );
 	list<SRenderPartSet> listParts;
 	pRender->FormPartList( pTS, &listParts,IRender::DT_STATIC, _mask );
 	pr.FastInitZBuffer();

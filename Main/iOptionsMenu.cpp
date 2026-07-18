@@ -1395,7 +1395,6 @@ START_REGISTER(iOptionsMenu)
 	REGISTER_VAR( "ui_charresponsessubtitles", 0, 1.0f, true )
 	REGISTER_VAR( "game_autosaves",            0, 1.0f, true )
 	REGISTER_VAR( "game_pathinrealtime",       0, 1.0f, true )
-	REGISTER_VAR( "game_forceturnbased",       0, 0.0f, true )
 	REGISTER_VAR( "game_dblclkmoveinrealtime", 0, 0.0f, true )
 	REGISTER_VAR( "ui_tooltipdelay",           0, 0.1f, true )
 	REGISTER_VAR( "ui_showtooltips",           0, 1.0f, true )   // retail UIInterfaceInit @0x71e630 registers both tooltip vars

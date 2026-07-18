@@ -323,6 +323,9 @@ public:
 
 	virtual void Command( NWorld::CCommand *pCmd ) = 0;
 	virtual void Command( NWorld::CUnit *pUnit, NWorld::CCmd *pCmd, bool bInstantly = true ) = 0;
+	// retail mission vtbl+0x2c (CMissionBase::DoEvent @0x1a2fa0): the interface-EVENT channel --
+	// ack barks / script callbacks / UI-action ids / delayed game-over post here, NOT via Command
+	virtual void DoEvent( NWorld::CCommand *pCmd ) = 0;
 	virtual void StopAction() = 0;
 	virtual bool IsReady() const = 0;
 	virtual bool IsActionExecuted() const = 0;
@@ -456,7 +459,9 @@ public:
 
 	virtual void Step() = 0;
 	virtual bool ProcessEvent( const NInput::SEvent &sEvent ) = 0;
-	virtual void RenderFrame( int nMode, const STime &sTime, ICamera *pCamera = 0, bool bShowUnits = true ) = 0;
+	// retail PDB: RenderFrame(int,bool,ICamera*,bool) -- param 2 is the ADVANCE flag (Step's world-advance
+	// gate), NOT a time: the body reads the raw clock (GetTime) for sound and the UI counter for Draw.
+	virtual void RenderFrame( int nMode, bool bAdvanceTime, ICamera *pCamera = 0, bool bShowUnits = true ) = 0;
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CMissionBase -- the retail mission base class (serialization-convergence W4.2; release iBase.obj).
@@ -552,6 +557,9 @@ public:
 	//// real retail-base bodies (iMissionBase.cpp) -- all only touch base members
 	virtual void Command( NWorld::CCommand *pCmd );										// retail @0x1a18f0
 	virtual void Command( NWorld::CUnit *pUnit, NWorld::CCmd *pCmd, bool bInstantly = true );	// retail @0x1a15b0
+	virtual void DoEvent( NWorld::CCommand *pCmd );										// retail @0x1a2fa0 (vtbl+0x2c, events channel)
+	virtual void OnGetFocus();															// retail @0x1a19c0: ResetTiming + sound-scene unpause
+	virtual void OnLostFocus();															// retail @0x1a19e0: sound-scene pause (menu over mission)
 	virtual void StopAction();															// retail @0x1a29d0
 	virtual bool IsReady() const;														// retail @0x1a1e60
 	virtual bool IsActionExecuted() const;												// retail @0x1a3e30
@@ -559,6 +567,10 @@ public:
 	// retail CMissionBase::GetUITime @0x19d490: the always-running UI clock (sUITimeCounter's node,
 	// advanced every Step) -- feeds the @0x1fbf10 end-of-turn cooldown.
 	STime GetUITime() const { return pUITimeFunc->GetValue(); }
+	// retail CMissionBase::GetGameTime @0x1a4500: the GAME clock -- refreshed pTimeFunc (sTimeCounter)
+	// + nDeltaTime. Drives UpdateDesktop and the camera-command executors; nDeltaTime growth is what
+	// fast-forwards the movie fades/camera moves through the Step skip-part loop.
+	STime GetGameTime() { pTimeFunc.Refresh(); return pTimeFunc->GetValue() + nDeltaTime; }
 	virtual void PauseGame( bool bState );												// retail @0x1a16a0
 	virtual bool IsGamePaused() const;													// retail @0x1a16b0
 	virtual IPlayerTracker* GetActivePlayer() const;									// retail @0x1a1950
@@ -593,7 +605,7 @@ public:
 	virtual NGScene::IGameView* GetScene() const;										// retail @0x103d20
 	virtual NSound::ISoundScene* GetSoundScene() const;									// retail @0x19df20
 	virtual NRender::IRenderGame* GetRenderGame() const;								// retail @0x19df30
-	virtual void RenderFrame( int nMode, const STime &sTime, ICamera *pCamera = 0, bool bShowUnits = true );	// retail @0x1a19f0
+	virtual void RenderFrame( int nMode, bool bAdvanceTime, ICamera *pCamera = 0, bool bShowUnits = true );	// retail @0x1a19f0 (PDB: (int,bool,ICamera*,bool))
 
 	//// retail COMDAT-stub defaults (the release folds identical trivial stubs across the vtable;
 	//// CMission overrides every one of these with its real body -- the menus never call them)

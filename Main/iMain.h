@@ -35,6 +35,9 @@ public:
 	ZDATA_(IInterfaceObject)
 	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(IInterfaceObject*)this); return 0; }
 	virtual void OnGetFocus() = 0;
+	// retail IInterfaceBase vtbl+0x24: fired on the interface being COVERED (PushInterface) or
+	// REMOVED (PopInterface). CMissionBase pauses its sound scene here (the menu-over-mission pause).
+	virtual void OnLostFocus() {}
 	// Called on every interface right after a RAW snapshot reload (CICLoadFile, e.g. restart.sav):
 	// the graph resumes IN PLACE (no Initialize), so runtime-only caches that Initialize normally
 	// derives must be rebuilt here. CMission rebuilds the building shells (SBuildingInfo, which is
@@ -60,6 +63,7 @@ class CInterfaceCommand: public CObjectBase
 // Interface Commands
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void Command( CInterfaceCommand *pCmd );
+bool HaveInterfaceCommand();	// retail @0x1f4e40: is an interface command queued (aborts Step's skip fast-forward)
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CICContainer: public CInterfaceCommand
 {

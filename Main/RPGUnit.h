@@ -326,6 +326,7 @@ public:
 	// A HERO maps per-VOICE to the donor pers of its voice family (same Side + gender, nVoice
 	// match); everyone else -- and a hero with no donor -- uses the own pers id.
 	int GetAckPersID() const;
+	NDb::CRPGPers* GetAckHolder() const;   // retail @0x2ba8f0 pointer form (KillUnit bloody arm): the ack donor pers* / NULL
 
 	void SetHead( NDb::CComplexHead *pNewHead );  // build pHeadInfo from a CComplexHead template
 	void SetHeadInfo( NLSHead::CHeadInfo *pNewHead ); // install a live head directly (@0x192070; advanced FaceGen)

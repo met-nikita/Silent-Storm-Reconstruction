@@ -403,10 +403,11 @@ BEGIN_SCRIPT_COMMAND( UnitCheat, "unb" )
 	return 0;
 END_SCRIPT_COMMAND
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-BEGIN_SCRIPT_COMMAND( UnitKill, "u" )
+BEGIN_SCRIPT_COMMAND( UnitKill, "ub[false]" )
 	CDynamicCast<NWorld::CUnitServer> pUS(luaParams[0].p);
 	if (pUS)
 	{
+		pUS->SetBloodyDeath( luaParams[1].b );   // retail luaUnitKill @0x2f7fc0: params[1].b (default false)
 		NRPG::SCritical rpgCritical( NDb::CL_HEAD, NDb::C_DEATH );
 		pUS->GetUnitRPG()->ApplyCritical( rpgCritical );
 		pUS->ProcessCriticalImmediately( rpgCritical.eCritical );

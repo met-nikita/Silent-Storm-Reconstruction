@@ -103,13 +103,14 @@ void CRenderBaseInterface::Command( NWorld::CCommand *pCmd )
 	pCommander->Do( pCmd );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+void CRenderBaseInterface::DoEvent( NWorld::CCommand *pCmd )
+{
+	ASSERT( pCmd );
+	pCommander->DoEvent( pCmd );	// drained by the front-end world's Segment like any player commander
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 // W4.2: SetLightMode consolidated onto CMissionBase (retail @0x1a2640 -- one body on the base; the
 // CMission copy was identical).
-////////////////////////////////////////////////////////////////////////////////////////////////////
-void CRenderBaseInterface::OnGetFocus()
-{
-	pRender->ResetTiming();	// retail @0x2cb190 forwards to both sound mixers
-}
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CRenderBaseInterface::ProcessEvent( const NInput::SEvent &sEvent )
 {
@@ -148,7 +149,7 @@ void CRenderBaseInterface::RenderFrame( const STime &sTime, ICamera *pCamera )
 	CTransformStack ts;
 	pCamera->GetTransform( &ts, pScene->GetScreenRect() );
 
-	pRender->UpdateSound( &ts, sTime );
+	pRender->UpdateSound( true, &ts, sTime );	// front-end views never pause the mixer clock
 
 	const CTRect<float> &rScreen = pCamera->GetScreenRect();
 	if ( ( rScreen.Width() != 0 ) && ( rScreen.Height() != 0 ) )

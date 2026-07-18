@@ -211,7 +211,7 @@ bool CShowHintInterface::ProcessEvent( const NInput::SEvent &sEvent )
 		// release @0x23a4a0: post the interface-event (carries nEventID) to the mission -- unblocks the lua
 		// WaitForUI(id) that queued this hint -- then tear down the modal.
 		if ( IsValid( pMission ) )
-			pMission->Command( new NWorld::CCmdInterfaceEvent( nEventID ) );
+			pMission->DoEvent( new NWorld::CCmdInterfaceEvent( nEventID ) );
 		NMainLoop::Command( new NMainLoop::CICExitModal() );
 		return true;
 	}

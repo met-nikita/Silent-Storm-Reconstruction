@@ -143,7 +143,7 @@ void CUICmdMoveCameraExec::Finished()
 	// release id-queue @0x24e6a0: post the finished command's id; CWorld::ExecuteCommand ->
 	// pOwnScript->RemoveUIActionID unblocks the lua WaitForUI(id) that queued this camera move
 	// (CameraMove/CameraSet/CameraSequence).
-	pMission->Command( new NWorld::CCmdInterfaceEvent( GetCmd()->nID ) );
+	pMission->DoEvent( new NWorld::CCmdInterfaceEvent( GetCmd()->nID ) );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CUICmdUnitCameraExec (release iUIExec.obj: ctor @0x24f090, Update @0x24eae0, Cancel @0x24ee60,

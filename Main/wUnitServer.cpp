@@ -52,9 +52,6 @@ void CCommandExecute::StartAction( CWorld *pWorld, EActionType actionType )
 		case SKIPPABLE:
 			pAction = pWorld->GetSkippableCounter();
 			break;
-		case NOBLOCK:
-			pAction = new CActionCounter;
-			break;
 		default:
 			ASSERT( 0 );
 	}
@@ -1101,6 +1098,12 @@ void CUnitServer::UpdateVisible( SInterruptInfo *pRes )
 		GetWorld()->GetUnitsNear( GetPosition().GetEyePosition(), &res,
 			GetWorld()->GetGame()->GetMaxUnitSightDistance( GetUnitRPG()->GetRPGUnit() ) );
 		
+		// retail @0x7c459c: drop hiders that left the GetUnitsNear candidate set
+		for ( list<CPtr<CUnitServer> >::iterator h = hiddenAtSight.begin(); h != hiddenAtSight.end(); )
+			if ( find( res.begin(), res.end(), h->GetPtr() ) == res.end() )
+				h = hiddenAtSight.erase( h );
+			else
+				++h;
 		visible.clear();
 		list<CPtr<CUnitServer> > carriedBodies;   // retail @0x7c460f: carried non-fighting bodies, adopted after the loop
 		for ( list<CPtr<CUnitServer> >::iterator i = res.begin(); i != res.end(); ++i )
@@ -1139,6 +1142,7 @@ void CUnitServer::UpdateVisible( SInterruptInfo *pRes )
 			// push 1 @0x7c46fe (the observer's real FOV cone applies; facing matters).
 			if ( !GetWorld()->GetGame()->CheckVisibility( this, pEnemy, true ) )
 			{
+				hiddenAtSight.erase( remove( hiddenAtSight.begin(), hiddenAtSight.end(), pEnemy ), hiddenAtSight.end() );  // retail @0x7c473f: lost unit leaves hiddenAtSight
 				if ( find( oldVisible.begin(), oldVisible.end(), pEnemy ) != oldVisible.end() )
 				{
 					// enemy lost from sight
@@ -1148,9 +1152,8 @@ void CUnitServer::UpdateVisible( SInterruptInfo *pRes )
 						lostUnits.push_back( pEnemy );
 					// item 7 parity: retail CUnitServer::UpdateVisible @0x3c4450 raises the lost-from-sight event
 					// (symmetric with the CEventOnSeeNewEnemy throw below); CAIEventTrackerImpl::OnLostEnemy
-					// downgrades enemy -> possible-enemy. Gate on DS_ENEMY so a lost neutral isn't marked a suspect.
-					if ( GetDiplomacyState( pEnemy ) == NDb::DS_ENEMY )
-						NGlobal::ThrowEvent( NWorld::CEventOnLostEnemyFromSight( this, pEnemy ) );
+					// downgrades enemy -> possible-enemy. Retail @0x7c47e7 throws it UNCONDITIONALLY (no diplomacy gate).
+					NGlobal::ThrowEvent( NWorld::CEventOnLostEnemyFromSight( this, pEnemy ) );
 				}
 				continue;
 			} 
@@ -1163,13 +1166,19 @@ void CUnitServer::UpdateVisible( SInterruptInfo *pRes )
 			//
 //			if ( !IsCheatEnabled( NRPG::CHEAT_SCRIPTSEQUENCE ) && !IsCheatEnabled( NRPG::CHEAT_NOAI ) )
 //			{
+			bool bWasHidden = ( find( hiddenAtSight.begin(), hiddenAtSight.end(), pEnemy ) != hiddenAtSight.end() );
 			if ( pEnemy->GetUnitRPG()->IsHiding() )
 			{
-				if ( !IsAudible( pEnemy ) )
-					continue;
-				else
-					pEnemy->Hide( false );
+				if ( IsAudible( pEnemy ) || !bWasHidden )   // @0x7c48cb: no re-roll for a tracked silent hider
+					CheckSpot( pEnemy );                    // @0x7c48da CUnitServer::CheckSpot @0x3bfe30 (may unhide)
+				if ( pEnemy->GetUnitRPG()->IsHiding() )     // @0x7c48df re-check after the roll
+				{
+					if ( !bWasHidden )                      // @0x7c48f0
+						hiddenAtSight.push_back( pEnemy );  // @0x7c4913
+					continue;                               // still hidden -> not added to visible
+				}
 			}
+			hiddenAtSight.erase( remove( hiddenAtSight.begin(), hiddenAtSight.end(), pEnemy ), hiddenAtSight.end() );  // @0x7c492e spotted -> drop
 			// (no commander notify here: retail UpdateVisible @0x3c4450 has no OnSeeUnit vcall -- the
 			// realtime->TBS arm is ONLY the transition-gated AddEvent below)
 			//
@@ -1347,6 +1356,25 @@ void CUnitServer::UpdateVisible( SInterruptInfo *pRes )
 	FilterSounds( visible );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail CUnitServer::CheckSpot @0x3bfe30 (this=spotter, pTarget=hider): one distance roll to reveal a
+// spotted hiding enemy. Returns true iff pTarget was unhidden.
+bool CUnitServer::CheckSpot( CUnitServer *pTarget )
+{
+	if ( IsValid( pTarget ) && CanFight() && pTarget->CanFight() &&
+		GetDiplomacyState( pTarget ) == NDb::DS_ENEMY &&
+		GetWorld()->GetGame()->CheckVisibility( this, pTarget, true ) )
+	{
+		float fDistance = fabs( GetPosition().GetCP() - pTarget->GetPosition().GetCP() ) / FP_GRID_STEP;
+		int nProbability = GetUnitRPG()->GetUnhideProbability( pTarget->GetUnitRPG(), fDistance );
+		int nCheck = random.Get( 0, 100 );   // @0x7bff43: shared global RNG (retail &random@0x9c9978)
+		if ( nCheck >= nProbability && !IsAudible( pTarget ) )
+			return false;
+		pTarget->Hide( false, true );
+		return true;
+	}
+	return false;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 NAI::CPath* CUnitServer::GetCurrentPath()
 {
 	RefreshExecutor();
@@ -1374,15 +1402,23 @@ bool CUnitServer::GetCurrentCommandName( string *pName ) const
 	return true;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// retail @0x3c32e0. (Retail additionally short-circuits on a second, known-audible set (unit+0x168,
-// rebuilt by UpdateVisible @0x3c4450) and clears the current set when the RPG awareness predicate asks --
-// neither exists in this tree yet.)
+// retail @0x3c32e0: +0x164 audibleUnits is cleared first when the unit HasCritical(C_DEAF); +0x168 is
+// CTBSUnitVision::visible (the TB visible set) -- a unit I already SEE, I trivially hear (no roll).
 bool CUnitServer::CanHearSound( const CVec3 &ptFrom, const NDb::SAISound &sound, CUnitServer *pWho )
 {
 	if ( !CanFight() )
 		return false;
-	if ( IsAudible( pWho ) )
+	// retail @0x3c32e0: a DEAF unit forgets its per-turn heard-set first (HasCritical(C_DEAF) -> clear +0x164).
+	if ( GetUnitRPG()->HasCritical( NDb::C_DEAF ) )
+		ClearAudible();
+	if ( IsAudible( pWho ) )                 // +0x164 audibleUnits: already heard this turn
 		return true;
+	// +0x168 visible: a unit I can SEE, I trivially hear (no distance roll).
+	{
+		const list< CPtr<CUnitServer> > &vis = GetTBSVisible();
+		if ( find( vis.begin(), vis.end(), pWho ) != vis.end() )
+			return true;
+	}
 	return GetUnitRPG()->CanHearSound( ptFrom, GetPosition().GetCP(), sound, pWho->GetUnitRPG() );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////

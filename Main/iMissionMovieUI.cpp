@@ -74,7 +74,7 @@ void CMissionMovieUI::BorderShow()
 	if ( IsValid( pBottomBackground ) )
 		pBottomBackground->SetColor( NGfx::SPixel8888( 0, 0, 0, 0xFF ) );
 	pTransition->SetStyle( STYLE_VISIBLE, false );
-	pMission->Command( new NWorld::CCmdInterfaceEvent( nNotifyID ) );
+	pMission->DoEvent( new NWorld::CCmdInterfaceEvent( nNotifyID ) );
 	pMission->SetCheatVisibility( true );	// retail vtbl[0x120](1) -- the cinematic "see all" toggle on
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -82,7 +82,7 @@ void CMissionMovieUI::BorderShow()
 // id) unblocks), cinematic toggle off, restore the saved panels, pop this desktop.
 void CMissionMovieUI::BorderHide()
 {
-	pMission->Command( new NWorld::CCmdInterfaceEvent( nNotifyID ) );
+	pMission->DoEvent( new NWorld::CCmdInterfaceEvent( nNotifyID ) );
 	pMission->SetCheatVisibility( false );	// retail vtbl[0x120](0)
 	pMission->SetPanelState( nPanelsStateSave, true );
 	pMission->PopDesktop( this );
@@ -250,7 +250,7 @@ void CMissionFadeUI::UpdateDesktop( const STime &sTime )
 			sStageTime = sTime;
 			pFade->SetColor( FadePixel( vColor, 0xFF ) );		// fully tinted
 			pTransition->SetStyle( STYLE_VISIBLE, false );
-			pMission->Command( new NWorld::CCmdInterfaceEvent( nNotifyID ) );	// unblock WaitForUI(id)
+			pMission->DoEvent( new NWorld::CCmdInterfaceEvent( nNotifyID ) );	// unblock WaitForUI(id)
 			break;
 		}
 	case DUMMY:
@@ -270,7 +270,7 @@ void CMissionFadeUI::UpdateDesktop( const STime &sTime )
 				break;
 			}
 
-			pMission->Command( new NWorld::CCmdInterfaceEvent( nNotifyID ) );	// unblock WaitForUI(id)
+			pMission->DoEvent( new NWorld::CCmdInterfaceEvent( nNotifyID ) );	// unblock WaitForUI(id)
 			pMission->PopDesktop( this );
 			break;
 		}

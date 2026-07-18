@@ -82,10 +82,10 @@ namespace NGame
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 const int
 	N_SCROLL_STEP				= 4,
-	N_SCROLL_GUARDBAND	= 4,
-	N_MAX_SKIPPED_STEPS = 1200;
+	N_SCROLL_GUARDBAND	= 4;
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 static bool bShowAllCheat = false;
+static int nFake = 0;	// retail global @0x9c62a8: the slo-mo frame divider counter (Step)
 static float fDefaultCameraFOV = N_FOV;
 // NGame::defaultCameraLimits / defaultCameraSoftLimits -- the module default-camera records the
 // mission_camera_* console setters below mutate. The SCameraLimits 32->56 ripple LANDED (Camera.h):
@@ -413,7 +413,7 @@ bool CMission::Initialize( int _nTemplateID, int _nVariantID, NScenario::CScenar
 	// which is fixed at the seed -- NOT by pumping extra hidden segments here (a prior dev-invented
 	// pump loop was reverted: retail runs no extra warm-up simulation at Initialize).
 	ExecWorldCommands();
-	if ( IsValid( pCmdExec ) && pCmdExec->Update( GetTime() ) )
+	if ( IsValid( pCmdExec ) && pCmdExec->Update( GetGameTime() ) )
 	{
 		pCmdExec->Finished();
 		pCmdExec = 0;
@@ -425,6 +425,14 @@ bool CMission::Initialize( int _nTemplateID, int _nVariantID, NScenario::CScenar
 	vCameraCP = pInitCamera->GetCP();
 	sCameraPos = pInitCamera->GetPos();
 	pInitCamera->GetTransform( &sTransform, GetScene()->GetScreenRect() );
+
+	// retail @0x60167d: render ONE hidden frame -- RenderFrame(0xb = 2D|3D|bit8-NOFLIP,
+	// !IsGamePaused() [vtbl+0x58], GetCamera(), true). Nothing presents (bit 8 skips the Flip; the
+	// loading screen stays up); it warms every lazy render resource so the mission's FIRST live
+	// frames are FAST. Load-bearing for the sound epoch: a slow second live frame hits the 150ms
+	// clamp on the mixer clock while the world timer (input still 0) re-baselines and misses it --
+	// a permanent mixer-vs-aim lead that seeks every fresh shot past its attack transient.
+	RenderFrame( N_RENDERMODE_2D | N_RENDERMODE_3D | 8, !IsGamePaused(), GetCamera() );
 
 	// retail @0x200690 tail: enqueue the mission-start "restart" snapshot (CICSaveRestartMission
 	// @0x20b860 -> writes "restart.sav" @0x1f6a80). Deferred through the command queue ON PURPOSE:
@@ -462,6 +470,15 @@ void CMission::Command( NWorld::CCommand *pCmd )
 
 	ASSERT( pCmd );
 	pActivePlayer->GetCommander()->Do( pCmd );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail CMissionBase::DoEvent @0x1a2fa0 (events channel) + the dev-extra update latch (like Command)
+void CMission::DoEvent( NWorld::CCommand *pCmd )
+{
+	bForceUpdateNextFrame = true;
+
+	ASSERT( pCmd );
+	pActivePlayer->GetCommander()->DoEvent( pCmd );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CMission::Command( NWorld::CUnit *pUnit, NWorld::CCmd *pCmd, bool bInstantly )
@@ -1089,45 +1106,47 @@ void CMission::Step()
 	//    anywhere -- the 5th "serialized, no consumer" pair found in this tree. The compare is
 	//    UNSIGNED (`jb`), so the shipped mission default of 0 makes it a no-op, exactly as in retail
 	//    (only CChapterMap/CGlobalMap::Initialize stamp 5 -- .text has no other writer to +0xfc).
-	// 2. sTimeCounter (@0x5a3b10) -- the pausable accumulating GAME clock, and sUITimeCounter
-	//    (@0x5a3b25) which runs even while paused. Dev built both counters in the ctor and wired
-	//    pTimeFunc/pUITimeFunc to their CCTime nodes, then NEVER advanced them: the whole
-	//    CTimeCounter subsystem was dead, which is why nDeltaTime had to be folded into GetTime().
-	//    CTimeCounter::Advance is already byte-faithful to retail's @0x70f570 (same 150ms clamp,
-	//    same accumulate + DG version bump) -- it only ever lacked a caller.
+	// 2. sTimeCounter (@0x5a3b10) -- the pausable accumulating GAME clock (drives the world via
+	//    pTimeFunc + nDeltaTime below), and sUITimeCounter (@0x5a3b25) which runs even while paused
+	//    (drives pInterface->Draw via GetUITime). CTimeCounter::Advance is byte-faithful to retail's
+	//    @0x70f570 (same 150ms clamp, same accumulate + DG version bump). GetTime() is the raw
+	//    main-loop clock like retail (the old dev override that folded nDeltaTime in is GONE).
 	if ( GetTime() - sFPSLimitLastTime < sMinFrameTime )
 		return;
 	sFPSLimitLastTime = GetTime();
 	sTimeCounter.Advance( !bPause, GetTime() );
 	sUITimeCounter.Advance( true, GetTime() );
+	EraseInvalidRefs( &soundsList );	// retail @0x5a3b2a
 
 	if ( CanRender() )
 	{
-		int nStepCount = 0;
+		bool bAdvance = !bPause;
 		do
 		{
-			// release CMissionBase::Step @0x5a3c24 adds nDeltaTime HERE (`add edi,[esi+0x50]` before
-			// the UpdateViewWorld push @0x5a3c36) because retail's GetTime() does NOT carry it. Dev's
-			// GetTime() override already folds nDeltaTime in (see iMissionInternal.h -- it is what
-			// drives the skip-part fast-forward through InternalStep's script), so adding it again
-			// here would double it. Same value reaches the render either way; the two trees just put
-			// the add in different places. Do not add nDeltaTime here while that override exists.
-			pRender->UpdateViewWorld( !bPause, GetTime(), pActivePlayer->GetPlayer(), bShowAllCheat || bCheatVisibility );
+			// retail @0x5a3b50: cinematic slo-mo divider -- while the camera reports a ratio > 1 only
+			// every Nth frame advances the world (nFake counter, retail global @0x9c62a8)
+			if ( bAdvance && GetCamera()->GetSloMoRatio() > 1 )
+			{
+				++nFake;
+				bAdvance = ( nFake % GetCamera()->GetSloMoRatio() ) == 0;
+			}
+
+			// retail @0x5a3c07-@0x5a3c3e: world time = GetGameTime() (sTimeCounter node + nDeltaTime),
+			// applied HERE -- GetTime() stays the raw main-loop clock (the old dev GetTime() override
+			// folded nDeltaTime into every consumer, leaking the skip fast-forward into the sound clock)
+			pRender->UpdateViewWorld( bWaitForPartFinished || bAdvance, GetGameTime(),
+				pActivePlayer->GetPlayer(), bShowAllCheat || bCheatVisibility );
 
 			InternalStep();
-			nStepCount++;
-
-			if ( bWaitForPartFinished )
-			{
-				MarkNewDGFrame();
-				SetDeltaTime( GetDeltaTime() + 50 );
-			}
-			if ( nStepCount > N_MAX_SKIPPED_STEPS )
-			{
-				bWaitForPartFinished = false;
-				csGame << CC_RED << "ERROR: Script skip-part execute more than" << N_MAX_SKIPPED_STEPS << " steps!" << endl;
-			}
-		} while ( bWaitForPartFinished );
+			if ( !bWaitForPartFinished )
+				break;
+			MarkNewDGFrame();
+			// retail @0x5a3c56: a queued interface command (load/exit) aborts the skip fast-forward
+			// without rendering this frame
+			if ( NMainLoop::HaveInterfaceCommand() )
+				return;
+			SetDeltaTime( GetDeltaTime() + 50 );
+		} while ( true );
 
 		NUI::CWindow *pClientWindow = GetDesktop()->GetClientWindow();
 
@@ -1139,11 +1158,12 @@ void CMission::Step()
 		NUI::SRect sScrClientRect( sScrPosition.x, sScrPosition.y, sScrPosition.x + sScrSize.x, sScrPosition.y + sScrSize.y );
 		GetCamera()->SetScreenRect( CTRect<float>( float( sScrClientRect.x1 ) / 1024.0f, float( sScrClientRect.y1 ) / 768.0f, float( sScrClientRect.x2 ) / 1024.0f, float( sScrClientRect.y2 ) / 768.0f ) );
 
-		int nFlags = N_RENDERMODE_3D;
+		int nFlags = bRenderWorld ? N_RENDERMODE_3D : 0;	// retail @0x5a3d11 gates 3D on bRenderWorld
 		if ( !bHideInterface )
 			nFlags |= N_RENDERMODE_2D;
 
-		RenderFrame( nFlags, GetTime(), GetCamera() );
+		NGScene::ClearScreen( CVec3( 0, 0, 0 ) );	// release ClearScreenZBuffer() @0x5a3d26 (absent) -> black clear
+		RenderFrame( nFlags, bAdvance, GetCamera() );
 	}
 	else
 	{
@@ -1178,9 +1198,12 @@ void CMission::InternalStep()
 	}
 
 	ExecWorldCommands();
+	// executors run on the GAME clock (retail ProcessWorldCommands @0x1a24a0 passes GetGameTime()
+	// @0x1a4500) -- nDeltaTime growth fast-forwards camera transitions through the skip-part loop,
+	// releasing their WaitForUI ids; the raw clock is CONSTANT inside that loop and would hang it.
 	if ( IsValid( pCmdExec ) )
 	{
-		if ( pCmdExec->Update( GetTime() ) )
+		if ( pCmdExec->Update( GetGameTime() ) )
 		{
 			pCmdExec->Finished();
 			pCmdExec = 0;
@@ -1190,7 +1213,7 @@ void CMission::InternalStep()
 	// parallel with pCmdExec (so a shot/death focus never blocks the general UI-command drain).
 	if ( IsValid( pExecLocator ) )
 	{
-		if ( pExecLocator->Update( GetTime() ) )
+		if ( pExecLocator->Update( GetGameTime() ) )
 		{
 			pExecLocator->Finished();
 			pExecLocator = 0;
@@ -1241,9 +1264,9 @@ void CMission::InternalStep()
 		// W4.2) has no dev scenario-failure writer yet, so the delayed path is the one that runs.
 		bLoseSignalSended = true;
 		if ( bScenarioGameOver )
-			Command( new NWorld::CCmdCallScriptFunction( "OnPlayerLose", "i", 1 ) );
+			DoEvent( new NWorld::CCmdCallScriptFunction( "OnPlayerLose", "i", 1 ) );
 		else
-			Command( new NWorld::CCmdDelayedCallGameOver(
+			DoEvent( new NWorld::CCmdDelayedCallGameOver(
 				new NWorld::CCmdCallScriptFunction( "OnPlayerLose", "i", 0 ), 4000 ) );
 	}
 
@@ -1278,9 +1301,22 @@ void CMission::InternalStep()
 
 	UpdateSound();
 
-	pStateTarget = 0;
-	pInterface->Step( GetTime() );
-	GetDesktop()->UpdateDesktop( GetTime() );
+	// retail base InternalStep @0x5a2b2f-@0x5a2b6e: the interface steps at most every 100ms on the
+	// UI counter, or immediately when the mission reports IsUpdated (vtbl+0x80); ONLY those frames
+	// reset the state target (vtbl+0x98 SetStateTarget(0)) and restamp sLastUpdateTime.
+	{
+		STime uiTime = GetUITime();
+		if ( uiTime - sLastUpdateTime > 100 || IsUpdated() )
+		{
+			SetStateTarget( 0 );
+			pInterface->Step( uiTime );
+			sLastUpdateTime = uiTime;
+		}
+	}
+	// retail @0x5a2bb7: the desktop (movie/dialog fades + their executors) runs on the GAME clock --
+	// pTimeFunc + nDeltaTime -- so the skip-part loop's +50/iteration drives the fades to completion.
+	// Raw GetTime() here stalled the fade -> WaitForUI never released -> the ESC-skip froze.
+	GetDesktop()->UpdateDesktop( GetGameTime() );
 
 	bHasCommands |= pActivePlayer->GetCommander()->HasCommands();
 
@@ -1295,11 +1331,6 @@ void CMission::InternalStep()
 		pCamera->SetPlacement( sPos );							// @0x1a2c41, bOnTerrain = false
 		pCamera->SetCutFloor( GetCamera()->GetCutFloor() );		// @0x1a2c57/@0x1a2c5d
 	}
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-void CMission::OnGetFocus()
-{
-	pRender->ResetTiming();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // retail @0x1fcbd0 (mission vtbl+0xe0). Status-string ids verified against the retail Strings table:
@@ -1623,7 +1654,7 @@ bool CMission::ProcessEvent( const NInput::SEvent &sEvent )
 			csGame << wsReason << endl;
 			return true;
 		}
-		Command( new NWorld::CCmdCallScriptFunction( "OnExit", "" ) );
+		DoEvent( new NWorld::CCmdCallScriptFunction( "OnExit", "" ) );
 		return true;
 	}
 
@@ -2433,7 +2464,7 @@ void CMission::ExecWorldCommands()
 			if ( bShow )
 				NMainLoop::Command( new NGame::CICShowHint( this, pShowHint->GetID(), pShowHint->pHint, pGlobalGame ) );
 			else
-				Command( new NWorld::CCmdInterfaceEvent( pShowHint->GetID() ) );
+				DoEvent( new NWorld::CCmdInterfaceEvent( pShowHint->GetID() ) );
 		}
 		// LUA convergence: campaign OnRealExit() -> ExitToChapter() (scriptScenario.cpp:96) queues a
 		// CUICmdContinueChapter. retail CMission::ExecWorldCommand @0x1fd8c0 posts a CICRealEndMission and
@@ -2523,7 +2554,7 @@ void CMission::ExecWorldCommands()
 						csSystem << CC_RED << "ERROR: unexpected CUICmdEndSequence!" << endl;
 						// dev safety net (retail leaks the id here): release the wait id so lua
 						// WaitForUI(EndSequence()) cannot hang on the dropped command.
-						Command(new NWorld::CCmdInterfaceEvent(pEndSequence->GetID()));
+						DoEvent(new NWorld::CCmdInterfaceEvent(pEndSequence->GetID()));
 					}
 				}
 				else {
@@ -2535,7 +2566,7 @@ void CMission::ExecWorldCommands()
 							csSystem << CC_RED << "WARNING: Dialog in in WaitForPartFinished mode ignored!" << endl;
 							// release the DialogPlay wait id now (the dialog UI that would do it is never created)
 							if (pDialog->GetID() >= 0)
-								Command(new NWorld::CCmdInterfaceEvent(pDialog->GetID()));
+								DoEvent(new NWorld::CCmdInterfaceEvent(pDialog->GetID()));
 							continue;
 						}
 						////
@@ -3284,7 +3315,7 @@ void CICEndMission::Exec()
 	// CICRealEndMission, and THAT does Terminate()+transition at the safe NMainLoop level. Exit is fully
 	// script-driven (no Terminate / no transition here). The mission stays alive and ticking after this returns
 	// (the leave-zone modal was popped first via CICExitModal), so the queued OnRealExit drains normally.
-	pMission->Command( new NWorld::CCmdCallScriptFunction( "OnRealExit", "" ) );
+	pMission->DoEvent( new NWorld::CCmdCallScriptFunction( "OnRealExit", "" ) );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // retail NGame::CICRealEndMission::Exec @0x20a850 -- the deferred, NMainLoop-level teardown queued by the

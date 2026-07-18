@@ -116,6 +116,11 @@ public:
 	virtual void GetLimits( SCameraLimits *pLimits ) const {}
 	virtual void SetLimits( const SCameraLimits &sLimits ) {}
 
+	// retail ICamera vtbl+0x88 (CCamera @0xd0500): the cinematic slow-motion frame divider consumed by
+	// CMission::Step's world-advance gate -- while > 1 the world advances only every Nth frame.
+	// Non-cinematic cameras run at ratio 1.
+	virtual int GetSloMoRatio() const { return 1; }
+
 	// retail CBaseCamera::SetZoneLimits @0xcfff0 (ICamera virtual): the scroll-zone clamp rect --
 	// it lives ON the camera (+0xC4, save tag 13) in the widened layout, NOT inside SCameraLimits.
 	// The mission stamps it from the world's map safe zone. Default no-op so non-tactical ICamera

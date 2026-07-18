@@ -1087,7 +1087,7 @@ bool CMissionUI::ProcessEvent( const NInput::SEvent &sEvent )
 		// fire the matching engine->script hook so the campaign lua can react to the inventory open/close.
 		bool bWasOpen = ( pMission->GetPanelState( NGame::PANEL_INVENTORY ) != 0 );
 		pMission->SetPanelState( NGame::PANEL_INVENTORY, !bWasOpen );
-		pMission->Command( new NWorld::CCmdCallScriptFunction( bWasOpen ? "OnCloseInventory" : "OnOpenInventory", "" ) );
+		pMission->DoEvent( new NWorld::CCmdCallScriptFunction( bWasOpen ? "OnCloseInventory" : "OnOpenInventory", "" ) );
 		return true;
 	}
 	else if ( bindCharacter.ProcessEvent( sEvent ) )

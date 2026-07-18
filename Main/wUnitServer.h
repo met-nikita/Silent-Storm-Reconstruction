@@ -48,11 +48,10 @@ protected:
 public:
 	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&pAction); f.Add(3,&state); f.Add(4,&pUS); return 0; }
 protected:
-	enum EActionType
+	enum EActionType   // retail PDB NWorld::CCommandExecute::EActionType = { NORMAL=0, SKIPPABLE=1 }
 	{
 		NORMAL,
-		SKIPPABLE,
-		NOBLOCK
+		SKIPPABLE
 	};
 	void StartAction( CWorld *pWorld, EActionType actionType );
 	void StopAction() { pAction = 0; }
@@ -264,6 +263,8 @@ public:
 
 	void Segment();
 	void UpdateVisible( SInterruptInfo *pRes );
+	// retail CUnitServer::CheckSpot @0x3bfe30: one distance-roll to unhide a spotted enemy (this=spotter).
+	bool CheckSpot( CUnitServer *pTarget );
 	bool HasCommand() const { return IsValid( pCurrentCmd ); } //pExec->IsValid(); }// && commandsQueue.empty(); }
 	// The path-conflict remover of this unit's current executor (pExec -> IExecMove), or null.
 	// Used by CPathConflictsRemover::CheckLockerState to walk the who-locks-whom chain.

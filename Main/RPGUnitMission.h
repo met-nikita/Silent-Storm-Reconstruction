@@ -187,6 +187,10 @@ public:
 	// game (e.g. the called-shots gate pDifficulty->bHeadshotShouldKill in the to-hit paths). Appended
 	// NON-PURE at the vtable tail like SetGlobalGame; CUnitMission overrides it.
 	virtual CGlobalGame* GetGlobalGame() const { return 0; }
+	// retail vtbl+0x184 AddVPBoost @0x2c3400 (temporary VP drug boost); the healer FAE_BOOST_VP path
+	// (wUnitStates.cpp) dispatches through IUnitMission. Appended NON-PURE at the vtable tail like the
+	// two above; CUnitMission overrides it.
+	virtual void AddVPBoost( float fStrength, int nDuration ) {}
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 float GetCubesArea( const CVec3 &ptPos, vector<CVec3> *pCubes );

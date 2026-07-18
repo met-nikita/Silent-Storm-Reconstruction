@@ -43,9 +43,10 @@ public:
 	void Initialize( int nTemplate );
 
 	void Command( NWorld::CCommand *pCmd );
+	void DoEvent( NWorld::CCommand *pCmd );	// events channel twin (script OnScriptNotify posts ride it)
 
 	void Step();
-	void OnGetFocus();
+	// (OnGetFocus/OnLostFocus inherit the CMissionBase bodies -- ResetTiming + sound-scene pause pair)
 	bool ProcessEvent( const NInput::SEvent &sEvent );
 	void RenderFrame( const STime &sTime, ICamera *pCamera );
 };

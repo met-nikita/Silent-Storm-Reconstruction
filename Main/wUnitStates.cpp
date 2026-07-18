@@ -534,8 +534,16 @@ void CUnitStateHealer::OnStateStarted()
 			//xz;
 			break;
 		case NDb::FAE_BOOST_VP:
-			//xz;
+		{
+			float fMult = 1.0f, fPerk;
+			if ( pRPG->GetRPGUnit()->HasPerk( 0x40, &fPerk ) )   // 0x7c9721 (healer's capacity perk)
+				fMult = fPerk;
+			pTarget->GetUnitRPG()->AddVPBoost( pFirstAid->fPower, int( pFirstAid->nDuration * fMult ) );  // 0x7c9966: AddVPBoost(fPower, trunc(nDuration*fMult))
+			pTarget->SyncConscious();                            // 0x7c996f
+			if ( pTarget == pUS && !pUS->CanFight() )            // 0x7c997a: self-heal knocked self out
+				return;                                          // goto release: skip the fKitCapacity/SetState(Normal)/breath tail
 			break;
+		}
 		case NDb::FAE_TEMP_STOP_BLEEDING:
 			//xz;
 			break;

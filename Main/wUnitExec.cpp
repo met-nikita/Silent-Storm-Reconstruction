@@ -444,7 +444,7 @@ public:
 			Finished();
 			return;
 		}
-		StartAction( pUS->GetWorld(), NOBLOCK );
+		StartAction( pUS->GetWorld(), SKIPPABLE );   // retail @0x3b5005 push 1 = SKIPPABLE
 
 		bTwoHeavy = IsTwoHeavy( subType, subTypeNext );
 		nStage = 1;

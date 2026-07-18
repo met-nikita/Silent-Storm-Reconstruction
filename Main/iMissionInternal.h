@@ -242,7 +242,9 @@ private:
 	void InternalStep();
 
 protected:
-	virtual const STime GetTime() { return IInterfaceObject::GetTime() + nDeltaTime; }
+	// NO GetTime() override: retail's mission GetTime() IS the raw main-loop clock (@0x1f4e00).
+	// nDeltaTime (the script skip-part fast-forward) is applied ONLY at Step's UpdateViewWorld call
+	// site (retail @0x5a3c24), so it never leaks into the sound/UI clocks.
 	void SetDeltaTime( STime _nDeltaTime ) { nDeltaTime = _nDeltaTime; }
 	STime GetDeltaTime() const { return nDeltaTime; }
 	bool TrackChanges();
@@ -276,9 +278,10 @@ public:
 	bool Initialize( int nTemplateID, int nVariantID, NScenario::CScenarioZone *pZone, const vector<string> &params, NRPG::CGlobalGame *pGlobalGame, NDb::CUITexture *pPWLImage = 0 );
 	void Terminate();
 
-	// dev-extra bForceUpdateNextFrame latch on top of the retail base Command bodies
+	// dev-extra bForceUpdateNextFrame latch on top of the retail base Command/DoEvent bodies
 	void Command( NWorld::CCommand *pCmd );
 	void Command( NWorld::CUnit *pUnit, NWorld::CCmd *pCmd, bool bInstantly = true );
+	void DoEvent( NWorld::CCommand *pCmd );
 
 	bool IsUpdated() const;
 
@@ -323,7 +326,7 @@ public:
 	NScenario::CScenarioZone* GetScenarioZone() const { return pZone; }
 
 	void Step();
-	void OnGetFocus();
+	// (OnGetFocus/OnLostFocus live on CMissionBase -- retail @0x1a19c0/@0x1a19e0, no CMission override)
 	bool ProcessEvent( const NInput::SEvent &sEvent );
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////

@@ -118,6 +118,7 @@ public:
 	{
 		return find( audibleUnits.begin(), audibleUnits.end(), pUnitServer ) != audibleUnits.end();
 	}
+	void ClearAudible() { audibleUnits.clear(); }   // retail: list::clear on +0x164 (C_DEAF per-turn forget @0x3c32e0)
 	void SetAudible( TUnit *pUnitServer, bool bAudible )
 	{
 		list< CPtr<TUnit> >::iterator i = find( audibleUnits.begin(), audibleUnits.end(), pUnitServer );

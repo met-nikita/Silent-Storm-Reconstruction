@@ -868,14 +868,32 @@ struct SCompareInterruptStrength
 // game_tbs_on_enemy_spot (retail @0x9c7b14, default off, saved) -- registered in the wMain block below
 static bool bTBSOnEnemySpot = false;
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail NWorld::AddCheckedInterrupt @0x3621d0: a notice survives into the interrupt list only if
+// pWho has not already interrupted pWhom, can pay a side-step's AP (AC_MOVE_SIDE) and can still
+// FIGHT; the RPG CheckInterrupt roll runs LAST (RNG order), >=0 becomes fStrength.
+static void AddCheckedInterrupt( list<SInterruptInfo::SNotice> *pOut, const SInterruptInfo::SNotice &src )
+{
+	SInterruptInfo::SNotice n = src;
+	if ( n.pWho->WasInterrupted( n.pWhom ) )
+		return;
+	if ( !n.pWho->CanSpendAP( n.pWho->GetActionAP( NRPG::AC_MOVE_SIDE ) ) )
+		return;
+	if ( !n.pWho->CanFight() )
+		return;
+	int nStrength = n.pWho->GetUnitRPG()->CheckInterrupt( n.pWhom->GetUnitRPG(), n.bIsMutual, n.bWasShot );
+	if ( nStrength < 0 )
+		return;
+	n.fStrength = (float)nStrength;
+	pOut->push_back( n );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 void CWorld::CheckInterrupt( SInterruptInfo *info )
 {
 	// retail CWorld::CheckInterrupt @0x3684c0 opens with the same gate off IsSequence (IWorld
 	// vtbl+0x1a8): a running sequence swallows EVERY sighting notice -- no interrupt, no auto-TBS,
-	// no cancel tail.
+	// no cancel tail. This is the ONLY early-out (@0x7684ea): the body runs even with ZERO notices,
+	// because the cancel tail below must still fire for players who can now see a new trap.
 	if ( IsSequence() )
-		return;
-	if ( info->events.empty() )
 		return;
 	// detect if interrupts are mutual or not
 	for ( list<SInterruptInfo::SNotice>::iterator i = info->events.begin(); i != info->events.end(); ++i )
@@ -891,170 +909,131 @@ void CWorld::CheckInterrupt( SInterruptInfo *info )
 			}
 		}
 	}
-	CPlayer *pWhoseTurn = GetTBSCurrentPlayer();
-	// retail @0x3684c0: keep the RAW notice list -- the realtime no-interrupt tail scans it for
-	// the auto-TBS switches (the filter loop below erases from info->events)
-	list<SInterruptInfo::SNotice> rawEvents;
-	if ( pWhoseTurn == 0 )
-		rawEvents = info->events;
-	// determine interrupts strength
-	CPtr<IPlayer> pWhoPlayer = info->events.front().pWho->GetPlayer(); // interface convenience
-	list< CPtr<CUnitServer> > unitsToCancelAction; // interface convenience
-	bool bCanCancel = ( IsRealTime() || pWhoPlayer.GetPtr() == pWhoseTurn )
-			&& !NAI::IsAIPlayer( pWhoPlayer.GetPtr() ); // interface convenience -- retail CheckInterrupt @0x3684c0 keys on IsAIPlayer, NOT a CAICommander cast (the human's CSequenceCommander IS a CAICommander)
-	for ( list<SInterruptInfo::SNotice>::iterator i = info->events.begin(); i != info->events.end(); )
+	CPlayer *pCurrent = GetTBSCurrentPlayer();
+	// retail dispatch @0x768588: info->events stays RAW (the two ORIGINAL BUGs below read it); each
+	// notice is routed into TWO new lists -- `own` (sightings that only cancel actions) and `checked`
+	// (roll-gated interrupts). Realtime (@0x76860a): EVERY notice goes to own, MUTUAL ones also roll.
+	// TB: spotter on the current player's side -> own (no roll); a spotted unit of the current player
+	// -> roll; anything else is dropped. NOTE the retail asymmetry: the pWho key is GetTBSPlayer
+	// (+0x154 slot0) while the pWhom key is GetPlayer (+0x14c slot+0x34).
+	list<SInterruptInfo::SNotice> checked;
+	list<SInterruptInfo::SNotice> own;
+	for ( list<SInterruptInfo::SNotice>::iterator i = info->events.begin(); i != info->events.end(); ++i )
 	{
-		if ( bCanCancel && !i->bWasShot && !i->bIsMutual && i->pWho->GetPlayer() == pWhoPlayer )
+		if ( pCurrent == 0 )
 		{
-			unitsToCancelAction.push_back( i->pWho );
-			i = info->events.erase( i );
-		}
-		else
-		{
-			// retail NWorld::AddCheckedInterrupt @0x3621d0 gate order: WasInterrupted -> CanSpendAP(AC_MOVE_SIDE) -> CanFight -> roll last
-			if ( i->pWho->WasInterrupted( i->pWhom ) || !i->pWho->CanSpendAP( i->pWho->GetActionAP( NRPG::AC_MOVE_SIDE ) ) || !i->pWho->CanFight() )
-				i = info->events.erase( i );
-			else
-			{
-				int nInteruptStr = i->pWho->GetUnitRPG()->CheckInterrupt( i->pWhom->GetUnitRPG(), i->bIsMutual, i->bWasShot );
-				if ( nInteruptStr < 0 )
-					i = info->events.erase( i );
-				else
-				{
-					i->fStrength = nInteruptStr;
-					++i;
-				}
-			}
-		}
-	}
-	if ( info->events.empty() )
-	{
-		// retail @0x3684c0 (oracle s2_interrupt.h): real time + nothing interrupted -> the
-		// auto-turn-based scouting scan over the RAW notices
-		if ( pWhoseTurn == 0 )
-		{
-			bool bAISawHuman = false, bHumanSawAI = false;
-			CPlayer *pHumanPlayer = 0;
-			vector<CPlayer*> aiSpotters;
-			for ( list<SInterruptInfo::SNotice>::iterator i = rawEvents.begin(); i != rawEvents.end(); ++i )
-			{
-				CPlayer *pWhoP = i->pWho->GetTBSPlayer();
-				CPlayer *pWhomP = i->pWhom->GetTBSPlayer();
-				if ( NAI::IsAIPlayer( pWhoP ) )
-				{
-					if ( !NAI::IsAIPlayer( pWhomP ) && i->pWho->GetDiplomacyState( i->pWhom ) == NDb::DS_ENEMY )
-					{
-						bAISawHuman = true;
-						if ( find( aiSpotters.begin(), aiSpotters.end(), pWhoP ) == aiSpotters.end() )
-							aiSpotters.push_back( pWhoP );
-					}
-				}
-				else if ( NAI::IsAIPlayer( pWhomP ) && i->pWhom->GetDiplomacyState( i->pWho ) == NDb::DS_ENEMY )
-				{
-					bHumanSawAI = true;
-					pHumanPlayer = pWhoP;
-				}
-			}
-			if ( bHumanSawAI )
-			{
-				if ( bAISawHuman )
-				{
-					csSystem << CC_RED << "AI and human player saw each other, human player wants turn based automatically" << endl;
-					WantTurnBased( pHumanPlayer );
-					return;	// retail skips the cancel tail
-				}
-				if ( bTBSOnEnemySpot )
-				{
-					csSystem << CC_RED << "human player saw hostile AI, game_tbs_on_enemy_spot is set" << endl;
-					WantTurnBased( pHumanPlayer );
-					return;
-				}
-			}
-			// AI players that spotted a human enemy file the delayed want (50-segment countdown)
-			if ( IsRealTime() )
-				for ( int k = 0; k < aiSpotters.size(); ++k )
-					WillWantTBS( aiSpotters[k] );
-		}
-		if ( !unitsToCancelAction.empty() )
-		{
-			// interface convenience
-			csSystem << CC_RED << "No interrupt, all commands were canceled" << endl;
-			for ( list< CPtr<CUnitServer> >::iterator i = unitsToCancelAction.begin(); i != unitsToCancelAction.end(); ++i )
-				(*i)->OnTBSEvent( TBS_CANCEL_ACTION );
-			//	(*i)->Do( new NWorld::CCmdCancel( *i ) );
-		}
-		// interface convenience, re: mines
-		vector<CPtr<CPlayer> > players;
-		GetPlayersList( &players );
-		for ( int k = 0; k < players.size(); ++k )
-		{
-			CPlayer *pPlayer = players[k];
-			if ( pPlayer->CanSeeNewTraps() )
-				pPlayer->OnTBSEvent( TBS_CANCEL_ACTION );
-		}
-		return;
-	}
-	// sort them out
-	info->events.sort( SCompareInterruptStrength() );
-	CPlayer *pTestPlayer = info->events.back().pWho->GetTBSPlayer();
-	// BUG 2 (realtime reaction delay): in real time, an AI player that has only just SPOTTED you (a one-sided,
-	// non-mutual sighting -- you do not see it yet) must NOT seize turn-based instantly. Retail defers it:
-	// CheckInterrupt @0x3684c0 files a WillWantTBS request (a 50-segment countdown, @0x3683e0) instead of the
-	// immediate interrupt, so the enemy reacts after a short delay. A mutual sighting (you see it too) still
-	// interrupts now, and any human-side interrupt is unaffected.
-	if ( IsRealTime() && IsValid( pTestPlayer ) &&
-	     NAI::IsAIPlayer( pTestPlayer ) )   // retail CheckInterrupt @0x3684c0: the AI-spotter defer gate is IsAIPlayer
-	{
-		bool bGroupMutual = false;
-		for ( list<SInterruptInfo::SNotice>::reverse_iterator i = info->events.rbegin(); i != info->events.rend(); ++i )
-		{
-			if ( i->pWho->GetTBSPlayer() != pTestPlayer )
-				break;                 // only the strongest (last) group shares pTestPlayer
+			own.push_back( *i );
 			if ( i->bIsMutual )
-				bGroupMutual = true;
+				AddCheckedInterrupt( &checked, *i );
 		}
-		if ( !bGroupMutual )
+		else if ( i->pWho->GetTBSPlayer() == pCurrent )
+			own.push_back( *i );
+		else if ( i->pWhom->GetPlayer() == pCurrent )
+			AddCheckedInterrupt( &checked, *i );
+	}
+	if ( !checked.empty() )
+	{
+		checked.sort( SCompareInterruptStrength() );	// ascending -> back() = strongest
+		// ORIGINAL BUG (confirmed retail @0x76869a): the interrupting player is read from the RAW
+		// events.back(), NOT from the strength-sorted checked.back().
+		CPlayer *pTest = info->events.back().pWho->GetTBSPlayer();
+		list<CUnitServer*> res;
+		CUnitServer *pLast = 0;
+		for ( list<SInterruptInfo::SNotice>::iterator i = checked.begin(); i != checked.end(); ++i )
 		{
-			WillWantTBS( pTestPlayer );
-			return;
+			pLast = i->pWho;	// unconditional (@0x7686d0) -> ends as checked.back().pWho, the strongest
+			if ( i->pWho->GetTBSPlayer() != pTest )
+				continue;	// retail scans the WHOLE list -- no break (@0x7686e5)
+			if ( find( res.begin(), res.end(), i->pWho ) == res.end() )
+				res.push_back( i->pWho );
+			i->pWho->MarkInterrupted( i->pWhom );
+			// (retail dropped the Jan03 per-interrupter 3D scream -- the loop is dedup+MarkInterrupted
+			// only; the interrupt bark stays DB-driven via GetGlobalAck()->OnInterrupt below.)
 		}
+		csSystem << CC_RED << "Interrupt, units:";
+		for ( list<CUnitServer*>::iterator r = res.begin(); r != res.end(); ++r )
+		{
+			string szName( "?" );
+			GetUnitName( *r, &szName );
+			csSystem << " " << szName;
+		}
+		csSystem << endl;
+		// ack the STRONGEST interrupter of ANY player (retail @0x7687d2, behind the 0x80 ref-valid gate)
+		if ( IsValid( pLast ) )
+			GetGlobalAck()->OnInterrupt( pLast );
+		AddInterrupt( res );	// retail @0x768808 passes (pTest, &res); the dev overload derives the player from res
+		return;	// retail frees the lists and exits -- NO cancel tail after an interrupt
 	}
-	list<CUnitServer*> res;
-	CUnitServer *pWhom = 0;
-	CUnitServer *pWho = 0;
-	while ( !info->events.empty() )
+	if ( pCurrent == 0 )
 	{
-		const SInterruptInfo::SNotice &e = info->events.back();
-		pWho = e.pWho;
-		if ( pWho->GetTBSPlayer() != pTestPlayer )
-			break;
-		if ( find( res.begin(), res.end(), pWho ) == res.end() )
-			res.push_back( pWho );
-		if ( !pWhom )
-			pWhom = e.pWhom;
-		pWho->MarkInterrupted( e.pWhom );
-		info->events.pop_back();
-		// (retail CheckInterrupt @0x3684c0 dropped the Jan03 per-interrupter 3D scream --
-		// AttachMiscObject(Create3DSound(eye, NDb::GetSound(11))); the loop is dedup+MarkInterrupted only.
-		// The interrupt bark stays DB-driven via GetGlobalAck()->OnInterrupt below.)
+		// ORIGINAL BUG (confirmed retail @0x7688c0): the auto-TBS scan loops once per OWN notice but
+		// examines the SAME fixed notice -- info->events.back() -- every iteration (the own iterator
+		// only counts). Net effect: examine events.back() ONCE when own is non-empty.
+		bool bAISawHuman = false, bHumanSawAI = false;
+		CPlayer *pHumanPlayer = 0;
+		vector<CPlayer*> aiSpotters;
+		if ( !own.empty() )
+		{
+			SInterruptInfo::SNotice &n = info->events.back();
+			CPlayer *pWhoP = n.pWho->GetTBSPlayer();
+			CPlayer *pWhomP = n.pWhom->GetTBSPlayer();
+			if ( NAI::IsAIPlayer( pWhoP ) )
+			{
+				if ( !NAI::IsAIPlayer( pWhomP ) && n.pWho->GetDiplomacyState( n.pWhom ) == NDb::DS_ENEMY )
+				{
+					bAISawHuman = true;
+					aiSpotters.push_back( pWhoP );
+				}
+			}
+			else if ( NAI::IsAIPlayer( pWhomP ) && n.pWhom->GetDiplomacyState( n.pWho ) == NDb::DS_ENEMY )
+			{
+				bHumanSawAI = true;
+				pHumanPlayer = pWhoP;
+			}
+		}
+		if ( bHumanSawAI )
+		{
+			if ( bAISawHuman )
+			{
+				csSystem << CC_RED << "AI and human player saw each other, human player wants turn based automatically" << endl;
+				WantTurnBased( pHumanPlayer );
+				return;	// retail skips the cancel tail
+			}
+			if ( bTBSOnEnemySpot )
+			{
+				csSystem << CC_RED << "human player saw hostile AI, game_tbs_on_enemy_spot is set" << endl;
+				WantTurnBased( pHumanPlayer );
+				return;
+			}
+		}
+		// an AI player that spotted a human enemy files the delayed want (50-segment countdown @0x768b6c)
+		if ( IsRealTime() )
+			for ( int k = 0; k < aiSpotters.size(); ++k )
+				WillWantTBS( aiSpotters[k] );
 	}
-	//
-	// retail CheckInterrupt @0x3684c0 prints the interrupting group (csSystem << CC_RED << "Interrupt,
-	// units: " << names -- oracle s2_interrupt.h)
-	csSystem << CC_RED << "Interrupt, units:";
-	for ( list<CUnitServer*>::iterator r = res.begin(); r != res.end(); ++r )
+	// cancel tail (retail @0x768b85): runs even with ZERO notices, at PLAYER granularity -- every
+	// player that can now see a NEW trap (an entry in the new-traps list absent from the known list),
+	// plus the own-sighting spotter's TBS player, deduped, gets a TBS_CANCEL_ACTION.
+	vector<CPtr<CPlayer> > players;
+	GetPlayersList( &players );
+	vector<CPlayer*> toCancel;
+	for ( int k = 0; k < players.size(); ++k )
 	{
-		string szName( "?" );
-		GetUnitName( *r, &szName );
-		csSystem << " " << szName;
+		CPlayer *pPlayer = players[k];
+		if ( pPlayer->CanSeeNewTraps() )
+			toCancel.push_back( pPlayer );
 	}
-	csSystem << endl;
-	if ( IsValid( pWho ) )
-		GetGlobalAck()->OnInterrupt( pWho );
-	AddInterrupt( res );
-	// (retail CheckInterrupt @0x3684c0 posts NO UI camera command here -- the dev-added
-	// AddUICommand(new CUICmdUnit(pWhom)) focus hint had no retail counterpart; removed for 1:1. The
-	// auto-focus now comes from the shoot/death/grenade producers via CUICmdUnitCamera.)
+	// ORIGINAL BUG (confirmed retail @0x768ce0): like the auto-TBS scan, this loop iterates the own
+	// list but reads the FIXED info->events.back().pWho every pass; with the dedup the net effect is
+	// "add events.back()'s spotter's TBS player once when own is non-empty".
+	for ( list<SInterruptInfo::SNotice>::iterator i = own.begin(); i != own.end(); ++i )
+	{
+		CPlayer *p = info->events.back().pWho->GetTBSPlayer();
+		if ( find( toCancel.begin(), toCancel.end(), p ) == toCancel.end() )
+			toCancel.push_back( p );
+	}
+	for ( int k = 0; k < toCancel.size(); ++k )
+		toCancel[k]->OnTBSEvent( TBS_CANCEL_ACTION );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // BUG 2 (realtime reaction delay): retail CWorld::WillWantTBS @0x3683e0. A human player's turn-based wish is
@@ -2605,6 +2584,45 @@ void CWorld::Segment()
 	bDelayUpdateVisibleCalc = true;
 	bCallUpdateVisible = false;
 	TTBSWorld::Segment();
+	// BUG 2 (realtime reaction delay): tick the deferred realtime->TBS requests. Retail does this at
+	// @0x76bd6d -- after ProcessTBSEvents #4 (the TTBSWorld::Segment tail), BEFORE the events drain
+	// and the unit-Segment loop. Fire WantTurnBased when a countdown elapses; drop all pending
+	// requests once we are no longer real-time.
+	if ( !willWantTBS.empty() )
+	{
+		if ( !IsRealTime() )
+			willWantTBS.clear();
+		else
+			for ( vector<SWillWantTBS>::iterator i = willWantTBS.begin(); i != willWantTBS.end(); ++i )
+				if ( --i->nTimeLeft < 1 )
+				{
+					CPtr<CPlayer> pPlayer = i->pPlayer;
+					willWantTBS.erase( i );          // erase invalidates the iterator -> one switch per segment
+					if ( IsValid( pPlayer ) )
+						WantTurnBased( pPlayer.GetPtr() );
+					break;
+				}
+	}
+	// retail CWorld::Segment drain @0x76bdf4: unconditionally drain EVERY player's commander
+	// interface-event queue (FIFO) between ProcessTBSEvents #4 and the unit-Segment loop. This is a
+	// SEPARATE channel from the turn-gated cmds fetch; ExecuteCommand carries the retail RTTI ladder
+	// (CCmdInterfaceEvent / CCmdCallScriptFunction / CCmdDelayedCallGameOver / CCmdPlayAck).
+	{
+		vector< CPtr<CPlayer> > drainPlayers;
+		GetPlayersList( &drainPlayers );
+		for ( int k = 0; k < drainPlayers.size(); ++k )
+		{
+			if ( !IsValid( drainPlayers[k] ) )
+				continue;
+			CCommander *pC = drainPlayers[k]->GetCommander();
+			while ( !pC->events.empty() )
+			{
+				CObj<CCommand> pEv = pC->events.front();
+				pC->events.pop_front();
+				ExecuteCommand( pEv );
+			}
+		}
+	}
 	for ( list< CObj<CUnitServer> >::iterator i = units.begin(); i != units.end(); )
 	{
 		if ( IsValid(*i) )
@@ -2635,24 +2653,7 @@ void CWorld::Segment()
 	pGlobalAck->OnSegment();
 	NGlobal::ThrowEvent( CEventOnSegment() );   // per-segment broadcast (script-logic units count segments)
 	pAIJobManager->Segment();
-	// BUG 2 (realtime reaction delay): tick the deferred realtime->TBS requests (retail CWorld::Segment
-	// @0x36bce0). Fire WantTurnBased when a countdown elapses; drop all pending requests once we are no longer
-	// real-time (turn-based already started, e.g. via a mutual sighting or a human interrupt).
-	if ( !willWantTBS.empty() )
-	{
-		if ( !IsRealTime() )
-			willWantTBS.clear();
-		else
-			for ( vector<SWillWantTBS>::iterator i = willWantTBS.begin(); i != willWantTBS.end(); ++i )
-				if ( --i->nTimeLeft < 1 )
-				{
-					CPtr<CPlayer> pPlayer = i->pPlayer;
-					willWantTBS.erase( i );          // erase invalidates the iterator -> one switch per segment
-					if ( IsValid( pPlayer ) )
-						WantTurnBased( pPlayer.GetPtr() );
-					break;
-				}
-	}
+	// (the willWantTBS tick moved to its retail slot @0x76bd6d, before the unit loop -- see above)
 	// retail CWorld::Segment @0x36bce0: when the path network reports a change since the last
 	// segment (CheckUpdated @0x4c9a0, read-and-clear), broadcast TBS_GRID_INFO_UPDATED
 	// (GridInfoUpdated @0x375ca0) so locker units re-seat on the changed grid. This DELIVERS the
@@ -3231,6 +3232,9 @@ int CWorld::GetEnemyWatchers( IPlayer *pPlayer ) const
 	}
 	return nWatchers;
 }
+// game_forceturnbased (retail @0x9c7b0c, default off, saved) -- debug pin: while set, real time is
+// never possible. Registered in the wMain block below; consumer is IsTBSRealTimeModePossible @0x364f10.
+static bool bForceTurnBased = false;
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CWorld::IsTBSRealTimeModePossible() const
 {
@@ -3241,11 +3245,12 @@ bool CWorld::IsTBSRealTimeModePossible() const
 	// is set, real time is never possible, pinning turn-based) or a multi-party map ([this+0x130] =
 	// CWorld+0x138 nPartiesAdded) forbids real time. The old bFreezeStart term here was a misdecode of
 	// the unshifted +0x1b8; bFreezeStart's real retail consumer is the StartFirstSegments warm-up loop
-	// @0x36c4c0. (Retail also ORs a bForceTurnBased debug global @0x9c7b0c -- no dev counterpart,
-	// omitted.) NO sequence term: the sequence gate lives in StartNextPlayerTurn (@0x375f80 gate 2).
+	// @0x36c4c0. Also ORed: the bForceTurnBased debug global (game_forceturnbased, retail @0x9c7b0c,
+	// read at 00764f51) -- but only AFTER the IsBase() early-true, so a base map stays real-time even
+	// with the flag set. NO sequence term: the sequence gate lives in StartNextPlayerTurn (@0x375f80 gate 2).
 	if ( IsBase() )
 		return true;
-	if ( bScriptWantTurnBased || nPartiesAdded > 1 )
+	if ( bForceTurnBased || bScriptWantTurnBased || nPartiesAdded > 1 )
 		return false;
 	vector< CPtr<CPlayer> > players;
 	GetPlayersList( &players );
@@ -3708,10 +3713,13 @@ REGISTER_SAVELOAD_CLASS_NM( 0x0251101b, CWorld, NWorld );
 using namespace NWorld;
 REGISTER_SAVELOAD_CLASS( 0x02731131, CPlayer )
 BASIC_REGISTER_CLASS( CPostWorldCreateInfo )
-// retail wMainInit @0x76f1b0 registers three bools: game_forceturnbased (registered plain in
-// iOptionsMenu.cpp here), game_eq_on_grenades, game_tbs_on_enemy_spot.
-// (bTBSOnEnemySpot defined above CheckInterrupt -- the consumer @0x3684c0)
+// retail wMainInit @0x76f1b0 registers three bools, in this order: game_forceturnbased,
+// game_eq_on_grenades, game_tbs_on_enemy_spot -- each VarBoolHandler-bound to its module global,
+// default 0.0f, bSave=true.
+// (bForceTurnBased defined above IsTBSRealTimeModePossible -- the consumer @0x364f10;
+//  bTBSOnEnemySpot defined above CheckInterrupt -- the consumer @0x3684c0)
 START_REGISTER(wMain)
+	REGISTER_VAR_EX( "game_forceturnbased", NGlobal::VarBoolHandler, &bForceTurnBased, 0, true )   // retail @0x9c7b0c (default off, saved)
 	REGISTER_VAR_EX( "game_eq_on_grenades", NGlobal::VarBoolHandler, &bEQonGrenades, 0, true )   // retail @0x9c7b04 (default off, saved)
 	REGISTER_VAR_EX( "game_tbs_on_enemy_spot", NGlobal::VarBoolHandler, &bTBSOnEnemySpot, 0, true )   // retail @0x9c7b14 (default off, saved)
 FINISH_REGISTER

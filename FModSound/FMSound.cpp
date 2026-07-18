@@ -584,6 +584,20 @@ bool IsPlaying( CSound3D *pSound )
 	return false;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail @0x3db4e0
+void Pause( CSound2D *pSound, bool bPause )
+{
+	if ( IsValid( pSound ) )
+		FSOUND_SetPaused( pSound->nChannel, bPause );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail @0x3db500
+void Pause( CSound3D *pSound, bool bPause )
+{
+	if ( IsValid( pSound ) )
+		FSOUND_SetPaused( pSound->nChannel, bPause );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 CSound3D *Play3DSound( const SPlayParams &params )
 {
 	if ( !bIsFMODInitialized )

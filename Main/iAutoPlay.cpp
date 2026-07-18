@@ -132,7 +132,7 @@ public:
 	bool Initialize();
 
 	bool ProcessEvent( const NInput::SEvent &sEvent );
-	void RenderFrame( int nMode, const STime &sTime, ICamera *pCamera, bool bShowUnits );
+	void RenderFrame( int nMode, bool bAdvanceTime, ICamera *pCamera, bool bShowUnits );
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CICAutoPlay -- the queued main-loop command that (re-)enters the auto-play logo screen.
@@ -280,9 +280,9 @@ bool CAutoPlayInterface::ProcessEvent( const NInput::SEvent &sEvent )
 // Render the mission with the AutoPlay render-mode flag (bit 8) forced on, step+draw the live logo interface,
 // then present -- but only when the caller did not already set bit 8 (the top-level render path).
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CAutoPlayInterface::RenderFrame( int nMode, const STime &sTime, ICamera *pCamera, bool bShowUnits )
+void CAutoPlayInterface::RenderFrame( int nMode, bool bAdvanceTime, ICamera *pCamera, bool bShowUnits )
 {
-	CMission::RenderFrame( nMode | 8, sTime, pCamera, bShowUnits );
+	CMission::RenderFrame( nMode | 8, bAdvanceTime, pCamera, bShowUnits );
 
 	if ( IsValid( pLogoInterface ) )
 	{

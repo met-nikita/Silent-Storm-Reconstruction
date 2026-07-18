@@ -26,7 +26,8 @@ namespace NRender
 class IRenderSound: public CObjectBase
 {
 public:
-	virtual void Update( CTransformStack *pTS, STime currentTime ) = 0;
+	// retail @0x2d5740 shape: (bool bAdvanceTime, ...) -- the flag freezes the mixer clock while paused
+	virtual void Update( bool bAdvanceTime, CTransformStack *pTS, STime currentTime ) = 0;
 	virtual void ResetTiming() = 0;
 	// retail IRenderSound vtbl+0x18: CRenderGame::UpdateVisible re-points the unit-sound mixer at the
 	// same visibility-filtered source it hands rUnits (voice fog-of-war gate).
@@ -37,7 +38,7 @@ public:
 // built by the caller -- CRenderGame owns TWO mixers (GetActive-backed pSound for world/misc sounds,
 // GetUnits-backed pUnitSounds for unit-emitted sounds) -- NOT the Jan03 inline
 // union(GetActive,GetUnits), which mixed every unit sound regardless of player visibility.
-IRenderSound* CreateRenderSound( CSyncSrc<NWorld::IVisObj> *pSrc, NSound::ISoundScene *pSoundScene );
+IRenderSound* CreateRenderSound( CSyncSrc<NWorld::IVisObj> *pSrc, NSound::ISoundScene *pSoundScene, NWorld::IWorld *pWorld );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 #endif

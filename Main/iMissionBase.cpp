@@ -66,6 +66,29 @@ void CMissionBase::Command( NWorld::CCommand *pCmd )
 	pActivePlayer->GetCommander()->Do( pCmd );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail CMissionBase::DoEvent @0x1a2fa0 (mission vtbl+0x2c): forward to the active player's
+// commander EVENTS channel -- never forces an interrupt, drained unconditionally each CWorld::Segment
+void CMissionBase::DoEvent( NWorld::CCommand *pCmd )
+{
+	ASSERT( pCmd );
+	pActivePlayer->GetCommander()->DoEvent( pCmd );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail CMissionBase::OnGetFocus @0x1a19c0: back on top of the interface stack -- re-baseline the
+// render/mixer timers over the covered gap and resume every frozen channel
+void CMissionBase::OnGetFocus()
+{
+	pRender->ResetTiming();	// retail @0x2cb190 forwards to both sound mixers
+	pSoundScene->Pause( false );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail CMissionBase::OnLostFocus @0x1a19e0: a menu covered the mission -- freeze every live channel
+// (this is why retail goes silent in the pause MENU but not on the Pause/Break realtime pause)
+void CMissionBase::OnLostFocus()
+{
+	pSoundScene->Pause( true );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 // retail CMissionBase::Command @0x1a15b0: wrap in CCmdSetCommand (+ CCmdContinue when instant),
 // dispatched through the virtual single-command slot
 void CMissionBase::Command( NWorld::CUnit *pUnit, NWorld::CCmd *pCmd, bool bInstantly )
@@ -405,15 +428,17 @@ void CMissionBase::SetLightMode( int _nLightMode )
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // retail CMissionBase::RenderFrame @0x1a19f0 (was the dev CMission::RenderFrame -- the body only
-// touches base members, so it lands here per the retail placement; CMission no longer overrides it)
-void CMissionBase::RenderFrame( int nMode, const STime &sTime, ICamera *pCamera, bool bShowUnits )
+// touches base members, so it lands here per the retail placement; CMission no longer overrides it).
+// Param 2 is the ADVANCE flag (retail PDB: (int,bool,ICamera*,bool)) -- the old dev `const STime&`
+// was a mis-decode. The body picks its own clocks: sound = raw GetTime(), interface = GetUITime().
+void CMissionBase::RenderFrame( int nMode, bool bAdvanceTime, ICamera *pCamera, bool bShowUnits )
 {
 	if ( nMode & N_RENDERMODE_3D )
 	{
 		CTransformStack ts;
 		pCamera->GetTransform( &ts, pScene->GetScreenRect() );
 
-		pRender->UpdateSound( &ts, sTime );	// retail CMissionBase::RenderFrame @0x1a19f0 -> @0x2cb1c0
+		pRender->UpdateSound( bAdvanceTime, &ts, GetTime() );	// retail @0x1a19f0 -> @0x2cb1c0: raw main-loop clock + advance flag
 
 		const CTRect<float> &rScreen = pCamera->GetScreenRect();
 		if ( ( rScreen.Width() != 0 ) && ( rScreen.Height() != 0 ) )
@@ -429,7 +454,7 @@ void CMissionBase::RenderFrame( int nMode, const STime &sTime, ICamera *pCamera,
 	}
 
 	if ( !bHideInterface && !bSpecialHideInterface && ( nMode & N_RENDERMODE_2D ) )
-		pInterface->Draw( sTime );
+		pInterface->Draw( GetUITime() );	// retail @0x1a19f0: the always-running UI counter, not the raw clock
 
 	float fFrameTime = NGScene::GetFrameTime();
 	static float fMinFrameTime = 1, fMaxFrameTime = 1e-4f, fElapsed = 0;
@@ -447,7 +472,8 @@ void CMissionBase::RenderFrame( int nMode, const STime &sTime, ICamera *pCamera,
 		nFrames = 0;
 	}
 
-	NGScene::Flip();
+	if ( !( nMode & 8 ) )	// retail @0x5a1c29: bit 8 (CAutoPlayInterface logo frame) suppresses the present
+		NGScene::Flip();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 } // NAMESPACE

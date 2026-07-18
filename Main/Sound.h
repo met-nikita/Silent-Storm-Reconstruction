@@ -44,6 +44,11 @@ public:
 	// internal data-driven fade the machine calls through vtbl+0x20).
 	virtual void FadeOutMusic() = 0;
 
+	// retail ISoundScene vtbl+0x28 (@0x304d80): freeze/resume every live channel (3D/2D/effects;
+	// the music stream keeps playing) -- driven by CMissionBase::OnLostFocus/OnGetFocus when a menu
+	// covers the mission.
+	virtual void Pause( bool bPause ) = 0;
+
 	virtual void Draw( CTransformStack *pTS ) = 0;
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////

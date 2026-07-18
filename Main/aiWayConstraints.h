@@ -106,9 +106,13 @@ public:
 		return finalPoints[ _dst ];
 	}
 
-	void AddFinalPoint( const SPathPlace& _position, const SPathPlace& _parent ) 
-	{ 
-		if ( pNet->IsPassable( _parent ) )
+	void AddFinalPoint( const SPathPlace& _position, const SPathPlace& _parent )
+	{
+		// retail AddFinal/AddFinalLay @0x8a030/@0x89f30 gate: GetPassability in {AIP_YES, AIP_DOOR}
+		// (raw disasm `test eax,eax; je pass; cmp eax,4; jne skip`) -- a door-threshold goal must
+		// register as a reachable final; strict ==AIP_YES dropped it.
+		EPassable ep = pNet->GetPassability( _parent );
+		if ( ep == AIP_YES || ep == AIP_DOOR )
 		{
 			finalPoints[ _position ] = _parent;
 			/*char buf[128];

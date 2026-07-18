@@ -161,9 +161,11 @@ public:
 	CDumbUnitServer() {}
 	CDumbUnitServer( CWorld *pWorld, NRPG::IUnitMission *_pRPG, NDb::CModel *pModel, const NAI::SUnitPosition &pos );
 	void KillUnit( const CVec3 &ptDir );
+	bool SetBloodyDeath( bool b );   // retail @0x34ec90 get/set: install the bloody-death flag, return the prior value
 	// retail @0x350dc0 3-arg: the 3rd arg is FallAsIfDead's bPlayDeathAnim -- a combat knock-out
 	// (ProcessAttack @0x75130e pushes 1) DOES play the death clip; lua passes its optional 2nd param.
 	void MakeUnconscious( const CVec3 &ptDir, bool bFromScript = false, bool bPlayDeathAnim = true );
+	void SyncConscious();   // retail @0x3515a0: reconcile world alive/conscious state with the RPG persona
 	void SetPosition( const NAI::SUnitPosition &dst );
 	void SetTemporaryPosition( const NAI::SUnitPosition &dst ) // to be used only in CExecQueue; in all other cases use SetPosition
 	{	position = dst;	}

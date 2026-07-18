@@ -21,6 +21,7 @@ public:
 	CTimeCounter();
 	void ResetTiming();
 	void Advance( bool bAdvanceTime, STime currentTime );
+	void SetCurrent( STime currentTime );   // retail @0x30f560: stamp value (bumps CCTime counter), prevTime untouched
 	CCTime* GetTime() const { return pTime; }
 	int operator&( CStructureSaver &f );
 };

@@ -398,7 +398,7 @@ class CUICmdUnitCamera: public CUICmdCameraLocator
 public:
 	CPtr<CUnit> pUnit;                  // +0x14  the framed unit (shooter / dying unit)
 	CPtr<CUnit> pUnitTarget;            // +0x18  optional second framing point (shot target); null -> single point
-	bool        bUseSloMo;              // +0x1c  carried for parity; the a5dll camera has no slo-mo -> inert
+	bool        bUseSloMo;              // +0x1c  feeds ShowPlacesFromBestPoint's nSloMoRatio (live behind the cheat_slomo console var)
 	float       fSloMoIncrProbability;  // +0x20
 	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CUICmdCameraLocator*)this); f.Add(2,&pUnit); f.Add(3,&pUnitTarget); f.Add(4,&bUseSloMo); f.Add(5,&fSloMoIncrProbability); return 0; }
 	//

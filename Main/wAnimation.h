@@ -116,8 +116,9 @@ private:
 	//NAnimation::CAnimation* CreateAnimation( NDb::CAnimation::EType type, int nFlags, STime tStart );
 	void PlayAnimation( const NAI::SUnitPosition &cmdPos, 
 		NAnimation::CAnimation *pAnimation, bool bInstantly = false );
-	void PlayAnimation( const NAI::SUnitPosition &cmdPos, 
+	void PlayAnimation( const NAI::SUnitPosition &cmdPos,
 		int nType, const char *pszParams = 0, bool bInstantly = false );
+	void MoveOneStep( const NAI::SUnitPosition &cmdPos );	// @0x3409d0 -- MOVE_ONE_STEP clip
 	void DefaultAction( const NAI::SUnitPosition &cmdPos );
 	NAnimation::CAnimator* PutOnTerrain( NAnimation::CAnimator *pAnim );
 	void Move( const NAI::SUnitPosition &prevPos, 
@@ -175,7 +176,7 @@ public:
 	void CloseAttack( const NAI::SUnitPosition &cmdPos, NAI::EBlowHeight eHeight );
 	void ChangePose( const NAI::SUnitPosition &prevPos, const NAI::SUnitPosition &cmdPos );
 	void Climb( const NAI::SUnitPosition &prevPos, const NAI::SUnitPosition &cmdPos, bool bRealClimb );
-	void Jump( const NAI::SUnitPosition &prevPos, const NAI::SUnitPosition &cmdPos, bool bRealJump );
+	void Jump( const NAI::SUnitPosition &prevPos, const NAI::SUnitPosition &cmdPos, bool bRealJump, bool bJumpBack = false );
 	void Fall( const NAI::SUnitPosition &cmdPos, float fPrevHeight );
 	void ForcedMove( const NAI::SUnitPosition &cmdPos );
 	// retail @0x33bb90: bPlayDeath gates ONLY the death CLIP -- the ragdoll handoff (AddDynamics)
@@ -195,6 +196,7 @@ public:
 	void ThrowGrenade( const NAI::SUnitPosition &cmdPos, const CVec3 &target, int nSide, int nGrenadeSize = 1 );
 	void ThrowKnife( const NAI::SUnitPosition &cmdPos, const CVec3 &target );
 	void OpenWindowDoor( const NAI::SUnitPosition &cmdPos );
+	void SetMine( const NAI::SUnitPosition &cmdPos, bool bMine );	// @0x33f5a0 -- MINE_TILE/MINE_OBJECT
 	void Reload( const NAI::SUnitPosition &cmdPos );
 	void StartHealing( const NAI::SUnitPosition &cmdPos, NAI::EBlowHeight eHeight );
 	// @0x3401b0 -- power-armour REPAIR overload: bPanzerklein => fixed PK-heal clip params
@@ -225,7 +227,7 @@ public:
 	void IdleBan( char cBanSourceFlag, bool bBan ); 
 	// retail @0x33c8a0: bBoss/bTerrorPK drive nSpecialPKFlags (BOSS/TERROR_PK), only while in a PK
 	void ChangeSkeleton( NDb::CSkeleton *_pSkeleton, bool bBecomePanzerklein, bool bBoss, bool bTerrorPK );	// For PK
-	void PlayCustomAnimation( const NAI::SUnitPosition &cmdPos, int nDBAnimationID );
+	void PlayCustomAnimation( const NAI::SUnitPosition &cmdPos, int nDBAnimationID, bool bFreezeAfterLastFrame = false );
 	bool IsInstableCorpse();
 	bool CalmCorpse();
 	void CalculateAnimFlags( bool bUseItemFlags = true );

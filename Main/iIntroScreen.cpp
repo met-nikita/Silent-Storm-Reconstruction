@@ -224,7 +224,7 @@ void NGame::CSequence::ExecCommand( bool bForce )
 	// List exhausted -> finish the sequence. nEventID IS the queued UI-action id (release CCmdInterfaceEvent
 	// carries the id directly now); CWorld::ExecuteCommand -> RemoveUIActionID(nEventID) unblocks WaitForUI.
 	if ( IsValid( pMission ) )                             // boot: pMission == 0 -> skipped
-		pMission->Command( new NWorld::CCmdInterfaceEvent( nEventID ) );
+		pMission->DoEvent( new NWorld::CCmdInterfaceEvent( nEventID ) );
 	NMainLoop::Command( 0 );                               // pop this modal screen
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////

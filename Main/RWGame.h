@@ -82,7 +82,7 @@ public:
 	// retail IRenderGame vtbl+0x30 @0x2cb1c0: advance BOTH sound mixers (world pSound + fog-gated
 	// pUnitSounds). Retail threads a bAdvanceTime bool; dev CRenderSound::Update advances
 	// unconditionally, so the bool is folded (matches the old dev pRenderSound->Update call sites).
-	virtual void UpdateSound( CTransformStack *pTS, STime currentTime ) = 0;
+	virtual void UpdateSound( bool bAdvanceTime, CTransformStack *pTS, STime currentTime ) = 0;	// retail @0x2cb1c0: (bool,...)
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // retail CreateRenderGame @0x2d3aa0/ctor @0x2ceae0 takes the sound scene too: the render sounds are

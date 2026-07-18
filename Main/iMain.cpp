@@ -142,14 +142,18 @@ IInterfaceBase* CInterfaceCommand::GetInterface() const
 void CInterfaceCommand::PushInterface( IInterfaceBase *pNewInterface )
 {
 	ASSERT( IsValid( pNewInterface ) );
+	// retail @0x1f5230: the covered top gets OnLostFocus; the NEW interface gets NO focus call --
+	// its Initialize just ran (the old dev OnGetFocus-on-push had no retail counterpart)
+	if ( !interfaces.empty() )
+		interfaces.back()->OnLostFocus();
 	interfaces.push_back( pNewInterface );
-	pNewInterface->OnGetFocus();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CInterfaceCommand::PopInterface()
 {
 	if ( interfaces.empty() )
 		return;
+	interfaces.back()->OnLostFocus();	// retail @0x1f50a0: the removed top loses focus first
 	interfaces.pop_back();
 	if ( !interfaces.empty() )
 		interfaces.back()->OnGetFocus();
@@ -487,6 +491,12 @@ void DoneInterface()
 void Command( CInterfaceCommand *pCmd )
 {
 	cmds.push_back( pCmd );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail @0x1f4e40
+bool HaveInterfaceCommand()
+{
+	return !cmds.empty();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 int GetInterfaceStackDepth()

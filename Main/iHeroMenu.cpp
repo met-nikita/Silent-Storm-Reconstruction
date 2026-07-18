@@ -81,9 +81,9 @@ void CScriptButton::Draw( const STime &sTime, NGScene::I2DGameView *pView )
 {
 	if ( IsMouseCover() != bHoverNotify )
 	{
-		NWorld::CCommand *pCmd = 
+		NWorld::CCommand *pCmd =
 			new NWorld::CCmdCallScriptFunction( "OnScriptNotify", "si", GetWindowID().c_str(), IsMouseCover() ? 1 : 2 );
-		pInterface->Command( pCmd );
+		pInterface->DoEvent( pCmd );
 	}
 
 	bHoverNotify = IsMouseCover();
@@ -94,7 +94,7 @@ void CScriptButton::Draw( const STime &sTime, NGScene::I2DGameView *pView )
 void CScriptButton::OnAction()
 {
 	NWorld::CCommand *pCmd = new NWorld::CCmdCallScriptFunction( "OnScriptNotify", "si", GetWindowID().c_str(), 0 );
-	pInterface->Command( pCmd );
+	pInterface->DoEvent( pCmd );
 	CButton::OnAction();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////

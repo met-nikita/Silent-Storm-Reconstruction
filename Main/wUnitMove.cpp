@@ -86,7 +86,10 @@ public:
 	// @0x73e050, 4-arg) is a separate animation-subsystem convergence, so the flag is not yet consumed at
 	// dispatch. (Retail also adds a scratch processPos + ProcessMe -- deferred with the animator.)
 	bool bJumpBack;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CCmdTravel*)this); f.Add(2,&bRealJump); f.Add(3,&bJumpBack); return 0; }
+	// @0x3bb000/@0x3b87fc tag 4 -- unit position snapshotted at jump dispatch (retail cmd+0x20); read by the
+	// DEFERRED FallFromHigh next pass. Default SUnitPosition/SPathPlace ctor == retail's 0xfdffffff sentinel + null pNet.
+	NAI::SUnitPosition processPos;
+	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CCmdTravel*)this); f.Add(2,&bRealJump); f.Add(3,&bJumpBack); f.Add(4,&processPos); return 0; }
 	//
 	CCmdJump(): bJumpBack(false) {}   // default the NEW tag-3 field so a pre-tag3 save loads it as false, not garbage
 	CCmdJump( CUnit *_pUnit, NAI::SUnitPosition &_pos, bool b, bool bBack = false ): CCmdTravel(_pUnit,_pos), bRealJump(b), bJumpBack(bBack) {}
@@ -501,6 +504,12 @@ void CExecMove::DoCommand()
 			DoGameMove( pPrevMove->pos );
 		}
 	}
+	// @0x3b86e0 (0x3b87fc): a CCmdJump left in pCurCmd from the previous pass applies its fall NOW -- at the
+	// start of this pass, AFTER the jump animation completed -- from the stored processPos snapshot minus the
+	// landing target. The live position has already advanced to the target, so the snapshot is required.
+	CDynamicCast<CCmdJump> pJumpCur(pCurCmd);
+	if (pJumpCur)
+		pUS->FallFromHigh( pJumpCur->processPos.GetCP().z - pJumpCur->pos.GetCP().z );
 	// fetch command
 	CObj<CCommand> pCmd = commandsQueue.front(), pHoldCmd(pCurCmd);
 	commandsQueue.pop_front();
@@ -619,14 +628,11 @@ void CExecMove::DoCommand()
 					CheckDoors( pJump->pos );
 					if (TestSingleGameMove(pJump))
 					{
-						animator.Jump(position, pJump->pos, pJump->bRealJump);
-						// enable this if you want a laugh (if it works, of course)
-						//animator.Fall( pJump->pos, position.GetCP().z );
+						pJump->processPos = pUS->GetPosition();   // retail ProcessMe @0x3bb000: snapshot BEFORE DoGameMove
+						animator.Jump(position, pJump->pos, pJump->bRealJump, pJump->bJumpBack);	// bJumpBack: tag-3 producer @wUnitMove.cpp
 						pCurCmd = pCmd;
-						float fLastH = position.GetCP().z;
-						float fCurrH = pJump->pos.GetCP().z;
 						DoGameMove(pJump->pos);
-						pUS->FallFromHigh(fLastH - fCurrH);
+						// fall deferred to the START of the next DoCommand pass (retail @0x3b87fc)
 					}
 					else
 					{

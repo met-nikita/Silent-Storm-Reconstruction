@@ -185,6 +185,10 @@ public:
 	virtual bool IsRequestInterrupt() const { return bInterruptRequest; }
 	void ClearRequests() { bInterruptRequest = false; bStopAction = false; }
 	void Do( CCommand *pCmd ) { if ( !pCmd->IsSkippable() ) bInterruptRequest = true; cmds.push_back( pCmd ); }
+	// retail CCommander::DoEvent @0x1a4d20: the SECOND channel -- interface events (ack barks, script
+	// callbacks, UI-action ids, delayed game-over) push to `events`, NEVER set bInterruptRequest, and
+	// are drained unconditionally every CWorld::Segment (unlike the turn-gated cmds fetch).
+	void DoEvent( CCommand *pCmd ) { events.push_back( pCmd ); }
 	void ClearList() { cmds.clear(); }
 	bool HasCommands() const { return !cmds.empty(); }
 	void StopAction() { ClearList(); bStopAction = true; }

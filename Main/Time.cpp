@@ -9,9 +9,16 @@ CTimeCounter::CTimeCounter()
 	pTime = new CCTime( 0 );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CTimeCounter::ResetTiming() 
+void CTimeCounter::ResetTiming()
 {
-	prevTime = 0; 
+	prevTime = 0;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail @0x30f560: seed the counter to an absolute time (value + CCTime change-counter bump via Set);
+// prevTime is deliberately left untouched so the next Advance re-baselines with no spurious delta.
+void CTimeCounter::SetCurrent( STime currentTime )
+{
+	pTime->Set( currentTime );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CTimeCounter::Advance( bool bAdvanceTime, STime currentTime )

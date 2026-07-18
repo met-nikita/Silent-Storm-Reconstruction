@@ -198,7 +198,7 @@ public:
 	// retail AddVPBoost @0x2c3400: install a temporary VP modifier (fAdd = 1% of the VP base per
 	// unit of strength) + record its lifetime. (Retail tails into CheckOverdose @0x2c0a50, whose
 	// overdose metric the oracle left unresolved -- deferred with it.)
-	void AddVPBoost( float fStrength, int nDuration );
+	virtual void AddVPBoost( float fStrength, int nDuration );   // overrides IUnitMission vtbl+0x184
 	//
 	CUnitMission();
 	//

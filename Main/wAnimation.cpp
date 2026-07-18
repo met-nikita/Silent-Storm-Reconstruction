@@ -950,15 +950,52 @@ void CUnitAnimator::Move(
 	IdleOff();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// @0x33a560 -- same layer/pose/direction and |dX|<=1 && |dY|<=1
+static bool CheckIfOneStep( const NAI::SPathPlace &a, const NAI::SPathPlace &b )
+{
+	if ( a.GetLayer() != b.GetLayer() ) return false;
+	if ( a.GetPose()  != b.GetPose()  ) return false;
+	if ( a.GetDirection() != b.GetDirection() ) return false;
+	int dx = (int)a.GetX() - (int)b.GetX();
+	int dy = (int)a.GetY() - (int)b.GetY();
+	return dx >= -1 && dx <= 1 && dy >= -1 && dy <= 1;
+}
+// @0x33a5f0 -- orthogonal iff nX or nY matches
+static bool CheckIfNotDiagonal( const NAI::SPathPlace &a, const NAI::SPathPlace &b )
+{
+	return a.GetX() == b.GetX() || a.GetY() == b.GetY();
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 void CUnitAnimator::EndMove( const NAI::SUnitPosition &prevPos, const NAI::SUnitPosition &cmdPos, bool bFreeze, bool bInterGrid )
 {
-	Move( prevPos, cmdPos, cmdPos, true, bInterGrid );
+	bool bHandled = false;
+	if ( bStart && !bStrafing && !bCorpse && !bHasPKSkeleton &&
+		cmdPos.GetPose() != NAI::CRAWL && cmdPos.GetPose() != NAI::CROUCH &&
+		CheckIfOneStep( prevPos.pos.p, cmdPos.pos.p ) )
+	{
+		if ( CheckIfNotDiagonal( prevPos.pos.p, cmdPos.pos.p ) )
+			MoveOneStep( prevPos );
+		else
+		{
+			NAI::EPose savedPose = pose;
+			if ( pose == NAI::RUN ) pose = NAI::WALK;
+			NAI::SUnitPosition prevWalk = prevPos, cmdWalk = cmdPos;
+			prevWalk.SetPose( NAI::WALK );
+			cmdWalk.SetPose( NAI::WALK );
+			Move( prevWalk, cmdWalk, cmdWalk, true, bInterGrid );
+			pose = savedPose;
+		}
+		bHandled = true;
+	}
+	if ( !bHandled )
+		Move( prevPos, cmdPos, cmdPos, true, bInterGrid );
 	bStrafing = false;
 	bWalking = true;
 	pAnimator->AddMemorizer( tEnd );
 	IdleOff();
 	if ( !bFreeze )
 		Stand( cmdPos, bAimedStrafe );
+	bStandIfRecalcCommand = false;   // retail tail; inert in dev (no producer)
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CUnitAnimator::Move( const NAI::SUnitPosition &prevPos, const NAI::SUnitPosition &cmdPos, const NAI::SUnitPosition &nextPos, bool bInterGrid )
@@ -1475,7 +1512,7 @@ void CUnitAnimator::Fall( const NAI::SUnitPosition &cmdPos, float fPrevHeight )
 
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CUnitAnimator::Jump( const NAI::SUnitPosition &prevPos, const NAI::SUnitPosition &cmdPos, bool bRealJump )
+void CUnitAnimator::Jump( const NAI::SUnitPosition &prevPos, const NAI::SUnitPosition &cmdPos, bool bRealJump, bool bJumpBack )
 {
 	bInactivePose = false;
 	CPtr<NAnimation::CAnimator> pResult = 0;
@@ -1498,12 +1535,15 @@ void CUnitAnimator::Jump( const NAI::SUnitPosition &prevPos, const NAI::SUnitPos
 	else
 	{
 		pTerrainFunc->Move( cmdPos );
+		// @0x73e068 -- bJumpBack picks the FACE-AWAY jump clips
+		NDb::CAnimation::EType eHigh = bJumpBack ? NDb::CAnimation::JUMP_BACK_HIGH : NDb::CAnimation::JUMP_HIGH;
+		NDb::CAnimation::EType eLow  = bJumpBack ? NDb::CAnimation::JUMP_BACK_LOW  : NDb::CAnimation::JUMP_LOW;
 		float fHeightDiff = prevPos.GetCP().z - cmdPos.GetCP().z;
 		if ( fHeightDiff > F_HIGH_2_HEIGHT ) // high jump
 		{
 			STime tFallLength = (STime)( (fHeightDiff - F_HIGH_2_HEIGHT) / F_FALL_SPEED * 1000 );
 
-			NDb::CAnimation *pDbAnim = pSkeleton->GetAnimation( NDb::CAnimation::JUMP_HIGH, 0, "Height2" );
+			NDb::CAnimation *pDbAnim = pSkeleton->GetAnimation( eHigh, 0, "Height2" );
 			CPtr<NAnimation::CAnimation> pBegin = pAnimator->CreateAnimation( pDbAnim, tEnd );
 			if ( !pBegin )
 			{
@@ -1545,9 +1585,9 @@ void CUnitAnimator::Jump( const NAI::SUnitPosition &prevPos, const NAI::SUnitPos
 			pszParams = "Height2";
 		}
 		CPtr<NAnimation::CAnimation> pFrom = pAnimator->CreateAnimation(
-			pSkeleton->GetAnimation( NDb::CAnimation::JUMP_LOW, 0, pszParams ), tEnd );
+			pSkeleton->GetAnimation( eLow, 0, pszParams ), tEnd );
 		CPtr<NAnimation::CAnimation> pTo = pAnimator->CreateAnimation(
-			pSkeleton->GetAnimation( NDb::CAnimation::JUMP_HIGH, 0, pszParams ), tEnd );
+			pSkeleton->GetAnimation( eHigh, 0, pszParams ), tEnd );
 		if ( !pFrom || !pTo )
 		{
 			DefaultAction( cmdPos );
@@ -1948,18 +1988,38 @@ void CUnitAnimator::PlayAnimation( const NAI::SUnitPosition &cmdPos,
 	PlayAnimation( cmdPos, pAnim, bInstantly );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CUnitAnimator::PlayCustomAnimation( const NAI::SUnitPosition &cmdPos, int nDBAnimationID )
+// retail @0x33f4c0: play the DB clip, then -- if bFreezeAfterLastFrame -- BAN the internal idle so
+// the unit HOLDS the clip's last frame instead of returning to its (custom) idle when it ends. This
+// is the flag scripted freeze poses ride (EFirst's wounded commander: 4438 fall-to-side, freeze=true).
+// PlayAnimation -> Stand -> IdleOn CLEARS the bit, so the ban is set AFTER, matching retail order
+// (@0x73f530 PlayAnimation, then @0x73f542 or byte[+0x4c],1). IdleOn on the next command lifts it.
+void CUnitAnimator::PlayCustomAnimation( const NAI::SUnitPosition &cmdPos, int nDBAnimationID, bool bFreezeAfterLastFrame )
 {
-	CPtr<NAnimation::CAnimation> pAnim = 
+	CPtr<NAnimation::CAnimation> pAnim =
 		pAnimator->CreateAnimation( NDb::GetDBAnimation( nDBAnimationID ), tEnd );
 	if ( !IsValid( pAnim ) )
 		return;
 	PlayAnimation( cmdPos, pAnim );
+	if ( bFreezeAfterLastFrame )
+		IdleBan( NAnimation::E_INTERNAL_IDLE_OFF, true );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CUnitAnimator::OpenWindowDoor( const NAI::SUnitPosition &cmdPos )
 {
 	PlayAnimation( cmdPos, NDb::CAnimation::OPEN );
+	IdleOn( cmdPos );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// @0x3409d0 -- single-step clip, no trailing IdleOn/Stand
+void CUnitAnimator::MoveOneStep( const NAI::SUnitPosition &cmdPos )
+{
+	PlayAnimation( cmdPos, NDb::CAnimation::MOVE_ONE_STEP );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// @0x33f5a0 -- kneel-and-place: MINE_TILE (ground mine) or MINE_OBJECT (object/door trap)
+void CUnitAnimator::SetMine( const NAI::SUnitPosition &cmdPos, bool bMine )
+{
+	PlayAnimation( cmdPos, bMine ? NDb::CAnimation::MINE_TILE : NDb::CAnimation::MINE_OBJECT );
 	IdleOn( cmdPos );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////

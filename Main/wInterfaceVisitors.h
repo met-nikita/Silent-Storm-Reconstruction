@@ -58,9 +58,11 @@ struct IRenderVisitor
 	{
 		CPtr<NDb::CModel> pModel;
 		const char *pszBindBone;
+		CPtr<NDb::CEffect> pEffect;   // +0x08 retail @0x352380: hand/item effect glued to the bind bone
+		STime tBeginEffect;          // +0x0c retail: SetHandEffect start-time stamp
 
-		SBoundMesh() {}
-		SBoundMesh( NDb::CModel *_pModel, const char *_pszBindBone ): pModel(_pModel), pszBindBone(_pszBindBone) {}
+		SBoundMesh(): pszBindBone(0), tBeginEffect(0) {}
+		SBoundMesh( NDb::CModel *_pModel, const char *_pszBindBone ): pModel(_pModel), pszBindBone(_pszBindBone), tBeginEffect(0) {}   // append path leaves pEffect null (retail zero-fills it)
 	};
 	// Release-added render-feed record: a particle effect bound to a unit (scriptParticles).
 	// Serialized raw (DoDataVector) as a member of CDumbUnitServer::attachedEffects; 8 bytes.

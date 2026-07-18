@@ -130,6 +130,9 @@ bool IsPlaying( CStream *pStream );
 unsigned long GetStreamTime( CStream *pStream );   // current play position ms, 0xFFFFFFFF if not playing (retail NSound::CMusic save capture)
 bool IsPlaying( CSound2D *pSound );
 bool IsPlaying( CSound3D *pSound );
+// retail @0x3db4e0 / @0x3db500: freeze/resume the live FMOD channel (the menu-over-mission pause)
+void Pause( CSound2D *pSound, bool bPause );
+void Pause( CSound3D *pSound, bool bPause );
 void FadeOut( CStream *pStream, float fSec );
 void CancelFadeOut( CStream *pStream );
 void SetSFXMasterVolume( int nSFX );

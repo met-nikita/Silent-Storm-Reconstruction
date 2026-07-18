@@ -944,7 +944,7 @@ public:
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CSkeleton;
 class CExplosion;
-const int N_PK_SPECIAL_WEAPONS = 7;
+const int N_PK_SPECIAL_WEAPONS = 10;	// game.db AllowWeaponType1..10 / PDB bool[10] / Import @0x4297e0 push 0xa
 class CPanzerklein: public CDBRecord
 {
 	OBJECT_BASIC_METHODS( CPanzerklein );

@@ -343,7 +343,7 @@ void CMissionDlgUI::SetStage( int _nStage )
 	pExit->SetStyle( STYLE_VISIBLE, bEndPhrase );
 	pNext->SetStyle( STYLE_VISIBLE, !bEndPhrase );
 	////
-	pMission->Command( new NWorld::CCmdCallScriptFunction( "OnDialogPhrase", "si", szDialogCode.c_str(), nStage ) );
+	pMission->DoEvent( new NWorld::CCmdCallScriptFunction( "OnDialogPhrase", "si", szDialogCode.c_str(), nStage ) );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CMissionDlgUI::UpdatePhrases( NGScene::I2DGameView *pView )
@@ -468,8 +468,8 @@ void CMissionDlgUI::EndDialog()
 	// Release the DialogPlay wait id (the release CScript id-queue): post CCmdInterfaceEvent(nID) so
 	// WaitForUI(DialogPlay(...)) unblocks. nID == -1 for a dialog not started via the script (no waiter).
 	if ( nID >= 0 )
-		pMission->Command( new NWorld::CCmdInterfaceEvent( nID ) );
-	pMission->Command( new NWorld::CCmdCallScriptFunction( "OnDialogFinished", "s", szDialogCode.c_str() ) );
+		pMission->DoEvent( new NWorld::CCmdInterfaceEvent( nID ) );
+	pMission->DoEvent( new NWorld::CCmdCallScriptFunction( "OnDialogFinished", "s", szDialogCode.c_str() ) );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 } // namespace
