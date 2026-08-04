@@ -72,16 +72,16 @@ static bool topLookupTbl[4][7] =
 	{0, 0, 0, 0, 1, 0, 0},
 	{0, 0, 0, 0, 1, 0, 0}
 };
-// true, если для стенки iThis входящая стенка (определяемая по delta: i = iThis - delta)
-// перпендикулярна и расположена в положительной части Y плоскости
-// Соответсвие между индексом и направлением:
+// true if for wall iThis the incoming wall (determined by delta: i = iThis - delta)
+// is perpendicular and located in the positive Y plane
+// Correspondence between index and direction:
 // 0-left, 1-top, 2-right, 3-bottom
 static inline bool GetBTop( int iThis, int delta )
 {
 	return topLookupTbl[iThis][3 + delta];
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// bit map для клип ID:
+// bit map for clip ID:
 // 1st b   - bPerpendicular
 // 2-3 b   - nWidth (incom width)
 // 4 b     - bTop
@@ -114,7 +114,7 @@ static short GetWallClipInfo( const CNodeMap<SGridNode> &grid,
 	float fThickness = pCP->fThickness;
 
 	{
-		// находим iThis
+		// find iThis
 		for ( int i = 0; i < 4 && iThis == -1; ++i )
 		{
 			for ( int j = 0; j < pNode->elems[i].size(); ++j )
@@ -129,7 +129,7 @@ static short GetWallClipInfo( const CNodeMap<SGridNode> &grid,
 				}
 			}
 		}
-		// Находим самую толстую стенку в узле
+		// find the thickest wall in the node
 		float fThick = 0;
 		for ( int i = 0; i < 4; ++i )
 		{
@@ -161,7 +161,7 @@ static short GetWallClipInfo( const CNodeMap<SGridNode> &grid,
 	// ASSERT( -1 != iThis );
 	//
 	vector<char> hideSides( 4, false ); 
-	const int iLEFT   = 0; // индексы сторон в массиве hideSides
+	const int iLEFT   = 0; // side indices in hideSides array
 	const int iRIGHT  = 1;
 	const int iTOP    = 2;
 	const int iBOTTOM = 3;
@@ -171,10 +171,10 @@ static short GetWallClipInfo( const CNodeMap<SGridNode> &grid,
 	//
 	int nInWidth = Width2ID( geThick.fThickness );
 	int nWidth = Width2ID( fThickness );
-	// пересечение с длинной стенкой ?
+	// intersection with a long wall ?
 	if ( INTERNAL == geThick.side )
 		return MakeClipID( nInWidth, 0, 0, MakeCullID( hideSides ) );	
-	// Возможно это особый случай - стыкуются более 2х стенок одинаковой толщины, надо проверить
+	// This may be a special case - more than two walls of the same thickness are joined, it needs to be checked
 	if ( nInWidth <= nWidth && indwidth.size() > 2 )
 	{
 		int k, cnt = 0;
@@ -187,7 +187,7 @@ static short GetWallClipInfo( const CNodeMap<SGridNode> &grid,
 			int iOpposite = (iThis+2) % 4;
 			if ( !pNode->elems[iOpposite].empty() )
 			{
-				// так и есть! это особый случай
+				// it IS a special case
 				const SGridElement &eopposite = pNode->elems[iOpposite].front();
 				if ( eopposite.pFragment && nClipGroup == eopposite.nClipGroup )
 				{
@@ -216,7 +216,7 @@ static short GetWallClipInfo( const CNodeMap<SGridNode> &grid,
 		bPerpendicular = false;
 		if ( nInWidth == Width2ID( fThickness ) )
 		{
-			// в этом случае надо выбрать какую из 2х стенок клипать
+			// in this case we need to choose which one of 2 walls to clip
 			
 			if ( geThis.side == geThick.side )
 			{
@@ -304,7 +304,7 @@ static bool SetVisibility( DWORD *pVisible, const CBuildingGrid &grid,
 	return bRes;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// Прописывание в clipinfo видимых частей сплошного объекта на основе данных в pBuildingGrid
+// Writing visible parts of a solid object to clipinfo based on the data in pBuildingGrid
 static void SetSolidVisibleParts( SClipInfo *pClip, CVec3 ptPos, const CBuildingGrid &grid, bool bParts, NAI::CGeometryInfo *pGI )
 {
 	DWORD nVisible = 0;
@@ -345,7 +345,7 @@ static void SetSolidVisibleParts( SClipInfo *pClip, CVec3 ptPos, const CBuilding
 			bAllPieces &= SetVisibility( &nVisible, grid, ptPos, pClip->nRotationID, SPoint3( x-1, y-1, z-1 ) );
 		}
 	}
-	// если все куски видны, рисуем блок как цельный
+	// if all pieces are visible, draw the block as a whole
 	if ( bAllPieces && !bParts )
 		nVisible = UNBROKEN_BLOCK32;
 	pClip->dwParts = nVisible;
@@ -458,7 +458,7 @@ static void MakeBuilding( SBuildingInfo *pInfo, const CBuildingGrid &grid, CBuil
 		pInfo->Clear();
 	const int nCutFloor = grid.GetCutFloor();
 
-  // Сплошные объекты
+  // Solid objects
 	const unordered_map<int, CNodeMap<SSolidElement> > &solids = swMap.GetSolidMap();
 	for (unordered_map<int, CNodeMap<SSolidElement> >::const_iterator it = solids.begin(); it != solids.end(); ++it )
 	{
@@ -476,7 +476,7 @@ static void MakeBuilding( SBuildingInfo *pInfo, const CBuildingGrid &grid, CBuil
 				clip.pGeometry  = frp.pCPart->pGeometry;
 				clip.nRotationID  = frp.pFr->nRotationID;
 				clip.nSubBlockID  = frp.nHashID;
-				//clip.nRooms[0] = clip.nRooms[1] = GetSolidRoomID( clip, pBuildInfo ); // целиком находится в одной комнате
+				//clip.nRooms[0] = clip.nRooms[1] = GetSolidRoomID( clip, pBuildInfo ); // wholly in one room
 				//SStoreyInfo &storey = pInfo->GetStorey( floor( clip.ptPos.z ) );
 				rand.seed.nSeed = randStart.Get( 0x6000 ) + randStart.Get( 0x6000 ) * 0x6000;
 				const SPart &part = Point2PartSolid( clip.ptPos, clip.nRotationID );
@@ -513,8 +513,8 @@ static void MakeBuilding( SBuildingInfo *pInfo, const CBuildingGrid &grid, CBuil
 		clip.nRotationID  = fr.nRotationID;
 		clip.nSubBlockID  = fr.nSubBlockID;
 		clip.nClip  = ((2 << 8) + Width2ID( pCP->fThickness )) << 16;
-		clip.nClip += GetWallClipInfo( wallGrid, fr, pCP, neighbs[i].pLeft ) << 8; // левый край
-		clip.nClip += GetWallClipInfo( wallGrid, fr, pCP, neighbs[i].pRight ); // правый край
+		clip.nClip += GetWallClipInfo( wallGrid, fr, pCP, neighbs[i].pLeft ) << 8; // left edge
+		clip.nClip += GetWallClipInfo( wallGrid, fr, pCP, neighbs[i].pRight ); // right edge
 		//clip.nRooms[0] = 0;//GetWallRoomID( 0, fr, pBuildInfo );
 		//clip.nRooms[1] = 0;//GetWallRoomID( 1, fr, pBuildInfo );
 		//SStoreyInfo &storey = pInfo->GetStorey( clip.ptPos.z );
@@ -587,7 +587,7 @@ inline void JuncsMoveRotate( const SDiscretePos &dpos, vector<SJunction> *pJuncs
 void AddPieces( CBuildingSchema *pSchema, const vector<int> &parts, const vector<int> &additionparts, NDb::CRPGArmor *pAr, int nAIGeomID, 
 	const CArray2D<bool> &cellarWalls, bool bGround, const SDiscretePos &dpos, int nSubPartID )
 {
-	// определяем, какие узлы присутсвуют в блоке
+	// find, which nodes are present in the block
 	CDGPtr< CPtrFuncBase<NAI::CGeometryInfo> > pSrc = NAI::shareAIModel.Get( nAIGeomID );
 	pSrc.Refresh();
 	NAI::CGeometryInfo *pGI = pSrc->GetValue();
@@ -655,7 +655,7 @@ void AddPieces( CBuildingSchema *pSchema, const vector<int> &parts, const vector
 		JuncsMoveRotate( dpos, &juncs );
 		dpos.MoveAndRotate( &pt );
 		bool bCellarWall = IsCellarWall( pt, cellarWalls );
-		pSchema->AddNode( pAr, pt, bCellarWall, 0.1f * pAr->pMaterial->fWeight, juncs ); // CRAP - объем для виртуального куска
+		pSchema->AddNode( pAr, pt, bCellarWall, 0.1f * pAr->pMaterial->fWeight, juncs ); // CRAP - volume for virtual part
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -687,7 +687,7 @@ static void SchemaAddSolid( CBuildingSchema *pSchema, const SFragmentPos &frp,
 	NDb::CRPGArmor *pAr = frp.pCPart->pArmor;
 	if ( !pAr )
 		return;
-	// определяем, какие узлы присутсвуют в блоке
+	// find which nodes are inside the block
 	CDGPtr< CPtrFuncBase<NAI::CGeometryInfo> > pSrc = NAI::shareAIModel.Get( nAIGeomID );
 	pSrc.Refresh();
 	NAI::CGeometryInfo *pGI = pSrc->GetValue();
@@ -713,7 +713,7 @@ static void SchemaAddSolid( CBuildingSchema *pSchema, const SFragmentPos &frp,
 static void SchemaAddWall( CBuildingSchema *pSchema, const SBuildFragment &fr, const CBuildingGrid &grid, 
 	int nAIGeomID, const CArray2D<bool> &cellarWalls, NDb::CRPGArmor *pAr )
 {
-	// определяем, какие узлы присутсвуют в блоке
+	// find which nodes are inside the block
 	CDGPtr< CPtrFuncBase<NAI::CGeometryInfo> > pSrc = NAI::shareAIModel.Get( nAIGeomID );
 	pSrc.Refresh();
 	NAI::CGeometryInfo *pGI = pSrc->GetValue();
@@ -861,7 +861,7 @@ static int nTotalNodes = 0;
 static void AddNodeHP( CBuildingGrid *pGrid, const SBuildFragment &fr, int nHashID, int nAGeometryID, 
 											const CVec3 &ptPos, NDb::CRPGArmor *pArmor )
 {
-	// определяем, какие узлы присутсвуют в блоке
+	// find which nodes are inside the block
 	CDGPtr< CPtrFuncBase<NAI::CGeometryInfo> > pSrc = NAI::shareAIModel.Get( nAGeometryID );
 	pSrc.Refresh();
 	NAI::CGeometryInfo *pGI = pSrc->GetValue();

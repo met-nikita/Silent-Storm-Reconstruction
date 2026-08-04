@@ -4,6 +4,7 @@
 #include "MapBuild.h"
 #include "wUnitServer.h"
 #include "RPGGame.h"
+#include "RPGBullet.h"
 #include "RPGGlobal.h"
 #include "RPGStore.h"    // NRPG::CStore -- the serialized vendor stock (CGlobalPlayer tag 3)
 #include "RPGUnitInfo.h"
@@ -2822,12 +2823,21 @@ void CWorld::KillObject( CObjectServerBase *pOS )
 	ActivateDebris( SSphere( pOS->GetPosition(), 5 ), GetAIMap(), pTime );*/
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+void CWorld::PerformRangedAttack( const NRPG::SAttackRayInfo &rayInfo, STime sCast, NDb::CModel *pTrailModel, float fTrailSpeed, NDb::CRPGGrenade *pGrenade, int nFloor )
+{
+	NRPG::PerformRangedAttack( this, rayInfo, sCast, pTrailModel, fTrailSpeed, pGrenade, nFloor );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 void CWorld::PerformRangedAttack( const NRPG::CAttackPortion &ap, const CRay &ray, const vector<NRPG::IAttackable*> &ignores, STime sCast, NDb::CModel *pTrailModel, float fTrailSpeed, float fMaxRange )
 {
-	vector<NRPG::STrailPoint> trail;
-	pRPGGame->ProcessRangedAttackPortion( ap, ray, ignores, &trail, fMaxRange );
-
-	miscObjects.push_back( CreateBulletServer( this, trail, sCast, pTrailModel, fTrailSpeed ) );
+	NRPG::SAttackRayInfo rayInfo( ap, ray.ptOrigin, ray.ptDir, true, 0.0f, fMaxRange, 0 );
+	if ( !ignores.empty() )
+	{
+		CDynamicCast<CObjectBase> pObj( ignores[0] );
+		if ( pObj )
+			rayInfo.pIgnore = pObj;
+	}
+	NRPG::PerformRangedAttack( this, rayInfo, sCast, pTrailModel, fTrailSpeed );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CWorld::ThrowGrenade( const CVec3 &vFrom, const CVec3 &vSpeed, STime tThrow,

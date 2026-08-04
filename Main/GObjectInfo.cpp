@@ -32,7 +32,7 @@ struct SLoadVertexHash
 };
 bool operator==( const SLoadVertex &a, const SLoadVertex &b ) { return memcmp( &a, &b, sizeof(a) ) == 0; }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// �������� �������������
+// discretisation step
 const int N_STEPS_PER_METER = 4096;
 const int N_TEXTURE_PRECISION = 65536;
 const int N_VECTOR_PRECISION = 16384;
@@ -880,7 +880,7 @@ bool CWallObjectInfoClipper::GetClipPlane( SPlane *pPlane, short nClip, bool bLe
 	bool  bPerpen  = nClip & 0x1;
 	bool  bTop     = (nClip >> 3) & 0x1;
 	int   nInWidth = (nClip >> 1) & 0x3;
-	if ( 0 == nInWidth ) // ��� �������� ��������� ������
+	if ( 0 == nInWidth ) // no input clipping plane
 		return false;
 	float fInWidth = ID2Width( nInWidth );
 	short nSrcWidthLen = clipInfo.nClip >> 16;
@@ -888,10 +888,10 @@ bool CWallObjectInfoClipper::GetClipPlane( SPlane *pPlane, short nClip, bool bLe
 	float fWidth   = ID2Width( nWidth );
 	float fLength  = FP_GRID_STEP * (nSrcWidthLen >> 8);
 
-	// ���������������� ������
+	// perpendicular planes
 	if ( bPerpen )
 	{
-		// ���������� ������� -> ���� ��������� ��� 45 ����.
+		// same width -> clip plane under 45 degrees.
 		if ( nInWidth == nWidth )
 		{
 			if ( bLeft )
@@ -911,7 +911,7 @@ bool CWallObjectInfoClipper::GetClipPlane( SPlane *pPlane, short nClip, bool bLe
 			}
 			return true;
 		}
-		// ������ ������� -> ���� ��������� ����� ���� ���������
+		// different width -> clip plane along axis
 		else if ( nInWidth > nWidth )
 		{
 			if ( bLeft )
@@ -922,9 +922,9 @@ bool CWallObjectInfoClipper::GetClipPlane( SPlane *pPlane, short nClip, bool bLe
 		}
 		return false;
 	}
-	// ������������ ������
+	// parallel planes
 	/*
-	// ���� ��������� ����� ������, �� �� �������
+	// if input plane is thinner, don't clip
 	if ( fInWidth < fWidth )
 	return false;
 	*/
@@ -962,7 +962,7 @@ void CWallObjectInfoClipper::Recalc()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CSolidObjectInfoClipper
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// �������� ������� �� ���������
+// solid objects don't clip
 void CSolidObjectInfoClipper::ClipSolid()
 {
 	CPieceMap &faces = pSrc->GetValue()->faces;

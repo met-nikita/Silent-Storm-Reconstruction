@@ -35,7 +35,7 @@ SAIState::SAIState( NWorld::CWorld *_pWorld, CAICommander *_pAICommander ):
 	pWorld( _pWorld ), pCurrentUnit( 0 ), nCurrentAction( 0 ), nTurnStartAllyHP( 0 ),
 	nTurnStartEnemyHP( 0 ), pAICommander( _pAICommander )
 {
-	// ������� AIUnit-� (the ally/enemy roster wrappers; they no longer back-reference the state)
+	// the ally/enemy roster wrappers; they no longer back-reference the state
 	pAlly = CreateAIPlayer();
 	pEnemy = CreateAIPlayer();
 }

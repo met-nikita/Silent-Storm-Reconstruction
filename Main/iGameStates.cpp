@@ -1154,8 +1154,9 @@ bool CStateUse::Initialize( IMission *pMission )
 		return false;
 	}
 
-	CObjectBase* pTargetObject = GetMission()->GetStateTarget();
-	if ( !IsValid( pTargetObject ) )
+	bool bFrom3DWorld = false;
+	CObjectBase* pTargetObject = GetMission()->GetStateTarget( &bFrom3DWorld );
+	if ( !IsValid( pTargetObject ) || !bFrom3DWorld )
 		return false;
 
 	CObjectBase *pObject = pTargetObject;

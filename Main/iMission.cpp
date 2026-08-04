@@ -543,12 +543,24 @@ void CMission::SetUpdatedStates( const vector<CObj<IState> > &_updatedStatesSet 
 	updatedStatesSet = _updatedStatesSet;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CObjectBase* CMission::GetStateTarget() const
+// retail GetStateTarget @0x1fbd40: returns pStateTarget (2D UI decorator hover, pbFrom3DWorld=false)
+// or sTraceResult.pObject (3D world ray trace, pbFrom3DWorld=true).
+CObjectBase* CMission::GetStateTarget( bool *pbFrom3DWorld ) const
 {
+	if ( pbFrom3DWorld )
+		*pbFrom3DWorld = false;
+
 	if ( IsValid( pStateTarget ) )
 		return pStateTarget;
 
-	return sTraceResult.pObject;	// W4.2: the cursor trace now lives in the retail STraceResult record
+	if ( nFramesSameCameraPosition >= 4 && sTraceResult.bObjectSet )
+	{
+		if ( pbFrom3DWorld )
+			*pbFrom3DWorld = true;
+		return sTraceResult.pObject;
+	}
+
+	return 0;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CMission::SetStateTarget( CObjectBase* pObject )

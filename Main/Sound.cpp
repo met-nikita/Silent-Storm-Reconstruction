@@ -410,7 +410,7 @@ void CSoundScene::Draw( CTransformStack *pTS )
 				{
 					NFMSound::SPlayParams p;
 					p.pSample = pData;
-					p.bLoop = pSound->pDBSample->bLoop;
+					p.bLoop = pSound->pDBSample->bLoop || (pSound->pDBSample->nEndingSamples > 0);
 					p.position = pSound->pPos->GetValue();
 					p.nStartMs = pSound->nStartMs;	// retail Draw @0x3052d0: SPlayParams.tStartTime = CSound+0x2c
 					pSound->pSound = NFMSound::Play3DSound( p );

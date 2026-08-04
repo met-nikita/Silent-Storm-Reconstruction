@@ -102,8 +102,8 @@ SInterval::SCrossPoint CTracer::CalcCross( const SRefTriangle &t )
 		}
 		if ( fMinDistance == 1e30f )
 		{
-			// мало того, что параллельный треугольник подсунули, 
-			// так он еще и не пересекается
+			// not only did they slip in a parallel triangle,
+			// it also doesn't intersect
 			ASSERT(0); 
 			fMinDistance = t.a * ptDir;
 		}

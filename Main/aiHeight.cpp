@@ -253,7 +253,7 @@ void CalcHeightMap( NAI::IAIMap *pMap, CHeightMapBlockInfo *pRes, const float fH
 		float fBestDiff = 100;
 		int pI = 0;
 		if ( nY < rect.top || nX < rect.left || nY - rect.top >= rect.bottom || nX - rect.left >= rect.right )
-			continue; // бывает при "переставлении" юнита очень далеко
+			continue; // happens when "relocating" unit very far
 		for ( CFastRenderer::SResult *p = render.resGrid[nY-rect.top][nX-rect.left]; p; p = p->pNext )
 		{
 			if ( IsDoor( p ) )

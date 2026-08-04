@@ -352,7 +352,7 @@ public:
 	virtual bool CommandState( IState *pState ) = 0;
 	virtual void ResetState() = 0;
 	virtual void SetUpdatedStates( const vector<CObj<IState> > &updatedStatesSet ) = 0;
-	virtual CObjectBase* GetStateTarget() const = 0;
+	virtual CObjectBase* GetStateTarget( bool *pbFrom3DWorld = 0 ) const = 0;
 	virtual void SetStateTarget( CObjectBase* pObject ) = 0;
 
 	virtual int GetUnitsState() = 0;
@@ -616,7 +616,7 @@ public:
 	virtual bool CommandState( IState *pState ) { CObj<IState> pHold( pState ); return false; }	// retail CRenderBaseInterface @0x19f1a0
 	virtual void ResetState() {}
 	virtual void SetUpdatedStates( const vector<CObj<IState> > &updatedStatesSet ) {}
-	virtual CObjectBase* GetStateTarget() const { return 0; }
+	virtual CObjectBase* GetStateTarget( bool *pbFrom3DWorld = 0 ) const { if ( pbFrom3DWorld ) *pbFrom3DWorld = false; return 0; }
 	virtual void SetStateTarget( CObjectBase* pObject ) {}
 	virtual int GetUnitsState() { return N_UNITSTATE_DEFAULT; }
 	virtual NWorld::CUnit::EState GetUnitsWorldState() { return NWorld::CUnit::ST_NORMAL_DEFAULT; }	// retail @0x1a16c0 (CRBI override @0x22ecd0)

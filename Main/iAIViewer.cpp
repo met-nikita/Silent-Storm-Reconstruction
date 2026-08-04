@@ -555,33 +555,33 @@ static CVec4 GetArmorColor( int nArmorID )
 {
 	switch ( nArmorID )
 	{
-	case 1: //�������
+	case 1: //Person
 		return CVec4(0.9f,0.9f,0.9f,1);
-	case 2: //�����
+	case 2: //Soil
 		return CVec4(0.5f,0.5f,0,1);
-	case 3: //������
+	case 3: //Stone
 		return CVec4(0.4f,0.4f,0.5f,1);
-	case 4: //������
+	case 4: //Wood
 		return CVec4(0.6f,0.3f,0.1f,1);
-	case 5: //������
+	case 5: //Brick
 		return CVec4(1,0.2f,0,1);
-	case 7: //������
+	case 7: //Foliage
 		return CVec4(0,1,0,0.8f);
-	case 8: //������
+	case 8: //Glass
 		return CVec4(1,1,1,0.5f);
-	case 20: //�������
+	case 20: //Matter
 		return CVec4(1,1,0,1);
-	case 21: //����� (������ ����������)
+	case 21: //Steel (car body)
 		return CVec4(0,1,1,1);
-	case 22: //���������� ����������
+	case 22: //Homogeneous armored steel
 		return CVec4(0,0.6f,1,1);
-	case 23: //���������� ���������������
+	case 23: //Cemented armored steel
 		return CVec4(0,0,1,1);
-	case 24: //��������
+	case 24: //Roof tiles
 		return CVec4(0.9f,0.6f,0.4f,1);
-	case 25: //�������������
+	case 25: //Indestructible
 		return CVec4(1,0,1,1);
-	case 26: //����� ������������ (crap)
+	case 26: //Extra-strong concrete (crap)
 		return CVec4(0.5f,0,0.5f,1);
 	}
 	return CVec4(0,0,0,1);

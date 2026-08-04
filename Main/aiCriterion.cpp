@@ -129,8 +129,8 @@
 //////////////////////////////////////////////////////////////////////////////////////////////////////
 //float CAIToHitCriterion::GetExpediency()
 //{
-//	// если ToHit >= nShoot то никуда не двигаемся
-//	// если ToHit <= nShoot то бежим вперед
+//	// if ToHit >= nShoot don't move
+//	// if ToHit <= nShoot run forward
 //	const int nShoot = 20;
 //	//
 //	CPtr<IAIUnit> pUnit = pAIState->GetCurrentAIUnit();
@@ -237,7 +237,7 @@
 //	CPtr<IAIUnit> pUnit = pAIState->GetCurrentAIUnit();
 //	if ( !IsValid( pUnit ) )
 //		return 0;
-//	// повреждения нанесенные врагам
+//	// damage dealt to enemies
 //	int nEnemyDamage = pUnit->GetHurtHP() + pUnit->GetAdditionalExpediency();
 //	return pHPConverter->Convert( nEnemyDamage );
 //}

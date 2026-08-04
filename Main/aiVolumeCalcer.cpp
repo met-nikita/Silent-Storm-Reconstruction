@@ -18,15 +18,15 @@ namespace NAI
 public:
 	ZDATA
 	vector<WORD> Points; // точки
-	unordered_map< WORD, CVec3 > PointsCoords; // координаты точек
-	unordered_map< WORD, vector<WORD> > Connectivities; // соединения между точками
+	unordered_map< WORD, CVec3 > PointsCoords; // points coordinates
+	unordered_map< WORD, vector<WORD> > Connectivities; // links between points
 	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&Points); f.Add(3,&PointsCoords); f.Add(4,&Connectivities); return 0; }
 	//
 	CConnectedPoints() {}
 	//
 	void DebugOutput( const char *szTitle );
 	void AddPoint( WORD n );
-	void RemovePoint( WORD n ); // удаляет точку и ребра ее содержащие
+	void RemovePoint( WORD n ); // deletes the point and the edges containing it
 	void RemoveIncorrectPoints( WORD k );
 	void AddPointCoords( WORD n, CVec3 pt );
 	void AddConnectivity( WORD n1, WORD n2 );

@@ -230,7 +230,7 @@ void CWeaponItem::CreateNewAttackPortion( vector<CAttackPortion> *pRes, bool bSp
 	float fPushCoeff = pAmmo->fCalibr * pAmmo->fCalibr * FP_PI *
 		( (float)pDBWeapon->nInitialVelocity * pAmmo->fWeight ) * 2.5e-7f;
 	pRes->push_back( CAttackPortion( nK, pAmmo->nBulletType, fPushCoeff, info.nDmgMin, info.nDmgMax,
-	info.nArmorPiercingAbility, 0 ) ); // ����������� � ��������� critical ����������� � RPGUnitMission
+	info.nArmorPiercingAbility, 0 ) ); // probability and severity of critical is calculated in RPGUnitMission
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 int CWeaponItem::GetClipType() const
@@ -274,10 +274,10 @@ bool CWeaponItem::FindProperClip( IInventoryInfo *pInventory,
 	SFindClipResult *pResult, bool bCheckSameColor ) const
 {
 	ASSERT( pResult );
-	// ���� ������� � ����� �� �����������, �� ���� ����� ������ ������ ��� �� ��� ��������
+	// if the magazine is not empty, you can only add the same type of cartridges
 	bool bSameColor = bCheckSameColor || pInnerClip->GetIncQuantity() > 0;
-	// ���� ������ ������ �� ���� ��� ������ � ������
-	// ���� � slot-��
+	// Search for a magazine of the same type as the weapon currently has
+	// Search in slots
 	for ( int i = 0; i < NDb::N_SLOTS; ++i )
 	{
 		CDynamicCast<CClipItem> pClip(pInventory->Get(NDb::ESlot(i)));
@@ -292,7 +292,7 @@ bool CWeaponItem::FindProperClip( IInventoryInfo *pInventory,
 			}
 		}
 	}
-	// ���� � �������
+	// search in backpack
 	const vector<SBackPackItem> &items = pInventory->GetItems();
 	for ( int i = 0; i < items.size(); ++i )
 	{
@@ -418,7 +418,7 @@ void CMeleeWeaponItem::CreateNewAttackPortion( vector<CAttackPortion> *pRes )
 	pRes->push_back( CAttackPortion(
 		110, 2, 0.0f, // retail @0x2a0850 passes fPushCoeff=0 -- melee kills never push the corpse
 		pDBMelee->nDmgMin, pDBMelee->nDmgMax,
-		0, 0 ) ); // piercing ability(+str*10), ����������� � ��������� critical ����������� � RPGUnitMission
+		0, 0 ) ); // piercing ability(+str*10), probability and severity of critical is calculated in RPGUnitMission
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 NDb::EWeaponType CMeleeWeaponItem::GetWeaponType() const
@@ -462,7 +462,7 @@ IInventoryItem *CreateClipItem( NDb::CRPGClip *pDBClip, NDb::CRPGAmmo *pDBAmmo, 
 	CDBPtr<NDb::CRPGAmmo> pTmpDBAmmo = pDBAmmo;
 	if ( !IsValid( pTmpDBAmmo ) )
 	{
-		// ���� ���������� �������
+		// search for appropriate ammo
 		CDBTable<NDb::CRPGAmmo> *pAmmoTable = NDatabase::GetTable<NDb::CRPGAmmo>();
 		CDBIterator<NDb::CRPGAmmo> i(*pAmmoTable);
 		while ( pAmmoTable && i.MoveNext() )
@@ -488,8 +488,8 @@ IInventoryItem *CreateClipItem( NDb::CRPGClip *pDBClip, NDb::CRPGAmmo *pDBAmmo, 
 	}
 	else
 	{
-		// � ���� ������ ��� ����������� clip-�
-		// ������ ����������
+		// database doesn't have appropriate clip
+		// designer error
 		ASSERT( 0 );
 	}
 	//

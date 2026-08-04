@@ -533,17 +533,11 @@ bool PeekRay( CCoverInfo *pCover, CRay *pRes, float fHit, bool *bIsMiss, bool bS
 	*bIsMiss = true;
 	pRes->ptOrigin = pCover->src;
 	float fMaxAngle = cos(ToRadian(8.f));
-	if ( fHit > 1 )
+	if ( fHit >= 1 )
 	{
 		ASSERT( pCover->hitRays.size() > 0 );	// super strange: cover is only passed here once at least 20 rays have been collected
 		if ( pCover->hitRays.empty() )
 		{
-			// translated dev diagnostic (the original Russian text was U+FFFD-corrupted in the dev copy).
-			// RETAIL-AUTHENTIC: NRPG::RealPeekRay @0x2b3f00 prints the same (Russian) line under the
-			// identical condition -- a guaranteed-hit ray requested while hitRays is empty (target fully
-			// obstructed) -- and returns false. The print is benign; the real bug was upstream: the
-			// ToHit calcer gate had `< 0` where retail has `<= 0` (see RPGToHit.cpp GetToHit overloads),
-			// so a fully-blocked target still showed a non-zero % and the shot could be ordered at all.
 			csRPG << "Kick the programmers!!! Do it right now!!!" << endl;
 			return false;
 		}

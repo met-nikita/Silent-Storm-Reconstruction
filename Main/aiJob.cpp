@@ -92,7 +92,7 @@ void CAIJobManager::Refresh()
 		if ( !IsValid( *i ) && find( jobsToRemove.begin(), jobsToRemove.end(), *i ) == jobsToRemove.end() )
 			jobsToRemove.push_back( *i );
 	}
-	// ������� ������ ������
+	// delete old tasks
 	for ( list< CPtr<IAIJob> >::iterator i = jobsToRemove.begin(); i != jobsToRemove.end(); ++i )
 	{
 		vector< CPtr<IAIJob> >::iterator t = find( jobs.begin(), jobs.end(), *i );
@@ -104,7 +104,7 @@ void CAIJobManager::Refresh()
 	}
 	// 
 	jobsToRemove.clear();
-	// ���������
+	// update
 	nCurrentJob = 0;
 	//DebugOutput();
 }
@@ -136,10 +136,10 @@ void CAIJobManager::Remove( IAIJob *pAIJob )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CAIJobManager::CanSkip()
 {
-	// ���� ��� �����
+	// if no tasks
 	if ( jobs.empty() )
 		return true;
-	// ���� ����� �� ����� ������ :)
+	// if no one wants to think :)
 	for ( int k = 0; k < jobs.size(); ++k )
 	{
 		CPtr<IAIJob> &pAIJob = jobs[k];

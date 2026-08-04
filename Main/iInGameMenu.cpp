@@ -88,9 +88,6 @@ bool CInGameMenuUI::ProcessMessage( const SEvent &sEvent )
 			pExitToMainMenu->AddTextState( CHoverButton::STATE_NORMAL, GetDBString( 11143 ) + GetDBString( 11149 ) );
 			pExitToMainMenu->AddTextState( CHoverButton::STATE_DISABLED, GetDBString( 11145 ) + GetDBString( 11149 ) );
 
-			// retail CInGameMenuUI @0x1e9df0 (disasm 0x5ead68: label id 0x4f19 = 20249 'Restart
-			// mission' -- NOT the lose dialog's 18970 'Заново'); enabled only when the menu was
-			// opened from a mission (bAllowRestart).
 			pRestartMission = new CHoverButton( sEvent.pLoader->GetControl( "restart" ) );
 			pRestartMission->AddTextState( CHoverButton::STATE_HOVER, GetDBString( 11144 ) + GetDBString( 20249 ) );
 			pRestartMission->AddTextState( CHoverButton::STATE_NORMAL, GetDBString( 11143 ) + GetDBString( 20249 ) );

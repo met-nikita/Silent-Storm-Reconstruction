@@ -20,7 +20,7 @@ namespace NGScene
 void CLODCalcer::Recalc() 
 {
 	float fDist = fabs2( ptCenter - pCamera->GetValue() ); 
-	value = fDist > sqr(4 * 8 * FP_GRID_STEP) ? 1 : 0; // 3 * 8 * GRID_STEP � ��������
+	value = fDist > sqr(4 * 8 * FP_GRID_STEP) ? 1 : 0; // 3 * 8 * GRID_STEP squared
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // Functions

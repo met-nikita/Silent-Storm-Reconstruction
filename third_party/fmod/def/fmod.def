@@ -31,6 +31,7 @@ EXPORTS
     _FSOUND_Sample_SetMode@8
     _FSOUND_Sample_SetDefaults@20
     _FSOUND_Sample_SetMinMaxDistance@12
+    _FSOUND_Sample_SetLoopPoints@12
     _FSOUND_PlaySound@8
     _FSOUND_PlaySoundEx@16
     _FSOUND_StopSound@4

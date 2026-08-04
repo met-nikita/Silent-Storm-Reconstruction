@@ -1054,7 +1054,10 @@ void CExecShoot::OnLabel()
 		//   AC_END_SHOOT + CheckShotResult. The retail weapon-empty notify / UpdateVision world
 		//   sinks remain deferred -- see the header.)
 		if ( IsValid( longBurstSnd.pLongBurstSnd ) && GetShootMode() == NDb::SM_LongBurst )
+		{
 			longBurstSnd.pLongBurstSnd->EndSound();
+			longBurstSnd.pLongBurstSnd = 0;
+		}
 		pUS->DoAction( NRPG::AC_END_SHOOT );
 		CheckShotResult();
 	}
@@ -1073,13 +1076,6 @@ void CExecShoot::OnLabel()
 // derive that interface in-tree, so the cross-cast never resolves; the whole medal-session subsystem is unwired.)
 void CExecShoot::PerformAttack()
 {
-	vector<NRPG::IAttackable*> ignores;
-	CCannon *pCannon = pUS->animator.GetCannon();
-	if ( pCannon )
-		ignores.push_back( pCannon );
-	else
-		ignores.push_back( pUS );
-
 	float fTrailSpeed = 0;
 	CPtr<NDb::CModel> pTrailEffect = 0;
 	NRPG::IWeaponItem *pWeapon = pUS->GetUnitRPG()->GetWeaponItem();
@@ -1093,9 +1089,7 @@ void CExecShoot::PerformAttack()
 		pTrailEffect = pWeapon->GetDBWeapon()->pTrailEffect->CreateModel( &sRand );
 	}
 
-	CRay rTempRay( rayInfo.GetRay() );
-	rTempRay.ptOrigin += rayInfo.vDir * pUS->GetMinClearDistance();
-	pUS->GetWorld()->PerformRangedAttack( attack, rTempRay, ignores, pUS->GetWorld()->GetTime()->GetValue(), pTrailEffect, fTrailSpeed );
+	pUS->GetWorld()->PerformRangedAttack( rayInfo, pUS->GetWorld()->GetTime()->GetValue(), pTrailEffect, fTrailSpeed );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // @0x3a1fa0 -- retail CheckBurst(nFired, bDoAction): may the burst keep firing? (return TRUE == continue) and,
@@ -1350,6 +1344,11 @@ void CExecShoot::OnBulletGo()
 	}
 
 	bAttackCanceled = true;   // nothing more to fire -> OnLabel ENDs the shot next tick
+	if ( IsValid( longBurstSnd.pLongBurstSnd ) && GetShootMode() == NDb::SM_LongBurst )
+	{
+		longBurstSnd.pLongBurstSnd->EndSound();
+		longBurstSnd.pLongBurstSnd = 0;
+	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // @0x3a8d20 -- per-tick timed-bullet driver. Samples world-time ONCE; as it crosses tNextBulletPrepare it

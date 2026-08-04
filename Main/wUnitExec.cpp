@@ -191,11 +191,7 @@ public:
 				return;
 			//
 			vector<NRPG::IAttackable *> ignores;
-			CPtr<CCannon> pCannon = pUS->animator.GetCannon();
-			if ( pCannon )
-				ignores.push_back( pCannon );
-			else
-				ignores.push_back( pUS );
+			ignores.push_back( pUS );
 			//
 			CPtr<NRPG::IWeaponItem> pWeaponItem = pUS->GetUnitRPG()->GetWeaponItem();
 			if ( !IsValid( pWeaponItem ) )
@@ -211,8 +207,11 @@ public:
 			//
 			ray.ptOrigin += ray.ptDir * pUS->GetMinClearDistance();
 			for ( vector<NRPG::CAttackPortion>::const_iterator i = attack.begin(); i != attack.end(); ++i )
-				pUS->GetWorld()->PerformRangedAttack( *i, ray, ignores, 
-					pUS->GetWorld()->GetTime()->GetValue(), pTrailEffect, pWeapon->fTrailSpeed );
+			{
+				NRPG::SAttackRayInfo rayInfo;
+				NRPG::MakeAccidentalShot( &rayInfo, pUS, pUS->GetPosition(), *i, ray.ptOrigin, ray.ptDir, 30.0f );
+				pUS->GetWorld()->PerformRangedAttack( rayInfo, pUS->GetWorld()->GetTime()->GetValue(), pTrailEffect, pWeapon->fTrailSpeed );
+			}
 			pUS->CreateFlash( false, false );   // @0x3b6d10 accidental shot -> right barrel, single sound
 		}
 	}

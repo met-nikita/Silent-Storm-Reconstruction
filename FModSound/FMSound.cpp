@@ -39,7 +39,7 @@ struct SFSoundSample
 };
 #define NOCOPIES( c ) c(const c&) {ASSERT(0); } c& operator=(const c&) {ASSERT(0); return *this;}
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// ��� ������ �� ����� ������� ������������ � ���������� � FMod
+// This is the audio data that is unpacked and loaded into FMod.
 class CSample2D: public CObjectBase
 {
 	OBJECT_BASIC_METHODS(CSample2D);
@@ -50,7 +50,7 @@ public:
 	operator FSOUND_SAMPLE*() const { return sample.hSample; }
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// ��� ������ �� ����� ������� ������������ � ���������� � FMod
+// This is the audio data that is unpacked and loaded into FMod.
 class CSample3D: public CObjectBase
 {
 	OBJECT_BASIC_METHODS(CSample3D);
@@ -537,13 +537,15 @@ CSample2D *LoadSample2D( const void *pData, int nLength )
 	return NewSample( hSample, (CSample2D*)0 );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CSample3D *LoadSample3D( const void *pData, int nLength, float fMinDistance, float fMaxDistance, int nPriority )
+CSample3D *LoadSample3D( const void *pData, int nLength, float fMinDistance, float fMaxDistance, int nPriority, int nStartSamples, int nEndingSamples )
 {
 	if ( !bIsFMODInitialized )
 		return 0;
 	FSOUND_SAMPLE *hSample;
 	hSample = FSOUND_Sample_Load( FSOUND_UNMANAGED, (const char*)pData, FSOUND_HW3D | FSOUND_LOADMEMORY, 0, nLength );
 	FSOUND_Sample_SetDefaults( hSample, -1, -1, -1, nPriority );
+	if ( nEndingSamples > nStartSamples )
+		FSOUND_Sample_SetLoopPoints( hSample, nStartSamples, nEndingSamples );
 	CSample3D *pRes = NewSample( hSample, (CSample3D*)0 );
 	pRes->SetMinMaxDistance( fMinDistance, fMaxDistance );
 	return pRes;

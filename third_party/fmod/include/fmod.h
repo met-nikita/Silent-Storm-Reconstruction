@@ -90,6 +90,7 @@ unsigned int   __stdcall FSOUND_Sample_GetLength( FSOUND_SAMPLE *sptr );
 signed char    __stdcall FSOUND_Sample_SetMode( FSOUND_SAMPLE *sptr, unsigned int mode );
 signed char    __stdcall FSOUND_Sample_SetDefaults( FSOUND_SAMPLE *sptr, int deffreq, int defvol, int defpan, int defpri );
 signed char    __stdcall FSOUND_Sample_SetMinMaxDistance( FSOUND_SAMPLE *sptr, float min, float max );
+signed char    __stdcall FSOUND_Sample_SetLoopPoints( FSOUND_SAMPLE *sptr, int loopstart, int loopend );
 
 // ---- channels ----
 int            __stdcall FSOUND_PlaySound( int channel, FSOUND_SAMPLE *sptr );

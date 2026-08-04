@@ -21,6 +21,7 @@
 //   * CanHitTarget (needs the shooter diplomacy/relation -> ally mapping) and the
 //     per-ray GetHitIntersections (reads a finished CCoverInfo) are deferred.
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+#include "time.h"
 #include "RPGGame.h"      // NRPG::STrailPoint, NRPG::CAttackPortion, NRPG::IAttackable, EAttackResult, CRay, CObj/CPtr, vector, NDb::CRPGArmor
 #include "aiRender.h"     // NAI::CFastRenderer::SResult / SSourceInfo
 #include "aiPosition.h"   // NAI::SUnitPosition / SPosition / SPathPlace
@@ -118,6 +119,12 @@ void PerformMeleeAttackPortion( NWorld::IWorld *pWorld, NAI::IAIMap *pAIMap, con
 // @0x290d80 -- build the cumulative AP-left profile across the cover chain.
 void CalcCoverIntervals( NAI::CFastRenderer::SResult *pList, const SAttackRayInfo &ray,
 	NDb::CRPGArmor *pFallbackArmor, vector<SCoverInterval> *pOut );
+// @0x292830 -- build loose fly-past tracer trail for missed shots
+void TraceLooseRay( NAI::IAIMap *pAIMap, const SAttackRayInfo &rayInfo, vector<STrailPoint> *pTrail );
+// @0x292010 -- trace segment of loose ray through obstacles
+void TraceLooseRaySegment( NAI::IAIMap *pAIMap, const SAttackRayInfo &rayInfo, vector<STrailPoint> *pTrail, const CVec3 &vOrigin, const CVec3 &vDir, float fRange );
+// @0x2929e0 -- retail ranged attack entry point
+CObjectBase * PerformRangedAttack( NWorld::IWorld *pWorld, const SAttackRayInfo &rayInfo, STime sCast, NDb::CModel *pTrailModel, float fTrailSpeed, NDb::CRPGGrenade *pGrenade = 0, int nFloor = 100 );
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 } // namespace NRPG
 ////////////////////////////////////////////////////////////////////////////////////////////////////

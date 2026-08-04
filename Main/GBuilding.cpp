@@ -84,7 +84,7 @@ void CBuilding::Build( IGScene *pScene, CMaterialShare *pMaterials )
 {
 	IGScene &scene = *pScene;
 	renderParts.clear();
-	// build info - статические данные, поэтому возвращаемеое значение Refresh не проверяется
+	// build info is static data, so the Refresh return value is not checked
 	const SBuildingInfo &info = pBInfo->GetInfo();
 	NBuilding::SPart part;
 	part.nID = nPartID;
@@ -323,12 +323,12 @@ void CLightCalcer::Recalc()
 		{
 			if ( rooms[j][i] == nRoom )
 			{
-			// разрушенный объем / весь объем
+			// destroyed volume / total volume
 //				nTotal += 5;
 //				for ( int k = 1; k <= 5; ++k )
 //					nDestroyed += pBuildingGrid->IsDestroyed( nFloor, i, j, k );
 
-			// разрушенная площадь / вся площадь
+			// destroyed square / whole square
 				nTotal += 2;
 				const SPoint3 p( i -1, j - 1, nFloor * 4 - 1);
 				nDestroyed += pBuildingGrid->IsDestroyed( p );

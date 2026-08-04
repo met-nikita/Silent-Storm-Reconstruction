@@ -15,7 +15,7 @@ void CBuildingSchema::Reserve( int nJuncs, int nRods )
 	rods.reserve( nRods );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// � ����� �,� �� ����� ������������ ����� ���������� ������ ���� ����
+// at a point x,y on the ground there can be only one node at a time
 void CBuildingSchema::CheckGroundHash( CJunction *pJ )
 {
 	ASSERT( pJ );
@@ -46,12 +46,12 @@ CRod* CBuildingSchema::AddRod( NDb::CRPGArmor *pArmor, SRodEdge ptLeft, SRodEdge
 	if ( ptLeft == ptRight || (ptLeft.pt.x != ptRight.pt.x && ptRight.pt.y != ptLeft.pt.y && ptLeft.pt.z != ptRight.pt.z) 
 		|| fabs2( ptLeft.pt - ptRight.pt ) > 1 )
 	{
-		ASSERT( 0 ); // ������ �������������� ��� ������������ �������
+		ASSERT( 0 ); // only horizontal or vertical rods
 		return 0;
 	}
 #endif
 	//
-	if ( ptRight.pt.z < ptLeft.pt.z ) // �������������� ����� ������� (����� ���� ���� ������� � �.�)
+	if ( ptRight.pt.z < ptLeft.pt.z ) // ordering the edges of the rod (the left edge is lower than the right, etc.)
 		swap( ptLeft, ptRight );
 	else if ( ptRight.pt.y < ptLeft.pt.y )
 		swap( ptLeft, ptRight );
@@ -82,7 +82,7 @@ CRod* CBuildingSchema::AddRod( NDb::CRPGArmor *pArmor, SRodEdge ptLeft, SRodEdge
 		if ( IsRodValid( pLJ->GetRod( dir ) ) )
 		{
 			CRod *pR = GetRod( pLJ->GetRod( dir ) );
-			// ����� �������� ��� ����
+			// this rod already exists
 			//pLJ->AddWeight( ptLeft.fWeight );
 			//pRJ->AddWeight( ptRight.fWeight );
 			if ( ptLeft.bFilled && !pLJ->IsFilled() )
@@ -211,7 +211,7 @@ bool CBuildingSchema::Destroy( CBuildingGrid *pGrid, CJunction *pJ, int nDepth, 
 			return true;
 		}
 	}
-	// �� ������� ��������� �� ���� ���� 
+	// coudn't destroy any node
 	for ( int i = XP; i < NDIRECTIONS; ++i )
 	{
 		CJunction *pNJ = pJ->GetNeighbour( EDirection(i) );
@@ -325,7 +325,7 @@ void CBuildingSchema::ComputeStability()
 		}
 		CJunction *pI = GetJunction( sortedJuncs[i] );
 		const int nz = pI->ptJ.z;
-		// �������������� ��������� ���� �� ����������� ����
+		// initialize layer state according to previous layer
 		for ( j = i; j < sortedJuncs.size(); ++j )
 		{
 			if ( !IsJunctionValid( sortedJuncs[j] ) )
@@ -337,7 +337,7 @@ void CBuildingSchema::ComputeStability()
 		}
 		bool bChanges = true;
 		int  nIterations = 0;
-		// ���� ��� ���������� ���������, ���������� ��������
+		// continue iteration while changes happen
 		while ( bChanges )
 		{
 			bChanges = false;
@@ -390,10 +390,10 @@ void CBuildingSchema::FindFree()
 {
 	for ( vector<CJunction>::iterator pJ = juncs.begin(); pJ != juncs.end(); ++pJ )
 	{
-		//ASSERT( pJ->GetStability() != CJunction::UNKNOWN ); // ��� �� ��������� ������������ ����
+		//ASSERT( pJ->GetStability() != CJunction::UNKNOWN ); // node stability is not calculated yet
 //		if ( !pJ->IsFilled() && !pJ->HasRightAngle() )
 //		{
-			// ���� ���� �� ������������� ��������� ������������� ����� � � ���� ��� �������� ��� 90 ����., �� ���������� ���
+			// If the node doesn't match the actual building block and doesn't have 90 degree rods, then throw it away.
 //			pJ->SetStability( CJunction::FREE );
 //			continue;
 //		}

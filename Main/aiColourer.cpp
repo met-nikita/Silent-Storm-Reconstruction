@@ -375,14 +375,14 @@ void CMapColourer::CalcDistanceTableForColor(
 void CMapColourer::CreateZonesMap( SNet *pZones, vector<CNodesLayer::SLadder> *pLadders )
 {
 	SNet &zones = *pZones;
-	// ������������� �����, ���� ��� ��� ���� ���������
+	// rebuild map, if already built
 	zones.Clear();
 	if (zones.nodes.size()<nLocalColors)
 		zones.nodes.resize(nLocalColors);
 	for (WORD wCurrColor = 0; wCurrColor < nLocalColors; ++wCurrColor)
 		zones.nodes[wCurrColor].wColor = wCurrColor;
 
-	// ���������� ���������, ������ ����
+	// define path finding structures
 	EPathfinderMode mode;
 	CSquareMapCosts *pTable;
 	if ( pZones == &zonesStandOnly )
@@ -395,7 +395,7 @@ void CMapColourer::CreateZonesMap( SNet *pZones, vector<CNodesLayer::SLadder> *p
 		mode = PM_ANY_MOVE;
 		pTable = &pointDistancesAnyMove;
 	}
-	// ��� ������� �����, ������� ������� ����������, ���� ���� � �������
+	// search path to neighbor for every truly existing color
 	SRectColorConstraint<unsigned char> constraints(0, 0, 24, 24);
 	CWaysCounter counter( pTable, &constraints, pMap, CTPoint<unsigned char>(0, 0) );
 	for (WORD wCurrColor = 0; wCurrColor < nLocalColors; ++wCurrColor)
@@ -444,7 +444,7 @@ void CColouredWaysCalcer::CalcBestWays( CPathNetwork *pPathNet, CLayerColorConst
 		bPrevStandOnly = bStandOnly;
 		prevSrc = src;
 		distances.clear();
-		// ���������� ������ ���� � ������� ����������
+		// write path beginning into distance table
 		start = src;
 		distances[src].distance = 0;
 		distances[src].parent.MakeNull();
@@ -452,11 +452,11 @@ void CColouredWaysCalcer::CalcBestWays( CPathNetwork *pPathNet, CLayerColorConst
 		distances[src].next.MakeNull();
 		distances[src].isProceeded = distances[src].isInList = true;
 	}
-	// �������� �����
+	// start search
 	for ( int i = 0; i < dst.size(); ++i )
 	{
 		CUpperNetWay way;
-		// ��������, �� ���������� �� �� ��� ��� ����
+		// check, if we calculated that zone already
 		CZonesToDistInfo::iterator calced = distances.find( dst[i] );
 		if ( calced != distances.end() )
 		{
@@ -480,21 +480,21 @@ void CColouredWaysCalcer::CalcBestWays( CPathNetwork *pPathNet, CLayerColorConst
 		{
 			firstNotFound = i;
 			break;
-			// ���� ������� ������� false, ������, � ������� ������ ��� ���������� �� ���� ���, ��� ���� ���������.
-			// ������� ����������� �� ������ �� ����� ������
+			// if function returned false, it means the table has distances to all reachable zones.
+			// so there is no sense in further calculation
 		}
 	}
 	if ( firstNotFound == -1 )
 		return;
 	//OutputDebugString("[ GLOBAL WAY SEARCH ] Way not found! \n");
-	// ���� �� ���� ������ ���� ������ false.
-	// �������������, ���� ������ "��������� �����������". 
+	// at least one pathfind returned false.
+	// so need to search for "nearest approximation". 
 	for ( int i = firstNotFound; i < dst.size(); ++i )
 	{
 		CUpperNetWay way;
 		CZonesToDistInfo::iterator calced = distances.find( dst[i] );
 		SZone best;
-		if ( calced == distances.end() ) // ���� ������������� �����������
+		if ( calced == distances.end() ) // the zone is truly unreachable
 		{
 			float bestDist = 1e8;
 			float fKoeff = ( FP_GRID_STEP / 32 );
@@ -651,7 +651,7 @@ void CMapColourer::ClearColor( EPathfinderMode mode, CPathNetwork* pNet, WORD wC
 		pMyNeighbours = &zonesStandOnly.nodes[wColor].neighbours;
 	else
 		pMyNeighbours = &zonesAnyMove.nodes[wColor].neighbours;
-	// ������� � ������� �� � ������� ������ ������ �� ������ ����
+	// remove references to this color from neighbors from other layers
 	for ( list<SNeighbour>::iterator i = pMyNeighbours->begin(); i != pMyNeighbours->end(); ++i )
 	{
 		if ( i->nLayer == nLayer )
@@ -673,14 +673,14 @@ void CMapColourer::ClearColor( EPathfinderMode mode, CPathNetwork* pNet, WORD wC
 			}
 		}
 	}
-	// ������, ����� ���� ���� ��������� ���������
+	// color fully cleared case
 	if ( localColorCounts[ wColor ] == 0 )
 	{
 		pMyNeighbours->clear();
 		return;
 	}
 	list<SNeighbour> temp;
-	// ������, ����� ��������� ������ ������ �� �������, ������� ��������� ���������
+	// only references to fully cleared neighbors clear case
 	for ( list<SNeighbour>::iterator i = pMyNeighbours->begin(); i != pMyNeighbours->end(); ++i )
 	{
 		if ( i->nLayer != nLayer )
@@ -866,7 +866,7 @@ void CMapColourer::RecalcColouring( CPathNetwork *pNet, int nCurrentLayer )
 			zonesAnyMove.nodes[wCurrColor].wColor = wCurrColor;
 	}
 
-	// ���������� ���������, ������ ����
+	// define path finding structures
 	SRectColorConstraint<unsigned char> constraints(0, 0, 24, 24);
 	CWaysCounter counterStandOnly(&pointDistancesStandOnly, &constraints, pMap, CTPoint<unsigned char>(0, 0) );
 	CWaysCounter counterAnyMove(&pointDistancesAnyMove, &constraints, pMap, CTPoint<unsigned char>(0, 0) );
@@ -901,7 +901,7 @@ void CMapColourer::RecalcColouring( CPathNetwork *pNet, int nCurrentLayer )
 			for ( unsigned char cY = cMinBlockY; cY < cMaxBlockY; ++cY )
 				mustInvestigate[ cY ][ cX ] = true;
 	}
-	// ��� ������ ���� ��������������� ������ � MustInvestigate ��������� �����
+	// add link between every adjacent color pair in MustInvestigate
 	unsigned char cX, cY;
 	for ( cX = 0; cX < ( (nSizeX + 7) >> 3 ); ++cX )
 	{
@@ -1124,9 +1124,9 @@ void CMapColourer::FindAdjacentColours( unsigned char cMinX, unsigned char cMinY
 		}
 	}
 	// add ladders
-	// � ���� ����� �� ��������� ������� � ������ ����� �� ��������, ���� �� ����.
-	// ������� � ������� �������� �������� ����� �������� �����, � ������ AttachTransitions
-	// �.�. ������ ��� �� ����, ��� ��� ���� ������ ��������
+	// here we add transition from lower point onto the ladder, if it exists
+	// transition from higher half of the ladder will be calculated later, in AttachTransitions
+	// because that layer may not be yet calculated
 	if ( !pLadders )
 		return;
 	vector<CNodesLayer::SLadder> &ladders = *pLadders;

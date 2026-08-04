@@ -319,9 +319,9 @@ void CPassCalcer::TestLayMovesInDirection( NAI::CCollider *pCollider, CArray2D<S
 			SDoorColliderAnalyzer analyzer;
 			if ( fDiffH > 0.05f )
 			{
-				// ��� ���� �� ���� ������� �������������, ����� ��������� ������� �����
-        // ���� ����� Crap, ������������� ������ � ���, ��� �� �� ������ ������� ������
-				// �� �� ������, �� ������� ��� ��� �� �������� �������� �����
+				// here, in theory, we need to construct a perpendicular to correctly position the spheres
+				// for now, there will be workaround, which simply consists of raising them
+				// to a height at which they no longer touch the original points
 				float fHypotenuse = fabs( vel );
 				float fCosInv = fHypotenuse / fStep;
 				ptCenter.z = fSrcHeight + F_CHECK_HEIGHT_MOVE * fCosInv + 0.15f;

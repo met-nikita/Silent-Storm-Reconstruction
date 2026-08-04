@@ -3,6 +3,8 @@
 #include "aiMap.h"				// NAI::IAIMap::Trace
 #include "aiGrid.h"				// NAI::CPathNetwork (complete -- for SPosition::pNet refcount)
 #include "wInterface.h"			// NWorld::CUnit / IWorld
+#include "wMain.h"				// NWorld::CWorld
+#include "wBullet.h"				// NWorld::CreateBulletServer
 #include "wUnitServer.h"			// NWorld::CUnitServer (complete -- for CObj<CUnitServer>)
 #include "wTSFlags.h"			// NWorld::TS_*
 #include "RPGUnitMission.h"		// NRPG::IUnitMissionInfo (complete -- for CAttackPortion's CPtr members)
@@ -205,6 +207,118 @@ void CalcCoverIntervals( NAI::CFastRenderer::SResult *pList, const SAttackRayInf
 		if ( fAP <= 0 )
 			break;
 	}
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// NRPG::TraceLooseRaySegment @0x292010
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void TraceLooseRaySegment( NAI::IAIMap *pAIMap, const SAttackRayInfo &rayInfo, vector<STrailPoint> *pTrail, const CVec3 &vOrigin, const CVec3 &vDir, float fRange )
+{
+	if ( !pAIMap || !pTrail )
+		return;
+
+	CRay ray; ray.ptOrigin = vOrigin; ray.ptDir = vDir;
+	CAttackPortion tmpAttackPortion( rayInfo.atk );
+	tmpAttackPortion.rTtrajectory = ray;
+
+	vector<NAI::SInterval> intersect;
+	pAIMap->Trace( ray, &intersect, NWorld::TS_FRAGMENTED );
+
+	for ( vector<NAI::SInterval>::iterator i = intersect.begin(); i != intersect.end(); ++i )
+	{
+		if ( i->enter.fT > 0 && i->enter.fT < fRange )
+		{
+			CObjectBase *pUD = i->pSrc->pUserData;
+			if ( pUD && pUD == rayInfo.pIgnore.GetPtr() )
+				continue;
+
+			NDb::CRPGArmor *pArmor = i->pSrc->pArmor;
+			if ( !pArmor )
+				pArmor = NDb::GetArmor( NDb::N_DEFAULT_ARMOR );
+
+			bool bDrawExit = false;
+			if ( !tmpAttackPortion.IsArmorIgnored( pArmor ) )
+			{
+				bDrawExit = true;
+				// pAttackTarget is NULL so no intended target damage is resolved for loose ray
+				pTrail->push_back( STrailPoint( i->nUserID, ray.ptDir, ray.Get( i->enter.fT ), tmpAttackPortion, 0, pUD, pArmor, -i->enter.ptNormal, i->pSrc->nFloor ) );
+				if ( !tmpAttackPortion.CanDealDmg( pArmor ) )
+					return;
+			}
+			tmpAttackPortion.nK -= GetAPASubstraction( i->enter.fT, i->exit.fT, pArmor );
+			if ( tmpAttackPortion.nK <= 0 )
+				return;	// bullet stopped by obstacle
+			if ( bDrawExit && i->exit.fT > 0 && i->exit.fT < fRange )
+				pTrail->push_back( STrailPoint( i->nUserID, ray.ptDir, ray.Get( i->exit.fT ), tmpAttackPortion, 0, pUD, pArmor, -i->exit.ptNormal, i->pSrc->nFloor ) );
+		}
+	}
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// NRPG::TraceLooseRay @0x292830 -- build loose fly-past tracer trail for missed shots
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void TraceLooseRay( NAI::IAIMap *pAIMap, const SAttackRayInfo &rayInfo, vector<STrailPoint> *pTrail )
+{
+	if ( !pTrail || !pAIMap )
+		return;
+
+	pTrail->clear();
+	float fRange = rayInfo.fMaxRange > 0.0f ? rayInfo.fMaxRange : 30.0f;
+	CRay ray; ray.ptOrigin = rayInfo.vOrigin; ray.ptDir = rayInfo.vDir;
+	CAttackPortion tmpAttackPortion( rayInfo.atk );
+	tmpAttackPortion.rTtrajectory = ray;
+
+	// Initial start point
+	pTrail->push_back( STrailPoint( 0, ray.ptDir, ray.ptOrigin, tmpAttackPortion, 0, 0, 0, CVec3(0,0,1), 100 ) );
+
+	// Trace loose ray through geometry
+	TraceLooseRaySegment( pAIMap, rayInfo, pTrail, rayInfo.vOrigin, rayInfo.vDir, fRange );
+
+	// Terminal end point
+	pTrail->push_back( STrailPoint( 0, ray.ptDir, ray.Get( fRange ), tmpAttackPortion, 0, 0, 0, CVec3(0,0,1), 100 ) );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// NRPG::PerformRangedAttack @0x2929e0
+////////////////////////////////////////////////////////////////////////////////////////////////////
+CObjectBase * PerformRangedAttack( NWorld::IWorld *pWorld, const SAttackRayInfo &rayInfo, STime sCast, NDb::CModel *pTrailModel, float fTrailSpeed, NDb::CRPGGrenade *pGrenade, int nFloor )
+{
+	NWorld::CWorld *pCWorld = dynamic_cast<NWorld::CWorld*>( pWorld );
+	if ( !pCWorld )
+		return 0;
+
+	vector<STrailPoint> trail;
+	if ( !rayInfo.bTargetIsHit )
+	{
+		// MISS branch: build loose fly-past tracer without dealing target damage
+		TraceLooseRay( pCWorld->GetAIMap(), rayInfo, &trail );
+	}
+	else
+	{
+		// HIT branch: if trailPoints already populated, use them; otherwise process attack portion along the ray
+		if ( !rayInfo.trailPoints.empty() )
+		{
+			trail = rayInfo.trailPoints;
+		}
+		else
+		{
+			vector<IAttackable*> ignores;
+			if ( rayInfo.pIgnore )
+			{
+				CDynamicCast<IAttackable> pAtt( rayInfo.pIgnore.GetPtr() );
+				if ( pAtt )
+					ignores.push_back( pAtt );
+			}
+			CRay ray; ray.ptOrigin = rayInfo.vOrigin; ray.ptDir = rayInfo.vDir;
+			float fMaxRange = rayInfo.fMaxRange > 0.0f ? rayInfo.fMaxRange : 30.0f;
+			pCWorld->GetGame()->ProcessRangedAttackPortion( rayInfo.atk, ray, ignores, &trail, fMaxRange );
+		}
+	}
+
+	NWorld::IDynamicObject *pBulletServer = NWorld::CreateBulletServer( pCWorld, trail, sCast, pTrailModel, fTrailSpeed );
+	if ( pBulletServer )
+	{
+		pCWorld->GetMiscObjects()->push_back( pBulletServer );
+		return pBulletServer;
+	}
+	return 0;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 } // namespace NRPG

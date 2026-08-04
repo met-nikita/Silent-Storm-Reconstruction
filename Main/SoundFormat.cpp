@@ -27,7 +27,7 @@ void CFileSample3D::RecalcValue( NGScene::CFileRequest *p )
 	if ( nSize )
 	{
 		CMemoryStream *pStream = file.GetStream();
-		pValue = NFMSound::LoadSample3D( pStream->GetBuffer(), pStream->GetSize(), pSound->fMinDistance, pSound->fMaxDistance, pSound->nPriority );
+		pValue = NFMSound::LoadSample3D( pStream->GetBuffer(), pStream->GetSize(), pSound->fMinDistance, pSound->fMaxDistance, pSound->nPriority, pSound->nStartSamples, pSound->nEndingSamples );
 	}
 	else
 	{
@@ -58,7 +58,7 @@ void CFileSoftwareSample3D::RecalcValue( NGScene::CFileRequest *p )
 	if ( nSize )
 	{
 		CMemoryStream *pStream = file.GetStream();
-		pValue = NFMSound::LoadSample3D( pStream->GetBuffer(), pStream->GetSize(), pSound->fMinDistance, pSound->fMaxDistance, pSound->nPriority );
+		pValue = NFMSound::LoadSample3D( pStream->GetBuffer(), pStream->GetSize(), pSound->fMinDistance, pSound->fMaxDistance, pSound->nPriority, pSound->nStartSamples, pSound->nEndingSamples );
 		pBufferHolder = p;
 	}
 	else

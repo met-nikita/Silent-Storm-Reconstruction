@@ -289,7 +289,7 @@ public:
 	bool CommandState( IState *pState );
 	void ResetState();
 	void SetUpdatedStates( const vector<CObj<IState> > &updatedStatesSet );
-	CObjectBase* GetStateTarget() const;
+	CObjectBase* GetStateTarget( bool *pbFrom3DWorld = 0 ) const;
 	void SetStateTarget( CObjectBase* pObject );
 
 	int GetUnitsState();

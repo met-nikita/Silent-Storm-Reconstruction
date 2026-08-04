@@ -111,10 +111,10 @@ bool Init( const SStartInfo &info );
 void Done();
 bool IsInitialized();
 void* GetSoundAPI();   // @0x3db240 -- underlying output device handle (the IDirectSound* on the DSOUND output) so Bink can share FMOD's device; null until FMOD is initialized
-// ���� ����� ��� ����� ����, � ������ ��� �� �����.
+//     ,     .
 void Update( const SListener &listen );
 CSample2D* LoadSample2D( const void *pData, int nLength );
-CSample3D* LoadSample3D( const void *pData, int nLength, float fMinDistance = 1, float fMaxDistance = 100, int nPriority = 0 );
+CSample3D* LoadSample3D( const void *pData, int nLength, float fMinDistance, float fMaxDistance, int nPriority, int nStartSamples = 0, int nEndingSamples = 0 );
 CSample3D* GetDefault3DSound();
 CSound2D* PlaySound( CSample2D *pSample );
 CSound3D* Play3DSound( const SPlayParams &params );

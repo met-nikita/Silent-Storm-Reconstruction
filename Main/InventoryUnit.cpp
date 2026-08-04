@@ -170,7 +170,7 @@ void GetItemsBindPlaces( vector<IRenderVisitor::SBoundMesh> *pRes, NRPG::IUnitMi
 		AttachItem( pRes, &rnd, UIT_PK_LEFT_HAND, pLeftHandItem->pModel, bIsPK );
 	}
 	bool bHeavy = false;
-	unordered_map< int, int > slotItems; // ����� ����� ���� -1 ��� ��������� ������
+	unordered_map< int, int > slotItems; // slot number or -1 for active weapon
 	NRPG::IInventoryItem *pActiveIItem = pInventory->GetActive();
 	NDb::CRPGItem *pActiveItem = 0;
 	if ( pActiveIItem )

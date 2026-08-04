@@ -22,7 +22,7 @@ void CTVoxelRenderer<TFinal,TRes>::Init( const CVec3 &_vCenter, float _fCubeSize
 template <class TFinal, class TRes>
 void CTVoxelRenderer<TFinal,TRes>::RealTraceEntity( const SConvexHull &e )
 {
-	// ������� �������� � CameraSpace
+	// find projection in CameraSpace
 	static vector<CVec3> flatProjected;
 	if ( e.points.size() > flatProjected.size() )
 		flatProjected.resize( e.points.size() );
@@ -35,7 +35,7 @@ void CTVoxelRenderer<TFinal,TRes>::RealTraceEntity( const SConvexHull &e )
 		CVec3 &dst = flatProjected[i];
 		xform.RotateHVector( &dst, src );
 	}
-	// rasterize ������ ����������� ConvexHull-�
+	// rasterize every triangle of ConvexHull
 	const vector<SEdge> &edges = e.tris.edges;
 	const vector<STriangle> &mesh = e.tris.mesh;
 	for ( int i = 0; i < mesh.size(); ++i )

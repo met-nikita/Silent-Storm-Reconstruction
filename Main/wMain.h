@@ -42,6 +42,7 @@ namespace NRPG
 	class IObject;
 	class CCoverInfo;
 	class CAttackPortion;
+	struct SAttackRayInfo;
 	class IUnitMission;
 	class IClipItem;
 	enum EAction;
@@ -564,9 +565,7 @@ public:
 	CMineTracker* GetMineTracker() const { return pMineTracker; }
 	
 	CCTime* GetTime() const { return pTime; }
-	// fMaxRange: the per-attack range cap (retail SAttackRayInfo.fMaxRange). Default 30 = the old
-	// N_WEAPONTRAIL_MAXDISTANCE == retail's value on the normal/accidental shot paths; grenade
-	// splinters pass fFragmentRange*FP_GRID_STEP (retail ExplodeFragments @0x356a80).
+	void PerformRangedAttack( const NRPG::SAttackRayInfo &rayInfo, STime sCast, NDb::CModel *pTrailModel, float fTrailSpeed, NDb::CRPGGrenade *pGrenade = 0, int nFloor = 100 );
 	void PerformRangedAttack( const NRPG::CAttackPortion &ap, const CRay &ray, const vector<NRPG::IAttackable*> &ignores, STime sCast, NDb::CModel *pTrailModel, float fTrailSpeed, float fMaxRange = 30.0f );
 	virtual void Explode( const CVec3 &ptEpicentre, int nPower );
 	virtual void CreateParticle( const CVec3 &ptPos, const CQuat &rot, NDb::CEffect *pEffect, int nFloor = -100 );

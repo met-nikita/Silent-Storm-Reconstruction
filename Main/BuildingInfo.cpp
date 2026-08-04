@@ -30,7 +30,7 @@ void CBuildInfoLoader::Recalc()
 		pValue->operator&( *(file.operator->()) );
 		if ( pValue->roomMap.empty() )
 		{
-			CArray2D<BYTE> array( pValue->nMaxX + 2, pValue->nMaxY + 2 ); // добавляем по краям полоску в 1 тайл
+			CArray2D<BYTE> array( pValue->nMaxX + 2, pValue->nMaxY + 2 ); // add a 1-tile stripe along the edges
 			array.FillZero();
 			pValue->roomMap.resize( pValue->nMaxFloor - pValue->nMinFloor + 1, array );
 		}
@@ -80,7 +80,7 @@ CMixedMaterial* SRawMixedMaterial::CreateMixedMaterial( SRand *pRand ) const
 	}
 	if ( !pM->layers.empty() )
 		return pM;
-	// нет действительных материалов в списке, удаляем pM
+	// if no valid materials in the list, delete pM
 	CPtr<CMixedMaterial> p = pM;
 	p = 0;
 	return 0;
