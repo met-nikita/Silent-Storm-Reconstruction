@@ -152,6 +152,10 @@ public:
 	// defaults (vtable-order append, same pattern as OnAISegment).
 	virtual void OnSequenceStarted() {}
 	virtual void OnSequenceFinished() {}
+	// release CAIUnit::ContinueRoute @0xadf20 (v1.2 @0x4ae1b0): move the saved route into
+	// the slot selected by the CURRENT sequence mode, resume it, clear the other slot, and
+	// drop any combat logic. UnitKeepMoving is the script-facing caller.
+	virtual void ContinueRoute() {}
 	// release CAIUnit per-unit runaway-AI guard (IAIUnit vtbl 0x90/0x94): GetNonFreezeCounter @0xaef20 /
 	// ClearNonFreezeCounter @0xaef30. The commander's IsPossibleFreeze @0x33ad0 weights each unit's counter
 	// (x200) into its 5000-cap freeze test; ClearNonFreezeCounters @0x33a90 zeroes them each real-time

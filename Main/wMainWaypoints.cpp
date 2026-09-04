@@ -27,11 +27,8 @@ void CWaypointsHolder::AddWaypoint( CMapWaypoint *pWaypoint, const CVec3 &ptShif
 	CObj<NAI::CAIRouteWaypoint> &slot = waypoints[ szLowerName ];
 	if ( !IsValid( slot ) )
 	{
-		// retail reads CMapWaypoint::b3DWaypoint here and passes it as the 3rd ctor arg. That field is
-		// ABSENT from the dev CMapWaypoint and cannot be added (OBJECT_BASIC_METHODS auto-serializes it ->
-		// adding it would change the map save format), so b3D is stubbed false. See the 3-arg
-		// NAI::CAIRouteWaypoint ctor (aiRoute.cpp).
-		slot = new NAI::CAIRouteWaypoint( GetPathNetwork(), pCopy, false /*b3D*/ );
+		// Retail forwards CMapWaypoint+0x48 so explicitly 3D editor points are fly-snapped.
+		slot = new NAI::CAIRouteWaypoint( GetPathNetwork(), pCopy, pCopy->b3DWaypoint );
 	}
 	else
 	{

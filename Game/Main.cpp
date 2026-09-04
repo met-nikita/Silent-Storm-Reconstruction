@@ -7,7 +7,7 @@
 #include "..\DBFormat\DataMap.h"		// NDb::BuildMapLinks (post-load DB relation build)
 #include "..\Misc\StrProc.h"
 #include "..\MiscDll\Commands.h"
-#include "..\Main\GResource.h" // CRAP �� ��������� �������, ������-�� ������ ���� ��������� ������
+#include "..\Main\GResource.h" // CRAP for lack of anything better, there should actually be version support
 #include "..\Main\iInterMission.h" // CRAP, to start from mission
 #include "..\Main\iLoading.h"      // NGame::InitLoadingScreen / TermLoadingScreen -- loading-screen UI built once at boot
 #include "..\Misc\HPTimer.h"       // NHPTimer::UpdateHPTimerFrequency -- the per-frame TSC recalibration

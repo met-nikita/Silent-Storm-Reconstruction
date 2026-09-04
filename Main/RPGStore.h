@@ -30,18 +30,13 @@ enum EStoreFilter
 // CStore - the non-UI vendor stock model (release class, saveload id 0xb3120140; PDB sizeof 56,
 // CObjectBase). It owns the priced stock rows (itemsSet, reusing the existing NRPG::SStoreItem) plus
 // one CItemsMap placement grid per filter category (itemsMapsSet). The active filter (eFilter) selects
-// which grid the forwarders dispatch to. This is DISTINCT from the UI's NUI::CStoreSlot
-// (iStorePanel.cpp), which open-codes its own EFilter + placeMap; CStore is the standalone model the
-// release factored out. Owned per-player: NRPG::CGlobalPlayer::pStore (save tag 3, retail
+// which grid the forwarders dispatch to. NUI::CStoreSlot is only a view over the active map in the
+// release; it owns no second placement grid. Owned per-player: NRPG::CGlobalPlayer::pStore (save tag 3, retail
 // CGlobalPlayer::operator& @0x29cba0), constructed in the side-seeded player ctor path.
 //
-// Reconstructed from the matched-release decode (oracle: decomp/src/s2_rpgstore.h). This landing
-// covers the dependency-free surface, wired straight to the REAL CItemsMap API (no hooks): the ctor,
-// the filter setter, the read-and-clear dirty-flag accessor, the five CItemsMap forwarders, and Take.
-// DEFERRED (not present here): PlaceItem @0x2b0da0 is register-garbled / unrecoverable in the release
-// decode (the answer key SKIPPED it), and Place / UpdateUnitItem / Update all funnel through it, so
-// they are intentionally omitted until PlaceItem can be re-derived. Likewise the NRPG item-filter
-// classification free fns (GetItemFilter / GetItemFiltersSet / IsItemBelongToSide) are a follow-up.
+// Reconstructed from the matched-release decode plus raw v1.1 disassembly. In particular PlaceItem
+// @0x2b0da0 was recovered from the raw instructions after the generated decompile lost its register
+// provenance; it lays each weapon out with the compatible clip stock beside it.
 class CStore: public CObjectBase
 {
 	OBJECT_BASIC_METHODS( CStore );
@@ -72,10 +67,16 @@ public:
 	void SetSize( int newX, int newY );                                   // @0x2b0560 (vtbl +0x24)
 	CTPoint<int> GetSize();                                               // @0x2b0570 (vtbl +0x28)
 	void Take( IInventoryItem *item );                                    // @0x2b0630 (vtbl +0x10)
-	// direct stock-row access for the CPlayer store flow (retail funnels stock maintenance through
-	// CStore::Update/PlaceItem -- @0x2b0da0 is register-garbled/unrecovered in the oracle, so the
-	// dev regen logic operates on the rows directly until PlaceItem can be re-derived).
+	bool Place( const CTPoint<int> &point, IInventoryItem *item );          // @0x2b1060
+	void Update( int nLevel, const vector< CObj<CUnit> > &units );          // @0x2b1350
+	bool HasMappedItems() const;                                           // live-view initialization probe
+	// Direct stock-row access is retained for diagnostics/save migration; normal store flow goes
+	// through Update/Place/Take and the category maps.
 	vector<SStoreItem>& ItemsSet() { return itemsSet; }
+
+private:
+	void PlaceItem( SStoreItem *pRow, bool bWeapon, bool bForce, const CTPoint<int> &point ); // @0x2b0da0
+	void UpdateUnitItem( IInventoryItem *pItem );                              // @0x2b1200
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 }

@@ -15,7 +15,9 @@
 namespace NRPG
 {
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-int CGlobalPlayer::GetPlayerSkill( NDb::ESkillType skill, NRPG::CUnit **ppUnit )
+// retail v1.2 @0x6998d0: use the best living merc's skill plus a difficulty-controlled
+// fraction of the remaining living mercs' average skill.
+int CGlobalPlayer::GetPlayerSkill( NDb::ESkillType skill, float fGroupCoeff, NRPG::CUnit **ppUnit )
 {
 	float fRes = 0;
 	int nMax = 0, nCount = 0;
@@ -36,7 +38,7 @@ int CGlobalPlayer::GetPlayerSkill( NDb::ESkillType skill, NRPG::CUnit **ppUnit )
 		}
 	}
 	//
-	return ( int ) ( ( nCount > 1 ? ( fRes - nMax ) / ( nCount - 1 ) : 0 ) + nMax );
+	return ( int )( nMax + fGroupCoeff * ( nCount > 1 ? ( fRes - nMax ) / ( nCount - 1 ) : 0 ) );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CGlobalPlayer::IsUnitRescued( CUnit *pUnit )
@@ -53,24 +55,27 @@ bool CGlobalPlayer::IsUnitRescued( CUnit *pUnit )
 	return false;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CGlobalPlayer::Heal( bool bBandage, bool bNeedCarryOutCorpse, float fCoeff )
+// retail v1.2 @0x699f30: convert the party's medical skill to a finite amount of healing.
+// The Jan03 implementation passed 1000 VP to CreateFirstAid and therefore healed every merc fully.
+void CGlobalPlayer::Heal( EHeal eHeal, bool bNeedCarryOutCorpse, float fHealCoeff, float fSkillCoeff )
 {
 	NRPG::CUnit *pUnit;
-	int nSkill = GetPlayerSkill( NDb::ST_MEDICINE, &pUnit ) * fCoeff;
+	int nSkill = GetPlayerSkill( NDb::ST_MEDICINE, fSkillCoeff, &pUnit );
 	if ( !IsValid( pUnit ) )
 		return;
 	//
 	NRPG::SFirstAid firstAid;
-	pUnit->CreateFirstAid( &firstAid, 1000, nSkill );
+	firstAid.nMaxVP = ( int )( ( int )( nSkill * fHealCoeff ) * 1.7857142686843872f );
+	firstAid.fdVP = ( float )firstAid.nMaxVP;
 	//
 	for ( vector< CObj<CUnit> >::iterator i = mercs.begin(); i != mercs.end(); ++i )
 	{
 		CUnit *pUnit = (*i);
 		if ( !pUnit->IsDead() && ( !pUnit->IsUnconscious() || ( !bNeedCarryOutCorpse || IsUnitRescued( pUnit ) ) ) )
 		{
-			if ( bBandage )
+			if ( eHeal == HEAL_BANDAGE )
 				pUnit->Heal( firstAid );
-			else
+			else if ( eHeal == HEAL_HEAL )
 				pUnit->RegenerateVP( firstAid );
 		}
 		else
@@ -298,19 +303,21 @@ void CGlobalGame::ChangeDifficulty( int nID )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CGlobalGame::HealOnLeaveZone()
 {
+	CGlobalPlayer::EHeal eHeal = pDifficulty->bHealOnLeaveZone ? CGlobalPlayer::HEAL_HEAL :
+		( pDifficulty->bBandageOnLeaveZone ? CGlobalPlayer::HEAL_BANDAGE : CGlobalPlayer::HEAL_NONE );
+	if ( bWasCampOrBase )
+		eHeal = CGlobalPlayer::HEAL_NONE;
+
 	for( vector< CObj<CGlobalPlayer> >::iterator i = players.begin(); i != players.end(); ++i )
-	{
-		if ( pDifficulty->bHealOnLeaveZone )
-			(*i)->Heal( false, pDifficulty->bNeedCarryOutUnconscious, pDifficulty->fHealOnLeaveZoneCoeff );
-		if ( pDifficulty->bBandageOnLeaveZone )
-			(*i)->Heal( true, pDifficulty->bNeedCarryOutUnconscious, pDifficulty->fBandageOnLeaveZoneCoeff );
-	}
+		(*i)->Heal( eHeal, pDifficulty->bNeedCarryOutUnconscious,
+			pDifficulty->fHealOnLeaveZoneCoeff, pDifficulty->fGroupMedicalCoeff );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CGlobalGame::HealOnRest()
 {
 	for( vector< CObj<CGlobalPlayer> >::iterator i = players.begin(); i != players.end(); ++i )
-		(*i)->Heal( false, false, pDifficulty->fHealOnRestCoeff );
+		(*i)->Heal( CGlobalPlayer::HEAL_HEAL, false,
+			pDifficulty->fHealOnRestCoeff, pDifficulty->fGroupMedicalCoeff );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CGlobalGame::UpdateScenarioOnLeaveZone()

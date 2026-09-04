@@ -26,20 +26,17 @@ private:
 	CPtr<NGame::IMission> pMission;
 	////
 	CPtr<CButton> pClose;
-	CPtr<CButton> pArrange;   // release save-format tag 4 (inserted before pStoreSlot); dead-in-dev
+	CPtr<CButton> pArrange;   // release save-format tag 4; posts CCmdUpdateStore
 	CObj<CStoreSlot> pStoreSlot;
 	CObj<CSlotScroll> pStoreSlotView;
-	//// release retypes these 8 to CObj<CComplexButtonFlash>; kept as CObj<CComplexButton> (polymorphic
-	//// base) -- CComplexButtonFlash now exists+registered so release Flash-button saves load; the
-	//// Flash-construction (create CComplexButtonFlash) is the deferred behavior half.
-	CObj<CComplexButton> pSMG;
-	CObj<CComplexButton> pOthers;
-	CObj<CComplexButton> pRifles;
-	CObj<CComplexButton> pPistols;
-	CObj<CComplexButton> pGrenades;
-	CObj<CComplexButton> pColdSteel;
-	CObj<CComplexButton> pPKWeapons;
-	CObj<CComplexButton> pHeavyWeapon;
+	CObj<CComplexButtonFlash> pSMG;
+	CObj<CComplexButtonFlash> pOthers;
+	CObj<CComplexButtonFlash> pRifles;
+	CObj<CComplexButtonFlash> pPistols;
+	CObj<CComplexButtonFlash> pGrenades;
+	CObj<CComplexButtonFlash> pColdSteel;
+	CObj<CComplexButtonFlash> pPKWeapons;
+	CObj<CComplexButtonFlash> pHeavyWeapon;
 	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CWindow*)this); f.Add(2,&pMission); f.Add(3,&pClose); f.Add(4,&pArrange); f.Add(5,&pStoreSlot); f.Add(6,&pStoreSlotView); f.Add(7,&pSMG); f.Add(8,&pOthers); f.Add(9,&pRifles); f.Add(10,&pPistols); f.Add(11,&pGrenades); f.Add(12,&pColdSteel); f.Add(13,&pPKWeapons); f.Add(14,&pHeavyWeapon); return 0; }
 
 protected:
@@ -50,6 +47,7 @@ public:
 	CStorePanel( const SWindowInfo &sInfo, NGame::IMission *pMission );
 
 	bool ProcessMessage( const SEvent &sEvent );
+	void Draw( const STime &sTime, NGScene::I2DGameView *pView );
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 } // Namespace

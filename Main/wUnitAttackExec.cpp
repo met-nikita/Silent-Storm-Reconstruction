@@ -569,6 +569,13 @@ static EUnitCommandResult CanMoveInventoryItem( CUnitServer *pUS, CCmdMoveInvent
 
 	ASSERT( IsValid( pItem ) );
 
+	// retail v1.1 @0x7aa1c0: hints do not need a free destination because MoveInventoryItem
+	// consumes them instead of placing them in the inventory.
+	if ( dynamic_cast<NRPG::IHintItem*>( pItem.GetPtr() ) )
+	{
+		return UCR_OK;
+	}
+
 	switch( sTarget.eType )
 	{
 	case SItem::HAND:
@@ -790,19 +797,24 @@ static void MoveInventoryItem( CUnitServer *pUS, CCmdMoveInventoryItem *pMoveIte
 
 	ASSERT( IsValid( pItem ) );
 
+	// retail v1.2 @0x7aac10: hints are consumed when picked up and advance the world's
+	// UI-hint sequence instead of being placed into the requested inventory destination.
+	if ( dynamic_cast<NRPG::IHintItem*>( pItem.GetPtr() ) )
+	{
+		pUS->GetWorld()->AddNextUIHint( false );
+		return;
+	}
+
 	switch( sTarget.eType )
 	{
 	case SItem::HAND:
 		{
-			// retail @0x7aace3: SItem::SItem(const SItem&) @0x5f920 COPIES sSource, then overwrites
-			// only pItem(+0x1c) and pUnit(+0x10). Copying sSource is what carries the item's ORIGIN
-			// (eType/nSlot/sPosition) into the hand -- CExecMoveInventoryItem::GetActionType
-			// @0x3a7990 reads sHandItem.eType back out and compares it to the drop destination.
-			// (Retail assigns pUnit from the entry-level CDynamicCast<CUnitServer>(cmd source unit);
-			// sSource.pUnit is the same object in every case reachable here.)
+			// Retail @0x7aace3 copies the source so the hand retains the item's origin, then stamps the
+			// command unit onto it. STORAGE sources deliberately have no pUnit, so copying that field
+			// instead leaves a purchased item ownerless and invisible to the drag state.
 			SItem sItem( sSource );
 			sItem.pItem = pItem;
-			sItem.pUnit = sSource.pUnit;
+			sItem.pUnit = pUS;
 			pUS->GetTBSPlayer()->SetInHandItem( sItem );
 			break;
 		}
@@ -1307,12 +1319,23 @@ void CExecShoot::CreateFlash( bool bFirstBullet )
 		pSnd->EndSound();                       // slot full: end the one-shot, do not retain
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// @0x3a40d0 -- retail reveals a concealed shooter before firing (weapon fSilencer >= 1.0 gated by a
-// hidden-state predicate). STUBBED: CRPGWeapon::fSilencer now exists (it feeds the shot's SAISound), but
-// the posProvider hidden-predicate (vtbl[0xc]) has no counterpart and the dev has no conceal-on-shoot
-// flow -> safe no-op until that subsystem lands.
+// @0x3a40d0 (v1.1), @0x7a4510 (v1.2) -- firing an unsilenced weapon reveals a concealed shooter.
+// Values below 1 are suppressors; they preserve concealment as in retail.
 void CExecShoot::CheckUnhide()
 {
+	if ( !IsValid( pUS ) || !pUS->IsHiding() )
+		return;
+
+	NRPG::IWeaponItem *pWeapon = pUS->GetUnitRPG()->GetWeaponItem();
+	if ( !IsValid( pWeapon ) )
+		return;
+
+	NDb::CRPGWeapon *pDBWeapon = pWeapon->GetDBWeapon();
+	if ( IsValid( pDBWeapon ) && pDBWeapon->fSilencer >= 1.0f )
+	{
+		pUS->Hide( false, false );
+		bUpdateVision = true;
+	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // @0x3a26f0 -- one bullet departs the barrel: fire it (PerformAttack), then decide whether to chamber the next
@@ -3444,6 +3467,24 @@ int CExecMoveInventoryItem::GetStartAP() const
 	return pUS->GetActionAP( GetActionType() );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// CExecUpdateStore
+////////////////////////////////////////////////////////////////////////////////////////////////////
+CExecUpdateStore::CExecUpdateStore( CUnitServer *_pUS, CCmdUpdateStore *_pCmd ):
+	CCommandExecute( _pUS ), pCmd( _pCmd )
+{
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+EUnitCommandResult CExecUpdateStore::CanDoIt( const NAI::SUnitPosition &from, bool bIgnoreTarget ) const
+{
+	return UCR_OK;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CExecUpdateStore::Run()
+{
+	pUS->GetTBSPlayer()->UpdateStore();
+	Finished();
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 // CExecPlayAnimation
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // @0x3a7cc0 — retail stores arg3 into bFreezeAfterLastFrame (+0x1c), NOT the Jan03 bCircled.
@@ -3554,4 +3595,5 @@ REGISTER_SAVELOAD_CLASS( 0x71983143, CExecDisarmTrap )
 REGISTER_SAVELOAD_CLASS( 0x71983144, CExecSetMine )
 REGISTER_SAVELOAD_CLASS( 0x71983145, CExecDisarmMine )
 REGISTER_SAVELOAD_CLASS( 0xB3120160, CExecCreateInventoryItem )
+REGISTER_SAVELOAD_CLASS( 0xB3120161, CExecUpdateStore )
 REGISTER_SAVELOAD_CLASS( 0xA0123140, CExecCreateAndActivateInventoryItem )

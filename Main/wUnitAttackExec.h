@@ -634,6 +634,21 @@ public:
 	}
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// CExecUpdateStore -- retail @0x3a7c70 / Run @0x3a1c90 / CanDoIt @0x3a0790.
+class CExecUpdateStore: public CCommandExecute
+{
+	OBJECT_BASIC_METHODS(CExecUpdateStore);
+private:
+	ZDATA_(CCommandExecute)
+	CObj<CCmdUpdateStore> pCmd;
+	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CCommandExecute*)this); f.Add(2,&pCmd); return 0; }
+public:
+	CExecUpdateStore() {}
+	CExecUpdateStore( CUnitServer *pUS, CCmdUpdateStore *pCmd );
+	EUnitCommandResult CanDoIt( const NAI::SUnitPosition &from, bool bIgnoreTarget = false ) const;
+	virtual void Run();
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
 // retail NWorld::CreateInventoryItemForUnit @0x3ab3c0: SYNCHRONOUS backpack insert (no executor, no
 // unit command, no AP) -- lua UnitCreateItem @0x2fbfd0 calls it directly; CExecCreateInventoryItem::
 // Run @0x3ab770 delegates to it.

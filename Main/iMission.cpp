@@ -172,6 +172,11 @@ bool CMission::Initialize( int _nTemplateID, int _nVariantID, NScenario::CScenar
 	int nMobsLevel = 0;
 	SRandomSeed sSeed;
 	list< CPtr<NScenario::CScenarioClue> > clues;
+	// retail CMission::Initialize @0x200690 clears the previous scenario-zone latch before
+	// classifying this mission.  Random encounters have no CScenarioZone; retaining the HQ
+	// zone made CWorld::StartGame cache bIsBase=true, which lets its turn controller return
+	// to real time even while hostile units are engaged.
+	pGlobalGame->pCurrentZone = 0;
 	if ( IsValid( pZone ) && pGlobalGame->pScenarioTracker->IsScenarioAvailable() )
 	{
 		if ( nTemplateID == -1 )
@@ -179,7 +184,6 @@ bool CMission::Initialize( int _nTemplateID, int _nVariantID, NScenario::CScenar
 		pGlobalGame->pScenarioTracker->GetPlacedClues( pZone, nTemplateID, &clues );
 		pZone->SetPassed();
 		pGlobalGame->pCurrentZone = pZone;
-		pGlobalGame->nCurrentTemplateID = nTemplateID;
 		sSeed = pZone->GetRandomSeedForTemplate( nTemplateID );
 		nMobsLevel = pZone->GetDifficulty();
 	}
@@ -192,6 +196,8 @@ bool CMission::Initialize( int _nTemplateID, int _nVariantID, NScenario::CScenar
 		nDelta /= 10; nDelta -= pGlobalGame->pDifficulty->nREDifficulty;
 		nMobsLevel = pGlobalGame->nCurrentChapterDifficulty + nDelta;
 	}
+	// Retail writes this for both scenario missions and template-only random encounters.
+	pGlobalGame->nCurrentTemplateID = nTemplateID;
 
 	if ( nVariantID == -1 )
 	{
@@ -255,17 +261,8 @@ bool CMission::Initialize( int _nTemplateID, int _nVariantID, NScenario::CScenar
 	// SetCutFloor (level-switch bar, UICmdSetFloor, unit focus) like retail SetCutFloor @0xd0050 --
 	// the bar previously bypassed the key-bind-only clamp, letting the base show a second floor.
 	pScene->SetCutFloorRange( nMinCutFloor, nMaxCutFloor );
-	// pick this mission's tracks from the pools (retail keeps the pools on the scene and picks per
-	// launch; dev's scene holds the picked records -- documented adaptation in Sound.cpp) and hand
-	// the scene BOTH slots like retail CreateSoundScene @0x305ad0 (ambient, combat).
-	SRand musicRand;
-	NDb::CMusic *pAmbientMelody = 0;
-	if ( IsValid( pAmbientPool ) )
-		pAmbientMelody = pAmbientPool->GetMusic( &musicRand );
-	pCombatMelody = 0;
-	if ( IsValid( pCombatPool ) )
-		pCombatMelody = pCombatPool->GetMusic( &musicRand );
-	pSoundScene = NSound::CreateSoundScene( pAmbientMelody, pCombatMelody );
+	// retail keeps the pools on the scene and performs the roulette pick on every music launch.
+	pSoundScene = NSound::CreateSoundScene( pAmbientPool, pCombatPool );
 	// retail @0x200690: the two sound mixers (world + fog-gated unit sounds) are owned by the
 	// render game -- the old separate CreateRenderSound(pWorld, pSoundScene) union mixer played
 	// unit voices (pain/death grunts) for units the player couldn't see.
@@ -2617,7 +2614,12 @@ void CMission::ExecWorldCommands()
 									else {
 										CDynamicCast<NWorld::CUICmdShowStore> pShowStore(pCmd);
 										if (pShowStore)
+										{
+											NWorld::CPlayer *pPlayer = dynamic_cast<NWorld::CPlayer*>( GetActivePlayer()->GetPlayer() );
+											if ( pPlayer )
+												pPlayer->UpdateStore();
 											SetPanelState(PANEL_STORE | PANEL_INVENTORY, true);
+										}
 										else {
 											CDynamicCast<NWorld::CUICmdShowTeamMng> pShowTeamMng(pCmd);
 											if (pShowTeamMng)

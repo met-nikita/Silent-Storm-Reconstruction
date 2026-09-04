@@ -107,10 +107,7 @@ void CAIEventTrackerImpl::ThrowAIEvent( IAIEvent *pEvent )
 		pIface->Notify( pEvent );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// CAIEventTracker::Notify (release vtbl slot 0): in the release this mutates the unit's threat state
-// (pEvent->Modify(&state)). The dev tree's per-unit AI-event consumer is deliberately omitted
-// (IAIUnit::GetAIUnitState() returns 0; the state is rebuilt by SAIUnitState::Populate()), so this
-// routes to a state only when one is installed -- never, in the dev tree -- making it behaviour-neutral.
+// CAIEventTracker::Notify (release vtbl slot 0): mutate the owning unit's threat state.
 void CAIEventTracker::Notify( IAIEvent *pEvent )
 {
 	if ( !IsValid( pEvent ) || !IsValid( pImpl ) )
@@ -121,7 +118,7 @@ void CAIEventTracker::Notify( IAIEvent *pEvent )
 	IAIUnit *pAI = GetAIUnit( pUS );
 	if ( !IsValid( pAI ) )
 		return;
-	SAIUnitState *pState = pAI->GetAIUnitState();   // NOW LIVE: CAIUnit::GetAIUnitState returns &state, so the event Modifies it
+	SAIUnitState *pState = pAI->GetAIUnitState();
 	if ( pState != 0 )
 		pEvent->Modify( pState );
 }

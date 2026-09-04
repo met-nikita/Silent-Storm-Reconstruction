@@ -57,7 +57,10 @@ void CTVoxelRenderer<TFinal,TRes>::RealTraceEntity( const SConvexHull &e )
 		else
 			i3 = edges[ t.i2 & 0x7fff ].wFinish;
 		//
-		RasterNoClip( flatProjected[i1], flatProjected[i2], flatProjected[i3] );
+		// v1.1/v1.2 use the later 16.16 fixed-point scan converter for both
+		// explosion and visibility voxel grids (CRasterizer::RasterTriangle at
+		// v1.2 0x4b3310/0x4b37f0).
+		RasterNoClipFixed( flatProjected[i1], flatProjected[i2], flatProjected[i3] );
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////

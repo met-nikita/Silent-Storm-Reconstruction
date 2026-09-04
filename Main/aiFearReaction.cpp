@@ -20,9 +20,8 @@
 // ELIDED (build-validation scope, exactly as CAIGuardReaction / CAIRetreatReaction):
 //  * the early pU->SetRoute(NULL) route-clear (release IAIUnit vtbl+0x5c). IAIUnit declares no SetRoute slot
 //    and SetLogic replaces the unit's logic in place, so the landed reactions drop it consistently.
-//  * the suspected-enemy AddEvent(CreateAILostPossibleEnemyEvent) + the glance look-AP refund (release
-//    vtbl+0x48 == CAIUnit::Notify, the per-unit AI event system -- unported; SAIUnitState::Populate()
-//    re-polls the seen sets each think, so the event's RemovePossibleEnemy cleanup is redundant here).
+//  * the suspected-enemy AddEvent(CreateAILostPossibleEnemyEvent) + the glance look-AP refund. The
+//    event layer is now active, so this omitted cleanup is a tracked follow-up divergence.
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 namespace NAI
 {

@@ -54,7 +54,9 @@ void C2DScene::StartNewFrame( NGfx::CTexture *pTarget, const CVec2 &vSize )
 	NGfx::CRenderContext rc;
 	if ( pTarget ) 
 		rc.SetTextureRT( pTarget, 0 );
-	rc.SetAlphaCombine( NGfx::COMBINE_ALPHA );
+	// Retail @0x40ac37 selects mode 8 (COMBINE_SMART_ALPHA). UI rect colors are
+	// premultiplied before submission, so the matching blend is ONE/INVSRCALPHA.
+	rc.SetAlphaCombine( NGfx::COMBINE_SMART_ALPHA );
 	rc.SetStencil( NGfx::STENCIL_NONE );
 	quadRender.SetTarget( rc, vSize, NGfx::QRM_OVERWRITE );	// retail StartNewFrame @0xabf0 ends here
 }

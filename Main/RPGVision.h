@@ -13,6 +13,7 @@ namespace NWorld
 {
 	class CUnit;
 }
+struct STerrainInfo;
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 template <class T>
 class CTPoint3
@@ -60,6 +61,9 @@ public:
 	// the same MakeVisionQuery gates (retail consumer: CGame::CanSeeCenter @0x298750).
 	virtual bool IsPointVisible( const CVec3 &ptFrom, const CVec3 &ptTarget, const CVec3 &ptForward,
 		float fRange, float fCosHalfFOV ) = 0;
+	// retail CVisionTracker::SetVisionMultiplier @0x2c8450 (vision vtbl+0x24): cap the world-provided
+	// multiplier at 1.0 and invalidate both visibility-query caches when it changes.
+	virtual void SetVisionMultiplier( float fMultiplier ) = 0;
 	// retail CVisionTracker::IsWithinSightRange @0x2c7fa0 (vision vtbl+0x28): the cheap pre-cull used by
 	// GetVisibilityArea @0x298840 -- dist^2 < eff^2 where eff is the same height-stretched, 2x-capped
 	// effective range MakeVisionQuery uses.
@@ -71,7 +75,8 @@ public:
 	virtual void GetCoord( const CVec3 &vPoint, CTPoint3<int> *pRes ) = 0;
 	virtual void GetCenter( const CTPoint3<int> &p, CVec3 *pRes ) = 0;
 };
-IVisionTracker* CreateVisionTracker( NAI::IAIMap *pAIMap );
+// retail @0x2c9810: terrain is required to build the grass-occlusion map.
+IVisionTracker* CreateVisionTracker( NAI::IAIMap *pAIMap, const STerrainInfo &terrainInfo );
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 }
 #endif

@@ -279,6 +279,43 @@ void CComplexButton::SetColor( const NGfx::SPixel8888 &sColor )
 	CButton::SetColor( sColor );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// Retail @0x241e90: store-category button with texture 945 as its flash overlay.
+CComplexButtonFlash::CComplexButtonFlash( const SWindowInfo &sInfo, NDb::CUITexture *pUp,
+	NDb::CUITexture *pDown, NDb::CUITexture *pUnchecked, NDb::CUITexture *pChecked ):
+	CComplexButton( sInfo, pUp, pDown, pUnchecked, pChecked ), bShowFlash( false ), sFlashTime( 0 )
+{
+	pImage = new CImageDraw( SRect( 0, 0, GetSize().x, GetSize().y ), NDb::GetUITexture( 945 ) );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// Retail @0x240f10: each bShowFlash edge arms a 0.5s ramp-up, 4.5s hold and 0.5s ramp-down.
+void CComplexButtonFlash::Draw( const STime &sTime, NGScene::I2DGameView *pView )
+{
+	CShrinkButton::Draw( sTime, pView );
+
+	if ( bShowFlash )
+	{
+		bShowFlash = false;
+		STime sStartTime = sTime;
+		if ( sTime - sFlashTime < 5500 )
+			sStartTime += 2500;
+		sFlashTime = sStartTime;
+	}
+
+	const float fElapsed = float( (unsigned long)( sTime - sFlashTime ) ) * 0.002f;
+	int nAlpha = 0xFF;
+	if ( fElapsed < 1.0f )
+		nAlpha = int( fElapsed * 255.0f );
+	else if ( fElapsed >= 10.0f )
+	{
+		if ( fElapsed >= 11.0f )
+			return;
+		nAlpha = int( ( 11.0f - fElapsed ) * 255.0f );
+	}
+
+	pImage->SetColor( NGfx::SPixel8888( 0xFF, 0xFF, 0xFF, nAlpha ) );
+	pImage->Draw( this, sTime, pView );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 // CHoverButton
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CHoverButton::CHoverButton( const SWindowInfo &sInfo ):
@@ -501,9 +538,15 @@ void CScrollWindowBase::Update( const STime &sTime, NGScene::I2DGameView *pView 
 void CScrollWindowBase::UpdateScrollers()
 {
 	if ( IsValid( pHScroll ) )
-		vValue.x = float( pHScroll->GetValue() ) / pHScroll->GetMaxValue();
+	{
+		const float fMaxValue = pHScroll->GetMaxValue();
+		vValue.x = ( fMaxValue != 0 ) ? float( pHScroll->GetValue() ) / fMaxValue : 0;
+	}
 	if ( IsValid( pVScroll ) )
-		vValue.y = float( pVScroll->GetValue() ) / pVScroll->GetMaxValue();
+	{
+		const float fMaxValue = pVScroll->GetMaxValue();
+		vValue.y = ( fMaxValue != 0 ) ? float( pVScroll->GetValue() ) / fMaxValue : 0;
+	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CUnitView

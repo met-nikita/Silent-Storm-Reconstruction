@@ -95,7 +95,8 @@ class CAIUnit: public IAIUnit
 	SAIUnitState state;            // per-unit threat tracker (release: by-value member; transient here)
 	CObj<CAIEventTracker> pEventTracker;   // release: CAIEventTracker base subobject @CAIUnit+0x8 -- a MEMBER here (dev
 	                               // CObjectBase is non-virtual so it can't be a 2nd base). Subscribes the 11 NWorld AI
-	                               // event handlers; transient (lazy-built on first tick, RAII-unsubscribes on release).
+	                               // event handlers; transient (fresh units subscribe in the ctor; loaded units are
+	                               // re-armed on their first tick, RAII-unsubscribes on release).
 	int nNonFreezeCounter;         // release CAIUnit+0x104: per-unit runaway-AI guard tally (IAIUnit vtbl 0x90/0x94).
 	                               // Bumped on every per-unit logic/reaction churn (SetReaction @0xad7d0,
 	                               // SetLogic path @0xadb20); the commander sums it (x200) in IsPossibleFreeze
@@ -188,6 +189,7 @@ public:
 	virtual void DeactivateCurrentControl();
 	virtual void OnSequenceStarted();    // retail @0xadec0
 	virtual void OnSequenceFinished();   // retail @0xad3f0
+	virtual void ContinueRoute();        // retail v1.1 @0xadf20 / v1.2 @0x4ae1b0
 	// retail CAIUnit::IsAIUnit @0xad4c0 (IAIUnit vtbl 0x1c) is DYNAMIC: pUS->IsAIUnit() == NAI::IsAIPlayer(
 	// the unit's CURRENT player). The frozen ctor flag is wrong under the retail wrapper model: the OWNING
 	// commander creates every shared CAIUnit (so the flag would read true even for the human's units), and
@@ -310,9 +312,8 @@ public:
 		if ( IsValid( pUnitServer ) && pUnitServer->CanFight() )
 			pUnitServer->Do( new NWorld::CCmdCancel( pUnitServer ) );
 	}
-	// release CAIUnit::OnAISegment @0xad2c0: per-segment tick. Lazily build the event tracker (covers BOTH the fresh
-	// ctor path and the deserialization path, where the (CUnitServer*,bool) ctor never runs and the tracker is not
-	// serialized), then ProcessAISegment (the corpse scan @0xab7a0, now LIVE -- IsCorpseVisible probe over the
+	// release CAIUnit::OnAISegment @0xad2c0: per-segment tick. Repair the event tracker after deserialization
+	// (where the (CUnitServer*,bool) ctor never runs), then ProcessAISegment (the corpse scan @0xab7a0, now LIVE -- IsCorpseVisible probe over the
 	// body's corpseHLpos points, radius GetMaxUnitSightDistance). Constructing the
 	// tracker subscribes the unit to the global event bus; nothing throws during this tick, so no dispatch reentrancy.
 	virtual void OnAISegment()
@@ -335,7 +336,7 @@ public:
 		if ( IsUnderAIControl() && IsValid( pUnitServer ) && pUnitServer->CanFight() && IsValid( pAIState ) )
 		{
 			// item 7 parity: retail maintains SAIUnitState EVENT-DRIVEN, not by a per-segment poll. The begin-turn
-			// enemy re-seed Populate() now runs via CAIBeginTurnEvent (fired by CEventOnStartGame + the newly-thrown
+			// enemy re-seed PrepareEnemies() runs via CAIBeginTurnEvent (fired by CEventOnStartGame + the newly-thrown
 			// CEventOnPassControl); the See/Lost/Hear/Bullet/Grenade/Die/Attack producers maintain it intra-turn.
 			// Only Update() stays per-segment -- it re-derives pEnemy/pAlly and sets the modified flag the
 			// commander's reaction pump (GetReactionForUpdate) consumes. (Poll Populate() removed for parity.)
@@ -354,6 +355,10 @@ CAIUnit::CAIUnit( NWorld::CUnitServer *_pUnitServer, bool _bUnderAIControl ) :
 	GetUnitSkillValues();
 	pos = pUnitServer->GetPosition();   // retail: the FULL SUnitPosition (incl. bRun)
 	state.SetUnit( this );
+	// Retail constructs its CAIEventTracker base subobject before the rest of CAIUnit.  Subscribe
+	// fresh map-deployed units now so they receive CEventOnStartGame; waiting for OnAISegment loses
+	// the initial enemy sweep in random encounters.
+	pEventTracker = new CAIEventTracker( pUnitServer );
 	pInventory = CreateAIInventory( this );
 	pUnitServer->GetRPG()->PrintLog( false );
 	// release CAIUnit ctor tail (@0xae420): seed the AI hide-roll chance from the current difficulty record
@@ -614,6 +619,33 @@ void CAIUnit::OnSequenceFinished()
 	if ( !controls.empty() && !controls.back()->IsActive() )
 		controls.back()->Activate();
 	state.selfModified.SetModified();   // retail tail: SAIUnitState::Modified()
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail CAIUnit::ContinueRoute @0xadf20; v1.2 @0x4ae1b0. A scripted route is installed in the
+// slot matching the mode at SetRoute time. UnitKeepMoving is deliberately called on the other side
+// of EndSequence in EFirst, so promote the just-paused sequence route into the now-active normal slot
+// (the inverse transfer is used when continuing a normal route after entering a sequence), resume it,
+// and clear the source slot. The old reconstruction resumed the obsolete dev IAIControl stack, leaving
+// the retail-style route slot paused and the actor one path node short of its destination.
+void CAIUnit::ContinueRoute()
+{
+	if ( !IsValid( pUnitServer ) || !IsUnderAIControl() )
+		return;
+	if ( IsWorldSequence() )
+	{
+		routeSequence() = routeNormal();
+		if ( IsValid( routeSequence() ) )
+			routeSequence()->Resume();
+		routeNormal() = 0;
+	}
+	else
+	{
+		routeNormal() = routeSequence();
+		if ( IsValid( routeNormal() ) )
+			routeNormal()->Resume();
+		routeSequence() = 0;
+	}
+	SetCurrentLogicInner( 0 );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 int CAIUnit::GetCoverForFixedUnit( const NAI::SUnitPosition &pos, 

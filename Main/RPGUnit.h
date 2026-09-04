@@ -160,6 +160,9 @@ public:
 	CSkilledObject(): fXP(0) {}
 
 	CDynamicSkill& Skills( const int eSkill ) { return *skills[eSkill]; }
+	void AddXP( float fXPToAdd );                         // retail @0x2bbde0
+	void UpdateSkills();                                  // retail @0x2bbcc0
+	int GetSkillBaseStatValue( const int eSkill );         // retail @0x2ba7b0
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CNamedObject -- the "thing that has a name" base (release re-architecture). Serialized as a CUnit
@@ -315,7 +318,6 @@ public:
 
 	void AddXP( float nXPToAdd );
 	bool UseSkill( const int eSkill, const int nAddValue );
-	int GetSkillBaseStatValue( const int eSkill );
 
 	NDb::CRPGPers* GetPers() const;
 	NDb::CComplexHead* GetHead() const;          // the head TEMPLATE (resolved via pHeadInfo)
@@ -354,7 +356,6 @@ public:
 	void SetXPLevel( int nLevel );
 	bool IsCheatEnabled( int nCheat );
 	void SetCheat( int nCheat, bool bState );
-	void UpdateSkills();
 	int GetDeathVP() { return nDeathVP; }
 	void CalcDeathVP( float _fDeathCoeff );
 	//

@@ -77,7 +77,7 @@ static void AddMipDXTN( CImageMMP *pDst, const CImage &src, NGfx::EPixelFormat f
 		fWeights
 	);
 
-	// Добавляем mip-уровень (точно так же, как раньше)
+	// add mip-level (same as before)
 	pDst->AddMipLevel(outdata.data(), outdata.size());
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////

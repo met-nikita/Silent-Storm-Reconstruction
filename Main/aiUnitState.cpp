@@ -2,33 +2,23 @@
 //
 #include "aiUnitState.h"
 #include "aiUnit.h"        // IAIUnit
+#include "aiMisc.h"        // GetAIUnit
 #include "aiState.h"       // SAIState
 #include "aiPlayer.h"      // IAIPlayer::GetUnits / IsContain
 #include "wUnitServer.h"   // CanFight
 #include "..\DBFormat\DataRPG.h"  // NDb::EShootMode -- BEFORE aiInventory.h (its NDB:: fwd-decl typo)
+#include "..\DBFormat\DataMap.h"  // NDb::DS_ENEMY
 #include "aiInventory.h"   // CAIInventory::GetBestFireArms (the FindMostDangerousEnemy to-hit metric)
 //
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // SAIUnitState - per-unit threat tracker. See aiUnitState.h for the fidelity/scope notes (event-driven
-// maintenance + the position cache + the morale-skill half of CheckScared are simplified; the derive
-// methods + Populate keep enemies/allies/pEnemy/pAlly/bScared correct each think).
+// maintenance + the position cache + the morale-skill half of CheckScared are simplified).
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 namespace NAI
 {
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 static bool IsAlive( IAIUnit *p ) { return IsValid( p ) && !p->IsDead(); }
 static bool IsFightable( IAIUnit *p ) { return IsValid( p ) && IsValid( p->GetUnitServer() ) && p->GetUnitServer()->CanFight(); }
-// fog of war: is enemy `e` in the seer's currently-visible set?
-static bool CanSee( const vector< CPtr<NWorld::CUnit> > &visible, IAIUnit *e )
-{
-	if ( !IsValid( e ) || !IsValid( e->GetUnitServer() ) )
-		return false;
-	NWorld::CUnit *pServer = e->GetUnitServer();   // CUnitServer is-a CUnit
-	for ( vector< CPtr<NWorld::CUnit> >::const_iterator i = visible.begin(); i != visible.end(); ++i )
-		if ( (*i).GetPtr() == pServer )
-			return true;
-	return false;
-}
 static void AddUnique( vector< CPtr<IAIUnit> > *pv, IAIUnit *p )
 {
 	for ( vector< CPtr<IAIUnit> >::iterator i = pv->begin(); i != pv->end(); ++i )
@@ -89,68 +79,38 @@ void SAIUnitState::Reset()
 	bScared = false; bHelpCalled = false;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// Refresh the threat lists from the AI players, FOG-OF-WAR limited: the unit only knows the enemies it can
-// currently SEE (CUnitServer's per-unit visibility, kept up to date by UpdateVisible for interrupts). This
-// is the dev equivalent of the release's event-maintained seen-set (CAIEventTracker::OnSeeEnemy/OnLostEnemy
-// -> SAIUnitState AddEnemy/RemoveEnemy); the release's transient-stimulus events (bullet/grenade/heard) have
-// no dev emitter and are not modelled. Enemies the unit no longer sees but saw last think are remembered as
-// possible enemies. Allies are EVENT-ONLY (retail semantics): the list is populated solely by
-// CAIAllyNeedHelpEvent (an ally who called for help) and drained by CAILostAllyEvent / OnDie -- it is
-// NOT a team roster (the dev's roster refill made pAlly "the nearest teammate" and would have sent every
-// idle unit marching at its neighbor once the ally-assist rung landed).
+// Retail SAIUnitState::PrepareEnemies @0x004b17a0.  At the start of a turn, promote every
+// live hostile in this unit's own CTBSUnitVision list to a confirmed enemy.  Confirmed enemies
+// that vanished from that list become possible enemies.  This deliberately does not depend on
+// SAIState's commander rosters: StartGame raises the begin-turn event before those transient
+// back-pointers have necessarily been synchronized.
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void SAIUnitState::Populate()
+void SAIUnitState::PrepareEnemies()
 {
-	bScared = false;   // re-evaluate scared from the current situation each think (CheckScared latches it)
-	vector< CPtr<IAIUnit> > seenLastThink = enemies.data.units;   // for the lost-from-sight -> possible memory
-	enemies.data.units.clear();         enemies.SetModified();
-	// possibleEnemies are now EVENT-managed (the reconstructed OnBullet/OnHear/OnGrenade/OnLostEnemy handlers
-	// AddPossibleEnemy a NON-visible threat; LostPossibleEnemy/EnemyDied/Enemy remove it). Do NOT clear them here:
-	// the dev's predecessor-era poll wiped every event suspect each think, which made the whole reactive layer
-	// inert (a shot-from-concealment was forgotten before the unit could act). Just drop suspects that resolved on
-	// their own -- ones whose unit is no longer valid/alive. (Retail SAIUnitState has no Populate at all; this hybrid
-	// keeps the dev's cheap poll for the visible enemies/allies and lets events own the non-visible suspects.)
-	possibleEnemies.SetModified();
-	for ( int k = (int)possibleEnemies.data.units.size() - 1; k >= 0; --k )
-		if ( !IsValid( possibleEnemies.data.units[ k ] ) )
-			possibleEnemies.data.units.erase( possibleEnemies.data.units.begin() + k );
-	SAIState *pState = IsValid( pUnit ) ? pUnit->GetAIState() : 0;
-	if ( !IsValid( pState ) )
+	if ( !IsAlive( pUnit ) )
 		return;
-	IAIPlayer *pAllyPlayer = pState->GetAllyAIPlayer();
-	IAIPlayer *pEnemyPlayer = pState->GetEnemyAIPlayer();
-	const bool bUnitInAlly = IsValid( pAllyPlayer ) && pAllyPlayer->IsContain( pUnit );
-	IAIPlayer *pFoes = bUnitInAlly ? pEnemyPlayer : pAllyPlayer;
-	// the unit's currently-visible set (fog of war)
-	vector< CPtr<NWorld::CUnit> > visible;
-	if ( IsValid( pUnit ) && IsValid( pUnit->GetUnitServer() ) )
-		pUnit->GetUnitServer()->GetVisible( &visible );
-	if ( IsValid( pFoes ) )
+	NWorld::CUnitServer *pUS = pUnit->GetUnitServer();
+	if ( !IsValid( pUS ) )
+		return;
+
+	vector< CPtr<IAIUnit> > vanished = enemies.data.units;
+	const list< CPtr<NWorld::CUnitServer> > &visible = pUS->GetTBSVisible();
+	for ( list< CPtr<NWorld::CUnitServer> >::const_iterator i = visible.begin(); i != visible.end(); ++i )
 	{
-		vector< CPtr<IAIUnit> > *pUnits = pFoes->GetUnits();
-		for ( vector< CPtr<IAIUnit> >::iterator i = pUnits->begin(); i != pUnits->end(); ++i )
-		{
-			if ( !IsFightable( *i ) )
-				continue;
-			if ( CanSee( visible, *i ) )
-				AddEnemy( *i );                          // seen -> a known enemy
-			else
-			{
-				for ( vector< CPtr<IAIUnit> >::iterator j = seenLastThink.begin(); j != seenLastThink.end(); ++j )
-					if ( (*j).GetPtr() == (*i).GetPtr() ) { AddPossibleEnemy( *i ); break; }   // lost from sight -> remembered
-			}
-		}
+		NWorld::CUnitServer *pSeen = (*i).GetPtr();
+		if ( !IsValid( pSeen ) || !pSeen->CanFight() )
+			continue;
+		IAIUnit *pAI = GetAIUnit( pSeen );
+		if ( !IsAlive( pAI ) || pUS->GetDiplomacyState( pSeen ) != NDb::DS_ENEMY )
+			continue;
+		RemoveFrom( &vanished, pAI );
+		RemovePossibleEnemy( pAI );
+		AddEnemy( pAI );
 	}
-	// promote: a suspect that is now a visible/known enemy this think is no longer a mere "possible enemy"
-	// (mirrors retail's Enemy event RemovePossibleEnemy). Bounds the preserved set together with the invalid-prune
-	// above and the LostPossibleEnemy events the reactions raise once a suspect is investigated and found empty.
-	for ( int k = (int)possibleEnemies.data.units.size() - 1; k >= 0; --k )
+	for ( vector< CPtr<IAIUnit> >::iterator i = vanished.begin(); i != vanished.end(); ++i )
 	{
-		bool bNowSeen = false;
-		for ( vector< CPtr<IAIUnit> >::iterator e = enemies.data.units.begin(); e != enemies.data.units.end(); ++e )
-			if ( (*e).GetPtr() == possibleEnemies.data.units[ k ].GetPtr() ) { bNowSeen = true; break; }
-		if ( bNowSeen )
-			possibleEnemies.data.units.erase( possibleEnemies.data.units.begin() + k );
+		RemoveEnemy( *i );
+		AddPossibleEnemy( *i );
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////

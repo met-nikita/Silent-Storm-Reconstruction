@@ -20,6 +20,8 @@ namespace NLSHead { class CHeadInfo; }   // NWorld::CUnit::GetHeadInfo (baked st
 namespace NRPG
 {
 	struct SStoreItem;
+	struct SMapItem;
+	enum EStoreFilter;
 	class CGlobalGame;
 	class CGlobalPlayer;
 	struct SUnitInfo;
@@ -552,6 +554,13 @@ public:
 	virtual const wstring& GetPlayerName() const = 0;
 	virtual NRPG::CGlobalPlayer* GetGlobalPlayer() const = 0;
 	virtual void GetDeploySpot( NAI::SPathPlace *pRes ) = 0;
+	////
+	// Retail IPlayer store surface, vtable +0x20..+0x2c.  These four slots were added with the
+	// release CStore and must precede GetInHandItem (+0x30).
+	virtual CTPoint<int> GetStoreSize() = 0;
+	virtual void SetStoreFilter( NRPG::EStoreFilter eFilter ) = 0;
+	virtual void GetStoreUpdateFlags( vector<bool> *pFlags ) = 0;
+	virtual vector<NRPG::SMapItem>* GetStoreItems() = 0;
 	////
 	// retail IPlayer vtable slot 12 (+0x30, PDB-confirmed; NUI::CSlot::GetDragItem @0x1beb80 and
 	// CExecMoveInventoryItem::GetActionType @0x3a7990 both dispatch it there). The parameter is the

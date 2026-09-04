@@ -116,6 +116,7 @@ public:
 	CObjectBase* GetTarget();      // retail @0x1ee050 (CActionDecorator pure virtual)
 
 	void Take( int nX, int nY );
+	void Take( int nX, int nY, bool bSmart );
 	void Place( int nX, int nY, const NWorld::SItem &sItem );
 	bool CanPlace( int nX, int nY, const NWorld::SItem &sItem, int *nAP = 0 );
 	void GetItemsList( vector<SItem> *pItemsSet );
@@ -153,6 +154,12 @@ CObjectBase* CBackPackSlot::GetTarget()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CBackPackSlot::Take( int nX, int nY )
 {
+	Take( nX, nY, false );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// Retail @0x1ee140: smart-take drops normally, but sells directly while the store panel is open.
+void CBackPackSlot::Take( int nX, int nY, bool bSmart )
+{
 	SPoint sPos;
 	GetInSlotPos( nX, nY, &sPos );
 
@@ -171,7 +178,20 @@ void CBackPackSlot::Take( int nX, int nY )
 			sInvItem.pItem = sItem.pItem;
 			sInvItem.pUnit = pUnit->GetUnit();
 			sInvItem.sPosition = sItem.sPos;
-			pMission->CommandState( new NGame::CStateMoveItem( pUnit->GetUnit(), sInvItem, NWorld::SItem( pUnit->GetUnit(), NWorld::SItem::HAND ) ) );
+
+			NWorld::SItem sTarget;
+			if ( !bSmart )
+				sTarget = NWorld::SItem( pUnit->GetUnit(), NWorld::SItem::HAND );
+			else if ( pMission->GetPanelState( NGame::PANEL_STORE ) )
+			{
+				sTarget.eType = NWorld::SItem::STORAGE;
+				sTarget.pPlayer = GetGame()->GetActivePlayer()->GetPlayer();
+				sTarget.sPosition = CTPoint<int>( -1, -1 );
+			}
+			else
+				sTarget = NWorld::SItem( pUnit->GetUnit(), NWorld::SItem::GROUND );
+
+			pMission->CommandState( new NGame::CStateMoveItem( pUnit->GetUnit(), sInvItem, sTarget ) );
 			return;
 		}
 	}
@@ -250,6 +270,9 @@ bool CBackPackSlot::ProcessMessage( const SEvent &sEvent )
 			return true;
 		}
 	case EVENT_LBUTTONUP:
+		return true;
+	case EVENT_LBUTTONDBLCLK:
+		Take( sEvent.nX, sEvent.nY, true );
 		return true;
 	}
 

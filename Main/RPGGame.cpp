@@ -85,7 +85,8 @@ class CGame: public IGame
 	bool IsVisible( const CVec3 &vFrom, const vector<CVec3> &testPoints );
 public:
 	CGame() {}
-	CGame( NAI::IAIMap *_pAIMap, NAI::IPathNetwork *_pNet ): pAIMap(_pAIMap), pNet(_pNet) { if ( _pAIMap ) pVision = CreateVisionTracker( _pAIMap ); }
+	CGame( NAI::IAIMap *_pAIMap, NAI::IPathNetwork *_pNet, const STerrainInfo &terrainInfo ):
+		pAIMap(_pAIMap), pNet(_pNet) { if ( _pAIMap ) pVision = CreateVisionTracker( _pAIMap, terrainInfo ); }
 	virtual CCoverInfo* CalcCovers( const CVec3 &src, const CAttackPortion &attack, 
 		NWorld::CUnit *pIgnore, NWorld::CUnit *pDest, int nTargetUserID, float fMinClearDistance, bool bAIMode = false );
 	virtual CCoverInfo* CalcCoversForTile( const CVec3 &src, const CAttackPortion &attack, NWorld::CUnit *pIgnore,
@@ -106,6 +107,8 @@ public:
 	virtual bool IsCorpseVisible( const NWorld::CUnit *pObserver, const NWorld::CUnit *pCorpse );   // retail @0x298da0
 	virtual bool CheckPositionVisibility( const NAI::SUnitPosition observerPos, const NAI::SPosition targetPos,
 		float fRange, float fFOVAngle );   // retail @0x298fa0 (4-arg)
+	virtual void SetVisionMultiplier( float fMultiplier ) { pVision->SetVisionMultiplier( fMultiplier ); }   // retail @0x298740
+	virtual void SetNight( bool bIsNight ) { bNight = bIsNight; }   // retail @0x299550
 	virtual float GetUnitSightDistance( NRPG::CUnit *pRPGUnit );   // retail @0x2984d0
 	virtual float GetMaxUnitSightDistance( NRPG::CUnit *pRPGUnit );   // retail @0x298520 (vtbl+0x38)
 	virtual void GetVisibilityArea( vector<SVisibilitySpot> *pRes, const NWorld::CUnit *pObserver );
@@ -1109,9 +1112,9 @@ float CGame::GetMaxUnitSightDistance( NRPG::CUnit *pRPGUnit )
 	return f + f;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-IGame* CreateGame( NAI::IAIMap *pAIMap, NAI::IPathNetwork *pNet )
+IGame* CreateGame( NAI::IAIMap *pAIMap, NAI::IPathNetwork *pNet, const STerrainInfo &terrainInfo )
 {
-	return new CGame( pAIMap, pNet );
+	return new CGame( pAIMap, pNet, terrainInfo );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 }

@@ -842,7 +842,7 @@ void CDBTableBase::PreCreate( int nTypeID )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CDBTableBase::Refresh( int nTypeID )
 {
-	Sleep(0); // �������� ���������� ������� ������ (������ � ���� ������ ���������� �� � ������� ������)
+	Sleep(0); // transfer control to the other thread (writing to DB usually happens not in the current thread)
 	const CRecordHash copy = records;
   records.clear();
 	// iterate through recordset & create records

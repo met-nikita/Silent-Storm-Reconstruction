@@ -49,9 +49,8 @@ CVec3 GetColor( DWORD dwColor )
 	return CVec3( c.cR / 255.0f, c.cG / 255.0f, c.cB / 255.0f );
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// ���������� ������� ���� � ���� ������ ��� ��������� ��� ������������
-// ��� �������� �� vInputParams � ������ ������ ���
-// !!! attrs � vInputParams ������� ���� ���������������� ���������
+// This is a suitable option if it has no attributes at all or if it has all the attributes in vInputParams and no other flags.
+// !!! Attrs and vInputParams must be sorted arrays.
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool IsSuitableVariant( const vector<int> &vInputParams, const vector<NDb::SVariantFlags> &flags )
 {
@@ -96,7 +95,7 @@ class CRndConstructionPart: public CDBRecord
 public:
 	CPtr<CGeometry> pGeometry;
 	CPtr<CGeometry> p2ndGeometry;
-	int nSizeX;			// SizeX,Y ���������� � ������������ ������; SizeZ � ������
+	int nSizeX;			// SizeX,Y measure in construction tiles; SizeZ in floors
 	int nSizeY;
 	int nSizeZ;
 	int nSubPartsMask;
@@ -229,7 +228,7 @@ void CAnimation::Import()
 	}
 	else
 	{
-		// ����� �� �������� ������� ������� ����� (��-�� ����������� � BasicDB.h)
+		// to preverse field importing order (because of optimizations in BasicDB.h)
 		int n;
 		NDatabase::ImportField( "StartFrame", &n );
 		NDatabase::ImportField( "EndFrame", &n );
@@ -476,7 +475,7 @@ CAnimation* SAnimationVector::GetAnimation( int nFlags,
 		return results[0];
 	else if ( bMostPossible )
 	{
-		// ���������� �������� ��������� ��������
+		// return most likely animation
 		CAnimation *pRes = 0;
 		for ( int i = 0; i < results.size(); ++i )
 		{
@@ -1308,25 +1307,14 @@ void CSound::Import()
 	NDatabase::ImportField( "MinDistance", &fMinDistance );
 	NDatabase::ImportField( "MaxDistance", &fMaxDistance );
 	NDatabase::ImportField( "Priority", &nPriority );
+	NDatabase::ImportField( "EndingSamples", &nEndingSamples );
+	NDatabase::ImportField( "StartSamples", &nStartSamples );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CMusic
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CMusic::Import()
 {
-	string szType;
-	NDatabase::ImportField( "Type", &szType );
-	if ( "Ambient" == szType )
-		eType = MT_AMBIENT;
-	else if ( "PreCombat" == szType )
-		eType = MT_PRECOMBAT;
-	else if ( "Combat" == szType )
-		eType = MT_COMBAT;
-	else
-	{
-		ASSERT(0);
-		eType = MT_AMBIENT;
-	}
 	string szSrcName;
 	NDatabase::ImportField( "SrcName", &szSrcName );
 	vector<string> split;
@@ -2209,7 +2197,7 @@ FINISH_REGISTER
 	//////////////////////////////////////////////////////////////////////////////////////
 }
 using namespace NDb;
-// Format 0x[�������]DDMYHHN
+// Format 0x[Person]DDMYHHN
 REGISTER_SAVELOAD_CLASS( 0x002a1172, CString )
 REGISTER_SAVELOAD_CLASS( 0x02511000, CModel )
 REGISTER_SAVELOAD_CLASS( 0x02511001, CAnimation )

@@ -188,11 +188,7 @@ public:
 	void SetColor( const NGfx::SPixel8888 &sColor );
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// CComplexButtonFlash -- release-new CComplexButton variant with a flash-overlay animation. DEAD in
-// this predecessor UI (panels still create CComplexButton); reconstructed registered + serializable so
-// release saves whose buttons are CComplexButtonFlash load polymorphically (CObj<CComplexButton> holds
-// it via inheritance). operator& byte-exact to decode @0x243db0; flash Draw behavior deferred (inherits
-// CComplexButton::Draw -- never instantiated in this tree).
+// CComplexButtonFlash -- release store-category button with a one-shot flash overlay.
 class CComplexButtonFlash: public CComplexButton
 {
 	OBJECT_BASIC_METHODS(CComplexButtonFlash)
@@ -203,6 +199,10 @@ class CComplexButtonFlash: public CComplexButton
 public:
 	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CComplexButton*)this); f.Add(2,&bShowFlash); f.Add(3,&sFlashTime); f.Add(4,&pImage); return 0; }
 	CComplexButtonFlash() {}
+	CComplexButtonFlash( const SWindowInfo &sInfo, NDb::CUITexture *pUp, NDb::CUITexture *pDown, NDb::CUITexture *pUnchecked, NDb::CUITexture *pChecked );
+
+	void SetShowFlash( bool bState ) { bShowFlash = bState; }
+	void Draw( const STime &sTime, NGScene::I2DGameView *pView );
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CHoverButton

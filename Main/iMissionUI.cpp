@@ -299,7 +299,8 @@ bool CItemText::ProcessMessage( const SEvent &sEvent )
 	{
 	case EVENT_MOUSEENTER:
 		{
-			SetColor( NGfx::SPixel8888( 0xDF, 0x1F, 0x1F, 0xFF ) );   // retail @0x2101c0: 0xff1f1fdf
+			// Retail stores 0xff1f1fdf (AARRGGBB): an opaque BLUE hover, not red.
+			SetColor( NGfx::SPixel8888( 0x1F, 0x1F, 0xDF, 0xFF ) );
 			break;
 		}
 	case EVENT_MOUSEEXIT:

@@ -9,17 +9,11 @@
 // grenade lands, a corpse appears, our turn starts, ...) into the NAI AI events of aiEvent.h and hands
 // them to the unit's threat state (SAIUnitState).
 //
-// ADDITIVE PARITY SHELL (behaviour-neutral). In the release this bridge is owned by the per-unit
-// CAIUnit (which derives from CAIEventTracker) and is fed by the global world event bus. The dev tree
-// deliberately omits that install path -- SAIUnitState is poll-based (Populate() each think), so the
-// nine NWorld trigger payloads below are release-new world-subsystem events that NOTHING in the dev
-// tree throws. This module reconstructs the classes + handlers faithfully so the compiland SOURCE
-// converges. UPDATE (PART G): the layer is now ACTIVE -- CAIUnit owns a CObj<CAIEventTracker> built + ticked in
-// CAIUnit::OnAISegment (commit 3ea95eb), and the CEventOnBullet producer (wBullet.cpp) is wired, so a unit shot from
-// concealment now reacts (the suspect survives the no-clear SAIUnitState::Populate). Two release world seams have no dev twin (the
-// CWorld range query at vtbl+0x10c and the RPG corpse-scan radius) -- they are documented absent and
-// stubbed empty in the .cpp, so the (deferred) corpse scan finds no candidates. CAIEventTracker is a
-// free-standing CObjectBase class here (NOT grafted onto the dev CAIUnit). Oracle:
+// In the release this bridge is a CAIUnit base subobject and is fed by the global world event bus.
+// Here it is an owned CObj because the dev CObjectBase hierarchy cannot accept the second base safely.
+// Fresh units construct it immediately (so StartGame is observed), loaded units re-arm it on their
+// first OnAISegment, and SAIUnitState::PrepareEnemies performs the retail begin-turn reconciliation.
+// The world producers and corpse range/radius seams are now wired. Oracle:
 // decomp/src/s2_threattracker.h (every handler disasm-verified there).
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 #include "..\Misc\Geom.h"          // CRay / CVec3 (by-value event-payload members)
@@ -47,8 +41,6 @@ class CAIEventTracker;
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CAIEventTrackerImpl (PDB 152): CObjectBase + 11 auto-subscribing CEventRegister handler slots (the
 // ctor wires each to its OnXxx handler and the global event bus) + the unit / interface back-pointers.
-// Faithful handler bodies live in the .cpp; they are unreachable in the dev tree (no producer throws
-// the trigger events), so subscribing is behaviour-neutral.
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CAIEventTrackerImpl: public CObjectBase
 {

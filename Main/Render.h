@@ -214,6 +214,160 @@ class CRasterizer
 		else if ( nEdges > 0 )
 			RasterTriangleLow( pLeft[0], pRight[0], pRight[0], zGrad, pLeft[0].nSY, pRight[0].nFY, pLeft[0].nFY, nBack );
 	}
+	// The release-game rasterizer walks triangle edges in 16.16 fixed point.  Keep
+	// this path separate for now because the January source's CRasterizer is also
+	// used by the software renderer and shadow-volume builder, while the release
+	// binary proves this exact instantiation for both voxel renderers.
+	struct SFixedEdgeInfo
+	{
+		int nSY, nFY;
+		int nDX, nX0;
+	};
+	struct SFixedZGradientInfo
+	{
+		float fZ0, fZ, fZx, fZy;
+	};
+	void RasterTriangleLowFixed( const SFixedEdgeInfo &sLeft, const SFixedEdgeInfo &sRight,
+		const SFixedEdgeInfo &sRight2, SFixedZGradientInfo *pZGradient,
+		int nSY, int nFY2, int nFY, int nBack )
+	{
+		T *pThis = static_cast<T*>( this );
+		pThis->ClipVertical( &nSY, &nFY2, &nFY );
+
+		pZGradient->fZ = nSY * pZGradient->fZy + pZGradient->fZ0;
+		int nLeftX = ( nSY - sLeft.nSY ) * sLeft.nDX + sLeft.nX0;
+		int nRightX = ( nSY - sRight.nSY ) * sRight.nDX + sRight.nX0;
+		int nY = nSY;
+		for ( ; nY < nFY2; ++nY, nLeftX += sLeft.nDX, nRightX += sRight.nDX,
+			pZGradient->fZ += pZGradient->fZy )
+		{
+			int nLeft = nLeftX >> 16;
+			int nRight = nRightX >> 16;
+			int nBackface;
+			if ( nLeft > nRight )
+			{
+				swap( nLeft, nRight );
+				nBackface = nBack ^ 1;
+			}
+			else if ( nRight > nLeft )
+				nBackface = nBack;
+			else
+				continue;
+			if ( nBackface && !pThis->DoRenderBackface() )
+				continue;
+			pThis->ClipHorizontal( &nLeft, &nRight );
+			pThis->RasterSpan( nY, nLeft, nRight,
+				pZGradient->fZ + nLeft * pZGradient->fZx,
+				pZGradient->fZx, nBackface );
+		}
+
+		nRightX = ( nY - sRight2.nSY ) * sRight2.nDX + sRight2.nX0;
+		for ( ; nY < nFY; ++nY, nLeftX += sLeft.nDX, nRightX += sRight2.nDX,
+			pZGradient->fZ += pZGradient->fZy )
+		{
+			int nLeft = nLeftX >> 16;
+			int nRight = nRightX >> 16;
+			int nBackface;
+			if ( nLeft > nRight )
+			{
+				swap( nLeft, nRight );
+				nBackface = nBack ^ 1;
+			}
+			else if ( nRight > nLeft )
+				nBackface = nBack;
+			else
+				continue;
+			if ( nBackface && !pThis->DoRenderBackface() )
+				continue;
+			pThis->ClipHorizontal( &nLeft, &nRight );
+			pThis->RasterSpan( nY, nLeft, nRight,
+				pZGradient->fZ + nLeft * pZGradient->fZx,
+				pZGradient->fZx, nBackface );
+		}
+	}
+	void InitFixedEdge( SFixedEdgeInfo *pRes, const CVec3 &a, const CVec3 &dif, int nSY, int nFY )
+	{
+		const float fDX = dif.x / dif.y;
+		pRes->nDX = Float2Int( fDX * 65536.0f );
+		pRes->nX0 = Float2Int( ( a.x - ( a.y - 0.5f - nSY ) * fDX ) * 65536.0f ) + 0x8000;
+		pRes->nSY = nSY;
+		pRes->nFY = nFY;
+	}
+	bool CalcFixedZGradient( SFixedZGradientInfo *pInfo, const CVec3 &vA,
+		const CVec3 &vCB, const CVec3 &vAC )
+	{
+		const float fArea = -vAC.x * vCB.y + vAC.y * vCB.x;
+		if ( fArea == 0 )
+			return false;
+		const float fD = 1 / fArea;
+		pInfo->fZx = fD * ( -vCB.y * vAC.z + vAC.y * vCB.z );
+		pInfo->fZy = fD * ( vCB.x * vAC.z - vAC.x * vCB.z );
+		pInfo->fZ0 = vA.z - ( vA.x - 0.5f ) * pInfo->fZx - ( vA.y - 0.5f ) * pInfo->fZy;
+		pInfo->fZ = 0;
+		return true;
+	}
+	void RasterTriangleFixed( const CVec3 &vA, const CVec3 &vB, const CVec3 &vC )
+	{
+		const int nA = Float2Int( vA.y );
+		const int nB = Float2Int( vB.y );
+		const int nC = Float2Int( vC.y );
+		if ( nA == nB && nA == nC )
+			return;
+
+		int nLeft = 0, nRight = 0;
+		const CVec3 vEdge1( vB - vA ), vEdge2( vC - vB ), vEdge3( vA - vC );
+		SFixedZGradientInfo zGrad;
+		if ( !CalcFixedZGradient( &zGrad, vA, vEdge2, vEdge3 ) )
+			return;
+		SFixedEdgeInfo sLeft[2], sRight[2];
+
+		if ( vEdge1.y > 0 )
+			InitFixedEdge( &sLeft[nLeft++], vA, vEdge1, nA, nB );
+		else if ( vEdge1.y < 0 )
+			InitFixedEdge( &sRight[nRight++], vB, vEdge1, nB, nA );
+
+		if ( vEdge2.y > 0 )
+			InitFixedEdge( &sLeft[nLeft++], vB, vEdge2, nB, nC );
+		else if ( vEdge2.y < 0 )
+			InitFixedEdge( &sRight[nRight++], vC, vEdge2, nC, nB );
+
+		if ( vEdge3.y > 0 )
+			InitFixedEdge( &sLeft[nLeft++], vC, vEdge3, nC, nA );
+		else if ( vEdge3.y < 0 )
+			InitFixedEdge( &sRight[nRight++], vA, vEdge3, nA, nC );
+
+		SFixedEdgeInfo *pLeft, *pRight;
+		int nEdges, nBack;
+		if ( nLeft == 1 )
+		{
+			pLeft = sLeft;
+			pRight = sRight;
+			nEdges = nRight;
+			nBack = 0;
+		}
+		else if ( nRight == 1 )
+		{
+			pLeft = sRight;
+			pRight = sLeft;
+			nEdges = nLeft;
+			nBack = 1;
+		}
+		else
+			return;
+
+		if ( nEdges > 1 )
+		{
+			if ( pRight[0].nSY > pRight[1].nSY )
+				RasterTriangleLowFixed( pLeft[0], pRight[1], pRight[0], &zGrad,
+					pLeft[0].nSY, pRight[1].nFY, pLeft[0].nFY, nBack );
+			else
+				RasterTriangleLowFixed( pLeft[0], pRight[0], pRight[1], &zGrad,
+					pLeft[0].nSY, pRight[0].nFY, pLeft[0].nFY, nBack );
+		}
+		else if ( nEdges > 0 )
+			RasterTriangleLowFixed( pLeft[0], pRight[0], pRight[0], &zGrad,
+				pLeft[0].nSY, pRight[0].nFY, pLeft[0].nFY, nBack );
+	}
 	void Intersect( SProjectedPoint *pRes, const SProjectedPoint &vA, const SProjectedPoint &vB )
 	{
 		float ffA = vA.src.z - F_RASTERIZER_NEAR_PLANE;// - vA.w;
@@ -289,6 +443,10 @@ public:
 	void RasterNoClip( const CVec3 &v1, const CVec3 &v2, const CVec3 &v3 )
 	{
 		RasterTriangle( v1, v2, v3 );
+	}
+	void RasterNoClipFixed( const CVec3 &v1, const CVec3 &v2, const CVec3 &v3 )
+	{
+		RasterTriangleFixed( v1, v2, v3 );
 	}
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////

@@ -851,6 +851,9 @@ CCommandExecute* CreateExecutor( CUnitServer *pUS, CCmd *pCmd, EUnitCommandResul
 	const NAI::SUnitPosition &position = pUS->GetPosition();
 
 	*pError = UCR_OK;
+	CDynamicCast<CCmdUpdateStore> pUpdateStore( pCmd );
+	if ( pUpdateStore )
+		return new CExecUpdateStore( pUS, pUpdateStore );
 	// retail CreateExecutor @0x3b37b0: a non-hero "wants to talk" command becomes a one-shot executor
 	// that throws CEventOnNotHeroWantsToTalk (drives the CAckNPCInteraction bark).
 	CDynamicCast<CCmdNotHeroWantsToTalk> pNotHeroTalk(pCmd);

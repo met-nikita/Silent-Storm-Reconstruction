@@ -900,26 +900,18 @@ BEGIN_SCRIPT_COMMAND( UnitStop, "u" )
 	return 0;
 END_SCRIPT_COMMAND
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// retail @0x2fbcc0 ("u") -> NAI::CAIUnit::ContinueRoute @0xadf20 (IAIUnit vtbl+0x40): tell a unit whose
-// route was interrupted to keep moving along it. Retail resumes the route-following logic and cancels the
-// interrupting combat logic (pCurrentLogic). DEV DELTA: the dev route lives in the IAIControl stack
-// (GetRoute/ActivateCurrentControl), NOT as an IAILogic; pLogic is the reaction-installed (combat) logic --
-// i.e. the retail "pCurrentLogic" being cancelled, NOT the route. So Resume(routes[live]) maps to
-// re-activating the route control, and Cancel(pCurrentLogic) maps to StopThinking() on pLogic. For a
-// script-routed unit pLogic is normally null (the AIM_SCRIPT route control outranks the AI reaction), so
-// that half is usually a no-op -- which matches retail's null-route-slot path. (Sibling: UnitStop above.)
+// retail @0x2fbcc0 ("u") -> NAI::CAIUnit::ContinueRoute @0xadf20 (v1.2 @0x4ae1b0):
+// promote the saved route into the slot matching the current sequence mode, resume it there, and drop
+// the interrupting combat logic. This transfer is essential when the script calls UnitKeepMoving just
+// after EndSequence: OnSequenceFinished paused the sequence slot, and ContinueRoute moves it into the
+// normal slot so the actor completes the remaining path.
 BEGIN_SCRIPT_COMMAND( UnitKeepMoving, "u" )
 	CDynamicCast<NWorld::CUnitServer> pUS( luaParams[ 0 ].p );
 	if ( pUS )
 	{
 		NAI::IAIUnit *pAI = NAI::GetAIUnit( pUS );
 		if ( IsValid( pAI ) )
-		{
-			pAI->ActivateCurrentControl();				// resume the route control (retail Resume routes[live])
-			NAI::IAILogic *pLogic = pAI->GetLogic();
-			if ( IsValid( pLogic ) )
-				pLogic->StopThinking();					// cancel the interrupting logic (retail Cancel pCurrentLogic)
-		}
+			pAI->ContinueRoute();
 	}
 	return 0;
 END_SCRIPT_COMMAND

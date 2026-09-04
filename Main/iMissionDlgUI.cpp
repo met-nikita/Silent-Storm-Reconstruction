@@ -296,7 +296,10 @@ void CMissionDlgUI::SetStage( int _nStage )
 {
 	if ( _nStage >= parsedPhrasesSet.size() )
 	{
-		ASSERT( 0 );
+		// Retail deliberately lets the Next binding advance one past the last page. SetStage then
+		// turns that out-of-range request into the normal animated close path (v1.1 @0x2059c0,
+		// v1.2 @0x606170) rather than treating it as an invalid stage.
+		HideDesktop();
 		return;
 	}
 

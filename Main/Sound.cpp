@@ -102,8 +102,7 @@ public:
 static CObj<CMusic> theCurrentMusic;
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // Retail CSoundScene music machine (Sound.obj), rebuilt to the retail shape over the dev framework:
-//   * per-scene pAmbient/pCombat track slots + edge-triggered eCurrent/eNextMusicType
-//     (retail holds CTMusic POOLS here; dev holds the picked CMusic records directly),
+//   * per-scene pAmbient/pCombat CTMusic pools + edge-triggered eCurrent/eNextMusicType,
 //   * a data-driven play/fade/silence cycle: SetMusicStopTime (@0x304ae0, now + PlayTime +
 //     rnd(RndPlayTime)), FadeOutMusic (@0x304c20, fade over the record's FadeOut ms),
 //     SetMusicStartTime (@0x304b80, now + Silence + rnd(RndSilence)), then the next track of the
@@ -122,8 +121,8 @@ private:
 	bool bRearmStopTime;	// dev: deadlines from a save belong to another session's clock -> re-arm
 	ZDATA
 	CObj<CMusic> pMusic;
-	CDBPtr<NDb::CMusic> pAmbient;
-	CDBPtr<NDb::CMusic> pCombat;
+	CDBPtr<NDb::CTMusic> pAmbient;
+	CDBPtr<NDb::CTMusic> pCombat;
 	NDb::EMusicType eCurrentMusicType;
 	NDb::EMusicType eNextMusicType;
 	__int64 tStartMusic;
@@ -135,11 +134,7 @@ public:
 		// retail CSoundScene::operator& @0x307440 tag layout: 2=tStartMusic(8), 4=pTime (the DG
 		// time node -- dev has none, the chunk is skipped), 5=pMusic (CObj), 6=pAmbient,
 		// 7=pCombat, 8=eCurrentMusicType, 9=eNextMusicType, 10=tStopMusic(8), 11=rand(4).
-		// NOTE: retail 6/7 are CDBPtr<CTMusic> POOL ids; dev stores the PICKED CMusic record ids.
-		// Dev-written saves round-trip exactly. A RETAIL save's pool id only happens to resolve to
-		// the matching track where TemplateID == ID (the low ids, e.g. 1/3); elsewhere the tables
-		// diverge (game.db: template 124 = ambient07 pool, Music record 124 = Combat13) -- known
-		// retail-save-load caveat of the picked-record adaptation.
+		// Tags 6/7 are CDBPtr<CTMusic> pool ids, not already-picked CMusic record ids.
 		f.Add(2,&tStartMusic);
 		f.Add(5,&pMusic);
 		f.Add(6,&pAmbient);
@@ -159,15 +154,15 @@ public:
 	}
 
 public:
-	CSoundScene( NDb::CMusic *_pAmbient = 0, NDb::CMusic *_pCombat = 0 );
+	CSoundScene( NDb::CTMusic *_pAmbient = 0, NDb::CTMusic *_pCombat = 0 );
 
 	virtual CSound* Add3DSound( NDb::CSound *pSample, CFuncBase<CVec3> *pPos, STime tStart );
 	virtual CSound2D* Add2DSound( NDb::CSound *pSample );
 	virtual CSoundEffect* AddEffect( NDb::CSoundEffect *pEff, STime stBeginTime, CFuncBase<STime> *pTime, CFuncBase<CVec3> *pPos, const vector<int> &flags );
 
 	virtual void SetMusic( NDb::EMusicType eType );
-	virtual void SetMusic( NDb::CMusic *pMusic );
 	virtual void FadeOutMusic();
+	virtual void Draw( CTransformStack *pTS );
 
 	// retail @0x304d80 (ISoundScene vtbl+0x28): freeze/resume every live channel -- effects, 3D
 	// sounds, 2D sounds, in that order. The music stream is NOT touched (retail menus keep music).
@@ -184,22 +179,20 @@ public:
 				NFMSound::Pause( (*i)->pSound, bPause );
 	}
 
-	virtual void Draw( CTransformStack *pTS );
-
 private:
 	void SetMusicStopTime();	// retail @0x304ae0
 	void SetMusicStartTime();	// retail @0x304b80
 	void DoFadeOutMusic();		// retail FadeOutMusic @0x304c20 (the vtbl+0x20 wind-down virtual)
-	bool StartMusic( NDb::CMusic *pTrack );
+	bool StartMusic( NDb::CMusic *pTrack, int nStartMs = 0 );
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CSoundScene::CSoundScene( NDb::CMusic *_pAmbient, NDb::CMusic *_pCombat ):
+CSoundScene::CSoundScene( NDb::CTMusic *_pAmbient, NDb::CTMusic *_pCombat ):
 	bSilence(true), bRearmStopTime(false), pAmbient(_pAmbient), pCombat(_pCombat),
 	eCurrentMusicType(NDb::MT_AMBIENT), eNextMusicType(NDb::MT_AMBIENT),
 	tStartMusic(0), tStopMusic(0)
 {
-	// retail ctor @0x3058c0: stores BOTH the ambient and the combat slot (retail: CTMusic pools,
-	// dev: the records the mission picked from those pools); bSilence=true, both types MT_AMBIENT,
+	// retail ctor @0x3058c0: stores both the ambient and combat CTMusic pools; bSilence=true,
+	// both types MT_AMBIENT,
 	// tStopMusic=0 and tStartMusic seeded to "now" -- a fresh scene launches its ambient on the
 	// very first Draw.
 	tStartMusic = GetMusicTimeMs();
@@ -294,7 +287,7 @@ void CSoundScene::DoFadeOutMusic()
 // launch pTrack as the scene's current music. Cross-scene continuity: a surviving stream of the
 // SAME file is adopted (continues seamlessly) through PlayStream's adopt mode; a surviving FOREIGN
 // track is closed through SwitchStream (retail switch, fading the new track in over its FadeIn ms).
-bool CSoundScene::StartMusic( NDb::CMusic *pTrack )
+bool CSoundScene::StartMusic( NDb::CMusic *pTrack, int nStartMs )
 {
 	CMusic *pM = new CMusic;
 	pM->pMusic = pTrack;
@@ -314,7 +307,7 @@ bool CSoundScene::StartMusic( NDb::CMusic *pTrack )
 	if ( pOld && !bSameFile )
 		pM->pStream = NFMSound::SwitchStream( pOld, pTrack->szFileName.c_str(), true, fFadeInSec );
 	else
-		pM->pStream = NFMSound::PlayStream( pTrack->szFileName.c_str(), true, 0, true, fFadeInSec );
+		pM->pStream = NFMSound::PlayStream( pTrack->szFileName.c_str(), true, nStartMs, true, fFadeInSec );
 	if ( !IsValid( pM->pStream ) )
 		return false;
 	pMusic = pM;
@@ -347,31 +340,13 @@ void CSoundScene::SetMusic( NDb::EMusicType eType )
 	}
 	NDb::CMusic *pTrack = 0;
 	if ( IsValid( pCombat ) )
-		pTrack = pCombat;
+		pTrack = pCombat->GetMusic( &rand );
 	if ( !pTrack )
 		return;
 	if ( StartMusic( pTrack ) )
 		eCurrentMusicType = NDb::MT_COMBAT;
 	else
 		SetMusicStopTime();	// retail arms the stop window even when the switch failed
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-// dev-facing adapter (iMission passes the combat record): adopt the record into the scene's
-// ambient/combat slot by its eType and drive the retail type machine.
-void CSoundScene::SetMusic( NDb::CMusic *pDBMusic )
-{
-	if ( !IsValid( pDBMusic ) )
-		return;
-	if ( pDBMusic->eType == NDb::MT_AMBIENT )
-	{
-		pAmbient = pDBMusic;
-		SetMusic( NDb::MT_AMBIENT );
-	}
-	else
-	{
-		pCombat = pDBMusic;
-		SetMusic( NDb::MT_COMBAT );
-	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CSoundScene::FadeOutMusic()
@@ -487,22 +462,29 @@ void CSoundScene::Draw( CTransformStack *pTS )
 		}
 		else if ( now >= tStartMusic )
 		{
-			// silence over: pick and launch the pending track type. (Retail draws from the
-			// CTMusic pool of that type; dev holds the picked record in the matching slot.)
+			// silence over: choose a weighted track from the pending type's CTMusic pool.
+			NDb::CTMusic *pPool = 0;
 			NDb::CMusic *pTrack = 0;
 			if ( eNextMusicType == NDb::MT_AMBIENT )
 			{
 				if ( IsValid( pAmbient ) )
-					pTrack = pAmbient;
+					pPool = pAmbient;
 			}
 			else
 			{
 				if ( IsValid( pCombat ) )
-					pTrack = pCombat;
+					pPool = pCombat;
 			}
+			if ( pPool )
+				pTrack = pPool->GetMusic( &rand );
 			eCurrentMusicType = eNextMusicType;	// retail publishes the type even without a track
 			if ( pTrack )
-				StartMusic( pTrack );
+			{
+				// retail @0x705c9b: if Draw arrives after the exact deadline, begin that far
+				// into the looping stream instead of restarting it from sample zero.
+				__int64 nStartMs = now - tStartMusic;
+				StartMusic( pTrack, nStartMs > 0 ? (int)nStartMs : 0 );
+			}
 			else if ( IsValid( theCurrentMusic ) && IsValid( theCurrentMusic->pStream )
 				&& NFMSound::IsPlaying( theCurrentMusic->pStream ) )
 			{
@@ -568,7 +550,7 @@ bool SetModeFromConfig()
 	return true;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-ISoundScene* CreateSoundScene( NDb::CMusic *pAmbient, NDb::CMusic *pCombat )
+ISoundScene* CreateSoundScene( NDb::CTMusic *pAmbient, NDb::CTMusic *pCombat )
 {
 	return new CSoundScene( pAmbient, pCombat );	// retail @0x305ad0 (two-slot factory)
 }

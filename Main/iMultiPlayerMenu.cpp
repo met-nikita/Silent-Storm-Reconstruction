@@ -38,9 +38,9 @@
 //    dropped. "cancel" exits the modal (CICExitModal), exactly as the sibling menus do.
 //  - The sides combo uses the header-available NUI::CComboBox (the release CComplexComboBox is a
 //    file-local class in iOptionsMenu.cpp and not includable).
-//  - The "weapons" action posts a CCmdUpdateStore to the first player; that command class is ABSENT
-//    from this build (grep UpdateStore in a5dll/Main = 0 hits, as the prior decode noted). The bind and
-//    its branch are present but consume-only (parity-neutral) until a store-update path is wired.
+//  - The "weapons" action posts a CCmdUpdateStore to the first player. The command/executor now exist,
+//    but this separate pre-game-menu branch remains consume-only pending raw verification of which
+//    unit/player object retail uses before a mission roster exists.
 //  - GetUIContainer id 449 (release 0x1c1) is the decoded skin id; CLoader::GetControl is null-safe
 //    (logs a UI-ERROR + returns an empty placeholder for a missing control), so the screen is crash-safe
 //    even where this build's content DB lacks the container.
@@ -396,7 +396,7 @@ void CMultiPlayerInterface::OnGetFocus()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // release CMultiPlayerInterface::ProcessEvent @0x21aa20: the bind dispatch tree. cancel -> exit modal;
 // inventory/store -> return to the lobby (the menu is always shown here, so consume); next -> begin the
-// mission; weapons -> store update (CCmdUpdateStore absent in this build -> consume).
+// mission; weapons -> store update (dispatch still pending here -> consume).
 bool CMultiPlayerInterface::ProcessEvent( const NInput::SEvent &sEvent )
 {
 	NInput::SetSection( "menu" );
@@ -424,8 +424,7 @@ bool CMultiPlayerInterface::ProcessEvent( const NInput::SEvent &sEvent )
 	}
 	else if ( bindWeapons.ProcessEvent( sEvent ) )
 	{
-		// release issues a CCmdUpdateStore to the first player here; that command is absent from this
-		// build (see file note) -- consume only.
+		// Release issues CCmdUpdateStore here; the pre-game player/unit resolution still needs porting.
 		return true;
 	}
 

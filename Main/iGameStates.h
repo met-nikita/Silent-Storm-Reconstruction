@@ -423,6 +423,8 @@ public:
 	bool ProcessEvent( const NInput::SEvent &sEvent );
 
 	bool OnLButtonUp( int nX, int nY );
+	bool OnLButtonDown( int nX, int nY );
+	bool OnLButtonDblClk( int nX, int nY );
 	NUI::SCursorInfo GetCursorInfo() const;
 
 	EType GetType() const { return TEMPORARY; }

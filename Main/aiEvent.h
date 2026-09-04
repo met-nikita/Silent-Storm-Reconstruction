@@ -12,10 +12,9 @@ class IAIUnit;
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // IAIEvent (retail-new aiEvent.obj): a notification that mutates a unit's SAIUnitState; vtbl+0x10 =
 // Modify. In the release the per-unit AI event system (CAIUnit::Notify) drives these incrementally
-// as the unit sees/loses enemies, allies and corpses. The dev tree deliberately omits that install
-// path -- SAIUnitState::Populate() re-derives the seen-sets each think, making the events redundant
-// -- so these classes are reconstructed for release parity but are not wired to any producer
-// (behaviour-neutral). Each event carries at most one CPtr<IAIUnit> payload.
+// as the unit sees/loses enemies, allies and corpses. The reconstructed CAIEventTracker now drives
+// this path, with PrepareEnemies providing retail's begin-turn visibility reconciliation. Each event
+// carries at most one CPtr<IAIUnit> payload.
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class IAIEvent : public CObjectBase
 {

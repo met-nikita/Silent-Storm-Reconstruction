@@ -12,10 +12,10 @@ namespace NAI
 // ---- Modify bodies (vtbl+0x10): each re-targets the release SAIUnitStateR mutators onto the real
 // dev SAIUnitState methods.
 
-// @0x3b920: the begin-turn refresh (release PrepareEnemies sweep -> dev Populate()).
+// @0x3b920: the begin-turn refresh.
 void CAIBeginTurnEvent::Modify( SAIUnitState *pState )
 {
-	pState->Populate();
+	pState->PrepareEnemies();
 }
 
 // @0x3b940: mark the state changed so the next Update() recomputes the derived enemy/ally.

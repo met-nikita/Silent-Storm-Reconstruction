@@ -183,7 +183,9 @@ public:
 	virtual void OnUnitDied( NWorld::CUnitServer *pUnit );
 	void RemoveUnit( NWorld::CUnitServer *pUS );
 	virtual bool IsEndOfTurn();
-	virtual bool IsRequestInterrupt() const { return false; }
+	// Inherit CCommander::IsRequestInterrupt. Retail CAICommander has no override: when AI queues a
+	// non-skippable command (notably CCmdShootObject/CCmdShootTile), CCommander::Do raises the request
+	// and the next CTBSWorld request pass cancels realtime action and starts that AI player's turn.
 	virtual void Segment();
 	virtual void OnUnitAdded( NWorld::CUnitServer *pUnit );
 	virtual void OnTBSEvent( NWorld::ETBSEvent event );
@@ -233,11 +235,6 @@ public:
 	CSequenceCommander() {}
 	CSequenceCommander( NWorld::CWorld *_pWorld );
 	void GenerateCommand();
-	// retail CAICommander does NOT override CCommander::IsRequestInterrupt (no such method in the
-	// binary) -- the `return false` override above is a dev-side hack for the AI issuance model. The
-	// HUMAN's commander must keep the retail base semantics: a non-skippable command queued via Do()
-	// (bInterruptRequest) seizes the turn (CTBSWorld request scan, retail @0x377830).
-	virtual bool IsRequestInterrupt() const { return NWorld::CCommander::IsRequestInterrupt(); }
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 }

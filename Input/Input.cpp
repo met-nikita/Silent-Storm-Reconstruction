@@ -23,7 +23,7 @@ namespace NInput
 {
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 //
-// ��������������� ��������� ������
+// helper data structures
 //
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 struct SKeyInfo
@@ -276,7 +276,7 @@ BOOL CALLBACK EnumDeviceObjectsCallback( const DIDEVICEOBJECTINSTANCE* lpdidObje
 // Initialization / Deinitialization / message handling
 //
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// ���������������� DirectInput
+// Initialize DirectInput
 bool InitInput( HWND hWnd, bool _bNonExclusiveMode, int nSampleBufferSize )
 {
 	HRESULT hRes;
@@ -396,7 +396,7 @@ bool SetCoopLevel()
 	return true;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// �������� ��� event'�, ������������ � ��������� �������
+// pump all events queued since the last pump
 struct SSeqNumberLessThenFunctional
 {
 	bool operator()( const SInputEvent &sEvent1, const SInputEvent &sEvent2 ) const 
@@ -759,7 +759,7 @@ void StopEmulateInput()
 //	Internal functions
 //
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// ������� / ������ �������� ��� ���������
+// obtain / free device control
 bool SetFocus( bool bFocus )
 {
 	HRESULT hRes;
@@ -797,7 +797,7 @@ bool SetFocus( bool bFocus )
 	return true;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// �������� ���������� ��� ������
+// add device info
 void AddDeviceInfo( IDirectInputDevice8 *pdiDevice, DWORD dwFormatSize )
 {
 	HRESULT hRes;
@@ -831,7 +831,7 @@ void AddDeviceInfo( IDirectInputDevice8 *pdiDevice, DWORD dwFormatSize )
 	return;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// �������� ���������� ��� ����������� ������
+// add unknown device info
 void AddDeviceEnum( IDirectInputDevice8 *pdiDevice )
 {
 	HRESULT hRes;
@@ -930,7 +930,7 @@ void AddDeviceEnum( IDirectInputDevice8 *pdiDevice )
 	return;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// ������� � hash �������� ��� ������� ����������
+// hash actions for this device
 void AddDeviceKeys( int nID, int nDevType )
 {
 	int nTemp = 0;

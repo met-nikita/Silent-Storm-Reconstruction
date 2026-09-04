@@ -7,6 +7,7 @@
 #include "..\DBFormat\DataRPG.h"
 #include "aiMap.h"
 #include "grid.h"
+#include "TerrainInfo.h"
 #include "..\Misc\2darray.h"
 #include "..\Misc\HPTimer.h"
 
@@ -92,6 +93,7 @@ private:
 	int nGCx, nGCy, nGCz;
 	CPtr<CVisionCube> pCachedCube;
 
+	void CalcGrassInfo( const STerrainInfo &info );
 	bool TraverseLine( const CTPoint3<int> &_p1, const CTPoint3<int> &_p2, const CTPoint3<int> &_s, const CTPoint3<int> &_a,  
 		int nXIdx, int nYIdx, int nZIdx, int nTranspLimit );
 	bool IsVisible( const CTPoint3<int> p1, const CTPoint3<int> &p2, int nDistance, float fRange );
@@ -99,14 +101,16 @@ private:
 	void FlushCubeCache() { nGCx = 0x7fffffff; nGCy = 0; nGCz = 0; pCachedCube = 0; }
 	CVisionCube* FetchCube( int x, int y, int z );
 	EVoxelVisionState GetVisionCached( int x, int y, int z );
+	friend class CVisionCube;
 public:
 	CVisionTracker() { FlushCubeCache(); }
-	CVisionTracker( NAI::IAIMap *_pAIMap );
+	CVisionTracker( NAI::IAIMap *_pAIMap, const STerrainInfo &terrainInfo );
 	virtual bool IsCubeVisible( const CVec3 &ptFrom, const CVec3 &ptTarget, const CVec3 &ptForward );
 	virtual bool IsCubeVisible( const CVec3 &ptFrom, const CVec3 &ptTarget, const CVec3 &ptForward,
 		float fRange, float fCosHalfFOV );   // retail @0x2c9160 (vision vtbl+0x10)
 	virtual bool IsPointVisible( const CVec3 &ptFrom, const CVec3 &ptTarget, const CVec3 &ptForward,
 		float fRange, float fCosHalfFOV );   // retail @0x2c9440
+	virtual void SetVisionMultiplier( float fMultiplier );   // retail @0x2c8450 (vision vtbl+0x24)
 	virtual bool IsWithinSightRange( const CVec3 &ptFrom, const CVec3 &ptTarget, float fRange );   // retail @0x2c7fa0
 	virtual bool UpdateVision( float fTime );   // retail @0x2c9510 (vision vtbl+0x2c)
 	virtual EVoxelVisionState GetVision( int x, int y, int z )
@@ -116,7 +120,7 @@ public:
 	}
 	virtual void GetCoord( const CVec3 &vPoint, CTPoint3<int> *pRes );
 	virtual void GetCenter( const CTPoint3<int> &p, CVec3 *pRes );
-	void FlushVisionCache() { visionCache.clear(); }
+	void FlushVisionCache() { visionCache.clear(); pointVisionCache.clear(); }
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CVisionCube
@@ -160,6 +164,65 @@ void CVisionCube::Recalc()
 			}
 		}
 	}
+	// retail CVisionCube::Recalc @0x2c8724..0x2c8ac8: normal AI geometry is followed by a
+	// terrain-grass overlay. Sample the parent tracker's tile bitmap at each of this cube's 32x32
+	// horizontal vision cells; where grass is present, trace the terrain height and mark six
+	// transparent voxels (0.9375 m) upward from the surface. The Jan03 source omitted this entire
+	// second pass.
+	if ( IsValid( pParent ) && pParent->grassHeight.GetXSize() > 0 && pParent->grassHeight.GetYSize() > 0 )
+	{
+		CArray2D<char> grassCells;
+		grassCells.SetSizes( N_VISION_CUBE_RESOLUTION, N_VISION_CUBE_RESOLUTION );
+		grassCells.FillEvery( 0 );
+		const float fHalfCube = F_VISION_CUBE_SIZE * 0.5f;
+		const float fGrassFixedScale = 256.0f * FP_INV_GRID_STEP;
+		int nStartGrassX = Float2Int( ( vCenter.x - fHalfCube ) * fGrassFixedScale );
+		int nStartGrassY = Float2Int( ( vCenter.y - fHalfCube ) * fGrassFixedScale );
+		int nGrassStep = Float2Int( F_STEP * fGrassFixedScale );
+		bool bHasGrass = false;
+		for ( int y = 0, nFixedY = nStartGrassY; y < N_VISION_CUBE_RESOLUTION; ++y, nFixedY += nGrassStep )
+		{
+			int nGrassY = nFixedY >> 8;
+			if ( nGrassY < 0 || nGrassY >= pParent->grassHeight.GetYSize() )
+				continue;
+			for ( int x = 0, nFixedX = nStartGrassX; x < N_VISION_CUBE_RESOLUTION; ++x, nFixedX += nGrassStep )
+			{
+				int nGrassX = nFixedX >> 8;
+				if ( nGrassX < 0 || nGrassX >= pParent->grassHeight.GetXSize() )
+					continue;
+				char cGrass = pParent->grassHeight[nGrassY][nGrassX];
+				grassCells[y][x] = cGrass;
+				bHasGrass |= cGrass != 0;
+			}
+		}
+		if ( bHasGrass )
+		{
+			int nMinX = Float2Int( ( vCenter.x - fHalfCube ) / F_STEP );
+			int nMinY = Float2Int( ( vCenter.y - fHalfCube ) / F_STEP );
+			NAI::CFastRenderer terrainHeights;
+			terrainHeights.InitParallel( CVec2( 0, 0 ), 0, F_STEP,
+				CTRect<int>( nMinX, nMinY, nMinX + N_VISION_CUBE_RESOLUTION, nMinY + N_VISION_CUBE_RESOLUTION ) );
+			pAIMap->TraceGrid( &terrainHeights, NWorld::TS_TERRAINS );
+			float fMinZ = vCenter.z - fHalfCube;
+			for ( int y = 0; y < N_VISION_CUBE_RESOLUTION; ++y )
+				for ( int x = 0; x < N_VISION_CUBE_RESOLUTION; ++x )
+				{
+					if ( grassCells[y][x] == 0 )
+						continue;
+					NAI::CFastRenderer::SResult *pHeight = terrainHeights.resGrid[y][x];
+					if ( pHeight == 0 )
+						continue;
+					int nTerrainZ = Float2Int( ( pHeight->fExit - fMinZ ) / F_STEP );
+					int nFirstZ = Max( nTerrainZ, 0 );
+					int nLastZ = Min( nTerrainZ + 6, N_VISION_CUBE_RESOLUTION );
+					DWORD dwGrass = 0;
+					for ( int z = nFirstZ; z < nLastZ; ++z )
+						dwGrass |= DWORD( 1 ) << z;
+					transp[y][x] |= dwGrass;
+					dwTotal |= dwGrass;
+				}
+		}
+	}
 	if ( dwTotal == 0 )
 	{
 		// save memory on empty cube
@@ -181,9 +244,42 @@ void CVisionCube::OnChange()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CVisionTracker
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CVisionTracker::CVisionTracker( NAI::IAIMap *_pAIMap ): pAIMap(_pAIMap)
+// retail CVisionTracker::CalcGrassInfo @0x2c81c0: collapse every authored grass layer into one
+// terrain-tile bitmap. Density contributes fMaxDensity*10/255 and explicit blades contribute 10;
+// a final accumulated value above 6 marks the tile as vision-blocking grass.
+void CVisionTracker::CalcGrassInfo( const STerrainInfo &info )
+{
+	const int nWidth = info.nWidth;
+	const int nHeight = info.nHeight;
+	grassHeight.SetSizes( nWidth, nHeight );
+	grassHeight.FillEvery( 0 );
+	for ( int nLayer = 0; nLayer < info.grass.size(); ++nLayer )
+	{
+		const SGrassLayer &layer = info.grass[nLayer];
+		float fScale = layer.fMaxDensity * ( 10.0f / 255.0f );
+		for ( int y = 0; y < nHeight; ++y )
+			for ( int x = 0; x < nWidth; ++x )
+			{
+				int nValue = grassHeight[y][x] + Float2Int( layer.grass[y][x] * fScale );
+				grassHeight[y][x] = (char)Clamp( nValue, 0, 255 );
+			}
+		for ( int nBlade = 0; nBlade < layer.blades.size(); ++nBlade )
+		{
+			int x = Clamp( Float2Int( layer.blades[nBlade].x * FP_INV_GRID_STEP ), 0, nWidth - 1 );
+			int y = Clamp( Float2Int( layer.blades[nBlade].y * FP_INV_GRID_STEP ), 0, nHeight - 1 );
+			int nValue = grassHeight[y][x] + 10;
+			grassHeight[y][x] = (char)Min( nValue, 255 );
+		}
+	}
+	for ( int y = 0; y < nHeight; ++y )
+		for ( int x = 0; x < nWidth; ++x )
+			grassHeight[y][x] = ( grassHeight[y][x] >= 7 ) ? 1 : 0;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+CVisionTracker::CVisionTracker( NAI::IAIMap *_pAIMap, const STerrainInfo &terrainInfo ): pAIMap(_pAIMap)
 {
 	FlushCubeCache();
+	CalcGrassInfo( terrainInfo );
 	// here comes hotstepper
 	grid.SetSizes( 32, 32, 4 );
 	for ( int z = 0; z < grid.GetZSize(); ++z )
@@ -434,8 +530,8 @@ bool CVisionTracker::IsCubeVisible( const CVec3 &vFrom, const CVec3 &ptTarget, c
 	if ( i != visionCache.end() )
 		return i->second;
 	int nCount = 0;
-	nCount += IsVisible( vFrom, ptTarget, fDist, fRange );                                    // center: RAW range
-	nCount += IsVisible( vFrom, ptTarget + CVec3(-0.2f, -0.2f, -0.2f), fDist, fEff );         // jitter: EFFECTIVE
+	nCount += IsVisible( vFrom, ptTarget, fDist, fRange );                               // center: RAW range
+	nCount += IsVisible( vFrom, ptTarget + CVec3(-0.2f, -0.2f, -0.2f), fDist, fEff );    // jitter: EFFECTIVE
 	nCount += IsVisible( vFrom, ptTarget + CVec3(0.2f, -0.2f, -0.2f), fDist, fEff );
 	nCount += IsVisible( vFrom, ptTarget + CVec3(-0.2f, 0.2f, -0.2f), fDist, fEff );
 	nCount += IsVisible( vFrom, ptTarget + CVec3(0.2f, 0.2f, -0.2f), fDist, fEff );
@@ -460,6 +556,18 @@ bool CVisionTracker::IsWithinSightRange( const CVec3 &ptFrom, const CVec3 &ptTar
 	float fCap = fVisionKoef * fRange + fVisionKoef * fRange;
 	float fEff = ( fEff2 <= fCap * fCap ) ? sqrtf( fEff2 ) : fCap;
 	return du * du + dv * dv + dq * dq < fEff * fEff;   // strict <
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// retail @0x2c8450: night/day changes update the shared query multiplier and invalidate both caches.
+void CVisionTracker::SetVisionMultiplier( float fMultiplier )
+{
+	float fNewMultiplier = Min( fMultiplier, 1.0f );
+	if ( fNewMultiplier != fVisionKoef )
+	{
+		fVisionKoef = fNewMultiplier;
+		visionCache.clear();
+		pointVisionCache.clear();
+	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // retail @0x2c9510: eagerly recalc every changed (once-calced) cube; bail out (false) as soon as one
@@ -493,13 +601,11 @@ bool CVisionTracker::UpdateVision( float fTime )
 //    dot2d / (|dif2d||fwd2d|) >= cosHalfFOV, epsilon 1e-5 (@0x2c8040 const 0x3727c5ac).
 //  * range: effective = min( sqrt( h^2 + (2h + range)^2 ) * koef, 2 * koef * range ), h = |dz|
 //    (NRPG::GetSightDistance @0x2c7f50 -- looking up/down stretches the nominal range, capped at 2x).
-//    The retail fVisionKoef (SetVisionMultiplier @0x2c8450, night missions) is unported here -- koef = 1.
 //  * the retail per-query pointVisionCache is omitted (this leaf only serves the AI cover planner;
 //    the hot per-segment visibility stays on IsCubeVisible's cache).
 bool CVisionTracker::IsPointVisible( const CVec3 &ptFrom, const CVec3 &ptTarget, const CVec3 &ptForward,
 	float fRange, float fCosHalfFOV )
 {
-	const float F_VISION_KOEF = 1.0f;   // retail this->fVisionKoef (SetVisionMultiplier unported)
 	float du = ptTarget.u - ptFrom.u;
 	float dv = ptTarget.v - ptFrom.v;
 	float dq = ptTarget.q - ptFrom.q;
@@ -511,8 +617,8 @@ bool CVisionTracker::IsPointVisible( const CVec3 &ptFrom, const CVec3 &ptTarget,
 	// height-adjusted effective range (@0x2c7f50), capped at 2x the nominal
 	float h = (float)fabs( dq );
 	float t = h + h + fRange;
-	float fEff2 = ( h * h + t * t ) * F_VISION_KOEF * F_VISION_KOEF;
-	float fCap = F_VISION_KOEF * fRange + F_VISION_KOEF * fRange;
+	float fEff2 = ( h * h + t * t ) * fVisionKoef * fVisionKoef;
+	float fCap = fVisionKoef * fRange + fVisionKoef * fRange;
 	float fEff = ( fEff2 <= fCap * fCap ) ? sqrtf( fEff2 ) : fCap;
 	if ( sqrtf( du * du + dv * dv + dq * dq ) >= fEff )
 		return false;
@@ -521,9 +627,9 @@ bool CVisionTracker::IsPointVisible( const CVec3 &ptFrom, const CVec3 &ptTarget,
 	return IsVisible( ptFrom, ptTarget, sqrtf( du * du + dv * dv + dq * dq ), fEff );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-IVisionTracker* CreateVisionTracker( NAI::IAIMap *pAIMap )
+IVisionTracker* CreateVisionTracker( NAI::IAIMap *pAIMap, const STerrainInfo &terrainInfo )
 {
-	return new CVisionTracker( pAIMap );
+	return new CVisionTracker( pAIMap, terrainInfo );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 }

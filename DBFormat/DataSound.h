@@ -81,7 +81,6 @@ class CMusic: public CDBRecord
 public:
 	ZDATA_(CDBRecord)
 	string szFileName;
-	EMusicType eType;
 	vector<SVariantFlags> flags;
 	int nFadeIn = 0;
 	int nFadeOut = 20000;
@@ -89,7 +88,7 @@ public:
 	int nRndPlayTime = 120000;
 	int nSilence = 60000;
 	int nRndSilence = 120000;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CDBRecord*)this); f.Add(2,&szFileName); f.Add(3,&flags); f.Add(4,&nFadeIn); f.Add(5,&nFadeOut); f.Add(6,&nPlayTime); f.Add(7,&nRndPlayTime); f.Add(8,&nSilence); f.Add(9,&nRndSilence); f.Add(10,&eType); return 0; }	// tags 1-9 = retail @0x41d4d0. eType is a dev field with no retail tag -> parked at 10 (retail uses only 1-9) so retail-read defaults it to MT_AMBIENT instead of garbage.
+	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CDBRecord*)this); f.Add(2,&szFileName); f.Add(3,&flags); f.Add(4,&nFadeIn); f.Add(5,&nFadeOut); f.Add(6,&nPlayTime); f.Add(7,&nRndPlayTime); f.Add(8,&nSilence); f.Add(9,&nRndSilence); return 0; }	// retail @0x41d4d0, byte-exact tags 1-9
 
   virtual void Import();
 };

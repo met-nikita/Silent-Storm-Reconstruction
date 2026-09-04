@@ -131,12 +131,18 @@ public:
 	virtual void GetDeploySpot( NAI::SPathPlace *pRes ) { *pRes = deploySpot; }
 	void SetDeploySpot( const NAI::SPathPlace &p ) { deploySpot = p; }
 	////
+	CTPoint<int> GetStoreSize();                              // retail @0x386a50
+	void SetStoreFilter( NRPG::EStoreFilter eFilter );        // retail @0x386a60
+	void GetStoreUpdateFlags( vector<bool> *pFlags );         // retail @0x386a80
+	vector<NRPG::SMapItem>* GetStoreItems();                  // retail @0x386a90
+	////
 	bool GetInHandItem( SItem *pInfo ) const;			// retail @0x386ae0 (IPlayer vtable slot 12)
 	void SetInHandItem( const SItem &sInfo );			// retail @0x386e70 (non-virtual, as in the PDB)
 	////
 	void GetStoreItems( list<CPtr<NRPG::IInventoryItem> > *pItems );
 	bool TakeStoreItem( NRPG::IInventoryItem *pItem );
 	void PlaceStoreItem( NRPG::IInventoryItem *pItem );
+	void UpdateStore();                                      // retail @0x386ed0
 	////
 	virtual void GetUnits( vector<CPtr<CUnitServer> > *pRes ) const;
 	virtual void GetUnits( CUnitSet *pRes ) const;

@@ -18,6 +18,17 @@
 namespace NUI
 {
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// Retail @0x329500: UI quads use premultiplied vertex colors. C2DScene pairs these with
+// COMBINE_SMART_ALPHA (ONE/INVSRCALPHA), preserving ordinary translucency while allowing
+// bright additive-looking assets such as the store category flash to remain visible.
+void MakeColor( NGfx::SPixel8888 *pResult, const NGfx::SPixel8888 &sColor )
+{
+	pResult->r = (unsigned int)( sColor.r ) * sColor.a / 0xFF;
+	pResult->g = (unsigned int)( sColor.g ) * sColor.a / 0xFF;
+	pResult->b = (unsigned int)( sColor.b ) * sColor.a / 0xFF;
+	pResult->a = sColor.a;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 // CTextDraw
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // retail ctor @0x329c20: sSize = sRealSize = size; sPosition = pos; nSize = 0; wsText(text);
@@ -169,6 +180,8 @@ void CImageDraw::SetImage( NDb::CUITexture* _pTexture, const SRect &sTexRect )
 void CImageDraw::Draw( CWindow *pWindow, const STime &sTime, NGScene::I2DGameView *pView )
 {
 	CVec2 vScreenRect = pView->GetViewportSize();
+	NGfx::SPixel8888 sDrawColor;
+	MakeColor( &sDrawColor, sColor );
 
 	SRect sScrWindow( sWindow );
 	SPoint sScrPosition( sWindow.x1, sWindow.y1 );
@@ -258,7 +271,7 @@ void CImageDraw::Draw( CWindow *pWindow, const STime &sTime, NGScene::I2DGameVie
 		CRectLayout sLayout;
 		for ( int nTempY = 0; nTempY < sWindow.Height(); nTempY += pUITexture->nHeight )
 			for ( int nTempX = 0; nTempX < sWindow.Width(); nTempX += pUITexture->nWidth )
-				sLayout.AddRect( nTempX * vTileScale.x, nTempY * vTileScale.y, fTileSizeX, fTileSizeY, sTexRect, sColor );
+				sLayout.AddRect( nTempX * vTileScale.x, nTempY * vTileScale.y, fTileSizeX, fTileSizeY, sTexRect, sDrawColor );
 
 		pView->CreateDynamicRects( pTexture, sLayout, sScrPosition, sScrWindow );
 	}
@@ -269,7 +282,7 @@ void CImageDraw::Draw( CWindow *pWindow, const STime &sTime, NGScene::I2DGameVie
 		sLayout.AddRect( 0, 0,
 			sWindow.Width() * pView->GetViewportSize().x / 1024.0f,
 			sWindow.Height() * pView->GetViewportSize().y / 768.0f,
-			CTRect<float>( 0, 0, sWindow.Width(), sWindow.Height() ), sColor );
+			CTRect<float>( 0, 0, sWindow.Width(), sWindow.Height() ), sDrawColor );
 		pView->CreateDynamicRects( (NDb::CTexture*)0, sLayout, sScrPosition, sScrWindow );
 	}
 }

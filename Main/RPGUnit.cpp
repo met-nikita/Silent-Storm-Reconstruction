@@ -31,6 +31,53 @@ float GetXPBySkill( int nCap, int nLvl )
 	return ( pow( 2.7296f, float(nLvl) / C ) - 1.f ) / 0.02f;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// Retail CSkilledObject::GetSkillBaseStatValue @0x2ba7b0.
+int CSkilledObject::GetSkillBaseStatValue( const int eSkill )
+{
+	switch ( eSkill )
+	{
+	case NDb::ST_MELEE:       return Skills(NDb::ST_STR) + 2 * Skills(NDb::ST_DEX);
+	case NDb::ST_SHOOTING:    return 20 + Skills(NDb::ST_DEX);
+	case NDb::ST_THROWING:
+	case NDb::ST_BURST:       return 2 * Skills(NDb::ST_STR) + Skills(NDb::ST_DEX);
+	case NDb::ST_SNIPE:       return 2 * Skills(NDb::ST_DEX) + Skills(NDb::ST_INT);
+	case NDb::ST_STEALTH:     return 5 + 2 * Skills(NDb::ST_DEX);
+	case NDb::ST_SPOT:        return 5 + 2 * Skills(NDb::ST_INT);
+	case NDb::ST_MEDICINE:
+	case NDb::ST_ENGINEERING: return Skills(NDb::ST_DEX) + 2 * Skills(NDb::ST_INT);
+	case NDb::ST_VP:          return 10 * ( Skills(NDb::ST_STR) + 5 );
+	case NDb::ST_AP:          return 36 + 2 * Skills(NDb::ST_DEX);
+	case NDb::ST_IC:          return 5;
+	case NDb::ST_INTERRUPT:   return 25;
+	case NDb::ST_LEVEL:       return 0;
+	}
+	return -1;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// Retail CSkilledObject::UpdateSkills @0x2bbcc0: fold the primary attributes into the derived
+// skills. SetNewBaseValue preserves damage to live VP/AP instead of refilling them.
+void CSkilledObject::UpdateSkills()
+{
+	for ( int i = 0; i <= NDb::ST_LEVEL; ++i )
+		Skills(i).SetNewBaseValue( GetSkillBaseStatValue( i ) );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// Retail CSkilledObject::AddXP @0x2bbde0. Equality does not promote: the executable's ordered
+// comparison continues only when total XP is strictly greater than the next threshold.
+void CSkilledObject::AddXP( float fXPToAdd )
+{
+	fXP += fXPToAdd;
+	CDynamicSkill &level = Skills( NDb::ST_LEVEL );
+	while ( fXP > GetXPBySkill( cap[NDb::ST_LEVEL], int( level ) + 1 ) )
+		level.SetXPPart( level.GetXPPart() + 1 );
+
+	const int nLevel = level;
+	const float fLevelXP = GetXPBySkill( cap[NDb::ST_LEVEL], nLevel );
+	const float fNextLevelXP = GetXPBySkill( cap[NDb::ST_LEVEL], nLevel + 1 );
+	level.SetProgress( ( fXP - fLevelXP ) / ( fNextLevelXP - fLevelXP ) );
+	UpdateSkills();
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 // CDynamicSkill (retail modifier-list model; RPGUnit.obj)
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // x87 round-to-nearest for the skill math (retail Update/Upgrade fistp under the default CW).
@@ -434,37 +481,20 @@ void CUnit::SetVoice( int _nVoice )
 		nVoice = _nVoice + 3;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CUnit::UpdateSkills()
-{
-	for ( int i = 0; i < NDb::ST_STR; ++i )
-	{
-		skills[i]->SetNewBaseValue( GetSkillBaseStatValue( NDb::ESkillType(i) ) );
-		skills[i]->Reset();
-	}
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
 void CUnit::AddXP( float fXPToAdd )
 {
 	if ( !IsValid( pPers ) || !IsValid( pPers->pName ) )
 		return;
-	//
+
+	fXPToAdd *= float( Skills( NDb::ST_INT ) ) * 0.05f + 1.0f;
+	float fXPFactor = 1.0f;
+	if ( IsValid( pPerksTree ) && pPerksTree->HasPerk( 0x3d, &fXPFactor, 0, 0 ) )
+		fXPToAdd *= fXPFactor;
+
 	int nOldLevel = Skills( NDb::ST_LEVEL );
 	csRPG << CC_YELLOW << pPers->pName->szStr << " gained " << fXPToAdd << " EXP" << endl;
-	fXP += fXPToAdd;
-	// FIX (2026-06-25): advance the level VALUE while the total XP reaches the next level's threshold. The
-	// predecessor only set the level skill's PROGRESS bar (SetProgress) and never advanced its value, so units
-	// never actually levelled up -- nNewLevel-nOldLevel was always 0, so the perk points a level grants (and any
-	// other level-up effect) were never awarded. Retail CSkilledObject::AddXP @0x6bbde0 loops the level-up the
-	// same way; GetXPBySkill is exponential (strictly increasing) so the loop terminates (the nGuard bound is
-	// belt-and-suspenders against a degenerate XP-for-level table).
-	for ( int nGuard = 0; nGuard < 1000 && fXP >= GetXPForSkill( NDb::ST_LEVEL, Skills( NDb::ST_LEVEL ) + 1 ); ++nGuard )
-		Skills( NDb::ST_LEVEL ).SetValue( Skills( NDb::ST_LEVEL ) + 1 );
-	// the progress bar within the (now current) level
-	int nLvlEXP = GetXPForSkill( NDb::ST_LEVEL, Skills( NDb::ST_LEVEL ) );
-	int nLvlUPEXP = GetXPForSkill( NDb::ST_LEVEL, Skills( NDb::ST_LEVEL ) + 1 );
-	if ( nLvlUPEXP > nLvlEXP )
-		Skills( NDb::ST_LEVEL ).SetProgress( float( fXP - nLvlEXP ) / float( nLvlUPEXP - nLvlEXP ) );
-	//
+	CSkilledObject::AddXP( fXPToAdd );
+
 	int nNewLevel = Skills( NDb::ST_LEVEL );
 	if ( nNewLevel > nOldLevel )
 	{
@@ -486,47 +516,6 @@ bool CUnit::UseSkill( int eSkill, const int nAddValue )
 	if ( eSkill >= NDb::ST_STR )
 		UpdateSkills();
 	return bRes;
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-int CUnit::GetSkillBaseStatValue( const int eSkill )
-{
-	switch ( eSkill )
-	{
-		case NDb::ST_MELEE:
-			return Skills(NDb::ST_STR) + 2 * Skills(NDb::ST_DEX);
-		case NDb::ST_SHOOTING:
-			return 20 + Skills(NDb::ST_DEX);
-		case NDb::ST_THROWING:
-			return 2 * Skills(NDb::ST_STR) + Skills(NDb::ST_DEX);
-		case NDb::ST_BURST:
-			return 2 * Skills(NDb::ST_STR) + Skills(NDb::ST_DEX);
-		case NDb::ST_SNIPE:
-			return 2 * Skills(NDb::ST_DEX) + Skills(NDb::ST_INT);
-		//
-		case NDb::ST_STEALTH:
-			return 5 + 2 * Skills(NDb::ST_DEX);
-		case NDb::ST_SPOT:
-			return 5 + 2 * Skills(NDb::ST_INT);
-		case NDb::ST_MEDICINE:
-			return Skills(NDb::ST_DEX) + 2 * Skills(NDb::ST_INT);
-		case NDb::ST_ENGINEERING:
-			return Skills(NDb::ST_DEX) + 2 * Skills(NDb::ST_INT);
-		//
-		case NDb::ST_VP:
-			return 50 + 10 * Skills(NDb::ST_STR);
-		case NDb::ST_INTERRUPT:
-			return 25; //CRAP
-		case NDb::ST_AP:
-			return 40 + 2 * Skills(NDb::ST_DEX);
-		case NDb::ST_IC:
-			return 5;
-		case NDb::ST_LEVEL:
-			return 0;
-		default:
-			ASSERT( 0 && "Unknow skill" );
-			break;
-	}
-	return -1;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 NDb::CRPGPers* CUnit::GetPers() const

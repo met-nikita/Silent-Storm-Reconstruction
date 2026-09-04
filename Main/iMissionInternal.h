@@ -13,7 +13,7 @@
 // cast path too.
 namespace NUI { class CMissionUI; }
 namespace NGScene { class CPolyline; }
-namespace NDb { class CMusic; class CString; class CUITexture; }
+namespace NDb { class CString; class CUITexture; }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 namespace NGame
 {
@@ -178,9 +178,6 @@ private:
 	CObj<NGScene::CPolyline> pIntersectLineHolder;
 	CVec3 vPrevCameraPosition;
 	int nFramesSameCameraPosition;
-	// TRANSIENT: the picked combat track already lives in the serialized sound scene (base tag 4);
-	// retail CMission has no such member.
-	CDBPtr<NDb::CMusic> pCombatMelody;
 	// retail tag 26: the test-weather-effect VECTOR (retail ShowWeatherEffect @0x201c60 clears the
 	// vector, then pushes the one new effect handle).
 	vector<CObj<CObjectBase> > testWeatherEffect;

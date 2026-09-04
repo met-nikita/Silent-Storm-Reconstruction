@@ -1175,7 +1175,7 @@ void CSide::Import()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 }
 using namespace NDb;
-// Format 0x[�������]DDMYHHN
+// Format 0x[Person]DDMYHHN
 REGISTER_SAVELOAD_CLASS( 0xE0502151, CRPGArmor )
 REGISTER_SAVELOAD_CLASS( 0xE0502152, CRPGAmmo )
 REGISTER_SAVELOAD_CLASS( 0xE0502130, CRPGBaseValue )

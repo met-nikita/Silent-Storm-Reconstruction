@@ -304,7 +304,10 @@ void CAILogChangeWeapon::GetCommands( list< CPtr<NWorld::CCommand> > *Commands )
 		// copy/paste from the old-weapon block above (which correctly checks pOldItem); it equipped that DB-less item
 		// into SLOT_1, crashing CExecMoveInventoryItem::AnimationFinished (wUnitAttackExec.cpp:2688) on its null
 		// GetDBItem()->subType. Guard the ITEM -> skip the draw when it isn't alive, exactly as retail does.
-		if ( IsValid( pNewItem ) )
+		// In this reconstruction a consumed item's wrapper can outlive the DB link cleared by
+		// DestroyContents, whereas retail's liveness probe rejects that same state. Do not enqueue
+		// the draw unless both halves of the inventory-item invariant are intact.
+		if ( IsValid( pNewItem ) && IsValid( pNewItem->GetDBItem() ) )
 		{
 			Commands->push_back( new NWorld::CCmdSetCommand( pUnitServer,
 				new NWorld::CCmdArrangeInventory() ) );

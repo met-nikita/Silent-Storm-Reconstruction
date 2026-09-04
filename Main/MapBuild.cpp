@@ -1267,7 +1267,14 @@ void CMapBuilder::AddWaypoints( SMapInfo *pDst, NDb::CTemplVariant *pVar, const 
 		pMW->b3DWaypoint = pdbW->b3DPoint;
 		pMW->commands = pW->commands;
 		CalcPosition( &pMW->pos, pW.GetPtr() , parent );
-		if ( bTerrAlign ) 
+		// Waypoint resources carry a continuous local-height offset in ptPos.z in addition to
+		// their integral floor.  CalcPosition deliberately handles only XY and nFloor; retail
+		// AddWaypoints then applies this offset (v1.2 @0x6742cf-0x6742da).
+		pMW->pos.ptPos.z += pW->ptPos.z;
+		// With terrain alignment enabled, every element is raised by the terrain under its own
+		// transformed XY.  The shared parent-building anchor is used only when alignment is disabled.
+		// This is the same branch used by units/items above and by retail v1.2 @0x6742d2-0x674303.
+		if ( !bTerrAlign ) 
 			pMW->ptAlignTo = ptAlignTo;
 		else
 			pMW->ptAlignTo = CVec2( pMW->pos.ptPos.x, pMW->pos.ptPos.y );

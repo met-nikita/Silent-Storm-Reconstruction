@@ -29,6 +29,7 @@ namespace NDb
 {
 	class CRPGChestReal;	// rolled chest loot (DataChest.h)
 }
+struct STerrainInfo;
 #include "RPGAttackMech.h"
 namespace NRPG
 {
@@ -130,6 +131,10 @@ public:
 	// (vision vtbl+0x10, disasm-proven -- NOT the single-ray IsPointVisible); first visible cube wins.
 	virtual bool CheckPositionVisibility( const NAI::SUnitPosition observerPos, const NAI::SPosition targetPos,
 		float fRange, float fFOVAngle ) = 0;
+	// retail CGame::SetVisionMultiplier @0x298740 / SetNight @0x299550. CWorld::UpdateVisible refreshes
+	// these before every perception sweep from the world's current time-of-day sentinel.
+	virtual void SetVisionMultiplier( float fMultiplier ) = 0;
+	virtual void SetNight( bool bIsNight ) = 0;
 	// retail CGame::GetUnitSightDistance @0x2984d0 (game vtbl+0x34): the unit's sight range --
 	// CUnit::GetSightDistance (flat 20, perk 0x53), x1.5015 at night with the night-vision perk 0x51.
 	virtual float GetUnitSightDistance( CUnit *pRPGUnit ) = 0;
@@ -183,7 +188,8 @@ NAI::EDirection GetShootDirection( NAI::IPathNetwork *pNet, const NAI::SPathPlac
 CVec3 GetMeleeAttackPos( const NWorld::CUnit *pAttacker, const CVec3 &ptTarget );
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // create mission time RPG info from Merc info or dbms record
-IGame* CreateGame( NAI::IAIMap *pAIMap, NAI::IPathNetwork *pNet );
+// retail NRPG::CreateGame @0x299150 threads the built terrain into the vision tracker.
+IGame* CreateGame( NAI::IAIMap *pAIMap, NAI::IPathNetwork *pNet, const STerrainInfo &terrainInfo );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 #endif

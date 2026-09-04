@@ -631,13 +631,13 @@ int Script::operator&( CStructureSaver &f )
 		f.Add( 2, &m_ownState );
 		ASSERT( m_ownState );
 		m_state = lua_open(0);
-		f.Add( 3, m_state ); // ��� ���������, ��������� �� �����
+		f.Add( 3, m_state ); // that's right, no &
 	}
 	else
 	{
-		ASSERT( m_ownState ); // �� ����� ������������, ���� ����� �� ����
+		ASSERT( m_ownState ); // we can't serialize not our state
 		f.Add( 2, &m_ownState );
-		f.Add( 3, m_state ); // ��� ���������, ��������� �� �����
+		f.Add( 3, m_state ); // that's right, no &
 	}
 	return 0; 
 }

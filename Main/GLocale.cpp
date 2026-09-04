@@ -28,7 +28,7 @@ CTextLocaleInfo::CTextLocaleInfo()
 {
 	CDBTable<NDb::CTypeface> *pFontTable = NDatabase::GetTable<NDb::CTypeface>();
 	CDBIterator<NDb::CTypeface> iTempFont( *pFontTable );
-	int nRecords = 0, nLoaded = 0;   // FONT-DIAG: localize db-layer (table empty) vs res-layer (format null)
+	int nRecords = 0, nLoaded = 0;
 	while( iTempFont.MoveNext() )
 	{
 		++nRecords;
@@ -39,8 +39,6 @@ CTextLocaleInfo::CTextLocaleInfo()
 		const CFontFormatInfo *pInfo = pFormatInfo->GetValue();
 		if ( !pInfo )
 		{
-			csSystem << "FONT-DIAG: typeface '" << pType->szName << "' (id " << pType->GetRecordID()
-			         << "): CFileFont format NULL -> res-layer parse failed" << endl;
 			continue;
 		}
 
@@ -49,7 +47,6 @@ CTextLocaleInfo::CTextLocaleInfo()
 	}
 	// nRecords==0 -> db layer (CTypeface table not found / type-id or schema mismatch).
 	// nRecords>0 && nLoaded==0 -> res layer (Fonts.res CFileFont format mismatch).
-	csSystem << "FONT-DIAG: CTypeface table = " << nRecords << " records, " << nLoaded << " font(s) loaded" << endl;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CTextLocaleInfo::Setup( const CVec2 &_vScreenRect )

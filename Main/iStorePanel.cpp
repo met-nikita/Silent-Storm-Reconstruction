@@ -6,7 +6,9 @@
 #include "Transform.h"
 #include "DiscretePos.h"
 #include "wInterface.h"
+#include "wMain.h"
 #include "RPGItem.h"
+#include "RPGStore.h"
 #include "RPGItemInfo.h"
 #include "RPGUnitInfo.h"
 #include "RWGame.h"
@@ -50,20 +52,9 @@ private:
 	////
 	SPoint sCellSize;
 	EFilter eFilter;
-	vector<SItem> itemsSet;
-	CArray2D<bool> placeMap;
 	// retail CStoreSlot::operator& = {1 CSlot, 2 pMission, 3 pScrollBase(CPtr<CScrollWindowBase>), 4 sCellSize,
-	// 5 eFilter}. dev had pScrollBase MISSING and serialized the runtime itemsSet/placeMap instead, so tag 3
-	// (sCellSize) read pScrollBase's ref etc. -- same class-of-bug as CSlot::hilights. Match retail; itemsSet
-	// and placeMap are transient runtime state (rebuilt), not on the wire.
+	// 5 eFilter}. The release slot is only a view over CStore's active CItemsMap; it owns no item/map copy.
 	ZEND int operator&( CStructureSaver &f ) { f.Add(1,( CSlot *)this); f.Add(2,&pMission); f.Add(3,&pScrollBase); f.Add(4,&sCellSize); f.Add(5,&eFilter); return 0; }
-
-protected:
-	void SetPlaceMapSize( int nWidth, int nHeight );
-	void ArrangeTake( const CTPoint<int> &sPos, const NRPG::IInventoryItem *pItem );
-	bool ArrangePlace( const CTPoint<int> &sPos, const NRPG::IInventoryItem *pItem );
-	bool ArrangeCanPlace( const CTPoint<int> &sPos, const NRPG::IInventoryItem *pItem ) const;
-	bool ArrangeFindPlace( const NRPG::IInventoryItem *pItem, CTPoint<int> *pPos );
 
 public:
 	CStoreSlot() {}
@@ -75,6 +66,7 @@ public:
 	CObjectBase* GetTarget();      // retail @0x241220 (CActionDecorator pure virtual)
 
 	void Take( int nX, int nY );
+	void Take( int nX, int nY, bool bToUnit );
 	void Place( int nX, int nY, const NWorld::SItem &sItem );
 	bool CanPlace( int nX, int nY, const NWorld::SItem &sItem, int *nAP = 0 );
 	void GetItemsList( vector<SItem> *pItemsSet );
@@ -86,14 +78,18 @@ CStoreSlot::CStoreSlot( const SWindowInfo &sInfo, NGame::IMission *_pMission, CS
 	CSlot( sInfo, _pMission, N_STORESLOT_DEFWIDTH, N_STORESLOT_DEFHEIGHT, NDb::CAMERA_NORMAL, true ), 
 	pMission( _pMission ), pScrollBase( _pScrollBase ), eFilter( FLT_PISTOLS )
 {
-	placeMap.SetSizes( N_STORESLOT_DEFWIDTH, N_STORESLOT_DEFHEIGHT );
-	placeMap.FillEvery( false );
 	sCellSize = SPoint( GetSize().x / N_STORESLOT_DEFWIDTH, GetSize().y / N_STORESLOT_DEFHEIGHT );
+	// Retail @0x241310 pushes its initial pistol filter through the mission's store container too.
+	SetFilter( FLT_PISTOLS );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CStoreSlot::SetFilter( EFilter _eFilter )
 {
 	eFilter = _eFilter;
+	NGame::IPlayerTracker *pTracker = IsValid( pMission ) ? pMission->GetActivePlayer() : 0;
+	NRPG::CGlobalPlayer *pGlobalPlayer = IsValid( pTracker ) ? pTracker->GetGlobalPlayer() : 0;
+	if ( IsValid( pGlobalPlayer ) && IsValid( pGlobalPlayer->pStore ) )
+		pGlobalPlayer->pStore->SetFilter( (NRPG::EStoreFilter)eFilter );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // retail @0x241220: the store grid is a STORAGE drop target (no owning unit).
@@ -103,6 +99,11 @@ CObjectBase* CStoreSlot::GetTarget()
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CStoreSlot::Take( int nX, int nY )
+{
+	Take( nX, nY, false );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CStoreSlot::Take( int nX, int nY, bool bToUnit )
 {
 	SPoint sPos;
 	GetInSlotPos( nX, nY, &sPos );
@@ -115,9 +116,14 @@ void CStoreSlot::Take( int nX, int nY )
 
 	CPtr<NGame::IUnitTracker> pUnit = unitsSet.front();
 
-	for ( int nTemp = 0; nTemp < itemsSet.size(); nTemp++ )
+	NRPG::CGlobalPlayer *pGlobalPlayer = pPlayer->GetGlobalPlayer();
+	if ( !IsValid( pGlobalPlayer ) || !IsValid( pGlobalPlayer->pStore ) )
+		return;
+	pGlobalPlayer->pStore->SetFilter( (NRPG::EStoreFilter)eFilter );
+	vector<NRPG::SMapItem> *pItems = pGlobalPlayer->pStore->GetItems();
+	for ( int nTemp = 0; nTemp < (int)pItems->size(); nTemp++ )
 	{
-		const SItem &sItem = itemsSet[nTemp];
+		const NRPG::SMapItem &sItem = (*pItems)[nTemp];
 		const SPoint &sItemPos = sItem.sPos;
 		const SPoint &sItemSize = sItem.pItem->GetSize();
 
@@ -127,7 +133,15 @@ void CStoreSlot::Take( int nX, int nY )
 			sInvItem.eType = NWorld::SItem::STORAGE;
 			sInvItem.pItem = sItem.pItem;
 			sInvItem.pPlayer = pPlayer->GetPlayer();
-			pMission->CommandState( new NGame::CStateMoveItem( pUnit->GetUnit(), sInvItem, NWorld::SItem( 0, NWorld::SItem::HAND ) ) );
+			NWorld::SItem sTarget;
+			if ( bToUnit )
+			{
+				sTarget.eType = NWorld::SItem::UNIT_ANYPLACE;
+				sTarget.pUnit = pUnit->GetUnit();
+			}
+			else
+				sTarget = NWorld::SItem( 0, NWorld::SItem::HAND );
+			pMission->CommandState( new NGame::CStateMoveItem( pUnit->GetUnit(), sInvItem, sTarget ) );
 			return;
 		}
 	}
@@ -151,151 +165,59 @@ void CStoreSlot::Place( int nX, int nY, const NWorld::SItem &sItem )
 	NWorld::SItem sTarget;
 	sTarget.eType = NWorld::SItem::STORAGE;
 	sTarget.pPlayer = GetGame()->GetActivePlayer()->GetPlayer();
+	sTarget.sPosition = sPos;
 
-	pMission->Command( pUnit->GetUnit(), new NWorld::CCmdMoveInventoryItem( NWorld::SItem( sItem.pUnit, NWorld::SItem::HAND, sItem.pItem ), sTarget ) );
+	// Retail routes the command through the unit that owns the dragged hand item. Falling back to
+	// the selected unit is only for an ownerless hand; using the selected unit unconditionally made
+	// moves from another squad member fail the executor's source-hand validation.
+	NWorld::CUnit *pCommandUnit = IsValid( sItem.pUnit ) ? sItem.pUnit.GetPtr() : pUnit->GetUnit();
+	pMission->Command( pCommandUnit, new NWorld::CCmdMoveInventoryItem( NWorld::SItem( sItem.pUnit, NWorld::SItem::HAND, sItem.pItem ), sTarget ) );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CStoreSlot::CanPlace( int nX, int nY, const NWorld::SItem &sItem, int *nAP )
 {
+	// Retail @0x240e40 accepts every dragged item. CStore::Place classifies it and either honours
+	// the requested cell or auto-places it in the correct category; rejecting against the visible
+	// category map here prevented selling items whose footprint did not fit at the cursor.
 	return true;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// Retail @0x241d00: copy the already-positioned active CStore map; no transient reclassification or
+// second occupancy grid exists in CStoreSlot.
 void CStoreSlot::GetItemsList( vector<SItem> *pItemsSet )
 {
-	*pItemsSet = itemsSet;
+	pItemsSet->clear();
+	NGame::IPlayerTracker *pTracker = IsValid( pMission ) ? pMission->GetActivePlayer() : 0;
+	NRPG::CGlobalPlayer *pGlobalPlayer = IsValid( pTracker ) ? pTracker->GetGlobalPlayer() : 0;
+	if ( !IsValid( pGlobalPlayer ) || !IsValid( pGlobalPlayer->pStore ) )
+		return;
 
-	list<CPtr<NRPG::IInventoryItem> > itemsList;
-	pMission->GetActivePlayer()->GetPlayer()->GetStoreItems( &itemsList );
-
-	for ( list<CPtr<NRPG::IInventoryItem> >::iterator iTemp = itemsList.begin(); iTemp != itemsList.end(); )
+	NRPG::CStore *pStore = pGlobalPlayer->pStore;
+	// The stock is normally refreshed by CCmdUpdateStore before the panel is used. A save produced
+	// before that command was restored can still contain old stock rows while all release category maps
+	// are empty, so probe the maps themselves and refresh lazily once the live player is available.
+	if ( !pStore->HasMappedItems() )
 	{
-		EFilter eType = FLT_OTHERS;
-
-		CDynamicCast<NRPG::IWeaponItemInfo> pWeapon( *iTemp );
-		if ( IsValid( pWeapon ) && IsValid( pWeapon->GetDBWeapon()->pWeaponType ) )
-		{
-			switch( pWeapon->GetDBWeapon()->pWeaponType->eStoreWeaponType )
-			{
-			case NDb::SWT_PISTOL:
-				eType = FLT_PISTOLS;
-				break;
-			case NDb::SWT_RIFLE:
-				eType = FLT_RIFLES;
-				break;
-			case NDb::SWT_SUB_MACHINE_GUN:
-				eType = FLT_SUBMACHINEGUN;
-				break;
-			case NDb::SWT_HEAVY_WEAPON:
-				eType = FLT_HEAVYWEAPON;
-				break;
-			case NDb::SWT_COLD_STEEL:
-				eType = FLT_COLDSTEEL;
-				break;
-			case NDb::SWT_OTHER:
-				eType = FLT_OTHERS;
-				break;
-			case NDb::SWT_GRENADE:
-				eType = FLT_GRENADES;
-				break;
-			case NDb::SWT_PK_WEAPON:
-				eType = FLT_PKWEAPONS;
-				break;
-			}
-		}
-		else {
-			CDynamicCast<NRPG::IGrenadeItem> pGrenade(*iTemp);
-			if (pGrenade)
-			{
-				eType = FLT_GRENADES;
-			}
-			else
-			{
-				switch ((*iTemp)->GetWeaponType())
-				{
-				case NDb::SUBTYPE_PISTOL:
-				case NDb::SUBTYPE_AMMO_PISTOL:
-					eType = FLT_PISTOLS;
-					break;
-				case NDb::SUBTYPE_AMMO_RIFLE:
-					eType = FLT_RIFLES;
-					break;
-				case NDb::SUBTYPE_AMMO_SMG:
-					eType = FLT_SUBMACHINEGUN;
-					break;
-				case NDb::SUBTYPE_HEAVY:
-				case NDb::SUBTYPE_AMMO_MG:
-				case NDb::SUBTYPE_AMMO_HEAVY:
-					eType = FLT_HEAVYWEAPON;
-					break;
-				case NDb::SUBTYPE_KNIFE:
-				case NDb::SUBTYPE_THROWING_KNIFE:
-					eType = FLT_COLDSTEEL;
-					break;
-				case NDb::SUBTYPE_GRENADE_SMALL:
-				case NDb::SUBTYPE_GRENADE_LARGE:
-					eType = FLT_GRENADES;
-					break;
-				case NDb::SUBTYPE_FIRST_AID:
-				case NDb::SUBTYPE_ENGINEERING:
-				case NDb::SUBTYPE_MINE_DETECTOR:
-				case NDb::SUBTYPE_NONE:
-					eType = FLT_OTHERS;
-					break;
-				}
-			}
-		}
-
-		if ( eType != eFilter )
-			iTemp = itemsList.erase( iTemp );
-		else
-			iTemp++;
+		NWorld::CPlayer *pPlayer = dynamic_cast<NWorld::CPlayer*>( pTracker->GetPlayer() );
+		if ( pPlayer )
+			pPlayer->UpdateStore();
+		pStore = pGlobalPlayer->pStore;
+	}
+	pStore->SetFilter( (NRPG::EStoreFilter)eFilter );
+	vector<NRPG::SMapItem> *pStoreItems = pStore->GetItems();
+	pItemsSet->reserve( pStoreItems->size() );
+	for ( int i = 0; i < (int)pStoreItems->size(); ++i )
+	{
+		SItem sItem;
+		sItem.sPos = (*pStoreItems)[i].sPos;
+		sItem.pItem = (*pStoreItems)[i].pItem;
+		pItemsSet->push_back( sItem );
 	}
 
-	int nMaxY = N_STORESLOT_DEFHEIGHT;
-	vector<SItem> newItemsSet;
-	newItemsSet.reserve( itemsSet.size() );
-	for ( int nTemp = 0; nTemp < itemsSet.size(); nTemp++ )
-	{
-		list<CPtr<NRPG::IInventoryItem> >::const_iterator iItem = find( itemsList.begin(), itemsList.end(), itemsSet[nTemp].pItem );
-		if ( iItem == itemsList.end() )
-		{
-			ArrangeTake( itemsSet[nTemp].sPos, itemsSet[nTemp].pItem );
-			continue;
-		}
-
-		nMaxY = Max( nMaxY, itemsSet[nTemp].sPos.y + itemsSet[nTemp].pItem->GetSize().y );
-		newItemsSet.push_back( itemsSet[nTemp] );
-	}
-	itemsSet = newItemsSet;
-
-	if ( placeMap.GetYSize() != nMaxY )
-		SetPlaceMapSize( placeMap.GetXSize(), nMaxY );
-
-	for ( list<CPtr<NRPG::IInventoryItem> >::const_iterator iTemp = itemsList.begin(); iTemp != itemsList.end(); iTemp++ )
-	{
-		bool bFound = false;
-		for ( int nTemp = 0; nTemp < itemsSet.size(); nTemp++ )
-		{
-			if ( itemsSet[nTemp].pItem != *iTemp )
-				continue;
-
-			bFound = true;
-			break;
-		}
-
-		if ( bFound )
-			continue;
-
-		SPoint sPos;
-		if ( ArrangeFindPlace( *iTemp, &sPos ) )
-		{
-			ArrangePlace( sPos, *iTemp );
-
-			SItem &sItem = *itemsSet.insert( itemsSet.end(), SItem());
-			sItem.sPos = sPos;
-			sItem.pItem = *iTemp;
-		}
-	}
+	CTPoint<int> sMapSize = pStore->GetSize();
+	SetSize( SPoint( sMapSize.x * sCellSize.x, sMapSize.y * sCellSize.y ) );
+	SetSlotSize( sMapSize.x, sMapSize.y );
+	pScrollBase->GetVScroll()->SetMaxValue( Max( 0, sMapSize.y - N_STORESLOT_DEFHEIGHT ) );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CStoreSlot::ProcessMessage( const SEvent &sEvent )
@@ -323,87 +245,10 @@ bool CStoreSlot::ProcessMessage( const SEvent &sEvent )
 		}
 	case EVENT_LBUTTONUP:
 		return true;
+	case EVENT_LBUTTONDBLCLK:
+		Take( sEvent.nX, sEvent.nY, true );
+		return true;
 	}
-
-	return false;
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-void CStoreSlot::SetPlaceMapSize( int nWidth, int nHeight )
-{
-	CArray2D<bool> oldPlaceMap( placeMap );
-	placeMap.SetSizes( nWidth, nHeight );
-	placeMap.FillEvery( false );
-
-	for( int nTempY = 0; nTempY < Min( nHeight, oldPlaceMap.GetYSize() ); nTempY++ )
-		for( int nTempX = 0; nTempX < Min( nWidth, oldPlaceMap.GetXSize() ); nTempX++ )
-			placeMap[nTempY][nTempX] = oldPlaceMap[nTempY][nTempX];
-
-	SetSize( SPoint( placeMap.GetXSize() * sCellSize.x, placeMap.GetYSize() * sCellSize.y ) );
-	SetSlotSize( placeMap.GetXSize(), placeMap.GetYSize() );
-
-	pScrollBase->GetVScroll()->SetMaxValue( nHeight - N_STORESLOT_DEFHEIGHT );
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-void CStoreSlot::ArrangeTake( const CTPoint<int> &sPos, const NRPG::IInventoryItem *pItem )
-{
-	const CTPoint<int> &sSize = pItem->GetSize();
-	for( int nTempY = 0; nTempY < sSize.y; nTempY++ )
-		for( int nTempX = 0; nTempX < sSize.x; nTempX++ )
-			placeMap[sPos.y + nTempY][sPos.x + nTempX] = false;
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-bool CStoreSlot::ArrangePlace( const CTPoint<int> &_sPos, const NRPG::IInventoryItem *pItem )
-{
-	CTPoint<int> sPos( _sPos );
-
-	if ( ( sPos.x == -1 ) && ( sPos.y == -1 ) && !ArrangeFindPlace( pItem, &sPos ) )
-		return false;
-
-	const CTPoint<int> &sSize = pItem->GetSize();
-	for( int nTempY = 0; nTempY < sSize.y; nTempY++ )
-		for( int nTempX = 0; nTempX < sSize.x; nTempX++ )
-			placeMap[sPos.y + nTempY][sPos.x + nTempX] = true;
-
-	return true;
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-bool CStoreSlot::ArrangeCanPlace( const CTPoint<int> &sPos, const NRPG::IInventoryItem *pItem ) const
-{
-	if ( ( sPos.x < 0 ) || ( sPos.y < 0 ) || ( sPos.x + pItem->GetSize().x > placeMap.GetXSize() ) || ( sPos.y + pItem->GetSize().y > placeMap.GetYSize() ) )
-		return false;
-
-	const CTPoint<int> &sSize = pItem->GetSize();
-	for( int nTempY = 0; nTempY < sSize.y; nTempY++ )
-	{
-		for( int nTempX = 0; nTempX < sSize.x; nTempX++ )
-		{
-			if ( placeMap[sPos.y + nTempY][sPos.x + nTempX] )
-				return false;
-		}
-	}
-
-	return true;
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-bool CStoreSlot::ArrangeFindPlace( const NRPG::IInventoryItem *pItem, CTPoint<int> *pPos )
-{
-	for ( int nTemp = 0; nTemp <= pItem->GetSize().y; nTemp++ )
-	{
-		for( int nTempY = 0; nTempY < placeMap.GetYSize(); nTempY++ )
-		{
-			for( int nTempX = 0; nTempX < placeMap.GetXSize(); nTempX++ )
-			{
-				if ( ArrangeCanPlace( CTPoint<int>( nTempX, nTempY ), pItem ) )
-				{
-					*pPos = CTPoint<int>( nTempX, nTempY );
-					return true;
-				}
-			}
-		}
-
-		SetPlaceMapSize( placeMap.GetXSize(), placeMap.GetYSize() + 1 );
-	}
-
 
 	return false;
 }
@@ -466,8 +311,18 @@ bool CStorePanel::ProcessMessage( const SEvent &sEvent )
 	{
 	case EVENT_NOTIFY:
 		{
+			// Retail @0x241fb0: "store" is the close button and is left to CWindow.  The separate
+			// "arrange" button posts the one-shot store-refresh command through the first mission unit.
 			if ( sEvent.szID == "store" )
 				break;
+			if ( sEvent.szID == "arrange" )
+			{
+				vector< CPtr<NGame::IUnitTracker> > unitsSet;
+				pMission->GetUnits( &unitsSet );
+				if ( !unitsSet.empty() && IsValid( unitsSet.front() ) )
+					pMission->Command( unitsSet.front()->GetUnit(), new NWorld::CCmdUpdateStore(), true );
+				return true;
+			}
 
 			if ( sEvent.szID == "pistols" )
 				pStoreSlot->SetFilter( CStoreSlot::FLT_PISTOLS );
@@ -498,21 +353,21 @@ bool CStorePanel::ProcessMessage( const SEvent &sEvent )
 		{
 			pStoreSlotView = new CSlotScroll( sEvent.pLoader->GetControl( "slot" ), pMission );
 
-			pSMG = new CComplexButton( sEvent.pLoader->GetControl( "submachinegun" ), NDb::GetUITexture( 352 ), NDb::GetUITexture( 352 ), NDb::GetUITexture( 566 ), NDb::GetUITexture( 408 ) );
+			pSMG = new CComplexButtonFlash( sEvent.pLoader->GetControl( "submachinegun" ), NDb::GetUITexture( 352 ), NDb::GetUITexture( 352 ), NDb::GetUITexture( 566 ), NDb::GetUITexture( 408 ) );
 			pSMG->Set( NDb::GetUITexture( 624 ), NDb::GetUITexture( 625 ), CComplexButton::UNCHECKED );
-			pOthers = new CComplexButton( sEvent.pLoader->GetControl( "others" ), NDb::GetUITexture( 352 ), NDb::GetUITexture( 352 ), NDb::GetUITexture( 566 ), NDb::GetUITexture( 408 ) );
+			pOthers = new CComplexButtonFlash( sEvent.pLoader->GetControl( "others" ), NDb::GetUITexture( 352 ), NDb::GetUITexture( 352 ), NDb::GetUITexture( 566 ), NDb::GetUITexture( 408 ) );
 			pOthers->Set( NDb::GetUITexture( 632 ), NDb::GetUITexture( 633 ), CComplexButton::UNCHECKED );
-			pRifles = new CComplexButton( sEvent.pLoader->GetControl( "rifles" ), NDb::GetUITexture( 352 ), NDb::GetUITexture( 352 ), NDb::GetUITexture( 566 ), NDb::GetUITexture( 408 ) );
+			pRifles = new CComplexButtonFlash( sEvent.pLoader->GetControl( "rifles" ), NDb::GetUITexture( 352 ), NDb::GetUITexture( 352 ), NDb::GetUITexture( 566 ), NDb::GetUITexture( 408 ) );
 			pRifles->Set( NDb::GetUITexture( 622 ), NDb::GetUITexture( 623 ), CComplexButton::UNCHECKED );
-			pPistols = new CComplexButton( sEvent.pLoader->GetControl( "pistols" ), NDb::GetUITexture( 352 ), NDb::GetUITexture( 352 ), NDb::GetUITexture( 566 ), NDb::GetUITexture( 408 ) );
+			pPistols = new CComplexButtonFlash( sEvent.pLoader->GetControl( "pistols" ), NDb::GetUITexture( 352 ), NDb::GetUITexture( 352 ), NDb::GetUITexture( 566 ), NDb::GetUITexture( 408 ) );
 			pPistols->Set( NDb::GetUITexture( 620 ), NDb::GetUITexture( 621 ), CComplexButton::UNCHECKED );
-			pGrenades = new CComplexButton( sEvent.pLoader->GetControl( "grenades" ), NDb::GetUITexture( 352 ), NDb::GetUITexture( 352 ), NDb::GetUITexture( 566 ), NDb::GetUITexture( 408 ) );
+			pGrenades = new CComplexButtonFlash( sEvent.pLoader->GetControl( "grenades" ), NDb::GetUITexture( 352 ), NDb::GetUITexture( 352 ), NDb::GetUITexture( 566 ), NDb::GetUITexture( 408 ) );
 			pGrenades->Set( NDb::GetUITexture( 630 ), NDb::GetUITexture( 631 ), CComplexButton::UNCHECKED );
-			pColdSteel = new CComplexButton( sEvent.pLoader->GetControl( "coldsteel" ), NDb::GetUITexture( 352 ), NDb::GetUITexture( 352 ), NDb::GetUITexture( 566 ), NDb::GetUITexture( 408 ) );
+			pColdSteel = new CComplexButtonFlash( sEvent.pLoader->GetControl( "coldsteel" ), NDb::GetUITexture( 352 ), NDb::GetUITexture( 352 ), NDb::GetUITexture( 566 ), NDb::GetUITexture( 408 ) );
 			pColdSteel->Set( NDb::GetUITexture( 628 ), NDb::GetUITexture( 629 ), CComplexButton::UNCHECKED );
-			pPKWeapons = new CComplexButton( sEvent.pLoader->GetControl( "pkweapons" ), NDb::GetUITexture( 352 ), NDb::GetUITexture( 352 ), NDb::GetUITexture( 566 ), NDb::GetUITexture( 408 ) );
+			pPKWeapons = new CComplexButtonFlash( sEvent.pLoader->GetControl( "pkweapons" ), NDb::GetUITexture( 352 ), NDb::GetUITexture( 352 ), NDb::GetUITexture( 566 ), NDb::GetUITexture( 408 ) );
 			pPKWeapons->Set( NDb::GetUITexture( 634 ), NDb::GetUITexture( 635 ), CComplexButton::UNCHECKED );
-			pHeavyWeapon = new CComplexButton( sEvent.pLoader->GetControl( "heavyweapon" ), NDb::GetUITexture( 352 ), NDb::GetUITexture( 352 ), NDb::GetUITexture( 566 ), NDb::GetUITexture( 408 ) );
+			pHeavyWeapon = new CComplexButtonFlash( sEvent.pLoader->GetControl( "heavyweapon" ), NDb::GetUITexture( 352 ), NDb::GetUITexture( 352 ), NDb::GetUITexture( 566 ), NDb::GetUITexture( 408 ) );
 			pHeavyWeapon->Set( NDb::GetUITexture( 626 ), NDb::GetUITexture( 627 ), CComplexButton::UNCHECKED );
 			break;
 		}
@@ -520,6 +375,8 @@ bool CStorePanel::ProcessMessage( const SEvent &sEvent )
 		{
 			pClose = GetUIWindow<CButton>( this, "store" );
 			pClose->AddImageState( 0, NDb::GetUITexture( 437 ) );
+			pArrange = GetUIWindow<CButton>( this, "arrange" );
+			pArrange->AddImageState( 0, NDb::GetUITexture( 380 ) );
 
 			pStoreSlot = pStoreSlotView->GetClientWindow();
 			pStoreSlotView->SetVScroll( GetUIWindow<CScroll>( this, "scroll" ) );
@@ -556,6 +413,30 @@ void CStorePanel::UpdateButtons()
 	pColdSteel->SetChecked( eFilter == CStoreSlot::FLT_COLDSTEEL );
 	pPKWeapons->SetChecked( eFilter == CStoreSlot::FLT_PKWEAPONS );
 	pHeavyWeapon->SetChecked( eFilter == CStoreSlot::FLT_HEAVYWEAPON );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// Retail @0x241100: consume the store's category-dirty flags and arm the matching flash buttons.
+void CStorePanel::Draw( const STime &sTime, NGScene::I2DGameView *pView )
+{
+	vector<bool> flagsSet;
+	NGame::IPlayerTracker *pTracker = IsValid( pMission ) ? pMission->GetActivePlayer() : 0;
+	NWorld::IPlayer *pPlayer = IsValid( pTracker ) ? pTracker->GetPlayer() : 0;
+	if ( IsValid( pPlayer ) )
+		pPlayer->GetStoreUpdateFlags( &flagsSet );
+
+	if ( flagsSet.size() >= NRPG::FLT_MAXVALUE )
+	{
+		pSMG->SetShowFlash( flagsSet[CStoreSlot::FLT_SUBMACHINEGUN] );
+		pOthers->SetShowFlash( flagsSet[CStoreSlot::FLT_OTHERS] );
+		pRifles->SetShowFlash( flagsSet[CStoreSlot::FLT_RIFLES] );
+		pPistols->SetShowFlash( flagsSet[CStoreSlot::FLT_PISTOLS] );
+		pGrenades->SetShowFlash( flagsSet[CStoreSlot::FLT_GRENADES] );
+		pColdSteel->SetShowFlash( flagsSet[CStoreSlot::FLT_COLDSTEEL] );
+		pPKWeapons->SetShowFlash( flagsSet[CStoreSlot::FLT_PKWEAPONS] );
+		pHeavyWeapon->SetShowFlash( flagsSet[CStoreSlot::FLT_HEAVYWEAPON] );
+	}
+
+	CWindow::Draw( sTime, pView );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 } // namespace

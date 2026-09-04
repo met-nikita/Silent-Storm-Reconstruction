@@ -13,8 +13,7 @@
 // FIDELITY/SCOPE: the struct layout + the derive methods (FindMostDangerousEnemy/FindNearestAlly/
 // CheckScared/Update) follow the release (reconstruction/exports/aiunitstate_*.txt). The release maintains
 // the lists incrementally through the AI event system (Notify/OnAIEvent -> AddEnemy/AddAlly) and a
-// visibility sweep (PrepareEnemies); that event layer is not ported, so Populate() here refreshes the
-// lists each think from the AI players (the same enemy/ally sets the commander already uses). The
+// begin-turn visibility sweep (PrepareEnemies). The
 // SUnitsAndPositions per-unit position cache and the SModifiable lazy-recompute lock are kept structurally
 // but driven eagerly. State is transient on CAIUnit (rebuilt each turn), so it is not serialized.
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -74,7 +73,7 @@ struct SAIUnitState
 	bool IsKnownCorpse( IAIUnit *p ) const;
 	void AddKnownCorpse( IAIUnit *p );
 	//
-	void Populate();      // refresh enemies/allies from the AI players (release: events + PrepareEnemies)
+	void PrepareEnemies(); // @0x004b17a0: begin-turn visible-enemy refresh
 	void Update();        // recompute pEnemy/pPossibleEnemy/pAlly when lists changed, then CheckScared
 	void Reset();
 	// AI-convergence Stage 2: the commander's reaction pump reads this dirty flag. IsModified @0xb0550

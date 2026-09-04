@@ -79,6 +79,14 @@ class CGlobalPlayer: public CObjectBase
 	OBJECT_BASIC_METHODS( CGlobalPlayer )
 	ZDATA
 public:
+	// release nested enum (RPGGlobal.obj): the operation performed while leaving a zone
+	enum EHeal
+	{
+		HEAL_HEAL,
+		HEAL_BANDAGE,
+		HEAL_NONE
+	};
+
 	CDBPtr<NDb::CSide> pSide;
 	vector< CObj<CUnit> > mercs;
 	vector< CObj<CUnit> > totalMercs;
@@ -97,7 +105,7 @@ public:
 	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&deployData); f.Add(3,&pStore); f.Add(4,&pSide); f.Add(5,&mercs); f.Add(6,&totalMercs); f.Add(7,&zoneMercs); f.Add(8,&bAIPlayer); f.Add(9,&nMoney); return 0; }
 	//
 private:
-	int GetPlayerSkill( NDb::ESkillType skill, NRPG::CUnit **ppUnit );
+	int GetPlayerSkill( NDb::ESkillType skill, float fGroupCoeff, NRPG::CUnit **ppUnit );
 	bool IsUnitRescued( CUnit *pUnit );
 public:
 	CGlobalPlayer() {}
@@ -116,7 +124,7 @@ public:
 	//
 	void GetAliveUnits( vector< CPtr<NRPG::CUnit> > *pUnits );
 	float GetAverageLevel();
-	void Heal( bool bBandage, bool bNeedCarryOutCorpse, float fCoeff );
+	void Heal( EHeal eHeal, bool bNeedCarryOutCorpse, float fHealCoeff, float fSkillCoeff );
 	void Hire( CUnit *pUnit );
 	void Fire( CUnit *pUnit );
 };

@@ -46,7 +46,7 @@ void UnpackVariantFlags( const string &str, vector<SVariantFlags> *pFlags )
 		return;
 	
 	vector<string> sets;
-	// ������ ������ ����� ����� ����������� ';'
+	// flag sets are split with ';'
 	NStr::SplitString( str, sets, ';' );
 	pFlags->resize( sets.size() );
 	for ( int i = 0; i < sets.size(); ++i )
@@ -55,7 +55,7 @@ void UnpackVariantFlags( const string &str, vector<SVariantFlags> *pFlags )
 			continue;
 		vector<int> &flags = (*pFlags)[i].flags;
 		vector<string> attrInds;
-		// ������ ������ ����������� ','
+		// flag indices are split with ','
 		NStr::SplitString( sets[i], attrInds, ',' );
 		for ( int j = 0; j < attrInds.size(); ++j )
 			flags.push_back( atoi( attrInds[j].c_str() ) );
@@ -758,7 +758,7 @@ void MinMaxTiles4Solids( CTemplVariant *pVar, const vector<CPtr<T> > &fragments 
 			pVar->nMaxY = Max( pVar->nMaxY, (int)tiles[k].y );
 		}
 		pVar->nMinFloor = Min( pVar->nMinFloor, frag.nFloor );
-		// �������� ������ ����� �������� �� ���� ������ ��� ������� ��� ������, ������� �� �������� 1
+		// a solid object can occupy one floor more than its specified height, so we don't subtract 1
 		pVar->nMaxFloor = Max( pVar->nMaxFloor, frag.nFloor + frag.pModel->nHeight );
 	}
 }

@@ -279,8 +279,8 @@ void CAINormalReaction::Update()
 //  * the opening pU->SetRoute(NULL) route-clear (release IAIUnit vtbl+0x5c == NAI::CAIUnit::SetRoute; the decode
 //    hook mislabels it "pfnUnitNotify" -- it is NOT the +0x48 Notify event slot). IAIUnit has no SetRoute slot;
 //    SetLogic replaces the unit's logic in place, so the landed reactions drop it consistently.
-//  * the suspected-enemy AddEvent(CreateAILostPossibleEnemyEvent) (release vtbl+0x48 == CAIUnit::Notify, the
-//    per-unit AI event system -- unported; SAIUnitState::Populate() re-polls each think, so behaviour-safe).
+//  * the suspected-enemy AddEvent(CreateAILostPossibleEnemyEvent). The event layer is now active, so this
+//    omitted cleanup is a tracked follow-up divergence.
 //  * the path network is taken from the unit SERVER's world (as Guard/Defence do) rather than the AI state's
 //    pWorld -- the same NWorld::IWorld for an in-world unit; the release's GetAIState()!=NULL gate is folded
 //    into the GetAIUnitState()!=NULL gate (both non-null for a live in-world unit).

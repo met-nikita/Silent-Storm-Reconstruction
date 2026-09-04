@@ -1453,7 +1453,10 @@ NWorld::CCmd* CStatePickItem::GetTargetCmd()
 		if ( GetMission()->GetPanelState( PANEL_INVENTORY ) == 0 )
 		{
 			NWorld::SItem sTarget;
-			sTarget.eType = NWorld::SItem::BACKPACK;
+			// Retail CStatePickItem::GetTargetCmd uses UNIT_ANYPLACE when the inventory is
+			// closed (v1.1 RVA 0x1da892, v1.2 @0x5db2b2). MoveInventoryItem then tries the
+			// two hand slots before falling back to the backpack.
+			sTarget.eType = NWorld::SItem::UNIT_ANYPLACE;
 			sTarget.pUnit = unitsSet[0]->GetUnit();
 			sTarget.sPosition = CTPoint<int>( -1, -1 );
 			return new NWorld::CCmdMoveInventoryItem( sSource, sTarget );
@@ -1855,6 +1858,18 @@ bool CStateUnloadItem::OnLButtonUp( int nX, int nY )
 		return true;
 
 	GetMission()->Command( unitsSet.front()->GetUnit(), pCmd );
+	return true;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// v1.2 @0x5e01a0 -- consume both press variants. Otherwise the backpack handles the same press
+// after the item model and replaces this state with its ordinary take/move-item state before release.
+bool CStateUnloadItem::OnLButtonDown( int nX, int nY )
+{
+	return true;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+bool CStateUnloadItem::OnLButtonDblClk( int nX, int nY )
+{
 	return true;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////

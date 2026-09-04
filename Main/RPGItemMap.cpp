@@ -120,16 +120,25 @@ void CItemsMap::Take( IInventoryItem *item )
 // is the sibling virtual the decode left as an opaque seam, reconstructed in full.)
 bool CItemsMap::FindPlace( const IInventoryItem *item, CTPoint<int> *pPos ) const
 {
-	for ( int y = 0; y < placeMap.GetYSize(); ++y )
-		for ( int x = 0; x < placeMap.GetXSize(); ++x )
-		{
-			CTPoint<int> p( x, y );
-			if ( CanPlace( p, item ) )
+	// retail @0x29f090: a dynamic map grows one row at a time when the current grid is full.
+	// At most item-height+1 growth attempts are made, matching the original loop counter.
+	for ( int nGrow = 0; nGrow <= item->GetSize().y; ++nGrow )
+	{
+		for ( int y = 0; y < placeMap.GetYSize(); ++y )
+			for ( int x = 0; x < placeMap.GetXSize(); ++x )
 			{
-				*pPos = p;
-				return true;
+				CTPoint<int> p( x, y );
+				if ( CanPlace( p, item ) )
+				{
+					*pPos = p;
+					return true;
+				}
 			}
-		}
+
+		if ( !bDynamicSize )
+			return false;
+		const_cast<CItemsMap*>( this )->SetSize( placeMap.GetXSize(), placeMap.GetYSize() + 1 );
+	}
 	return false;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////

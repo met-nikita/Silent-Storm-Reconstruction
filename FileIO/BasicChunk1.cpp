@@ -423,7 +423,7 @@ void CStructureSaver::StoreObject( CObjectBase *pObject )
 	if ( pObject != 0 && storedObjects.find( pObject ) == storedObjects.end() )
 	{
 		toStore.push_back( pObject );
-		storedObjects[pObject] = true; // ����� ��������� ���� ���-������
+		storedObjects[pObject] = true; // it is important to assign something
 	}
 	RawData( &pObject, 4 );
 }

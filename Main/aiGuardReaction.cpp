@@ -57,10 +57,8 @@ CAIGuardReaction::CAIGuardReaction( IAIUnit *pUnit, NDb::CAnimation *pGuardAnima
 //    that SetLogic replaces in place (aiUnit.cpp:162); the landed CAINormalReaction/CAIDefenceReaction omit any
 //    such clear and IAIUnit declares no SetRoute slot, so it is dropped consistently.
 //  * the two AI-event raises -- AddEvent(CreateAILostPossibleEnemyEvent(possible)) (chase branch) and
-//    AddEvent(CreateAILostAllyEvent(ally)) (ally branch). The per-unit AI event system (IAIEvent /
-//    CAIUnit::Notify(IAIEvent*), vtbl+0x48) is unported; SAIUnitState::Populate() re-polls the seen sets every
-//    think (aiUnitState.h), so the events' RemovePossibleEnemy/RemoveAlly cleanup is redundant under the dev
-//    polling model -- behaviour-safe to drop.
+//    AddEvent(CreateAILostAllyEvent(ally)) (ally branch). The event layer is now active, so both omitted
+//    cleanups are tracked follow-up divergences.
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CAIGuardReaction::Update()
 {

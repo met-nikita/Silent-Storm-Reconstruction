@@ -326,142 +326,82 @@ void CPlayer::SetInHandItem( const SItem &sInfo )
 		sHandItem = sInfo;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// Retail IPlayer store forwarders @0x386a50..0x386a90.
+CTPoint<int> CPlayer::GetStoreSize()
+{
+	return pGlobalPlayer->pStore->GetSize();
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CPlayer::SetStoreFilter( NRPG::EStoreFilter eFilter )
+{
+	pGlobalPlayer->pStore->SetFilter( eFilter );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CPlayer::GetStoreUpdateFlags( vector<bool> *pFlags )
+{
+	pGlobalPlayer->pStore->GetUpdateFlags( pFlags );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+vector<NRPG::SMapItem>* CPlayer::GetStoreItems()
+{
+	return pGlobalPlayer->pStore->GetItems();
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 void CPlayer::GetStoreItems( list<CPtr<NRPG::IInventoryItem> > *pItems )
 {
-	if ( !pGlobalGame->pScenarioTracker->IsScenarioAvailable() )
+	pItems->clear();
+	if ( !IsValid( pGlobalPlayer ) || !IsValid( pGlobalPlayer->pStore ) )
 		return;
-
-	int nGameRating = pGlobalGame->pScenarioTracker->GetMaxDifficulty();
-	// retail: the stock rows live on the player's serialized CStore (CGlobalPlayer tag 3), so the
-	// vendor stock survives save/load; the Jan03 transient storeItemsList is gone.
-	if ( !IsValid( pGlobalPlayer->pStore ) )
-		pGlobalPlayer->pStore = new NRPG::CStore( pGlobalPlayer );
-	vector<NRPG::SStoreItem> &storeItemsList = pGlobalPlayer->pStore->ItemsSet();
-
-	{
-		CDBTable<NDb::CRPGStoreItem> *pStoreItemsTable = NDatabase::GetTable<NDb::CRPGStoreItem>();
-		CDBIterator<NDb::CRPGStoreItem> iTempItem( *pStoreItemsTable );
-
-		while( iTempItem.MoveNext() )
-		{
-			CPtr<NDb::CRPGStoreItem> pItem = iTempItem.Get();
-			if ( !IsValid( pItem->pItem ) )
-			{
-				ASSERT( 0 );
-				continue;
-			}
-			if ( !IsValid( pItem->pItem->pSuccessor ) )
-			{
-				ASSERT( 0 );
-				continue;
-			}
-			if ( pItem->pSide.GetPtr() != pGlobalPlayer->pSide.GetPtr() )
-				continue;
-
-			bool bFound = false;
-			for( vector<NRPG::SStoreItem>::const_iterator iTemp = storeItemsList.begin(); iTemp != storeItemsList.end(); iTemp++ )
-			{
-				if ( iTemp->pStoreItem != pItem )
-					continue;
-
-				bFound = true;
-				break;
-			}
-
-			if ( !bFound )
-			{
-				NRPG::SStoreItem &sItem = *storeItemsList.insert( storeItemsList.end(), NRPG::SStoreItem());
-				sItem.eType = NRPG::SStoreItem::REGEN_QUANTITY;
-				sItem.nRating = pItem->nRating;
-				sItem.fQuantity = pItem->fQuantity;
-				sItem.pRPGItem = pItem->pItem;
-				sItem.pStoreItem = pItem;
-
-				int nCount = int( sItem.fQuantity );
-				for ( int nTemp = 0; nTemp < nCount; nTemp++ )
-					sItem.itemsList.push_back( NRPG::CreateItem( sItem.pRPGItem->pSuccessor ) );
-
-				CDynamicCast<NDb::CRPGWeapon> pWeapon( pItem->pItem->pSuccessor );
-				if ( IsValid( pWeapon ) && IsValid( pWeapon->pInnerClip ) && IsValid( pWeapon->pInnerClip->pItem ) )
-				{
-					int nCount = Max( 0, pItem->pItem->sSize.y * ( N_STORESLOT_DEFWIDTH - pItem->pItem->sSize.x ) );
-
-					if ( nCount > 0 )
-					{
-						NRPG::SStoreItem &sItem = *storeItemsList.insert( storeItemsList.end(), NRPG::SStoreItem());
-						sItem.eType = NRPG::SStoreItem::CONST_QUANTITY;
-						sItem.nRating = -1;
-						sItem.fQuantity = Max( 0, pItem->pItem->sSize.y * ( N_STORESLOT_DEFWIDTH - pItem->pItem->sSize.x ) );
-						sItem.pRPGItem = pWeapon->pInnerClip->pItem;
-						sItem.pStoreItem = pItem;
-
-						for ( int nTemp = 0; nTemp < nCount; nTemp++ )
-							sItem.itemsList.push_back( NRPG::CreateItem( sItem.pRPGItem->pSuccessor ) );
-					}
-				}
-			}
-		}
-	}
-
-	for( vector<NRPG::SStoreItem>::iterator iTemp = storeItemsList.begin(); iTemp != storeItemsList.end(); iTemp++ )
-	{
-		if ( IsValid( iTemp->pStoreItem ) )
-		{
-			switch( iTemp->eType )
-			{
-			case NRPG::SStoreItem::CONST_QUANTITY:
-				{
-					int nCount = int( iTemp->fQuantity );
-					for ( int nTemp = iTemp->itemsList.size(); nTemp < nCount; nTemp++ )
-						iTemp->itemsList.push_back( NRPG::CreateItem( iTemp->pRPGItem->pSuccessor ) );
-
-					break;
-				}
-			case NRPG::SStoreItem::REGEN_QUANTITY:
-				{
-					iTemp->fQuantity = ( nGameRating - iTemp->nRating ) * iTemp->pStoreItem->fQuantity;
-
-					int nCount = int( iTemp->fQuantity );
-					for ( int nTemp = iTemp->itemsList.size(); nTemp < nCount; nTemp++ )
-						iTemp->itemsList.push_back( NRPG::CreateItem( iTemp->pRPGItem->pSuccessor ) );
-
-					break;
-				}
-			}
-		}
-
-		for ( list<CObj<NRPG::IInventoryItem> >::const_iterator iItem = iTemp->itemsList.begin(); iItem != iTemp->itemsList.end(); iItem++ )
-			pItems->push_back( iItem->GetPtr() );
-	}
+	vector<NRPG::SMapItem> *pMapItems = pGlobalPlayer->pStore->GetItems();
+	for ( int i = 0; i < (int)pMapItems->size(); ++i )
+		pItems->push_back( (*pMapItems)[i].pItem.GetPtr() );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CPlayer::TakeStoreItem( NRPG::IInventoryItem *pItem )
 {
-	if ( !IsValid( pGlobalPlayer->pStore ) )
+	if ( !IsValid( pGlobalPlayer ) || !IsValid( pGlobalPlayer->pStore ) )
 		return false;
-	vector<NRPG::SStoreItem> &storeItemsList = pGlobalPlayer->pStore->ItemsSet();
-	for( vector<NRPG::SStoreItem>::iterator iTemp = storeItemsList.begin(); iTemp != storeItemsList.end(); iTemp++ )
-	{
-		list<CObj<NRPG::IInventoryItem> >::iterator iItem = find( iTemp->itemsList.begin(), iTemp->itemsList.end(), pItem );
-		if ( iItem == iTemp->itemsList.end() )
-			continue;
-
-		iTemp->itemsList.erase( iItem );
-		return true;
-	}
-
+	vector<NRPG::SMapItem> *pItems = pGlobalPlayer->pStore->GetItems();
+	for ( int i = 0; i < (int)pItems->size(); ++i )
+		if ( (*pItems)[i].pItem.GetPtr() == pItem )
+		{
+			pGlobalPlayer->pStore->Take( pItem );
+			return true;
+		}
 	return false;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CPlayer::PlaceStoreItem( NRPG::IInventoryItem *pItem )
 {
-	NRPG::SStoreItem sItem;
-	sItem.eType = NRPG::SStoreItem::NONE;
-	sItem.nRating = 0;
-	sItem.itemsList.push_back( pItem );
+	if ( !IsValid( pGlobalPlayer ) )
+		return;
 	if ( !IsValid( pGlobalPlayer->pStore ) )
 		pGlobalPlayer->pStore = new NRPG::CStore( pGlobalPlayer );
-	pGlobalPlayer->pStore->ItemsSet().push_back( sItem );
+	pGlobalPlayer->pStore->Place( CTPoint<int>( -1, -1 ), pItem );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// Retail @0x386ed0: snapshot the live mission units, combine scenario and hot-seat tech level, and
+// let the serialized CStore perform its one-shot unlock/regeneration/rebuild pass.
+void CPlayer::UpdateStore()
+{
+	if ( !IsValid( pGlobalGame ) || !IsValid( pGlobalPlayer ) )
+		return;
+	if ( !IsValid( pGlobalPlayer->pStore ) )
+		pGlobalPlayer->pStore = new NRPG::CStore( pGlobalPlayer );
+	// Retail constructs a roster-sized snapshot and leaves null entries in place.
+	vector< CObj<NRPG::CUnit> > storeUnits( units.size() );
+	for ( int i = 0; i < (int)units.size(); ++i )
+	{
+		if ( IsValid( units[i] ) && IsValid( units[i]->GetUnitRPG() ) )
+			storeUnits[i] = units[i]->GetUnitRPG()->GetRPGUnit();
+	}
+
+	int nDifficulty = pGlobalGame->nHotSeatTechLevel;
+	// @0x386ed0 calls GetMaxDifficulty unconditionally when the tracker exists; it does not gate
+	// the store's unlock level on IsScenarioAvailable.
+	if ( IsValid( pGlobalGame->pScenarioTracker ) )
+		nDifficulty = Max( nDifficulty, pGlobalGame->pScenarioTracker->GetMaxDifficulty() );
+	pGlobalPlayer->pStore->Update( nDifficulty, storeUnits );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CPlayer::GetUnitsThatCanFight( list< CPtr<CUnitServer> > *pRes ) const
@@ -1128,6 +1068,13 @@ void CWorld::UpdateVisible( bool bForce )
 		bCallUpdateVisible = true;
 		return;
 	}
+	// retail @0x366c00: every completed visibility refresh derives the global sight multiplier and the
+	// RPG night flag from the world's time-of-day sentinel before asking any unit to update perception.
+	float fVisionMultiplier = 1.0f;
+	if ( GetTimeOfDay() == TOD_NIGHT )
+		fVisionMultiplier = 0.666f;   // retail constant 0x3f2a7efa
+	pRPGGame->SetVisionMultiplier( fVisionMultiplier );
+	pRPGGame->SetNight( GetTimeOfDay() == TOD_NIGHT );
 	SInterruptInfo info;
 	for ( list< CObj<CUnitServer> >::iterator i = units.begin(); i != units.end(); ++i )
 		(*i)->UpdateVisible( &info );
@@ -1654,7 +1601,6 @@ void CWorld::CreateRandom( int nVariantID, const vector<string> &params,
 	// (NWorld::CreateExplosionMaster @0x355b40 = new CExplosionMaster(this)). W4 serialization-
 	// convergence: it segments and serializes like retail but nothing enqueues blasts into it yet.
 	pExplosionMaster = CreateExplosionMaster( this );
-	pRPGGame = NRPG::CreateGame( pAIMap, pPathNetwork );
 	ConvertFlags( &createFlags, params );
 
 	SMapInfo mapInfo;
@@ -1665,6 +1611,9 @@ void CWorld::CreateRandom( int nVariantID, const vector<string> &params,
 		CreateDefault();
 		return;
 	}
+	// retail NRPG::CreateGame @0x299150 receives the completed STerrainInfo; the vision tracker
+	// derives its grass-occlusion bitmap from it before registering its cube trackers with the map.
+	pRPGGame = NRPG::CreateGame( pAIMap, pPathNetwork, mapInfo.terrain );
 	pDiplomacy->LoadDiplomacy( nVariantID );
 	nRootLayersGroup = 0;
 	// retail @0x36d0b0 (right after LoadDiplomacy/nRootLayersGroup): combat is prohibited in zones whose
@@ -1823,12 +1772,12 @@ void CWorld::CreateDefault()
 	pPathNetwork = NAI::CreateNodesNetwork( pAIMap, pAIJobManager );
 	// retail CreateDefault @0x36dc30: same as CreateRandom -- the explosion master right after the nodes network
 	pExplosionMaster = CreateExplosionMaster( this );
-	pRPGGame = NRPG::CreateGame( pAIMap, pPathNetwork );
 
 	nRootLayersGroup = pPathNetwork->CreateLayersGroup( 16, 16, CVec2(0,0), 0, 0 );
 
 	STerrainInfo sInfo;
 	CreateFakeTerrainInfo( &sInfo );
+	pRPGGame = NRPG::CreateGame( pAIMap, pPathNetwork, sInfo );
 	pTerrainInfo = new CTerrainInfoHolder( sInfo );
 	list<SMapHole> holes;
 	list<SMapWall> walls;

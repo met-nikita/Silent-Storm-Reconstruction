@@ -7,17 +7,17 @@
 class CStructureSaver;
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // single thread version
-// ������� ������ ��� ������� �������� ������ �� ������� � ����� ��������� memory
+// base classes for the object reference counting system to simplify memory
 // management
-//   ���� ������ ������� ���������� - ������� ��������� - CPtr � ����������� ������ �
-// ���������, ���������� ������ ������������� - CObj/CMObj. ����� ����������� CObj ������, �� �������
-// �� �������� ��������� � ���������� ��� ����������. ���������� ��������� CMObj ���������
-// ������������ �������� �������� (������������ ����� ������ ����� ���� ���������� ��-��
-// ������� ������� �������������)
-//   ����������� - ������ ����� ������������� � .cpp ����� ������������ BASIC_REGISTER_CLASS()
-// - ��� ������������� ���������� �� forward declared classes
-// ������ �������������� operator new, ��� ��� �������� ������� ����� � ������� ������������ 
-// operator`a delete (��-�� delete this)
+// There are different pointer templates - simple pointers - CPtr with added reference and
+// pointers with ownership - CObj/CMObj. After a CObj is destroyed, the object it
+// referenced is cleared and marked as invalid. CMObj operates similarly, organizing
+// concurrent object ownership (used when an object can be destroyed due to
+// external circumstances)
+// Limitations - sometimes it may be necessary to use BASIC_REGISTER_CLASS() in the .cpp file
+// - when using pointers to forward-declared classes
+// You cannot override operator new, as objects will be deleted using the standard
+// delete operator (due to delete this)
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 #pragma warning(disable:4250)
 ////////////////////////////////////////////////////////////////////////////////////////////////////

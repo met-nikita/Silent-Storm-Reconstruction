@@ -59,15 +59,8 @@ void CRenderBaseInterface::Initialize( int nTemplateID )
 	CPtr<NDb::CTemplVariant> pVar = NDb::GetTemplVariant( nVariantID );
 	if ( IsValid( pVar ) && IsValid( pVar->pAmbientMusic ) )
 		pAmbientPool = pVar->pAmbientMusic;
-	CPtr<NDb::CMusic> pAmbientMelody;
-	if ( IsValid( pAmbientPool ) )
-	{
-		SRand musicRand;
-		pAmbientMelody = pAmbientPool->GetMusic( &musicRand );
-	}
-
 	pScene = NGScene::CreateNewView();
-	pSoundScene = NSound::CreateSoundScene( pAmbientMelody );
+	pSoundScene = NSound::CreateSoundScene( pAmbientPool );
 	// retail CRenderBaseInterface::Initialize @0x22ef80: the sound mixers are owned by the render game
 	pRender = NRender::CreateRenderGame( pWorld, pScene, pSoundScene );
 
