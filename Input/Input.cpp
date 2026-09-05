@@ -1085,7 +1085,7 @@ BOOL CALLBACK EnumDeviceObjectsCallback( const DIDEVICEOBJECTINSTANCE* lpdidObje
 	nameIDs[szControlName] = sKey.nAction;
 	actionIDs[ INPUT_KEYID( psDeviceEnum->nID, diObjectFormat.dwOfs ) ] = sKey;
 
-	DebugTrace("INPUT:\tNew control found! Add new control %s\n", szControlName );
+	DebugTrace("INPUT:\tNew control found! Add new control %s\n", szControlName.c_str() );
 
 	if ( eType == CT_POV )
 	{
@@ -1098,14 +1098,14 @@ BOOL CALLBACK EnumDeviceObjectsCallback( const DIDEVICEOBJECTINSTANCE* lpdidObje
 		nameIDs[szControlName + "_X"] = sKey.nAction;
 		actionIDs[ INPUT_KEYIDEX( psDeviceEnum->nID, diObjectFormat.dwOfs, 1 ) ] = sKey;
 
-		DebugTrace("INPUT:\tNew control found! Add new control %s\n", szControlName + "_X" );
+		DebugTrace("INPUT:\tNew control found! Add new control %s\n", ( szControlName + "_X" ).c_str() );
 
 		sKey.nAction = INPUT_KEYIDEX( psDeviceEnum->nID, diObjectFormat.dwOfs, 2 );
 		sKey.ePOVAxis = PA_Y;
 		nameIDs[szControlName + "_Y"] = sKey.nAction;
 		actionIDs[ INPUT_KEYIDEX( psDeviceEnum->nID, diObjectFormat.dwOfs, 2 ) ] = sKey;
 
-		DebugTrace("INPUT:\tNew control found! Add new control %s\n", szControlName + "_Y" );
+		DebugTrace("INPUT:\tNew control found! Add new control %s\n", ( szControlName + "_Y" ).c_str() );
 	}
 
 	return DIENUM_CONTINUE;

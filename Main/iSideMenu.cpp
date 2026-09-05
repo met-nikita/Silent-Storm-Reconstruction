@@ -94,8 +94,8 @@ void CScriptHoverButton::OnAction()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CSideMenuUI
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// The retail side-menu container (353) ships no static cancel/next/axis/allies controls (the dev
-// looked them up by name -> dead buttons). The release builds them PROGRAMMATICALLY in two CButtonsLine
+// The retail side-menu container (353) has in-scene side hotspots, but no static bottom-panel
+// buttons. The release builds the visible buttons PROGRAMMATICALLY in two CButtonsLine
 // over the "line_1"/"line_2" template controls (the main-menu precedent) + adds a difficulty row.
 // Base is CDesktopWindow (the release's script-UI host). operator& 7 -> 15 tags (@0x23ed60).
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -151,13 +151,11 @@ private:
 		return pButton;
 	}
 
-	// Highlight the selected side + difficulty (retail drives this from the menu script; we set it in C++).
+	// Retail CSideMenuUI::Draw updates the bottom-panel selection highlights.
 	void UpdateChecked()
 	{
 		if ( IsValid( pAxis ) )         pAxis->SetChecked( eSide == SIDE_AXIS );
 		if ( IsValid( pAllies ) )       pAllies->SetChecked( eSide == SIDE_ALLIES );
-		if ( IsValid( pAxisOnView ) )   pAxisOnView->SetChecked( eSide == SIDE_AXIS );
-		if ( IsValid( pAlliesOnView ) ) pAlliesOnView->SetChecked( eSide == SIDE_ALLIES );
 		if ( IsValid( pEasy ) )         pEasy->SetChecked( eDifficulty == DIF_EASY );
 		if ( IsValid( pHard ) )         pHard->SetChecked( eDifficulty == DIF_HARD );
 		if ( IsValid( pNormal ) )       pNormal->SetChecked( eDifficulty == DIF_NORMAL );
@@ -170,6 +168,7 @@ public:
 	ESide GetSide() const { return eSide; }
 	EDifficulty GetDifficulty() const { return eDifficulty; }
 
+	void Draw( const STime &sTime, NGScene::I2DGameView *pView );
 	bool ProcessMessage( const SEvent &sEvent );
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -178,31 +177,35 @@ CSideMenuUI::CSideMenuUI( const SWindowInfo &sInfo, NGame::CRenderBaseInterface 
 {
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// Retail v1.1 @0x63cd50 / v1.2 @0x63cae0: update the enabled/checked states before drawing.
+void CSideMenuUI::Draw( const STime &sTime, NGScene::I2DGameView *pView )
+{
+	pNext->SetStyle( STYLE_ENABLED, eSide != SIDE_NONE );
+	UpdateChecked();
+	CDesktopWindow::Draw( sTime, pView );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CSideMenuUI::ProcessMessage( const SEvent &sEvent )
 {
 	switch( sEvent.nEvent )
 	{
 		case EVENT_NOTIFY:
 			{
-				if ( sEvent.szID == "axis" )        { eSide = SIDE_AXIS; UpdateChecked(); return true; }
-				else if ( sEvent.szID == "allies" ) { eSide = SIDE_ALLIES; UpdateChecked(); return true; }
-				else if ( sEvent.szID == "easy" )   { eDifficulty = DIF_EASY; UpdateChecked(); return true; }
-				else if ( sEvent.szID == "hard" )   { eDifficulty = DIF_HARD; UpdateChecked(); return true; }
-				else if ( sEvent.szID == "normal" ) { eDifficulty = DIF_NORMAL; UpdateChecked(); return true; }
+				if ( sEvent.szID == "axis" )        { eSide = SIDE_AXIS; return true; }
+				else if ( sEvent.szID == "allies" ) { eSide = SIDE_ALLIES; return true; }
+				else if ( sEvent.szID == "easy" )   { eDifficulty = DIF_EASY; return true; }
+				else if ( sEvent.szID == "hard" )   { eDifficulty = DIF_HARD; return true; }
+				else if ( sEvent.szID == "normal" ) { eDifficulty = DIF_NORMAL; return true; }
 
 				break;
 			}
 		case EVENT_TEMPLATELOAD:
 			{
-				// The in-3D-view "axis"/"allies" side clickables (notify the menu script on hover/click).
-				// Orphan-safe if our container 353 lacks these controls.
+				// Retail's in-scene hotspots notify the script but have no text states.
+				// Visible captions belong only to the bottom-panel buttons.
 				pAxisOnView = new CScriptHoverButton( sEvent.pLoader->GetControl( "axis" ), pInterface );
-				pAxisOnView->AddTextState( CHoverButton::STATE_HOVER, GetDBString( 11130 ) + GetDBString( 11131 ) );
-				pAxisOnView->AddTextState( CHoverButton::STATE_NORMAL, GetDBString( 11129 ) + GetDBString( 11131 ) );
 
 				pAlliesOnView = new CScriptHoverButton( sEvent.pLoader->GetControl( "allies" ), pInterface );
-				pAlliesOnView->AddTextState( CHoverButton::STATE_HOVER, GetDBString( 11130 ) + GetDBString( 11132 ) );
-				pAlliesOnView->AddTextState( CHoverButton::STATE_NORMAL, GetDBString( 11129 ) + GetDBString( 11132 ) );
 
 				// The navigable buttons live in two CButtonsLine over the line_1/line_2 template controls.
 				pButtonsLine1 = new CButtonsLine( sEvent.pLoader->GetControl( "line_1" ) );
@@ -223,7 +226,6 @@ bool CSideMenuUI::ProcessMessage( const SEvent &sEvent )
 				pNormal = AddScriptButton( pButtonsLine2, "normal", 17330 );
 				pHard   = AddScriptButton( pButtonsLine2, "hard",   17331 );
 
-				UpdateChecked();   // initial highlight (default difficulty)
 				break;
 			}
 	}
@@ -295,7 +297,7 @@ bool CSideMenuInterface::ProcessEvent( const NInput::SEvent &sEvent )
 		// The release (@0x23e330) threads the chosen difficulty as the 2nd CICHeroMenu arg, with the
 		// enum value passed DIRECTLY as the DB id: GetDBSide(eSide) (SIDE_AXIS=1/SIDE_ALLIES=2 = the
 		// N_SIDE_* ids) + GetDBDifficulty(eDifficulty) (DIF_EASY=0/DIF_HARD=1/DIF_NORMAL=2). We guard the
-		// null-side case (Next before a side is picked) — retail script-gates Next; our build doesn't.
+		// null-side case for direct bind events too; CSideMenuUI::Draw disables the Next button.
 		NDb::CSide *pDBSide = ( pSideMenuUI->GetSide() != NUI::CSideMenuUI::SIDE_NONE )
 			? NDb::GetDBSide( pSideMenuUI->GetSide() ) : 0;
 		NDb::CDBDifficulty *pDBDifficulty = NDb::GetDBDifficulty( pSideMenuUI->GetDifficulty() );

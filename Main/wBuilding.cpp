@@ -84,7 +84,7 @@ CBuilding::CBuilding( CSyncSrc<IVisObj> *_pShow, const SMapBuilding &_info, IWor
 	: info(_info), pRPG( NRPG::CreateBuilding(_info.pGrid) ), nSegemntCnt(-1), nActionCnt(-1), bNoAI(_bNoAI), pSWMap(_info.pSWMap)
 {
 	bindGlobal.Link( _pShow, this );
-	originalpos = info.pos;
+	originalpos = info.pPos->pos;
 	pWorld = _pWorld;
 	ASSERT( IsValid( pWorld ) );
 	pShow = _pShow;
@@ -217,8 +217,8 @@ void CBuilding::Update()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CBuilding::Explode( const CVec3 &ptEpic, int nPower )
 {
-	// retail CBuilding::Explode @0x343ac0: passes info.pos (the building's placement) into the grid
-	info.pGrid->Explode( info.pos, ptEpic, nPower, sqrt( nPower ) );
+	// retail CBuilding::Explode @0x343ac0: passes the building's placement into the grid
+	info.pGrid->Explode( info.pPos->pos, ptEpic, nPower, sqrt( nPower ) );
 	UpdateBuildingParts();
 	ToggleUpdateFlag();
 		//NBuilding::UpdateBuildingStability( (*it)->info.pVariant->GetRecordID(), (*it)->info.pGrid );
@@ -279,13 +279,13 @@ void CBuilding::RenderDestructionEffects()
 	if ( !pW )
 		return;
 	// grid -> world: scale each destroyed voxel by FP_GRID_STEP, then run it through the building placement
-	// matrix (info.pos.forward, an SHMatrix).
+	// matrix (info.pPos->pos.forward, an SHMatrix).
 	vector<CVec3> worldPts;
 	worldPts.resize( nSpots );
 	for ( int i = 0; i < nSpots; ++i )
 	{
 		const NBuilding::SPoint3 &s = spots[ i ];
-		info.pos.forward.RotateHVector( &worldPts[ i ],
+		info.pPos->pos.forward.RotateHVector( &worldPts[ i ],
 			CVec3( s.x * FP_GRID_STEP, s.y * FP_GRID_STEP, s.z * FP_GRID_STEP ) );
 	}
 	// dust/debris burst at every destroyed voxel ("BlockDestruct" template, EffectTemplates.ID 945), each spun a
@@ -357,7 +357,7 @@ bool CBuilding::Segment()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CBuilding::SetPosition( const SFBTransform &pos )
 {
-	info.pos = pos * originalpos;
+	info.pPos->pos = pos * originalpos;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CBuildingPart
@@ -400,7 +400,7 @@ void CBuildingPart::Visit( IAIVisitor* p )
 	if ( bNoAI || !IsValid( pParent ) || !IsValid( pParent->pBInfo ) )
 		return;
 	const SMapBuilding &bInfo = pParent->info;
-	SFBTransform place = bInfo.pos;
+	SFBTransform place = bInfo.pPos->pos;
 	const NBuilding::SBuildingInfo &info = pParent->pBInfo->GetInfo();
 
 	unordered_map<NBuilding::SPart, NBuilding::SStoreyInfo, NBuilding::SPart>::const_iterator i = info.info.find( part );

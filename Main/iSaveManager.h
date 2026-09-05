@@ -47,7 +47,6 @@ class CSaveManager
 {
 private:
 	int nActiveSlotID;
-	string szActiveProfile;
 
 public:
 	CSaveManager();
@@ -57,7 +56,7 @@ public:
 	void DeleteProfile( const string &szProfile ) const;
 	void GetProfilesList( list<string> *pList ) const;
 
-	const string& GetActiveProfile() const;
+	string GetActiveProfile() const;
 	void SetActiveProfile( const string &szProfile );
 
 //// Slots
@@ -78,7 +77,7 @@ CSaveManager* GetSaveManager();
 ////
 // Release profile free-fns (iSaveManager.obj): the profile UI talks to these, not the CSaveManager
 // methods.  Dir ops delegate to the manager; the ACTIVE profile lives in the NGlobal "game_profile"
-// var (release divergence from the dev CSaveManager::szActiveProfile member).
+// var. The retained CSaveManager API delegates profile selection to these functions.
 void CreateProfile( const string &szProfile );      // @0x235fe0
 void DeleteProfile( const string &szProfile );
 void GetProfilesList( list<string> *pList );         // @0x2368e0

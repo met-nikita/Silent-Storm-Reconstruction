@@ -1191,6 +1191,11 @@ rUnits( _pWorld->GetUnits(), _pScene ),
 pWorld(_pWorld), pScene(_pScene), bPrevShowUnits( true ),
 wasWeather( NWorld::IWorld::WEATHER_SUNNY ), tWeatherChange( 0 )
 {
+	// Retail v1.2 @0x6cf1e1 (v1.1 @0x6cec11): resume the world's aim-time epoch.
+	// A re-entered world keeps its clocks; starting this counter at zero stalls
+	// simulation until scene time + hidden time reaches the saved world time.
+	timer.SetCurrent( pWorld->GetAimTime()->GetValue() );
+
 	r.SetTimer( timer.GetTime(), pWorld->GetAimTime() );
 	rUnits.SetTimer( timer.GetTime(), pWorld->GetAimTime() );
 

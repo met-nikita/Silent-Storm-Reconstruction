@@ -1380,8 +1380,9 @@ bool CMapBuilder::BuildMap( int nPlacementID )
 		SMapBuilding &b = *it;
 		CVec3 pos( b.mpos.ptPos );
 		pos.z += GetMeterHeightCheck( info.terrain, b.ptAlignTo.x, b.ptAlignTo.y );
-		MakeMatrix( &b.pos, CVec3(1,1,1), pos, ToRadian( b.mpos.fRotation ) );
-		// retail: the grid stores no transform -- the placement lives in SMapBuilding (pPos/pos)
+		b.pPos = new CFBTransform;
+		MakeMatrix( &b.pPos->pos, CVec3(1,1,1), pos, ToRadian( b.mpos.fRotation ) );
+		// retail: the grid stores no transform -- the placement lives in SMapBuilding (pPos)
 		// and is passed to CBuildingGrid::Explode by the caller (BuildMap @0x277900, wBuilding @0x343ac0).
 	}
 
@@ -1391,7 +1392,7 @@ bool CMapBuilder::BuildMap( int nPlacementID )
 		const SExplosion &ex = explosions[j];
 		for ( int i = 0; i < info.buildings.size(); ++i )
 			// retail BuildMap @0x277900: Explode( &building.pPos->pos, ex.pos.ptPos, ex.fPower, ex.fRadius )
-			info.buildings[i].pGrid->Explode( info.buildings[i].pos, ex.pos.ptPos, ex.fPower, ex.fRadius );
+			info.buildings[i].pGrid->Explode( info.buildings[i].pPos->pos, ex.pos.ptPos, ex.fPower, ex.fRadius );
 		if ( ex.nObjStageDelta > 0 && ex.fObjRadius > FP_EPSILON )
 		{
 			const float fRadius2 = sqr( ex.fObjRadius * FP_INV_GRID_STEP );

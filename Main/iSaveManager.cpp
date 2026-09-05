@@ -25,7 +25,7 @@ CSaveManager* GetSaveManager()
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CSaveManager::CSaveManager(): 
-	nActiveSlotID( 0 ), szActiveProfile( "default" )
+	nActiveSlotID( 0 )
 {
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -58,18 +58,19 @@ void CSaveManager::GetProfilesList( list<string> *pList ) const
 	_findclose( nHandle );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-const string& CSaveManager::GetActiveProfile() const
+string CSaveManager::GetActiveProfile() const
 {
-	return szActiveProfile;
+	return NMainLoop::GetActiveProfile();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CSaveManager::SetActiveProfile( const string &szProfile )
 {
-	szActiveProfile = szProfile;
+	NMainLoop::SetActiveProfile( szProfile );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CSaveManager::SaveSlot( const string &szName )
 {
+	const string szActiveProfile = GetActiveProfile();
 	string szSource( NStr::Format( S_SAVE_SLOTTEMPLATE, szActiveProfile.c_str(), S_SLOT_ACTIVE ) );
 	string szTarget( NStr::Format( S_SAVE_SLOTTEMPLATE, szActiveProfile.c_str(), szName.c_str() ) );
 
@@ -89,6 +90,7 @@ void CSaveManager::SaveSlot( const string &szName )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CSaveManager::LoadSlot( const string &szName )
 {
+	const string szActiveProfile = GetActiveProfile();
 	string szSource( NStr::Format( S_SAVE_SLOTTEMPLATE, szActiveProfile.c_str(), szName.c_str() ) );
 	string szTarget( NStr::Format( S_SAVE_SLOTTEMPLATE, szActiveProfile.c_str(), S_SLOT_ACTIVE ) );
 
@@ -108,6 +110,7 @@ void CSaveManager::LoadSlot( const string &szName )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CSaveManager::ClearSlot( const string &szName )
 {
+	const string szActiveProfile = GetActiveProfile();
 	string szSource( NStr::Format( S_SAVE_SLOTTEMPLATE, szActiveProfile.c_str(), szName.c_str() ) );
 	RemoveDir( szSource );
 	CreateDir( szSource );
@@ -115,18 +118,21 @@ void CSaveManager::ClearSlot( const string &szName )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CSaveManager::DeleteSlot( const string &szName )
 {
+	const string szActiveProfile = GetActiveProfile();
 	string szSource( NStr::Format( S_SAVE_SLOTTEMPLATE, szActiveProfile.c_str(), szName.c_str() ) );
 	RemoveDir( szSource );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CSaveManager::PrepareSlot( const string &szName )
 {
+	const string szActiveProfile = GetActiveProfile();
 	string szSource( NStr::Format( S_SAVE_SLOTTEMPLATE, szActiveProfile.c_str(), szName.c_str() ) );
 	CreateDir( szSource );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CSaveManager::GetSlotsList( list<string> *pList ) const
 {
+	const string szActiveProfile = GetActiveProfile();
 	string szSource( NStr::Format( S_SAVE_PROFILETEMPLATE, szActiveProfile.c_str() ) );
 	string szSourceMask( szSource + "*.*" );
 
@@ -193,6 +199,8 @@ void CSaveManager::GetSlotScreenShot( const string &szName, CArray2D<NGfx::SPixe
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 string CSaveManager::GetSlotFilePath( const string &szName, const string &szFileName ) const
 {
+	// Retail resolves game_profile for each operation, including the first one after startup.
+	const string szActiveProfile = GetActiveProfile();
 	return string( NStr::Format( S_SAVE_SLOTTEMPLATE, szActiveProfile.c_str(), szName.c_str() ) + szFileName );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -262,7 +270,7 @@ void CopyFiles( const string &szSource, const string &szTarget, const string &sz
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // Profile free-fns (release iSaveManager.obj).  The profile UI talks to these.  Dir ops delegate to
 // the CSaveManager; the ACTIVE profile lives in the NGlobal "game_profile" var (validated against the
-// on-disk list), the release divergence from CSaveManager::szActiveProfile.
+// on-disk list). Slot operations use the same getter, without a separate cached profile.
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CreateProfile( const string &szProfile )
 {
@@ -325,7 +333,6 @@ string GetActiveProfile()
 void SetActiveProfile( const string &szProfile )
 {
 	NGlobal::SetVar( "game_profile", NGlobal::CValue( NStr::ToUnicode( szProfile ) ) );
-	GetSaveManager()->SetActiveProfile( szProfile );    // keep the slot system's active profile in sync
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // retail NMainLoop::IsValidCustomName @0x235d00 (iSaveManager.obj): a typed save-slot name is valid

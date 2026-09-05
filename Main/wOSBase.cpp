@@ -119,7 +119,8 @@ bool CObjectServerBase::CheckStability()
 	SHMatrix m;
 	if ( !GetCheckStabilityParams( &pModel, &m ) )
 		return true;
-	if ( !NAI::CheckObjectStability( pCurrentWorld->GetAIMap(), pModel, m, this ) )
+	// Retail uses the object's world; restore-time AI sync runs outside pCurrentWorld's scope.
+	if ( !NAI::CheckObjectStability( pWorld->GetAIMap(), pModel, m, this ) )
 	{
 		Kill( VNULL3 );
 		return false;
@@ -266,10 +267,10 @@ void CObjectServerBase::Kill( const CVec3 &ptDir )
 	pRPG->Kill();
 	if ( nPrevStage != pRPG->GetDestroyStage() )
 	{
-		tStageChange = pCurrentWorld->GetAimTime()->GetValue();
+		tStageChange = pWorld->GetAimTime()->GetValue();
 		// retail Kill @0x384de0 (disasm 0x784e19: push 0): scoped lag-0 counter touch, same shape as
 		// SetDestroyStage @0x384d40 -- fires one action-finish edge (vision recompute + pump recalc).
-		CObj<CActionCounter> pStageAction = pCurrentWorld->GetActiveCounter( 0 );
+		CObj<CActionCounter> pStageAction = pWorld->GetActiveCounter( 0 );
 		bindGlobal.Update();
 	}
 }

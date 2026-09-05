@@ -2833,7 +2833,7 @@ CViewBuildingScheme::CViewBuildingScheme( CSyncSrc<NWorld::IVisObj> *pSrc, NGSce
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CViewBuildingScheme::AddBuilding( const SMapBuilding &info )
 {
-	pRes->push_back( ViewBuildingSchema( pScene, info.pSWMap, info.pVariant->GetRecordID(), info.pGrid, info.pos ) );
+	pRes->push_back( ViewBuildingSchema( pScene, info.pSWMap, info.pVariant->GetRecordID(), info.pGrid, info.pPos->pos ) );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CUpdateBuildingStability

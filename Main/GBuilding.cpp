@@ -224,7 +224,8 @@ void CBuilding::Setup( int _nPartID, const SMapBuilding &info, NBuilding::CBuild
 	//nBuildInfoID = info.pVariant->GetRecordID();
 	//pBuildInfo = shareBuildings.Get( nBuildInfoID );
 	pBInfo = pBI;
-	pPlace->pos = info.pos;
+	// Retail v1.2 @0x4f8e60 shares the world's placement node with every render part.
+	pPlace = info.pPos;
 	pBuildingGrid = info.pGrid;
 	for ( int i = 0; i < info.lights.size(); ++i )
 	{
