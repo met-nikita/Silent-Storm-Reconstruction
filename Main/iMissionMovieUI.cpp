@@ -199,13 +199,9 @@ CMissionFadeUI::CMissionFadeUI( const SWindowInfo &sInfo, NGame::IMission *_pMis
 	CDesktopWindow( sInfo ), pMission( _pMission ), pTransition( _pTransition ),
 	vColor( _vColor ), sFadeTime( _sFadeTime ), eStage( START ), sStageTime( 0 ), nNotifyID( 0 )
 {
-	// The full-window colour overlay whose alpha the state machine ramps in/out. It is also tagged "view"
-	// and registered as the desktop's client window, because the mission's render loop (CMission::Step)
-	// reads GetDesktop()->GetClientWindow()->GetSize() for the world view rect -- a desktop with no client
-	// window (we load no template) would null-deref there. CDesktopWindow sets pClientWindow from the
-	// "view" child on EVENT_TEMPLATELOADCOMPLETE, so we fire that once now.
-	pFade = new CImage( SWindowInfo( this, SPoint( 0, 0 ), GetSize(), "view", STYLE_ENABLED | STYLE_VISIBLE | STYLE_TRANSPARENT ) );
-	CDesktopWindow::ProcessMessage( SEvent( EVENT_TEMPLATELOADCOMPLETE ) );
+	// Retail v1.2 @0x60a610: the full-screen tint is separate from template 377's "view".
+	// Using the tint as the client window changes camera framing while the fade is active.
+	pFade = new CImage( SWindowInfo( this, SPoint( 0, 0 ), GetSize(), "fade", STYLE_ENABLED | STYLE_VISIBLE | STYLE_TOPMOST ) );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 static NGfx::SPixel8888 FadePixel( const CVec3 &c, int nAlpha )

@@ -98,6 +98,15 @@ CAIFireArmsWeaponClip* CAIFireArmsWeaponBase::GetCurrentClip() const
 	return pCurrentClip;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+bool CAIFireArmsWeaponBase::IsCurrentClipFull() const
+{
+	if ( !IsValid( pCurrentClip ) || !IsValid( pCurrentClip->GetItem() ) )
+		return false;
+	// Retail v1.1 0x4b5b80 / v1.2 0x4b5e00 calls IItemContainerInfo::GetMaxIncQuantity.
+	// The loaded clip's capacity can differ from the DB ammo pack (Nagant: 7 vs 21).
+	return pCurrentClip->GetAmmoCount() == pCurrentClip->GetItem()->GetMaxIncQuantity();
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 void CAIFireArmsWeaponBase::SetCurrentClip( CAIFireArmsWeaponClip *pClip )
 {
 	pCurrentClip = pClip;

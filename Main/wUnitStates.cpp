@@ -367,7 +367,11 @@ CCommandExecute* CUnitStateCorpseCarrier::CreateExecutor( CCmd *pCmd, EUnitComma
 
 	*pResult = UCR_OK;
 	CDynamicCast<CCmdPath> pPath(pCmd);
-	if (pPath)
+	// v1.1 0x7c8d1a / v1.2 0x7c90ea: carriers can turn without dropping the body.
+	CDynamicCast<CCmdLook> pLook(pCmd);
+	// v1.2 0x7c9141..0x7c9158: taking a perk is also allowed while carrying.
+	CDynamicCast<CCmdTakePerk> pTakePerk(pCmd);
+	if (pPath || pLook || pTakePerk)
 		return NWorld::CreateExecutor( pUS, pCmd, pResult );
 	CDynamicCast<CCmdWishPose> pWishPose(pCmd);
 	if (pWishPose)

@@ -14,6 +14,7 @@ namespace NDb
 }
 namespace NAI
 {
+	class IAIMap;
 	enum EFindPathParams;
 	class CPath;
 	struct SUnitPosition;
@@ -31,6 +32,7 @@ class CCannon;
 class CCommand;
 class CUnitServer;
 class CCommandExecute;
+bool CanDropCorpse( const NAI::SUnitPosition &from, NAI::IAIMap *pAIMap );
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 enum EActionType
 {

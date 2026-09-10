@@ -2162,7 +2162,8 @@ IUnitMission* CreateUnit( NDb::CRPGPers *pSrc, NDb::CRPGItem *pInHandItem, NDb::
 {
 	static int nUnitN = 0;
 	CUnitMission *pRes = new CUnitMission();
-	pRes->pRPGUnit = new CUnit( pSrc, 0, false, 0, pInHandItem, pBackpack );
+	// v1.2 0x6c5131: map-created units do not collect medals (mercenaries do).
+	pRes->pRPGUnit = new CUnit( pSrc, 0, false, 0, pInHandItem, pBackpack, true );
 	if ( IsValid( pSrc->pDefaultWearsPanzerklein ) )
 		pRes->GetRPGUnit()->pPanzerklein = pSrc->pDefaultWearsPanzerklein;
 	NStr::ToDotString( &pRes->sID, ++nUnitN );

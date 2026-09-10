@@ -360,7 +360,7 @@ CInterface::CInterface( ICursor* _pCursor, NSound::ISoundScene *_pSound ):
 	if ( !IsValid( pSound ) )
 	{
 		bOwnSoundScene = true;		// retail @0x31dbd0: the flag is SET before the own scene is created (serialized tag 23)
-		pSound = NSound::CreateSoundScene( 0 );
+		pSound = NSound::CreateSoundScene( 0, 0, sCounter.GetTime() );
 	}
 	pCursor = _pCursor;
 	pConsole = new CConsole( SWindowInfo( this, SPoint( 0, 0 ), SPoint( 0, 0 ), "console", STYLE_ENABLED | STYLE_TOPMOST ) );

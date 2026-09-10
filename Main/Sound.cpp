@@ -5,7 +5,6 @@
 #include "..\DBFormat\DataSound.h"
 #include "..\FModSound\FMSound.h"
 #include "..\Misc\BasicShare.h"
-#include "..\Misc\HPTimer.h"
 #include "..\Misc\RandomGen.h"
 #include "..\MiscDll\Commands.h"
 #include "..\MiscDll\LogStream.h"
@@ -23,22 +22,6 @@ const int N_MUSIC_FALLBACK_MS = 120000;
 // last-resort fade when a record carries no FadeOut ms (dev db without the column); retail data
 // is 20000ms and lives on NDb::CMusic::nFadeOut.
 const float N_MUSIC_FADE_SEC = 4.0f;
-////////////////////////////////////////////////////////////////////////////////////////////////////
-// dev stand-in for retail CSoundScene.pTime (the CFuncBase<unsigned long> data-graph time node the
-// scene ctor @0x3058c0 receives): a monotonic module ms clock the music deadlines are computed on.
-static __int64 GetMusicTimeMs()
-{
-	static bool bInit = false;
-	static NHPTimer::STime tLast;
-	static double dAccumMs = 0;
-	if ( !bInit )
-	{
-		NHPTimer::GetTime( &tLast );
-		bInit = true;
-	}
-	dAccumMs += NHPTimer::GetTimePassed( &tLast ) * 1000.0;
-	return (__int64)dAccumMs;
-}
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CSound: public CObjectBase
 {
@@ -118,8 +101,8 @@ private:
 	list< CPtr<CSound2D> > sounds2D;
 	list< CPtr<CSoundEffect> > effects;
 	bool bSilence;			// runtime (retail leaves it out of the serializer too)
-	bool bRearmStopTime;	// dev: deadlines from a save belong to another session's clock -> re-arm
 	ZDATA
+	CDGPtr< CFuncBase<STime> > pTime;
 	CObj<CMusic> pMusic;
 	CDBPtr<NDb::CTMusic> pAmbient;
 	CDBPtr<NDb::CTMusic> pCombat;
@@ -131,11 +114,12 @@ private:
 public:
 	ZEND int operator&( CStructureSaver &f )
 	{
-		// retail CSoundScene::operator& @0x307440 tag layout: 2=tStartMusic(8), 4=pTime (the DG
-		// time node -- dev has none, the chunk is skipped), 5=pMusic (CObj), 6=pAmbient,
+		// v1.2 CSoundScene::operator& @0x707810: 2=tStartMusic(8), 4=pTime (the DG
+		// time node shared with the caller), 5=pMusic (CObj), 6=pAmbient,
 		// 7=pCombat, 8=eCurrentMusicType, 9=eNextMusicType, 10=tStopMusic(8), 11=rand(4).
 		// Tags 6/7 are CDBPtr<CTMusic> pool ids, not already-picked CMusic record ids.
 		f.Add(2,&tStartMusic);
+		f.Add(4,&pTime);
 		f.Add(5,&pMusic);
 		f.Add(6,&pAmbient);
 		f.Add(7,&pCombat);
@@ -143,18 +127,13 @@ public:
 		f.Add(9,&eNextMusicType);
 		f.Add(10,&tStopMusic);
 		f.Add(11,&rand.seed.nSeed);
-		if ( f.IsReading() )
-		{
-			// the loaded deadlines were computed on another session's music clock: let a restored
-			// track start/resume immediately and re-arm its stop window from data on first Draw
-			tStartMusic = 0;
-			bRearmStopTime = true;
-		}
 		return 0;
 	}
 
 public:
-	CSoundScene( NDb::CTMusic *_pAmbient = 0, NDb::CTMusic *_pCombat = 0 );
+	CSoundScene(): bSilence(true), eCurrentMusicType(NDb::MT_AMBIENT),
+		eNextMusicType(NDb::MT_AMBIENT), tStartMusic(0), tStopMusic(0) {}
+	CSoundScene( NDb::CTMusic *_pAmbient, NDb::CTMusic *_pCombat, CFuncBase<STime> *_pTime );
 
 	virtual CSound* Add3DSound( NDb::CSound *pSample, CFuncBase<CVec3> *pPos, STime tStart );
 	virtual CSound2D* Add2DSound( NDb::CSound *pSample );
@@ -186,8 +165,8 @@ private:
 	bool StartMusic( NDb::CMusic *pTrack, int nStartMs = 0 );
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CSoundScene::CSoundScene( NDb::CTMusic *_pAmbient, NDb::CTMusic *_pCombat ):
-	bSilence(true), bRearmStopTime(false), pAmbient(_pAmbient), pCombat(_pCombat),
+CSoundScene::CSoundScene( NDb::CTMusic *_pAmbient, NDb::CTMusic *_pCombat, CFuncBase<STime> *_pTime ):
+	bSilence(true), pTime(_pTime), pAmbient(_pAmbient), pCombat(_pCombat),
 	eCurrentMusicType(NDb::MT_AMBIENT), eNextMusicType(NDb::MT_AMBIENT),
 	tStartMusic(0), tStopMusic(0)
 {
@@ -195,7 +174,9 @@ CSoundScene::CSoundScene( NDb::CTMusic *_pAmbient, NDb::CTMusic *_pCombat ):
 	// both types MT_AMBIENT,
 	// tStopMusic=0 and tStartMusic seeded to "now" -- a fresh scene launches its ambient on the
 	// very first Draw.
-	tStartMusic = GetMusicTimeMs();
+	// v1.2 @0x705d30: retain and refresh the supplied DG clock, also saved as tag 4.
+	pTime.Refresh();
+	tStartMusic = pTime->GetValue();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CSound* CSoundScene::Add3DSound( NDb::CSound *pSample, CFuncBase<CVec3> *pPos, STime tStart )
@@ -237,7 +218,8 @@ CSound2D* CSoundScene::Add2DSound( NDb::CSound *pSample )
 // now + PlayTime + rnd(RndPlayTime) ms from its record; 120000ms fallback without a valid record.
 void CSoundScene::SetMusicStopTime()
 {
-	__int64 now = GetMusicTimeMs();
+	pTime.Refresh();
+	__int64 now = pTime->GetValue();
 	NDb::CMusic *pInfo = 0;
 	if ( IsValid( pMusic ) && IsValid( pMusic->pMusic ) )
 		pInfo = pMusic->pMusic;
@@ -251,7 +233,8 @@ void CSoundScene::SetMusicStopTime()
 // now + Silence + rnd(RndSilence) ms from the record that just finished; 120000ms fallback.
 void CSoundScene::SetMusicStartTime()
 {
-	__int64 now = GetMusicTimeMs();
+	pTime.Refresh();
+	__int64 now = pTime->GetValue();
 	NDb::CMusic *pInfo = 0;
 	if ( IsValid( pMusic ) && IsValid( pMusic->pMusic ) )
 		pInfo = pMusic->pMusic;
@@ -438,22 +421,16 @@ void CSoundScene::Draw( CTransformStack *pTS )
 		else
 			pMusic = 0;	// retail: a failed restart drops the music
 	}
-	__int64 now = GetMusicTimeMs();
+	pTime.Refresh();
+	__int64 now = pTime->GetValue();
 	if ( IsValid( pMusic ) && NFMSound::IsPlaying( pMusic->pStream ) )
 	{
 		bSilence = false;
-		if ( bRearmStopTime )
-		{
-			// dev: the loaded stop deadline was computed on another session's clock
-			SetMusicStopTime();
-			bRearmStopTime = false;
-		}
 		if ( now > tStopMusic )
 			DoFadeOutMusic();	// retail: play window over -> wind the track down (vtbl+0x20)
 	}
 	else
 	{
-		bRearmStopTime = false;
 		if ( !bSilence )
 		{
 			// first silent frame: arm the between-tracks silence window from the finished record
@@ -489,7 +466,7 @@ void CSoundScene::Draw( CTransformStack *pTS )
 				&& NFMSound::IsPlaying( theCurrentMusic->pStream ) )
 			{
 				// dev keep: this scene has NO track of its own (the chapter/global map scenes are
-				// created with CreateSoundScene(0)) but a foreign stream survived the switch --
+				// created without music pools) but a foreign stream survived the switch --
 				// wind it down instead of letting it loop forever (the "menu music leaks into the
 				// chapter map" / "combat stuck after campaign start" bugs). FadeOut no-ops while a
 				// fade is already running, so repeating it per frame is harmless.
@@ -550,9 +527,9 @@ bool SetModeFromConfig()
 	return true;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-ISoundScene* CreateSoundScene( NDb::CTMusic *pAmbient, NDb::CTMusic *pCombat )
+ISoundScene* CreateSoundScene( NDb::CTMusic *pAmbient, NDb::CTMusic *pCombat, CFuncBase<STime> *pTime )
 {
-	return new CSoundScene( pAmbient, pCombat );	// retail @0x305ad0 (two-slot factory)
+	return new CSoundScene( pAmbient, pCombat, pTime ); // v1.2 @0x705f40
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void DoneSound()

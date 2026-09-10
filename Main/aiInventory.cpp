@@ -446,22 +446,15 @@ CAIFirstAid* CAIInventory::GetBestFirstAid() const
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // @0xb5b80 (IsCurrentClipFull) + @0xb6250 (HasAmmoForReload): the weapon is reload-eligible when
-// its CURRENT clip is NOT at the RPG clip's capacity AND a live spare clip sits at the FRONT of the
+// its CURRENT clip is NOT at its instance capacity AND a live spare clip sits at the FRONT of the
 // spares vector. A null/dead current clip counts as not-full. The release does NOT consult the
 // spare's own ammo, nor require spare != current.
 static bool NeedsReloadAndCan( CAIFireArmsWeaponBase *pWeapon )
 {
 	if ( !IsValid( pWeapon ) )
 		return false;
-	// IsCurrentClipFull @0xb5b80: loaded ammo == pClipItem->GetDBClip()->nQuantity (RPG capacity).
-	CAIFireArmsWeaponClip *pCur = pWeapon->GetCurrentClip();
-	if ( IsValid( pCur ) )
-	{
-		NRPG::CClipItem *pClipItem = pCur->GetItem();
-		if ( IsValid( pClipItem ) && IsValid( pClipItem->GetDBClip() ) &&
-			pCur->GetAmmoCount() == pClipItem->GetDBClip()->nQuantity )
-			return false;                      // current clip full -> not reload-eligible
-	}
+	if ( pWeapon->IsCurrentClipFull() )
+		return false;
 	// HasAmmoForReload @0xb6250: a live spare clip at the FRONT of the spares vector (ammo not checked).
 	return IsValid( pWeapon->GetNextClip() );
 }

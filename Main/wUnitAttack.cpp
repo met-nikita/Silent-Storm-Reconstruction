@@ -343,6 +343,26 @@ static EUnitCommandResult GetActionValidPlaces( CUnitServer *pUS, CCmdTakeCorpse
 	return UCR_OK;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// v1.1 0x7940f0 / v1.2 0x794340: keep the carrier's tile and pose,
+// collect every direction in which the corpse's swept sphere is unobstructed.
+static EUnitCommandResult GetActionValidPlaces( CUnitServer *pUS, CCmdDropCorpse *pCmd, vector<NAI::SPathPlace> *pRes )
+{
+	if ( !IsValid( pCmd->pCorpse ) )
+		return UCR_NO_TARGET;
+	NAI::SUnitPosition from = pUS->GetPosition();
+	EUnitCommandResult result = UCR_GENERAL_FAILURE;
+	for ( int nDir = 0; nDir < 8; ++nDir )
+	{
+		from.pos.p.SetDirection( nDir );
+		if ( CanDropCorpse( from, pUS->GetWorld()->GetAIMap() ) )
+		{
+			pRes->push_back( from.pos.p );
+			result = UCR_OK;
+		}
+	}
+	return result;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 static EUnitCommandResult GetActionValidPlaces( CUnitServer *pUS, CCmdMoveInventoryItem *pCmd, vector<NAI::SPathPlace> *pRes )
 {
 	if ( pCmd->GetSource().eType == SItem::GROUND )
@@ -714,7 +734,8 @@ CCommandExecute* CreateActionExecutor( CUnitServer *pUS, CCmd *pCmd, EUnitComman
 																if (pCmdCorpse)
 																{
 																	CDynamicCast<CUnitServer> pDeadUnit(pCmdCorpse->pCorpse);
-																	return CreateSimpleAction(pUS, new CExecCorpse(pUS, pDeadUnit, false), pError);
+																	// v1.2 0x79eb5c..0x79eb6e: turn to a valid drop facing before the action.
+																	return CreateActionQueue(pUS, pCmdCorpse.GetPtr(), new CExecCorpse(pUS, pDeadUnit, false), ITEM_INACTIVE, pError);
 																}
 																else {
 																	CDynamicCast<CCmdExitPK> pExitPK(pCmd);

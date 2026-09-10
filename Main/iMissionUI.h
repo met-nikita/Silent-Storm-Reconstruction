@@ -33,6 +33,7 @@ class CCharacterPanel;
 class CMedalsPanel;
 class CBiographyPanel;
 class CHoverButton;
+class CHoverFlashButton;
 class CText;
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CMissionUI
@@ -82,7 +83,7 @@ private:
 	CObj<CPerksPanel> pPerksPanel;
 	CObj<CStorePanel> pStorePanel;
 	CObj<CHoverButton> pInventory;
-	CObj<CHoverButton> pCharacter;
+	CObj<CHoverFlashButton> pCharacter;
 	CObj<CInventoryPanel> pInventoryPanel;
 	CObj<CCharacterPanel> pCharacterPanel;
 	// retail CMissionUI hosts the medals + biography sub-panels too (@0x214d40 TEMPLATELOAD:

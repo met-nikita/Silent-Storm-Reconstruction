@@ -737,13 +737,10 @@ int CDumbUnitServer::ProcessAttack( NWorld::IWorld *_pWorld, int nUserID, NRPG::
 			GetBonePos( &vHeadPos, &qPos, "Head" );
 			//pWorld->AddDebris( dynamic_cast<CUnit*>(this), pWorld->GetAIMap(), vHeadPos, qPos, vVel, pWorld->GetTime() );
 			AttachMiscObject( CreateDParticles( vHeadPos, qPos, NDb::GetTEffect( 821 )->GetEffect( &rnd ), GetFloor() ) );
+			// Retail v1.1 0x7512b2 / v1.2 0x751602: the receiver is the IAttackable
+			// subobject (+8), so [esi+0x114] is bHeadless at complete-object +0x11c.
+			// It does not touch animator.fDeathFall (complete-object +0x114).
 			bHeadless = true;
-			// ORIGINAL BUG (confirmed retail @0x350e20): the behead flag is written as a BYTE into the
-			// LOW BYTE of animator.fDeathFall (`*(char*)&fDeathFall = 1` -> the float becomes the 1.4e-45
-			// denormal, which is still > 0.0f), so a beheaded unit's Die @0x33bb90 takes the falling-death
-			// SetMove branch with a ~zero fall height. Reproduced bit-exactly (the guards keep reading the
-			// dev bHeadless mirror, exactly as they read the byte in retail).
-			*(unsigned char *)&animator.fDeathFall = 1;
 			// retail @0x7512b9: RPG-kill BEFORE KillUnit -- required on the forced path (a full-VP
 			// unit must become RPG-dead or the pRPG->IsDead() reconciliation below won't fire).
 			pRPG->Kill();

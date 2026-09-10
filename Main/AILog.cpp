@@ -174,8 +174,11 @@ void CAILogReloadWeapon::RollBack()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CAILogReloadWeapon::Commit()
 {
-	pWeapon->RemoveClip( pNewClip );
+	// Retail ModifyState (v1.1 0x45b9c0 / v1.2 0x45bf30) transfers ownership
+	// before erasing the spare. pNewClip is only a CPtr: erasing the last CObj
+	// first invalidates the clip and leaves the planner with a dead loaded clip.
 	pWeapon->SetCurrentClip( pNewClip );
+	pWeapon->RemoveClip( pNewClip );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CAILogReloadWeapon::GetCommands( list< CPtr<NWorld::CCommand> > *Commands )

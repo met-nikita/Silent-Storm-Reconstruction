@@ -51,12 +51,13 @@ CUnitTracker::CUnitTracker( IMission *_pMission, NWorld::CUnit *_pUnit ):
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // retail CUnitTracker::GetSkillChanges @0x32c110: (current - baseline) for nSkill; the FIRST probe
-// of a skill records its current value as the baseline and reports 0.
+// of a skill records its maximum value as the baseline and reports 0.
+// v1.2 0x72c616 calls IUnitMissionInfo::GetSkillMaxValue (vtable +0x40).
 int CUnitTracker::GetSkillChanges( int nSkill )
 {
 	int nCur = 0;
 	if ( IsValid( pUnit ) && pUnit->GetRPG() )
-		nCur = pUnit->GetRPG()->GetSkillValue( (NDb::ESkillType)nSkill );
+		nCur = pUnit->GetRPG()->GetSkillMaxValue( (NDb::ESkillType)nSkill );
 
 	unordered_map<int,int>::iterator pos = skillsChanges.find( nSkill );
 	if ( pos != skillsChanges.end() )
@@ -74,7 +75,7 @@ void CUnitTracker::SyncAllSkills()
 	{
 		int nCur = 0;
 		if ( IsValid( pUnit ) && pUnit->GetRPG() )
-			nCur = pUnit->GetRPG()->GetSkillValue( (NDb::ESkillType)pos->first );
+			nCur = pUnit->GetRPG()->GetSkillMaxValue( (NDb::ESkillType)pos->first );
 		pos->second = nCur;
 	}
 }

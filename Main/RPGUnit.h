@@ -181,10 +181,8 @@ public:
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CMedalsGainer -- per-unit medal bookkeeper (release-new CUnit base, RPGMedals.obj compiland).
 // Owns one SMedalInfo per medal the unit can earn. Serialized as a CUnit base subobject
-// (operator& tags 2/3/4). NOTE: the medal-award methods (GainMedalsAfterMissionEnd /
-// GetGainedMedals / ThrowCheck / the side-driven ctor) require NDb::CSide::medals, a release-new DB
-// column ABSENT from this tree, so they are deferred -- nothing instantiates the gainer table yet.
-// The data + operator& are present so CUnit's save format matches the release byte-for-byte.
+// (operator& tags 2/3/4). New units initialize it from their persona's side; the default
+// constructor is for loading. Medal-progress and award methods remain to be restored.
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CMedalsGainer
 {
@@ -215,19 +213,9 @@ public:
 	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&medalInfos); f.Add(3,&pPers); f.Add(4,&bDisabled); return 0; }
 
 	CMedalsGainer(): bDisabled(false) {}
+	CMedalsGainer( NDb::CRPGPers *pPers, bool bDisabled );
 
-	// --- iMedalsPanel ADDITIVE STUBS (medal-award gather subsystem deferred) -------------------------
-	// The release gathers (RPGMedals.obj @0x6acad0 etc.) read each earned medal from side->medals[i],
-	// i.e. NDb::CSide::medals -- a release-new DB column ABSENT from this tree (see DataRPG.h CSide:
-	// retail tag 11 "is simply not read"). Re-adding that column would shift CSide's byte layout / save
-	// tags (forbidden -- the retail game.db is byte-exact), so the two accessors NUI::CMedalsPanel needs
-	// are landed here as behaviour-neutral STUBS so that compiland builds GREEN:
-	//   GetGainedMedals  -> leaves the output empty (the panel shows no rows; the binary's "no awards"
-	//                       state, since no medal can be earned until the DB-schema convergence lands).
-	//   HasNewMedalToShow-> false (the panel's perks-tab "new medal" flash is never armed; the binary's
-	//                       "no current-award record" path).
-	// When NDb::CSide::medals lands, replace these with the faithful gathers (bodies ready in
-	// decomp/src/s2_medalsgainer.h). See docs/CONVERGENCE_PROGRESS.md.
+	// TODO: restore retail medal gathering / notification; CSide::medals is imported already.
 	void GetGainedMedals( vector<CDBPtr<NDb::CMedal> >* /*pOut*/ ) {}
 	bool HasNewMedalToShow() const { return false; }
 
@@ -235,12 +223,7 @@ public:
 	// This is the DIRECT SINK the medal awards funnel into (disarm-trap MPC_DISARM_TRAP @0x3a84f0,
 	// CGlobalPlayer::AddMedalPointsForClue, AddMedalPointsForNoticedMines, and the rpgAttackSession
 	// tally, all call it as (CMedalsGainer*)(unit+0x38)->AddMedalPoints(game,case,amount)).
-	// The release body loops medalInfos, but medalInfos is ALWAYS EMPTY in this tree (the side-driven
-	// CMedalsGainer ctor @0x2ac9b0 that fills it needs NDb::CSide::medals, still absent), so every
-	// iteration is skipped and the only release-observable effect is two csSystem log lines. Landed as a
-	// behaviour-neutral no-op so those award sites link build-safe. Faithful body ready in
-	// decomp/src/s2_medalsgainer.h; restore it together with the side-driven ctor + ThrowCheck when
-	// NDb::CSide::medals lands. (CMedalsGainer has no vtable -> no layout/save impact.)
+	// TODO: restore the medalInfos loop, ThrowCheck and mission-end awards from disassembly.
 	void AddMedalPoints( CGlobalGame* /*pGame*/, EMedalPointCases /*eCase*/, float /*fAmount*/ ) {}
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -314,7 +297,7 @@ public:
 	// from SMapUnit +108/+112) -- when set they REPLACE the persona's default hand weapon / item
 	// list; null keeps the pers defaults (the only path before the chest-loot subsystem).
 	CUnit( NDb::CRPGPers *pPers, NDb::CComplexHead *pHead = 0, bool _bHero = false, NDb::CModel *pOverrideModel = 0,
-		NDb::CRPGItem *pInHandItem = 0, NDb::CRPGChestReal *pBackpack = 0 );
+		NDb::CRPGItem *pInHandItem = 0, NDb::CRPGChestReal *pBackpack = 0, bool bMedalsDisabled = false );
 
 	void AddXP( float nXPToAdd );
 	bool UseSkill( const int eSkill, const int nAddValue );

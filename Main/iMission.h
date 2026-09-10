@@ -243,6 +243,10 @@ public:
 
 	virtual void GetVisibleEnemiesList( list<CPtr<NWorld::CUnit> > *pEnemies ) const = 0;
 	virtual NWorld::CUnit* GetNextVisibleEnemy() = 0;
+
+	// Retail tracker vtable +0x44/+0x48: UI change notification and acknowledgment.
+	virtual int GetSkillChanges( int nSkill ) = 0;
+	virtual void SyncAllSkills() = 0;
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // IPlayerTracker

@@ -1150,7 +1150,8 @@ bool CMissionUI::ProcessMessage( const SEvent &sEvent )
 			pInventory->AddImageState( CHoverButton::STATE_DISABLED, NDb::GetUITexture( 647 ) );
 			pInventory->SetCursorInfo( GetInterface()->GetDefaultCursorInfo() );
 
-			pCharacter = new CHoverButton( sEvent.pLoader->GetControl( "character" ) );
+			// Retail v1.2 0x616065: tag 21 must own a CHoverFlashButton.
+			pCharacter = new CHoverFlashButton( sEvent.pLoader->GetControl( "character" ) );
 			pCharacter->AddImageState( CHoverButton::STATE_HOVER, NDb::GetUITexture( 383 ) );
 			pCharacter->AddImageState( CHoverButton::STATE_NORMAL, NDb::GetUITexture( 383 ) );
 			pCharacter->AddImageState( CHoverButton::STATE_DISABLED, NDb::GetUITexture( 428 ) );
@@ -1223,9 +1224,24 @@ void CMissionUI::Update( const STime &sTime, NGScene::I2DGameView *pView )
 	pPause->SetStyle( STYLE_VISIBLE, pMission->IsGamePaused() );
 
 	pInventory->SetStyle( STYLE_VISIBLE, ( pMission->GetPanelState( NGame::PANEL_INVENTORY ) == 0 ) );
-	pInventory->SetStyle( STYLE_ENABLED, pMission->IsReady() );
 	pCharacter->SetStyle( STYLE_VISIBLE, ( pMission->GetPanelState( NGame::PANEL_STORE | NGame::PANEL_PERKS | NGame::PANEL_CHARACTER | NGame::PANEL_MEDALS | NGame::PANEL_BIOGRAPHY ) == 0 ) );
-	pCharacter->SetStyle( STYLE_ENABLED, pMission->IsReady() );
+
+	// Retail v1.2 0x612703..0x6127be: a single selected unit is required;
+	// flash until its level change is acknowledged by the character panel.
+	vector<CPtr<NGame::IUnitTracker> > unitsSet;
+	pMission->GetSelectedUnits( &unitsSet );
+	if ( unitsSet.size() == 1 )
+	{
+		pInventory->SetStyle( STYLE_ENABLED, pMission->IsReady() );
+		pCharacter->SetStyle( STYLE_ENABLED, pMission->IsReady() );
+		pCharacter->SetShowFlash( unitsSet[0]->GetSkillChanges( NDb::ST_LEVEL ) != 0 );
+	}
+	else
+	{
+		pInventory->SetStyle( STYLE_ENABLED, false );
+		pCharacter->SetStyle( STYLE_ENABLED, false );
+		pCharacter->SetShowFlash( false );
+	}
 
 	// retail Update @0x211d60: each character sub-panel shows iff its bit is the SOLE family bit
 	// (exclusive switching); the inventory bit is outside the family mask and coexists.

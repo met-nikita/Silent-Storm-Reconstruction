@@ -163,7 +163,6 @@ bool CChapterMap::Initialize( NRPG::CGlobalGame *_pGame )
 
 	UpdateChapterDifficulty();
 
-	pSoundScene = NSound::CreateSoundScene( 0 ); // CRAP
 #ifdef _MAPEDIT
 	pCursor = NUI::ICursor::CreateEditorCursor();
 #else
@@ -171,6 +170,8 @@ bool CChapterMap::Initialize( NRPG::CGlobalGame *_pGame )
 #endif
 
 	pInterface = new NUI::CInterface( pCursor );
+	// This dev 2D map has no world clock; share the interface's clock-backed sound scene.
+	pSoundScene = pInterface->GetSound();
 
 	pChapterMapUI = new NUI::CChapterMapUI( NUI::SWindowInfo( pInterface, NUI::SPoint( 0, 0 ), NUI::SPoint( 1024, 768 ), "chaptermapUI" ), this );
 	NUI::LoadTemplate( pChapterMapUI, NDb::GetUIContainer( 147 ) );

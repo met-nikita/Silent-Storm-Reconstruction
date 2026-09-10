@@ -549,11 +549,10 @@ void CStructureSaver::Start( bool bRead )
 	}
 	if ( !bRead )
 	{
-		// The dev write path emits unpacked chunks and no pack marker (retail Start @0x3f2730
-		// stamps nVersion=1 and Finish packs chunks 0/2/1 behind the "A3\0" marker chunk 3; the
-		// content LAYOUT is identical either way -- v1 is just CNetCompressor packing). Reading
-		// handles both; writing packed is not implemented, so do not stamp v1 or the marker.
-		nVersion = 0;
+		// Retail Start (v1.2 0x8129bc): use the current object layout when writing.
+		// Version is independent of compression (marker chunk 3). In particular, CSlot's
+		// version-1 base includes its decorator hover state; v0 silently drops that state.
+		nVersion = 1;
 		return;
 	}
 	if ( bRead )
@@ -656,8 +655,11 @@ void CStructureSaver::Finish()
 	ASSERT( chunks.size() == 1 );
 	if ( !IsReading() )
 	{
-		// NB: we intentionally do NOT write a version chunk (id 4) - dev output stays legacy v0
-		// (typed-object records), which is the only content layout we can write. See Start().
+		// Retail Finish (v1.2 0x812a53..0x812a85): version is a separate, unpacked chunk.
+		// Payloads remain unpacked here, so no compression marker (chunk 3) is emitted.
+		CMemoryStream version;
+		version.Write( &nVersion, sizeof(nVersion) );
+		WriteShortChunkSave( res, 4, version );
 		// save standard data
 		AlignDataFileSize();
 		WriteShortChunkSave( res, 1, data );

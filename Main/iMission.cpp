@@ -262,7 +262,7 @@ bool CMission::Initialize( int _nTemplateID, int _nVariantID, NScenario::CScenar
 	// the bar previously bypassed the key-bind-only clamp, letting the base show a second floor.
 	pScene->SetCutFloorRange( nMinCutFloor, nMaxCutFloor );
 	// retail keeps the pools on the scene and performs the roulette pick on every music launch.
-	pSoundScene = NSound::CreateSoundScene( pAmbientPool, pCombatPool );
+	pSoundScene = NSound::CreateSoundScene( pAmbientPool, pCombatPool, pWorld->GetAimTime() );
 	// retail @0x200690: the two sound mixers (world + fog-gated unit sounds) are owned by the
 	// render game -- the old separate CreateRenderSound(pWorld, pSoundScene) union mixer played
 	// unit voices (pain/death grunts) for units the player couldn't see.
@@ -329,7 +329,7 @@ bool CMission::Initialize( int _nTemplateID, int _nVariantID, NScenario::CScenar
 	PushDesktop( pMissionUI );
 
 	vector<CObj<IState> > updatedStatesSet;
-	updatedStatesSet.push_back( new CStateWait() );
+	// Wait is installed explicitly while busy, never selected from the hover-state pool.
 	updatedStatesSet.push_back( new CStateDragItem() );
 	updatedStatesSet.push_back( new CStateUntrap( false ) );	// retail CMission::Initialize @0x200690: the hover-pool untrap is explicitly NON-forced
 	updatedStatesSet.push_back( new CStateUse() );
@@ -1291,6 +1291,9 @@ void CMission::InternalStep()
 
 		if ( bUpdated )
 			UpdateActionsInfo();
+
+		if ( ( pState->GetType() != IState::TEMPORARY ) && ( IsUpdated() || ( pState->GetType() == IState::INSTANT ) ) )
+			UpdateState();
 	}
 	else
 	{
@@ -1300,11 +1303,12 @@ void CMission::InternalStep()
 		for( int nTemp = 0; nTemp < actionsInfoSet.size(); nTemp++ )
 			actionsInfoSet[nTemp].bOk = false;
 
-		actionsInfoSet[UA_STOP].SetValid();	// retail SActionInfo::SetValid @0x1a18d0
+		// v1.2 0x602443..0x6024f3: busy state bypasses normal hover selection.
+		if ( IsPlayerTurn() )
+			actionsInfoSet[UA_STOP].SetValid();
+		ResetState();
+		CommandState( new CStateWait() );
 	}
-
-	if ( ( pState->GetType() != IState::TEMPORARY ) && ( IsUpdated() || ( pState->GetType() == IState::INSTANT ) ) )
-		UpdateState();
 
 	pState->Step();
 
@@ -2389,6 +2393,8 @@ void CMission::ExecWorldCommands()
 			NUI::CMissionFadeUI *pFadeUI = new NUI::CMissionFadeUI(
 				NUI::SWindowInfo( pInterface, NUI::SPoint( 0, 0 ), NUI::SPoint( 1024, 768 ), "fadeUI", NUI::STYLE_ENABLED ),
 				this, GetDesktop(), pBeginFade->vColor, pBeginFade->sFadeTime );
+			// Retail v1.1 @0x5fdd91 / v1.2 @0x5fe694: load the camera-view control before pushing the fade.
+			NUI::LoadTemplate( pFadeUI, NDb::GetUIContainer( 377 ) );
 			pFadeUI->ShowDesktop( pBeginFade->GetID() );
 		}
 		else if ( CDynamicCast<NWorld::CUICmdEndFade>( pCmd ) )

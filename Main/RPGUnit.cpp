@@ -229,8 +229,8 @@ float CUnit::GetXPForSkill( NDb::ESkillType eSkill, int nLvl )
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CUnit::CUnit( NDb::CRPGPers *_pPers, NDb::CComplexHead *_pHead, bool _bHero, NDb::CModel *_pOverrideModel,
-	NDb::CRPGItem *_pInHandItem, NDb::CRPGChestReal *_pBackpack ):
-	pPers( _pPers ), nHealedVP( 0 ), nCheats( 0 ),
+	NDb::CRPGItem *_pInHandItem, NDb::CRPGChestReal *_pBackpack, bool bMedalsDisabled ):
+	CMedalsGainer( _pPers, bMedalsDisabled ), pPers( _pPers ), nHealedVP( 0 ), nCheats( 0 ),
 	nDeathVP( 0 ), bUnconscious( false ), bHero( _bHero ),
 	fAdaptationCounter( 0 ), fCurrentAdaptation( 0 ), nVoice( 0 )
 {

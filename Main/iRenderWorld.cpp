@@ -60,7 +60,7 @@ void CRenderBaseInterface::Initialize( int nTemplateID )
 	if ( IsValid( pVar ) && IsValid( pVar->pAmbientMusic ) )
 		pAmbientPool = pVar->pAmbientMusic;
 	pScene = NGScene::CreateNewView();
-	pSoundScene = NSound::CreateSoundScene( pAmbientPool );
+	pSoundScene = NSound::CreateSoundScene( pAmbientPool, 0, pWorld->GetAimTime() );
 	// retail CRenderBaseInterface::Initialize @0x22ef80: the sound mixers are owned by the render game
 	pRender = NRender::CreateRenderGame( pWorld, pScene, pSoundScene );
 

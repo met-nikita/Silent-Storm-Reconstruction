@@ -4,6 +4,7 @@
 #include "wInterface.h"
 #include "RPGUnitInfo.h"
 #include "RPGUnit.h"        // NRPG::CUnit complete type (GetRPGUnit()->GetName() for the fullname header)
+#include "RPGPerk.h"
 #include "..\DBFormat\DataRPG.h"
 #include "..\DBFormat\DataFormat.h"
 #include "..\DBFormat\DataInterface.h"
@@ -164,8 +165,17 @@ bool CCharacterPanel::ProcessMessage( const SEvent &sEvent )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CCharacterPanel::Update( const STime &sTime, NGScene::I2DGameView *pView )
 {
-	if ( !GetStyle( STYLE_VISIBLE ) )
+	// Retail v1.2 0x5b0ec2..0x5b0f1a: acknowledge the viewed unit when
+	// closing the panel, then release the serialized tracker reference.
+	const bool bVisible = GetStyle( STYLE_VISIBLE );
+	if ( bLastPanelState != bVisible && bLastPanelState && IsValid( pUnit ) )
+		pUnit->SyncAllSkills();
+	bLastPanelState = bVisible;
+	if ( !bVisible )
+	{
+		pUnit = 0;
 		return;
+	}
 
 	// retail @0x1b0420: medals/biography tabs grayed while first-mission (tutorial) mode (mission vtbl+0xf8)
 	pMedals->SetStyle( STYLE_ENABLED, !pMission->IsSpecialFirstMissionMode() );
@@ -180,7 +190,14 @@ void CCharacterPanel::Update( const STime &sTime, NGScene::I2DGameView *pView )
 		return;
 	}
 
-	CPtr<NGame::IUnitTracker> pUnit = unitsSet[0];
+	// Retail v1.2 0x5b0fc8..0x5b1007 also acknowledges the previous unit
+	// when switching selection while the panel stays open.
+	if ( pUnit != unitsSet[0] )
+	{
+		if ( IsValid( pUnit ) )
+			pUnit->SyncAllSkills();
+		pUnit = unitsSet[0];
+	}
 
 	NRPG::SUnitInfo sUnitInfo;
 	pUnit->GetUnit()->GetInfo( &sUnitInfo );
@@ -257,6 +274,11 @@ void CCharacterPanel::Update( const STime &sTime, NGScene::I2DGameView *pView )
 
 	// release @0x1b0420: refresh the wound/critical icon column every visible frame
 	UpdateCriticalIcons( pUnit, criticalIconsSet );
+
+	// v1.2 0x5b11dc..0x5b1242: unspent points flash the character panel's perks tab.
+	NRPG::CPerksTree *pPerksTree = pRPGUnit->GetPerksTree();
+	if ( IsValid( pPerksTree ) )
+		pPerks->SetShowFlash( pPerksTree->GetPerkPoints() != 0 );
 
 	CWindow::Update( sTime, pView );
 }

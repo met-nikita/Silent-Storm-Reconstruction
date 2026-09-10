@@ -316,10 +316,7 @@ IMission* CStateBase::GetMission() const
 bool CStateWait::Initialize( IMission *pMission )
 {
 	CStateBase::Initialize( pMission );
-
-	if ( GetMission()->IsRealTime() || !GetMission()->IsActionExecuted() )
-		return false;
-
+	// v1.2 0x5d7d60: GameStep explicitly installs this state while not ready.
 	return true;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////

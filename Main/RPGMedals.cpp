@@ -1,9 +1,32 @@
 #include "StdAfx.h"
 #include "RPGMedals.h"
+#include "RPGUnit.h"
 #include "..\MiscDll\LogStream.h"   // CLogStream / csSystem / EConsoleColor (CC_RED=1, CC_GREEN=2)
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 namespace NRPG
 {
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// v1.1 0x6ac9b0 / v1.2 0x6aca40: only roster units collect medals.
+CMedalsGainer::CMedalsGainer( NDb::CRPGPers *_pPers, bool _bDisabled ):
+	pPers( _pPers ), bDisabled( _bDisabled )
+{
+	if ( !IsValid( pPers ) || bDisabled )
+		return;
+	NDb::CSide *pSide = pPers->pSide;
+	if ( !IsValid( pSide ) )
+		return;
+	medalInfos.resize( pSide->medals.size() );
+	for ( int i = 0; i < medalInfos.size(); ++i )
+	{
+		SMedalInfo &info = medalInfos[i];
+		info.bIsCollectingPoints = !IsValid( pSide->medals[i]->pPrecedingMedal );
+		info.bIsGained = false;
+		info.bWillBeGiven = false;
+		info.fPoints = 0;
+		info.nProbability = 0;
+		info.pMedal = pSide->medals[i];
+	}
+}
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // NRPG::GetMedalPoints @ RPGMedals.obj (release VA 0x6ac1e0)
 //

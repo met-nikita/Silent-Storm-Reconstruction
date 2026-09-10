@@ -76,6 +76,7 @@ public:
 	// clip management (retail base methods)
 	int GetClipCount() const;                                    // @0xb5890
 	CAIFireArmsWeaponClip* GetCurrentClip() const;
+	bool IsCurrentClipFull() const;                           // @0xb5b80
 	void SetCurrentClip( CAIFireArmsWeaponClip *pClip );         // @0xb61e0
 	CAIFireArmsWeaponClip* GetNextClip() const;
 	void RemoveClip( CAIFireArmsWeaponClip *pClip );             // @0xb6760

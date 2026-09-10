@@ -279,7 +279,7 @@ private:
 	// the single-/multi-unit face (retail CInfoPanelSingleUnit @0x25cd30 has no life member), so
 	// the dev's pLife/pHealedLife were dropped for retail parity -- they also caused the
 	// "face (life,life_healed)" container-not-found errors. The ack-effect ANIMATION behavior
-	// (members below, already save-reconciled tags 1-9) is a release-new feature -- deferred.
+	// (members below, serialized tags 1-9) owns both overlays from construction.
 	enum EStage { ST_NONE=0, ST_SOURCE_HIDE=1, ST_TARGET_SHOW=2, ST_ACK_WAIT=3, ST_TARGET_HIDE=4, ST_SOURCE_SHOW=5, ST_ACK_TERMINATE=6 };
 	STime sEventTime;
 	EStage eStage = ST_NONE;
@@ -325,6 +325,14 @@ CUnitFace::CUnitFace( const SWindowInfo &sInfo, NGame::IMission *_pMission ):
 	// which this line restores.
 	if ( IsValid( _pMission ) )
 		pRenderGame = _pMission->GetRenderGame();
+
+	// v1.2 0x6562b0: every face owns both overlays before it can be saved.
+	// Style 0x2c is enabled, topmost and transparent to input; initially hidden.
+	const int nOverlayStyle = STYLE_ENABLED | STYLE_TOPMOST | STYLE_TRANSPARENT;
+	pAckEffect = new CImage( SWindowInfo( this, SPoint( 0, 0 ), GetSize(), "ackeffect", nOverlayStyle ) );
+	pAckEffect->SetImage( NDb::GetUITexture( 951 ) );
+	pRedImage = new CImage( SWindowInfo( this, SPoint( 0, 0 ), GetSize(), "ackeffect", nOverlayStyle ) );
+	pRedImage->SetColor( NGfx::SPixel8888( 0xFA, 0x35, 0x00, 0x33 ) );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CUnitFace::CanHandleState( NGame::IState *pState ) const
@@ -408,17 +416,6 @@ void CUnitFace::PlayAckEvent( const STime &sTime, NUI::CAckEvent *_pEvent )
 	pEvent = _pEvent;
 	if ( !IsValid( pEvent ) )
 		return;
-
-	// retail ctor @0x256610 creates the crossfade overlay up front: CImage "ackeffect", full face
-	// rect, style TOPMOST only (starts hidden), skinned with UITexture 951 "AckSwitch" (disasm
-	// literal `mov ecx,0x3b7` @0x6567ae -- the Ghidra output register-noised the id). Created
-	// LAZILY here instead so worlds restored from pre-crossfade saves (serialized tag 6 = null)
-	// heal themselves on the first bark.
-	if ( !IsValid( pAckEffect ) )
-	{
-		pAckEffect = new CImage( SWindowInfo( this, SPoint( 0, 0 ), GetSize(), "ackeffect", STYLE_TOPMOST ) );
-		pAckEffect->SetImage( NDb::GetUITexture( 951 ) );
-	}
 
 	// retail PlayAckEvent @0x254ba0: play the full portrait "turn to camera + talk" dance ONLY when
 	// there is a valid tracked face AND a valid speaker; otherwise fall through to the FALLBACK below.
@@ -605,13 +602,7 @@ void CUnitFace::Draw( const STime &sTime, NGScene::I2DGameView *pView )
 	// unconscious party member selected (pFaceUnit = the selected unit). Retail ctor @0x256610 makes
 	// pRedImage a full-face-rect CImage with color 0x33fa3500 = SPixel8888(0xFA,0x35,0x00,0x33) (red-orange
 	// ~20% alpha) and NO texture -- the color-fill renders as a flat quad (CImageDraw fills sColor when the
-	// texture is null). Created lazily (like pAckEffect above) so pre-tint saves (serialized tag 9 = null)
-	// heal on the first Draw.
-	if ( !IsValid( pRedImage ) )
-	{
-		pRedImage = new CImage( SWindowInfo( this, SPoint( 0, 0 ), GetSize(), "redimage", STYLE_TOPMOST ) );
-		pRedImage->SetColor( NGfx::SPixel8888( 0xFA, 0x35, 0x00, 0x33 ) );
-	}
+	// texture is null). The constructor owns this image, including for unshown faces.
 	pRedImage->SetStyle( STYLE_VISIBLE,
 		IsValid( pFaceUnit ) && ( pFaceUnit->IsDead() || pFaceUnit->IsUnconscious() ) );
 
@@ -1271,10 +1262,8 @@ private:
 		STATE_BASEMENT_VISIBLE = 2,
 		STATE_BASEMENT_HIDDEN  = 3
 	};
-	// retail NUI::CLevelSwitchBar::SButton (@0x25d440): each slot pairs the button with its
-	// tooltip; serialized inline (tags 2/3) inside the tag-5 vector. Dev creates no per-slot
-	// tooltips yet, so pToolTip serializes null -- format-parity with retail (tooltip wiring
-	// per Draw @0x254420 is a follow-up).
+	// Retail SButton: button/tooltip references (tags 2/3) inside the tag-5 vector.
+	// Template setup creates the tooltip and the button owns it; Draw updates its floor label.
 	struct SButton
 	{
 		ZDATA
@@ -1342,9 +1331,15 @@ bool CLevelSwitchBar::ProcessMessage( const SEvent &sEvent )
 
 			// retail: every button carries ALL FOUR image states -- which slot is a basement
 			// depends on the LIVE range (min+i < 0), decided per frame in Draw, not per slot here.
+			buttonsSet.resize( N_MAXLEVELS_COUNT );
 			for ( int nTemp = 0; nTemp < buttonsSet.size(); nTemp++ )
 			{
 				buttonsSet[nTemp].pButton = GetUIWindow<CButton>( this, NStr::Format( "level_%d", ( nTemp + 1 ) ) );
+				// v1.2 @0x658cd5..0x658deb: hidden desktop tooltip, style 0x2c,
+				// retained by the button as well as referenced by this slot.
+				buttonsSet[nTemp].pToolTip = new CToolTip( SWindowInfo( GetInterface(),
+					SPoint( 0, 0 ), SPoint( 0, 0 ), "", STYLE_ENABLED | STYLE_TRANSPARENT | STYLE_TOPMOST ) );
+				buttonsSet[nTemp].pButton->SetToolTip( buttonsSet[nTemp].pToolTip );
 				buttonsSet[nTemp].pButton->AddImageState( STATE_FLOOR_VISIBLE,    NDb::GetUITexture( 404 ) );
 				buttonsSet[nTemp].pButton->AddImageState( STATE_FLOOR_HIDDEN,     NDb::GetUITexture( 406 ) );
 				buttonsSet[nTemp].pButton->AddImageState( STATE_BASEMENT_VISIBLE, NDb::GetUITexture( 405 ) );
@@ -1374,6 +1369,22 @@ void CLevelSwitchBar::Draw( const STime &sTime, NGScene::I2DGameView *pView )
 			buttonsSet[nTemp].pButton->SetActiveState( nFloor > nCut ? STATE_BASEMENT_HIDDEN : STATE_BASEMENT_VISIBLE );
 		else
 			buttonsSet[nTemp].pButton->SetActiveState( nFloor > nCut ? STATE_FLOOR_HIDDEN : STATE_FLOOR_VISIBLE );
+
+		// v1.2 @0x654167..0x654273: labels follow the live floor range, including
+		// hidden-image slots. Negative floors display their positive basement number.
+		CToolTip *pToolTip = buttonsSet[nTemp].pToolTip;
+		if ( nFloor < 0 )
+		{
+			pToolTip->SetText( GetDBString( 19076 ) );
+			pToolTip->SetVal( L"basement", -nFloor );
+		}
+		else if ( nFloor > 0 )
+		{
+			pToolTip->SetText( GetDBString( 4527 ) );
+			pToolTip->SetVal( L"floor", nFloor );
+		}
+		else
+			pToolTip->SetText( GetDBString( 19075 ) );
 	}
 
 	CWindow::Draw( sTime, pView );

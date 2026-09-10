@@ -116,7 +116,6 @@ void CGlobalMap::Initialize( NRPG::CGlobalGame *_pGame, EMode _eMode )
 	pGlobalMap = NDb::GetGlobalMap( pGame->nGlobalMapID );
 	pGlobalInfo = shareGlobalInfo.Get( pGame->nGlobalMapID );
 
-	pSoundScene = NSound::CreateSoundScene( 0 ); // CRAP
 #ifdef _MAPEDIT
 	pCursor = NUI::ICursor::CreateEditorCursor();
 #else
@@ -124,6 +123,8 @@ void CGlobalMap::Initialize( NRPG::CGlobalGame *_pGame, EMode _eMode )
 #endif
 
 	pInterface = new NUI::CInterface( pCursor );
+	// This dev 2D map has no world clock; share the interface's clock-backed sound scene.
+	pSoundScene = pInterface->GetSound();
 
 	pGlobalMapUI = new NUI::CGlobalMapUI( NUI::SWindowInfo( pInterface, NUI::SPoint( 0, 0 ), NUI::SPoint( 1024, 768 ), "globalmapUI" ), this );
 	NUI::LoadTemplate( pGlobalMapUI, NDb::GetUIContainer( 175 ) );

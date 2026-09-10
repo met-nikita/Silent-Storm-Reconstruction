@@ -180,9 +180,8 @@ static bool CanPickUpCorpse( CUnitServer *pUS, const NAI::SUnitPosition &from, C
 	return fabs2( from.GetCP() - ptTarget ) < 4; // CRAP
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-static bool CanDropCorpse( CUnitServer *pUS )
+bool CanDropCorpse( const NAI::SUnitPosition &from, NAI::IAIMap *pAIMap )
 {
-	const NAI::SUnitPosition &from = pUS->GetPosition();
 	CVec3 center = from.GetCP();
 	center.z += 0.9f;
 	vector<SSphere> spheres;
@@ -193,7 +192,7 @@ static bool CanDropCorpse( CUnitServer *pUS )
 	// Jan03 used FP_GRID_STEP here; the shipped binary widened the corpse-drop probe -- FOLLOW THE DECOMP.
 	vels.push_back( CVec3( cos(fDir) * 0.9375f, sin(fDir) * 0.9375f, 0 ) );
 	spheres.push_back( SSphere( center, 0.45f ) );
-	NAI::PhysCollideInfo( pUS->GetWorld()->GetAIMap(), spheres, vels, &ress, NWorld::TS_ITEM_BLOCKER );
+	NAI::PhysCollideInfo( pAIMap, spheres, vels, &ress, NWorld::TS_ITEM_BLOCKER );
 	return (ress[0].fDist == NAI::FP_NO_COLLISION);
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -2269,7 +2268,8 @@ EUnitCommandResult CExecCorpse::CanDoIt( const NAI::SUnitPosition &from, bool bI
 		return UCR_GENERAL_FAILURE;
 	if ( !bTake && pDeadUnit->GetCorpseCarrier() != pUS )
 		return UCR_GENERAL_FAILURE;
-	if ( !bTake && !CanDropCorpse( pUS ) )
+	// v1.2 0x7a66a5: test the proposed facing, not the carrier's current position.
+	if ( !bTake && !CanDropCorpse( from, pUS->GetWorld()->GetAIMap() ) )
 		return UCR_GENERAL_FAILURE;
 
 	// retail @0x3a61d0 tail lock gate: drop our reservation, probe the corpse's CLockable base for
