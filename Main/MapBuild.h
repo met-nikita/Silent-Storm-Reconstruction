@@ -206,7 +206,7 @@ struct SMapInfo
 	SMapInfo() {}
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void ConvertFlags( vector<int> *pFlags, const vector<string> &strParams );
+void ConvertFlags( vector<int> *pFlags, const vector<string> &strParams, bool bChooseTimeOfDay = false );
 // nRelativeLevel: the map/mission relative level (retail free BuildMap @0x2788b0 stores it into the
 // builder; it gates chest-loot rolls [max(0,lvl-4)..lvl, or 0..100 when lvl==0] and lock hardness).
 bool BuildMap( int nPlacementID, const vector<string> &strParams,

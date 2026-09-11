@@ -26,7 +26,7 @@ namespace NWorld
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 const float F_HEIGHT_MAP_SIZE = 2.5f;
 // retail CUnitAnimator::Rotate @0x33d0f0: 3*PI rad/s (~540 deg/s). Dev's old 700.0 was ~74x too fast.
-const float F_DEFAULT_TURN_SPEED = 9.42477798f;
+const float F_DEFAULT_TURN_SPEED = 7.0f;   // v1.2 Rotate @0x73d7b5, constant0x8c97f4
 const float F_DEFAULT_MOVE_SPEED = 1.f;
 const float F_DEFAULT_AIM_SPEED = 0.8f;
 			STime N_DEFAULT_TRANSIT_TIME = 300;
@@ -995,7 +995,7 @@ void CUnitAnimator::EndMove( const NAI::SUnitPosition &prevPos, const NAI::SUnit
 	IdleOff();
 	if ( !bFreeze )
 		Stand( cmdPos, bAimedStrafe );
-	bStandIfRecalcCommand = false;   // retail tail; inert in dev (no producer)
+	bStandIfRecalcCommand = false;   // retail tail; Rotate sets it while turning
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CUnitAnimator::Move( const NAI::SUnitPosition &prevPos, const NAI::SUnitPosition &cmdPos, const NAI::SUnitPosition &nextPos, bool bInterGrid )
@@ -1251,29 +1251,16 @@ void CUnitAnimator::Rotate( const NAI::SUnitPosition &prevPos, const NAI::SUnitP
 		CPtr<NAnimation::CAnimation> pAnim;
 		if ( bCorpse )
 		{
+			// v1.2 0x73d7c5..0x73d84e: carrying turns use a 45-degree
+			// left/right clip, with root rotation coordinated with angular movement.
 			pAnim = pAnimator->CreateAnimation(
-				pSkeleton->GetAnimation( NDb::CAnimation::POSE_CORPSE, nAnimFlagsPoseWeapon, 0, nAnimFlagsClassSex, pSide ),
-					tEnd, true );
-		}
-		else
-		{
-			/*
-			if ( fRotateVel > 0 )
-			{
-				pAnim = pAnimator->CreateAnimation(
-					pSkeleton->GetAnimation( NDb::CAnimation::TURN_LEFT, nAnimFlags ), tEnd, true );
-			}
-			else
-			{
-				pAnim = pAnimator->CreateAnimation(
-					pSkeleton->GetAnimation( NDb::CAnimation::TURN_RIGHT, nAnimFlags ), tEnd, true );
-			}
+				pSkeleton->GetAnimation( fRotateVel > 0 ? NDb::CAnimation::TURN_LEFT : NDb::CAnimation::TURN_RIGHT,
+					nAnimFlagsPoseWeapon, 0, nAnimFlagsClassSex, pSide ), tEnd, true );
 			if ( pAnim )
 			{
 				pAnim->SetRotateCycle( true );
-				fRotateVel = Sign(fDiffAngle) * FP_PI2 * 1000 / pAnim->GetTime();
+				fRotateVel = Sign(fDiffAngle) * FP_PI4 * 1000 / pAnim->GetTime();
 			}
-			*/
 		}
 		if ( !pAnim )
 		{
@@ -1287,7 +1274,13 @@ void CUnitAnimator::Rotate( const NAI::SUnitPosition &prevPos, const NAI::SUnitP
 		pAnimator->AddAnimator( tEnd, PutOnTerrain(pAnim) );
 	}
 
-	++tEnd;// += FP_PI4 * 1000 / fabs(fRotateVel);
+	// v1.2 0x73d914..0x73d979: each carrying turn step consumes a full
+	// 45-degree clip. Unladen turns retain the retail 1ms scheduling step.
+	bStandIfRecalcCommand = true;
+	if ( bCorpse )
+		tEnd += FP_PI4 * 1000 / fabs(fRotateVel);
+	else
+		++tEnd;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CUnitAnimator::EndRotate( const NAI::SUnitPosition &cmdPos )
@@ -2535,4 +2528,3 @@ bool IsTwoHeavy( NDb::EItemSubType subType, NDb::EItemSubType subTypeNext )
 using namespace NWorld;
 REGISTER_SAVELOAD_CLASS( 0x11461140, CUnitTerrain );
 REGISTER_SAVELOAD_CLASS( 0x11461141, CHeightMapBlock );
-

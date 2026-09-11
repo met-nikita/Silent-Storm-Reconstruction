@@ -383,18 +383,12 @@ bool CAckBase::CanSee( CUnitServer *pWho )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CAckBase::PlayAck()
 {
-	// CRASH FIX / Tier-B reconcile toward release @0x339640. This was the Jan03 PREDECESSOR form: it
-	// deref'd pUnit->IsCheatEnabled (-> GetUnitRPG()->GetRPGUnit()) with NO liveness guard, so a missed-
-	// shot ack fired for a zombie / torn-down unit (whose RPG mission is already gone) crashed on a null
-	// GetRPGUnit(). The release guards pUnit (non-null + not the CObjectBase zombie bit) and only barks
-	// for a unit that CanFight() before queuing on the global ack. The AddAckSequence overload now
-	// carries the speaking unit (retail @0x339640 -> @0x339420 SAck path: sequences stores (unit,ack)
-	// pairs). The gate stays the dev's per-unit IsCheatEnabled(CHEAT_SCRIPTSEQUENCE): the release's
-	// world-level CWorld::IsSequence has no equivalent in this snapshot (documented aiCommander.h:85 /
-	// wTurnBased.h:427), and the per-unit cheat flag is the subsystem-wide behaviour-equivalent.
+	// Retail v1.1 @0x739640 / v1.2 @0x739bd0 suppresses ALL automatic acks during
+	// a sequence (GetWorld()->GetTBS()->IsSequence), not just script-controlled units.
+	// Do not queue a sighting now for playback after the cinematic has ended.
 	if ( !IsValid( pUnit ) || !pUnit->CanFight() )
 		return;
-	if ( !pUnit->IsCheatEnabled( NRPG::CHEAT_SCRIPTSEQUENCE ) )
+	if ( !GetWorld()->IsSequence() )
 		GetWorld()->GetGlobalAck()->AddAckSequence( GetUnit(), GetDBAck() );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////

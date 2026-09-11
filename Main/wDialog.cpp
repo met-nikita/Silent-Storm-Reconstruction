@@ -117,7 +117,9 @@ static void MakeDialogData(  CWorld *pWorld, int nDialogID,
 		{
 			if ( find( pUnits->begin(), pUnits->end(), pUnit ) == pUnits->end() )
 			{
-				if ( pUnit->GetRPG() != ( NRPG::IUnitMissionInfo * )( pHero.GetPtr() ) )
+				// Retail 1.1 0x74d9d3 / 1.2 0x74ddc3 compares the underlying
+				// RPG unit, not the mission-info interface, with the campaign hero.
+				if ( pUnit->GetRPG()->GetRPGUnit() != pHero.GetPtr() )
 					pUnits->push_back( pUnit );
 				else
 					pUnits->insert( pUnits->begin(), pUnit );
@@ -138,13 +140,9 @@ NWorld::CUICmdPlayDialog* MakePlayDialogCommand( CWorld *pWorld, int nDialogID, 
 	vector< CPtr<NWorld::CAckEvent> > phrases;
 	vector< CObj<NWorld::CUnit> > units;
 	MakeDialogData( pWorld, nDialogID, &phrases, &units );
-	// retail NWorld::SortUnits @0x34dd10 (called by PlayDialog @0x34dd70): the rotate first->back
-	// runs ONLY when its bSkip arg is false. That arg is the lua DialogPlay 2nd param HeroOnLeft
-	// (luaDialogPlay @0x2e64b0, format "sb[true]" -- defaults TRUE = skip). So by default the hero,
-	// front-inserted by MakeDialogData (index 0, views created L/R/L/R and bound by index), stays
-	// on the LEFT; a script passes HeroOnLeft=false to demote him off the left slot. (The rotate is
-	// NOT an always-on normalization: with hero at the back his side would flip with speaker-count
-	// parity, which is exactly the left/right flip this replaces.)
+	// Retail SortUnits @0x34dd10: rotate first->back only when the optional
+	// DialogPlay bool is false (default true). MakeDialogData puts the hero first;
+	// actual screen placement belongs to the UI template, not the camera names.
 	if ( !bHeroOnLeft && units.size() >= 2 )
 	{
 		CObj<NWorld::CUnit> pFirst = units.front();

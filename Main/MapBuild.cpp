@@ -33,8 +33,17 @@ CBasicShare<int, NAI::CWaypointLoader> shareWaypoints(133);
 CBasicShare<int, NAI::CUnitAIInfoLoader> shareUnits(134);
 CBasicShare<int, NAI::CUnitGroupAIInfoLoader> shareUnitGroups(144);
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void ConvertFlags( vector<int> *pFlags, const vector<string> &strParams )
+void ConvertFlags( vector<int> *pFlags, const vector<string> &strParams, bool bChooseTimeOfDay )
 {
+	// Retail 1.1 0x6733b0 / 1.2 0x6733c0: only world creation requests a
+	// random time of day. Explicit Day/Night wins; child and light flags do not roll.
+	vector<string> params( strParams );
+	if ( bChooseTimeOfDay && find( params.begin(), params.end(), string("Day") ) == params.end()
+		&& find( params.begin(), params.end(), string("Night") ) == params.end() )
+	{
+		static SRand rand;
+		params.push_back( rand.Get( 2 ) > 0 ? "Day" : "Night" );
+	}
 	CDBTable<NDb::CAttribute> *pAttrTable = NDatabase::GetTable<NDb::CAttribute>();
 	if ( pAttrTable )
 	{
@@ -42,9 +51,9 @@ void ConvertFlags( vector<int> *pFlags, const vector<string> &strParams )
 		CDBIterator<NDb::CAttribute> it( *pAttrTable );
 		while ( it.MoveNext() )
 			attrmap[it.Get()->szName] = it.Get()->GetRecordID();
-		for ( int i = 0; i < strParams.size(); ++i )
+		for ( int i = 0; i < params.size(); ++i )
 		{
-			unordered_map<string, int>::const_iterator it = attrmap.find( strParams[i] );
+			unordered_map<string, int>::const_iterator it = attrmap.find( params[i] );
 			if ( it != attrmap.end() )
 				pFlags->push_back( it->second );
 		}

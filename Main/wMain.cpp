@@ -1601,7 +1601,7 @@ void CWorld::CreateRandom( int nVariantID, const vector<string> &params,
 	// (NWorld::CreateExplosionMaster @0x355b40 = new CExplosionMaster(this)). W4 serialization-
 	// convergence: it segments and serializes like retail but nothing enqueues blasts into it yet.
 	pExplosionMaster = CreateExplosionMaster( this );
-	ConvertFlags( &createFlags, params );
+	ConvertFlags( &createFlags, params, true );
 
 	SMapInfo mapInfo;
 	// nMobsLevel = the mission's relative level; it gates chest-variant eligibility and lock
@@ -1950,8 +1950,8 @@ IPlayer* CWorld::AddPlayer( const wstring &wsName, NRPG::CGlobalPlayer *pGlobalP
 
 	// retail AddPlayer @0x36e160: with the world carrying waypoints and no passage deploy, the
 	// waypoint scheme (FetchDeployWaypoints @0x368fd0) takes PRIORITY over deploy-spot placeables:
-	// unit i -> deployWps[i] (overflow -> deployWps[0]), the place is FINAL (GetDeployPlace's shift
-	// is skipped), and the UnitHero place becomes the player's deploy spot below.
+	// unit i -> deployWps[i] (overflow -> deployWps[0]), with zero formation displacement.
+	// GetDeployPlace still supplies the facing after saving the player's deploy spot below.
 	vector<NAI::SPathPlace> deployWps;
 	if ( !pGlobalPlayer->deployData.bPassage && !waypoints.empty() )
 		FetchDeployWaypoints( waypoints, pPathNetwork, &deployWps );
@@ -2011,6 +2011,10 @@ IPlayer* CWorld::AddPlayer( const wstring &wsName, NRPG::CGlobalPlayer *pGlobalP
 			pRes->SetDeploySpot( placeForUnit );
 			bSetDeploySpot = false;
 		}
+		// Retail 1.1 0x76e8fd / 1.2 0x76eb5d: waypoint deployment also
+		// calls GetDeployPlace, with displacement zero, to face into the map.
+		if ( !deployWps.empty() )
+			placeForUnit = pPathNetwork->GetDeployPlace( placeForUnit, 0 );
 
 		NRPG::CUnit *pUnit = pGlobalPlayer->mercs[i];
  		CPtr<CUnitServer> pUS = AddUnit( placeForUnit, NRPG::CreateUnit( pUnit ), pRes );

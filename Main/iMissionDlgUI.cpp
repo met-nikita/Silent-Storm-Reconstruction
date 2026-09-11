@@ -364,10 +364,17 @@ void CMissionDlgUI::UpdatePhrases( NGScene::I2DGameView *pView )
 
 		// The UNIT's chosen voice (NRPG::CUnit::nVoice via GetRPGUnit()->GetVoice()), not the persona's preset, so
 		// the player's FaceGen voice choice is heard in dialogs (retail indexes voices[] by GetRPGUnit()'s nVoice).
-		const NDb::SAckVoice &sVoice = pEvent->pAckInfo->voices[pEvent->pUnit->GetRPG()->GetRPGUnit()->GetVoice()];
+		NRPG::CUnit *pRPGUnit = pEvent->pUnit->GetRPG()->GetRPGUnit();
+		const NDb::SAckVoice &sVoice = pEvent->pAckInfo->GetVoice( pRPGUnit->GetVoice() );
 
 		SPoint sRealSize( 0, 0 );
-		wstring wsText = GetDBString( 11209 ) + GetDBString( pEvent->pAckInfo->pText );
+		// Retail 1.1 0x606e41 / 1.2 0x6075f1: select by the speaker's
+		// persona gender, retaining the default text if no female text exists.
+		NDb::CString *pText = pEvent->pAckInfo->pText;
+		NDb::CRPGPers *pPers = pRPGUnit->GetPers();
+		if ( pPers && pPers->bIsFemale && IsValid( pEvent->pAckInfo->pFemaleText ) )
+			pText = pEvent->pAckInfo->pFemaleText;
+		wstring wsText = GetDBString( 11209 ) + GetDBString( pText );
 		// retail UpdatePhrases @0x206d60 (the bVar9 gate): the sound/lipsync/expression attach to the
 		// FIRST page of each phrase only; continuation pages carry nulls so SetStage neither restarts
 		// the voiceline nor re-triggers the head on "Next".

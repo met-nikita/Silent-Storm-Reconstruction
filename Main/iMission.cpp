@@ -1,6 +1,7 @@
 #include "StdAfx.h"
 #include "wInterface.h"
 #include "wMain.h"			// NWorld::CWorld::GetOwnScript -- wire the script-UI bridge to the mission HUD
+#include "wUnitServer.h"	// temporary GFirst music diagnostics: script unit names
 #include "wMainTrace.h"
 #include "wMisc.h"			// NWorld::GetDMeshUnit -- heard-not-seen noise-marker pick (TraceCursor)
 #include "wUICommands.h"
@@ -970,16 +971,11 @@ void CMission::SetCameraParams( ECameraType eType, float _fFOV, const ICamera::S
 //    SetCameraParams @ iMission.cpp).
 void CMission::OnSnapshotRestored()
 {
-	// Re-apply the scene lighting exactly as Initialize does: the in-place snapshot resume runs no
-	// Initialize, so without this the scene's ambient + directional light + fog render state is never set
-	// up on load -> the 3D scene renders with an uninitialized global light color (random green/red/blue
-	// tint of the whole map, varying per run). Apply it BEFORE the building rebuild so the lightmap
-	// bake there uses the correct lighting rather than the uninitialized state.
-	NDb::CAmbientLightReal *pLight = GetWorld()->GetDefaultLight();
-	if ( pLight )
-		GetScene()->SetAmbient( pLight );
-	else
-		SetLightMode( 0 );
+	// Restore render state BEFORE rebuilding/lightmapping buildings, using the saved light
+	// and light mode (CGameView tags 21/27). GetDefaultLight is a template roulette for NEW
+	// scenes: calling it here rerolls day/night. Retail SetRenderMode @0x5872f0 reapplies
+	// pPrevLight with prevLightMode, so it also restores our runtime-only lighting state.
+	GetScene()->SetRenderMode( GetScene()->GetRenderMode() );
 	if ( IsValid( pWorld ) )
 		pWorld->RestoreRuntimeCaches( pGlobalGame );
 	// re-wire the runtime-only handles on EVERY deserialized camera: the cinematic camera (base
@@ -3315,8 +3311,14 @@ void CICBeginMission::Exec()
 		pGlobalGame->UpdateScenarioOnLeaveZone();
 	}
 
+	// Retail 1.1 0x60bb3d / 1.2 0x60c28d: scenario-zone parameters
+	// replace the caller's parameters (vector assignment, not append). This
+	// carries the authored TimeOfDay into world creation and light selection.
+	vector<string> missionParams( params );
+	if ( IsValid( pZone ) && pZone->GetDBZone() )
+		missionParams = pZone->GetDBZone()->vszParams;
 	CMission *pRes = new CMission();
-	if ( pRes->Initialize( nTemplateID, nVariantID, pZone, params, pGlobalGame, pPWLImage ) )
+	if ( pRes->Initialize( nTemplateID, nVariantID, pZone, missionParams, pGlobalGame, pPWLImage ) )
 		SetInterface( pRes );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
