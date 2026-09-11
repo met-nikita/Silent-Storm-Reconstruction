@@ -651,6 +651,12 @@ CUnit::EState CUnitServer::GetState()
 	return ST_NORMAL_DEFAULT;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+CCommandExecute* CUnitServer::CreateExecutor( CCmd *pCmd, EUnitCommandResult *pError )
+{
+	// retail v1.2 0x7bfbb0: use the current state's command restrictions.
+	return pState->CreateExecutor( pCmd, pError );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 void CUnitServer::RefreshExecutor()
 {
 	if ( IsValid( pExec ) )

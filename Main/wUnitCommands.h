@@ -55,8 +55,9 @@ enum EUnitCommandResult
 	                                  // (retail ordinal 0x15; here appended -> 16)
 	UCR_CANT_HEAL,                    // heal target's CanHeal() failed -- CanDoFirstAid @0x3a2d40
 	                                  // (retail ordinal 16; here appended -> 17)
-	UCR_DOOR_LOCKED                   // locked door, no key and no charged picklock in hand --
+	UCR_DOOR_LOCKED,                  // locked door, no key and no charged picklock in hand --
 	                                  // CExecOpenClose::CanDoIt @0x3bd290 (retail ordinal 17; here appended -> 18)
+	UCR_OK_RELOAD                    // attack replaced by a reload (retail ordinal 2)
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CCmd: public CObjectBase

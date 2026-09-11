@@ -650,6 +650,7 @@ void CMission::CanDoCommand( NWorld::CCmd *pCmd, bool bNoTarget, SActionInfo *pI
 		pInfo->bAvailable = true;
 		break;
 	case NWorld::UCR_OK:
+	case NWorld::UCR_OK_RELOAD:
 		pInfo->bOk = true;
 		pInfo->bEnoughAP = true;
 		pInfo->bAvailable = true;
@@ -688,39 +689,32 @@ void CMission::CanDoCommand( NWorld::CCmd *pCmd, bool bNoTarget, SActionInfo *pI
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// Maps a dev EUnitCommandResult onto its RETAIL ordinal so the retail result-combining rule
-// (retail @0x1fc870, see below) can be evaluated exactly. Retail ordinals recovered from the
-// binary: the CMission::CanDoCommand @0x1fb680 jump table (eResult-1 -> flag case) plus the
-// ShowError @0x1d5fc0 switch (case values 3..0x15) plus the literal compares scattered through
-// the state code (INVENTORY_NO_PLACE: `cmp eResult,0x12` @0x5dc911; PK_BAN: silent case 0x13;
-// CANT_HEAL: case 0x10; DOOR_LOCKED: dev-doc ordinal 17; NEED_RELOAD: raw code 10 in
-// CStateAttack::OnLButtonUp). The dev enum ordinals deliberately diverge (see wUnitCommands.h --
-// NEVER reorder them), hence this explicit map. The middle "condition" band (NO_EQUIPMENT..
-// TARGET_OUT_OF_RANGE) follows the declaration order shared by Jan03/dev/retail; retail ordinal 9
-// is UCR_CANT_SEE_TARGET, a retail-only code the dev enum does not carry.
+// PDB EUnitCommandResult values for the retail result-combining rule below.
+// UCR_NULL=0 and UCR_CANT_SEE_TARGET=14 are absent from the dev enum.
 static int UCRRetailOrdinal( NWorld::EUnitCommandResult eRes )
 {
 	switch ( eRes )
 	{
 	case NWorld::UCR_OK:							return 1;
+	case NWorld::UCR_OK_RELOAD:                    return 2;
 	case NWorld::UCR_NO_TARGET:						return 3;
 	case NWorld::UCR_NOT_ENOUGH_AP:					return 4;
-	case NWorld::UCR_NOT_HERO:						return 5;
+	case NWorld::UCR_UNAVAILABLE:					return 5;
 	case NWorld::UCR_GENERAL_FAILURE:				return 6;
 	case NWorld::UCR_INVALID_COMMAND:				return 7;
 	case NWorld::UCR_PATH_NOT_FOUND:				return 8;
-	case NWorld::UCR_NEED_RELOAD:					return 10;
-	case NWorld::UCR_NO_EQUIPMENT:					return 11;
-	case NWorld::UCR_WEAPON_JAMMED:					return 12;
-	case NWorld::UCR_CRITICALS_BAN:					return 13;
-	case NWorld::UCR_TARGET_OUT_OF_RANGE:			return 14;
+	case NWorld::UCR_NEED_RELOAD:					return 9;
+	case NWorld::UCR_NO_EQUIPMENT:					return 10;
+	case NWorld::UCR_WEAPON_JAMMED:					return 11;
+	case NWorld::UCR_CRITICALS_BAN:					return 12;
+	case NWorld::UCR_TARGET_OUT_OF_RANGE:			return 13;
 	case NWorld::UCR_NEED_HIGHER_SKILL:				return 15;
 	case NWorld::UCR_CANT_HEAL:						return 16;
 	case NWorld::UCR_DOOR_LOCKED:					return 17;
 	case NWorld::UCR_INVENTORY_NO_PLACE:			return 18;
-	case NWorld::UCR_PK_BAN:						return 19;
+	case NWorld::UCR_NOT_HERO:						return 19;
 	case NWorld::UCR_NOT_ALL_UNITS_NEAR_PASSAGE:	return 20;
-	case NWorld::UCR_UNAVAILABLE:					return 21;	// dev-reordered; retail keeps it past the messages
+	case NWorld::UCR_PK_BAN:						return 21;
 	}
 	return 21;
 }
@@ -2173,7 +2167,7 @@ void CMission::TraceCursor()
 		}
 	}
 
-	if ( !IsValid( pTraceObject ) )
+	if ( sTraceResult.bTileSet && !IsValid( pTraceObject ) )
 	{
 		NAI::SUnitPosition sPosition;
 		sPosition.pos = sTraceResult.sTile;

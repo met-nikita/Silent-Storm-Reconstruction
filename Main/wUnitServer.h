@@ -276,6 +276,7 @@ public:
 	void PostponeCritical( NDb::ECritical critical ) { criticals.push_front( critical ); }
 	void ProcessCriticalImmediately( NDb::ECritical eCA );
 	void SetState( CUnitState *_pState );
+	CCommandExecute* CreateExecutor( CCmd *pCmd, EUnitCommandResult *pError );
 	bool WasInterrupted( CUnitServer *pWho ) const { return find( wasInterruptedList.begin(), wasInterruptedList.end(), pWho ) != wasInterruptedList.end(); }
 	void MarkInterrupted( CUnitServer *pWho ) { ASSERT( !WasInterrupted( pWho ) ); wasInterruptedList.push_back( pWho ); }
 	void UpdateCriticalsState();

@@ -464,6 +464,36 @@ static CCommandExecute* CreateActionQueue( CUnitServer *pUS, TCommand *pCmd, TEx
 	return pRes;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+static CCommandExecute* CreateAttackReload( CUnitServer *pUS, EUnitCommandResult *pError )
+{
+	// retail v1.1 0x794460 / v1.2 0x7946b0: replace the attack, not queue it after reload.
+	CObj<CCmdReload> pCmd = new CCmdReload;
+	CObj<CCommandExecute> pExec = pUS->CreateExecutor( pCmd, pError );
+	if ( *pError == UCR_OK )
+		*pError = UCR_OK_RELOAD;
+	return pExec.Extract();
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+template<class TCommand, class TExecAction>
+static CCommandExecute* CreateSimpleActionOrReload( CUnitServer *pUS, TCommand *pCmd,
+	TExecAction *pAction, EUnitCommandResult *pError )
+{
+	CObj<CCommandExecute> pExec = CreateSimpleAction( pUS, pAction, pError );
+	if ( *pError == UCR_NEED_RELOAD && pCmd->bCanBeReplacedByReload )
+		return CreateAttackReload( pUS, pError );
+	return pExec.Extract();
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+template<class TCommand, class TExecAction>
+static CCommandExecute* CreateActionQueueOrReload( CUnitServer *pUS, TCommand *pCmd,
+	TExecAction *pAction, EUnitCommandResult *pError )
+{
+	CObj<CCommandExecute> pExec = CreateActionQueue( pUS, pCmd, pAction, ITEM_ACTIVE, pError );
+	if ( *pError == UCR_NEED_RELOAD && pCmd->bCanBeReplacedByReload )
+		return CreateAttackReload( pUS, pError );
+	return pExec.Extract();
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 CCommandExecute* CreateActionExecutor( CUnitServer *pUS, CCmd *pCmd, EUnitCommandResult *pError )
 {
 	*pError = UCR_OK;
@@ -506,13 +536,13 @@ CCommandExecute* CreateActionExecutor( CUnitServer *pUS, CCmd *pCmd, EUnitComman
 				return CreateActionQueue(pUS, pAttackTile.GetPtr(), new CExecThrowGrenade(pUS, pAttackTile->ptTarget), ITEM_ACTIVE, pError);
 			}
 			case AT_SHOOT:
-				return CreateActionQueue(pUS, pAttackTile.GetPtr(), new CExecShootTile(pUS, pAttackTile->ptTarget), ITEM_ACTIVE, pError);
+				return CreateActionQueueOrReload(pUS, pAttackTile.GetPtr(), new CExecShootTile(pUS, pAttackTile->ptTarget), pError);
 			case AT_THROW:
 				return CreateActionQueue(pUS, pAttackTile.GetPtr(), new CExecThrowKnife(pUS, pAttackTile->ptTarget + CVec3(0, 0, 0.5f)), ITEM_ACTIVE, pError);
 			case AT_BAZOOKA:
-				return CreateActionQueue(pUS, pAttackTile.GetPtr(), new CExecLaunchRocket(pUS, pAttackTile->ptTarget + CVec3(0, 0, 0.5f)), ITEM_ACTIVE, pError);
+				return CreateActionQueueOrReload(pUS, pAttackTile.GetPtr(), new CExecLaunchRocket(pUS, pAttackTile->ptTarget + CVec3(0, 0, 0.5f)), pError);
 			case AT_CANNON:
-				return CreateSimpleAction(pUS, new CExecShootTile(pUS, pAttackTile->ptTarget), pError);
+				return CreateSimpleActionOrReload(pUS, pAttackTile.GetPtr(), new CExecShootTile(pUS, pAttackTile->ptTarget), pError);
 			case AT_MINE:
 				*pError = UCR_INVALID_COMMAND;
 				return 0;
@@ -537,7 +567,7 @@ CCommandExecute* CreateActionExecutor( CUnitServer *pUS, CCmd *pCmd, EUnitComman
 				if (pWeapon)
 				{
 					if (IsValid(pWeapon) && pWeapon->GetShootMode() == NDb::SM_Snipe && !pUS->IsSniping())
-						return CreateActionQueue(pUS, pAttackObject.GetPtr(), new CExecSnipeAim(pUS, pUnitTarget), ITEM_ACTIVE, pError);
+						return CreateActionQueueOrReload(pUS, pAttackObject.GetPtr(), new CExecSnipeAim(pUS, pUnitTarget), pError);
 				}
 
 				EActionType eType = GetActionType(pUS);
@@ -566,9 +596,9 @@ CCommandExecute* CreateActionExecutor( CUnitServer *pUS, CCmd *pCmd, EUnitComman
 					}
 					case AT_SHOOT:
 					case AT_SNIPE:
-						return CreateActionQueue(pUS, pAttackObject.GetPtr(), new CExecShootUnit(pUS, pUnitTarget, pAttackObject->eHL, pAttackObject->nExtraAttackAP), ITEM_ACTIVE, pError);
+						return CreateActionQueueOrReload(pUS, pAttackObject.GetPtr(), new CExecShootUnit(pUS, pUnitTarget, pAttackObject->eHL, pAttackObject->nExtraAttackAP), pError);
 					case AT_CANNON:
-						return CreateSimpleAction(pUS, new CExecShootUnit(pUS, pUnitTarget, pAttackObject->eHL, pAttackObject->nExtraAttackAP), pError);
+						return CreateSimpleActionOrReload(pUS, pAttackObject.GetPtr(), new CExecShootUnit(pUS, pUnitTarget, pAttackObject->eHL, pAttackObject->nExtraAttackAP), pError);
 					}
 				}
 
@@ -591,6 +621,10 @@ CCommandExecute* CreateActionExecutor( CUnitServer *pUS, CCmd *pCmd, EUnitComman
 				NAI::IAIMap* pAIMap = pUS->GetWorld()->GetAIMap();
 				pAIMap->GetUnitHLPos(&ptTarget, pAIMap->GetHull(pAttackObject->pTarget), -1);
 				CObj<CCmdShootTile> pShoot(new CCmdShootTile(ptTarget));
+				// Firearm object attacks use the same retail reload policy as unit attacks.
+				// Dev still represents their aiming executor as a tile shot (retail CExecShootObject).
+				if ( eType == AT_SHOOT || eType == AT_CANNON )
+					pShoot->bCanBeReplacedByReload = pAttackObject->bCanBeReplacedByReload;
 				return CreateActionExecutor(pUS, pShoot, pError);
 			}
 			else {

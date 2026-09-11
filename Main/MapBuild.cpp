@@ -1442,7 +1442,10 @@ bool CMapBuilder::BuildMap( int nPlacementID )
 	// output borders
 	CVec2 vMapSize( (rootPlace.nWidth - 1) * FP_GRID_STEP, (rootPlace.nHeight - 1) * FP_GRID_STEP );
 	CVec2 vMapBorder( rootPlace.vOrigin );
-	info.sMapSafeZone = CTRect<float>( vMapBorder.x, vMapBorder.y, vMapSize.x + vMapBorder.x, vMapSize.y + vMapBorder.y );
+	// retail v1.1 0x677e56 / v1.2 0x677dd6: inset by the variant's exit border, in tiles.
+	const float fExitBorder = pVar->nExitBorder * FP_GRID_STEP;
+	info.sMapSafeZone = CTRect<float>( vMapBorder.x + fExitBorder, vMapBorder.y + fExitBorder,
+		vMapSize.x + vMapBorder.x - fExitBorder, vMapSize.y + vMapBorder.y - fExitBorder );
 
 	// add borders to terrain
 	if ( bBuildTerrain )

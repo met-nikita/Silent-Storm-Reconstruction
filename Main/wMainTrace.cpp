@@ -18,8 +18,6 @@ bool TraceTile( IWorld *pWorld, const CRay &ray, NAI::SPosition *pRes, int nMaxF
 	// and resolved to the wrong (current-floor) tile. Interval order stays nearest-first
 	// (CAIMap::Trace sorts unconditionally), matching retail's first-in-gate tile pick.
 	pWorld->GetAIMap()->Trace( ray, &intervals, TS_PICK|TS_PASS_BLOCKER, NAI::CFloorsSet(), NAI::IAIMap::STH_SPLIT_TERR_HG );
-	ptDst = ray.ptOrigin - ray.ptDir * ( (ray.ptOrigin.z - 1) / ray.ptDir.z );
-	bool bRet = false;
 	for ( int k = 0; k < intervals.size(); ++k )
 	{
 		NAI::SInterval &interv = intervals[k];
@@ -28,13 +26,13 @@ bool TraceTile( IWorld *pWorld, const CRay &ray, NAI::SPosition *pRes, int nMaxF
 		if ( interv.pSrc->nFloor > nMaxFloor )
 			continue;
 		ptDst = ray.ptOrigin + interv.enter.fT * ray.ptDir;
-		bRet = pWorld->GetPathNetwork()->SetOnFloor( pRes, interv.pSrc->nFloor, ptDst );
-		if ( pRes->GetFloor() <= nMaxFloor )
-			return bRet;
+		if ( pWorld->GetPathNetwork()->SetOnFloor( pRes, interv.pSrc->nFloor, ptDst )
+			&& pRes->GetFloor() <= nMaxFloor )
+			return true;
 	}
-	// fallback to root terrain in case none did help
-	bRet = pWorld->GetPathNetwork()->SetOnLayer( pRes, 0, ptDst );
-	return bRet;
+	// retail Trace v1.2 0x77dccd/0x77ded4: no actual hit resolving to a tile means no move target.
+	// Do not intersect an imaginary z=1 plane and snap that off-map point onto layer zero.
+	return false;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void TraceObjects( IWorld *pWorld, const CRay &ray, vector<CObjectBase*> *pRes, int nMaxFloor )

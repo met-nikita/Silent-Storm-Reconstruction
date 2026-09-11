@@ -157,8 +157,10 @@ void CTemplVariant::Import()
 	NDatabase::ImportField( "NoAttack", &bNoAttack );
 	NDatabase::ImportField( "MinCutFloor", &nMinCutFloor );
 	NDatabase::ImportField( "MaxCutFloor", &nMaxCutFloor );
-	// (weatherType tag 24 / nExitBorder tag 25 are read from the retail game.db via operator&;
-	// the SQL mirror carries "Weather" as a string and has no ExitBorder column, so no import.)
+	// retail v1.1 0x8240b6 / v1.2 0x805222. game.db stores columnar tables;
+	// record fields must be imported even when they also have serializer tags.
+	NDatabase::ImportField( "ExitBorder", &nExitBorder );
+	// Weather string -> weatherType conversion remains to be restored separately.
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CRectangle

@@ -26,6 +26,7 @@ const int
 	N_CURSOR_NORMAL					= 2,    // "normal"  -> Normal.cur   (UITexture 292)
 	N_CURSOR_BUSY						= 3,    // "busy"    -> Busy.cur     (665)
 	N_CURSOR_BLOCK					= 4,    // "block"   -> Blocked.cur  (208)
+	N_CURSOR_RELOAD                  = 26,   // retail attack replaced by reload
 	N_CURSOR_MOVE						= 5,    // "move"    -> Normal.cur   (292, same texture as normal)
 	N_CURSOR_ROTATE					= 25,   // "look" -> Look.cur (the EYE). retail CStateRotate::GetCursorInfo @0x1d68b0:
 	                                 // disasm @0x5d68e2 `mov ecx,0x19` -> NDb::GetUICursor(25) = UICursors row 25 "look"

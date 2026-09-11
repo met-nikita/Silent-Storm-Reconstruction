@@ -832,13 +832,11 @@ bool CStateAttack::OnLButtonUp( int nX, int nY )
 		return true;
 
 	GetMission()->CanDoCommand( pCmd, false, &sInfo );
-	if ( !sInfo.bAvailable || !sInfo.bOk )
+	if ( sInfo.eResult != NWorld::UCR_OK && sInfo.eResult != NWorld::UCR_OK_RELOAD )
 	{
 		ShowError( GetMission(), sInfo.eResult );
-		// retail CStateAttack::OnLButtonUp @0x1dbec0: the out-of-ammo result (retail raw code 10)
-		// barks "weapon empty", any other failure "impossible to perform". Dev's enum diverged
-		// from the retail ordinals -- the semantic equivalent is UCR_NEED_RELOAD.
-		SayAckForAll( GetMission(), sInfo.eResult == NWorld::UCR_NEED_RELOAD ?
+		// retail v1.2 0x5dc98d: no clip for the replacement reload (NO_EQUIPMENT=10).
+		SayAckForAll( GetMission(), sInfo.eResult == NWorld::UCR_NO_EQUIPMENT ?
 			NWorld::IA_WEAPON_EMPTY : NWorld::IA_IMPOSSIBLE_TO_PERFORM );
 		return false;
 	}
@@ -873,16 +871,22 @@ NWorld::CCmd* CStateAttack::GetTargetCmd()
 		if ( NWorld::GetDMeshPos( pTargetObject, &posMarker ) )
 		{
 			posMarker.z += 1.0f;
-			return new NWorld::CCmdShootTile( posMarker );
+			NWorld::CCmdShootTile *pCmd = new NWorld::CCmdShootTile( posMarker );
+			pCmd->bCanBeReplacedByReload = true;
+			return pCmd;
 		}
-		return new NWorld::CCmdShootObject( pTargetObject, 0, eHitLocation );
+		NWorld::CCmdShootObject *pCmd = new NWorld::CCmdShootObject( pTargetObject, 0, eHitLocation );
+		pCmd->bCanBeReplacedByReload = true;
+		return pCmd;
 	}
 
 	CVec3 pos;
 	if ( !GetMission()->GetTracePosition( &pos ) )
 		return 0;
 
-	return new NWorld::CCmdShootTile( pos );
+	NWorld::CCmdShootTile *pCmd = new NWorld::CCmdShootTile( pos );
+	pCmd->bCanBeReplacedByReload = true;
+	return pCmd;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CStateAttack::UpdateCursor()
@@ -908,12 +912,10 @@ void CStateAttack::UpdateCursor()
 		UpdateCursorInfo();
 	}
 
-	// retail CStateAttack::UpdateCursor @0x1dc0b0 keys the cursor on the cached sInfo: an
-	// UCR_OK_RELOAD result shows the reload cursor (26), !bOk shows the block cursor, else the
-	// per-hit-location cursor. (The dev enum carries no UCR_OK_RELOAD -- its CanDo never emits it --
-	// so only the !bOk fork is portable; in the retail eResult switch bOk=true implies
-	// bAvailable=true, so this equals the old !bActionUnavailable gate exactly.)
-	if ( sInfo.bOk )
+	// retail v1.2 0x5dcc9b: a replacement reload takes precedence over hit-location cursors.
+	if ( sInfo.eResult == NWorld::UCR_OK_RELOAD )
+		sCursorInfo.pCursor = NDb::GetUICursor( N_CURSOR_RELOAD );
+	else if ( sInfo.bOk )
 	{
 		switch ( eHitLocation )
 		{
