@@ -751,6 +751,11 @@ int CExecHide::GetActionAP() const
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 EUnitCommandResult CExecHide::CanDoIt()
 {
+	// Retail v1.2 0x7b38ee: reject the cooldown before accepting the order
+	// (and spending AP), not only when Hide(true) applies the state change.
+	if ( !pUS->CanHide() )
+		return UCR_GENERAL_FAILURE;
+
 	if ( pUS->IsWearingPK() )
 		return UCR_GENERAL_FAILURE;
 

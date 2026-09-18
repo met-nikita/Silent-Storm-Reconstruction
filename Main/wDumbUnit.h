@@ -241,6 +241,7 @@ public:
 	bool WearAsPK( bool bWear );
 	void Hide( bool bHide, bool bThrowEvent = true );   // @0x34fb10: bCanHide-gated 2-arg form
 	void EnableHide();                                   // @0x34ed00: re-arm hiding (per-fast-turn)
+	bool CanHide() const { return bCanHide; }
 	bool IsJustUnhided() { return bJustUnhided; }
 	virtual bool IsDead() const = 0;
 	virtual bool IsUnconscious() const = 0;
