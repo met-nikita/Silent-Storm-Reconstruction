@@ -211,13 +211,14 @@ void CalcCoverIntervals( NAI::CFastRenderer::SResult *pList, const SAttackRayInf
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // NRPG::TraceLooseRaySegment @0x292010
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void TraceLooseRaySegment( NAI::IAIMap *pAIMap, const SAttackRayInfo &rayInfo, vector<STrailPoint> *pTrail, const CVec3 &vOrigin, const CVec3 &vDir, float fRange )
+void TraceLooseRaySegment( NAI::IAIMap *pAIMap, const SAttackRayInfo &rayInfo, vector<STrailPoint> *pTrail,
+	const CVec3 &vOrigin, const CVec3 &vDir, float fRange, const CAttackPortion &attack, float fMinClearDistance )
 {
 	if ( !pAIMap || !pTrail )
 		return;
 
 	CRay ray; ray.ptOrigin = vOrigin; ray.ptDir = vDir;
-	CAttackPortion tmpAttackPortion( rayInfo.atk );
+	CAttackPortion tmpAttackPortion( attack );
 	tmpAttackPortion.rTtrajectory = ray;
 
 	vector<NAI::SInterval> intersect;
@@ -227,7 +228,12 @@ void TraceLooseRaySegment( NAI::IAIMap *pAIMap, const SAttackRayInfo &rayInfo, v
 
 	for ( vector<NAI::SInterval>::iterator i = intersect.begin(); i != intersect.end(); ++i )
 	{
-		if ( i->enter.fT > 0 && i->enter.fT < fRange )
+		// Retail 1.2 0x691e60: skip the surface just left by a reflected ray,
+		// while retaining intervals that straddle the clear-distance boundary.
+		if ( i->exit.fT < fMinClearDistance + 0.01f )
+			continue;
+		if ( i->enter.fT > fRange )
+			break;
 		{
 			CObjectBase *pUD = i->pSrc->pUserData;
 			if ( find( seen.begin(), seen.end(), pUD ) != seen.end() )
@@ -244,6 +250,20 @@ void TraceLooseRaySegment( NAI::IAIMap *pAIMap, const SAttackRayInfo &rayInfo, v
 			NDb::CRPGArmor *pArmor = i->pSrc->pArmor;
 			if ( !pArmor )
 				pArmor = NDb::GetArmor( NDb::N_DEFAULT_ARMOR );
+
+			// Retail 1.2 0x691f06 / 0x69237a: test incidence before penetration.
+			// Continue from the impact with the remaining range and kinetic energy.
+			float fCos = -vDir * i->enter.ptNormal;
+			if ( fCos < pArmor->fRicochetMaxCos && random.GetFloat( 0, 1 ) < pArmor->fRicochetProbability )
+			{
+				CVec3 vImpact = ray.Get( i->enter.fT );
+				CVec3 vReflected = vDir + i->enter.ptNormal * ( 2 * fCos );
+				pTrail->push_back( STrailPoint( i->nUserID, vReflected, vImpact, tmpAttackPortion,
+					0, pUD, pArmor, -i->enter.ptNormal, i->pSrc->nFloor ) );
+				TraceLooseRaySegment( pAIMap, rayInfo, pTrail, vImpact, vReflected,
+					fRange - i->enter.fT, tmpAttackPortion, Max( 0.0f, fMinClearDistance - i->enter.fT ) );
+				return;
+			}
 
 			bool bDrawExit = false;
 			if ( !tmpAttackPortion.IsArmorIgnored( pArmor ) )
@@ -262,6 +282,9 @@ void TraceLooseRaySegment( NAI::IAIMap *pAIMap, const SAttackRayInfo &rayInfo, v
 				pTrail->push_back( STrailPoint( i->nUserID, ray.ptDir, ray.Get( i->exit.fT ), tmpAttackPortion, 0, pUD, pArmor, -i->exit.ptNormal, i->pSrc->nFloor ) );
 		}
 	}
+	// Only a ray that exhausted its intersections reaches its range endpoint.
+	// A stopped or reflected leg must not append an endpoint along the old direction.
+	pTrail->push_back( STrailPoint( 0, vDir, ray.Get( fRange ), tmpAttackPortion, 0, 0, 0, CVec3(0,0,1), 100 ) );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // NRPG::TraceLooseRay @0x292830 -- build loose fly-past tracer trail for missed shots
@@ -272,19 +295,16 @@ void TraceLooseRay( NAI::IAIMap *pAIMap, const SAttackRayInfo &rayInfo, vector<S
 		return;
 
 	pTrail->clear();
-	float fRange = rayInfo.fMaxRange > 0.0f ? rayInfo.fMaxRange : 30.0f;
 	CRay ray; ray.ptOrigin = rayInfo.vOrigin; ray.ptDir = rayInfo.vDir;
 	CAttackPortion tmpAttackPortion( rayInfo.atk );
 	tmpAttackPortion.rTtrajectory = ray;
 
 	// Initial start point
-	pTrail->push_back( STrailPoint( 0, ray.ptDir, ray.ptOrigin, tmpAttackPortion, 0, 0, 0, CVec3(0,0,1), 100 ) );
+	pTrail->push_back( STrailPoint( 0, ray.ptDir, ray.Get( rayInfo.fMinClearDistance ), tmpAttackPortion, 0, 0, 0, CVec3(0,0,1), 100 ) );
 
 	// Trace loose ray through geometry
-	TraceLooseRaySegment( pAIMap, rayInfo, pTrail, rayInfo.vOrigin, rayInfo.vDir, fRange );
-
-	// Terminal end point
-	pTrail->push_back( STrailPoint( 0, ray.ptDir, ray.Get( fRange ), tmpAttackPortion, 0, 0, 0, CVec3(0,0,1), 100 ) );
+	TraceLooseRaySegment( pAIMap, rayInfo, pTrail, rayInfo.vOrigin, rayInfo.vDir,
+		rayInfo.fMaxRange, rayInfo.atk, rayInfo.fMinClearDistance );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // NRPG::PerformRangedAttack @0x2929e0

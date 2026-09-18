@@ -141,6 +141,23 @@ public:
 	CSelection( const SSelectionInfo &_info, CObjectBase *_pSelection ): selectionInfo( _info ), pSelection( _pSelection ) {}
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// Retail CFlashColorFunc: additive model tint fading exponentially for 1500 ms.
+class CFlashColorFunc: public CFuncBase<CVec4>
+{
+	OBJECT_BASIC_METHODS( CFlashColorFunc );
+	ZDATA
+	CDGPtr<CFuncBase<STime> > pTime;
+	STime tStart;
+	CVec4 vColor;
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&pTime); f.Add(3,&tStart); f.Add(4,&vColor); return 0; }
+	virtual bool NeedUpdate() { return pTime.Refresh(); }
+	virtual void Recalc() { value = vColor * exp( int(tStart - pTime->GetValue()) * 0.003f ); }
+public:
+	CFlashColorFunc() {}
+	CFlashColorFunc( CFuncBase<STime> *_pTime, STime _tStart, const CVec4 &_vColor ):
+		pTime(_pTime), tStart(_tStart), vColor(_vColor) {}
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
 class CSetRender: public COrdinarySyncDst<NWorld::IVisObj,CSetRender>, public NWorld::IRenderVisitor
 {
 	typedef COrdinarySyncDst<NWorld::IVisObj,CSetRender> TParent;
@@ -152,8 +169,7 @@ class CSetRender: public COrdinarySyncDst<NWorld::IVisObj,CSetRender>, public NW
 	vector<CPtr<NWorld::IVisObj> > objects;
 	CSelectionHash selections;
 	CPtr<NLSHead::CHeadsController> pHeadsController;
-	// release CSetRender tag 9: transient unit muzzle/effect flashes (scriptParticles-era).
-	// Dead in this predecessor (nothing pushes one) -> always empty, save-format member only.
+	// Retail CSetRender tag 9: temporary AI-turn model post-filters.
 	struct SUnitFlash { CObj<CObjectBase> pFlash; STime tEnd; SUnitFlash() {} int operator&( CStructureSaver &f ) { f.Add(2,&pFlash); f.Add(3,&tEnd); return 0; } };
 	list<SUnitFlash> unitFlashes;
 public:
@@ -204,9 +220,45 @@ public:
 	virtual void SetBaseFogHeight( float f );
 	//
 	CObjectBase* Select( CObjectBase *pSelect, const SSelectionInfo &info = SSelectionInfo() );
+	void FlashUnit( CObjectBase *pUnit, const CVec4 &vColor );
+	void RemoveObsoleteFlashes();
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CSetRender
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CSetRender::FlashUnit( CObjectBase *pUnit, const CVec4 &vColor )
+{
+	// v1.2 0x6cc930: only units present in the visible render set can flash.
+	for ( int k = 0; k < objects.size(); ++k )
+	{
+		if ( objects[k] != pUnit )
+			continue;
+		const vector<CObj<CObjectBase> > &ob = GetObjects( k );
+		vector<CObjectBase*> targets;
+		for ( int n = 0; n < ob.size(); ++n )
+			targets.push_back( ob[n] );
+		STime tNow = pTime->GetValue();
+		SUnitFlash flash;
+		flash.pFlash = pScene->AddPostFilter( targets, new NGScene::CPostColorer( new CFlashColorFunc( pTime, tNow, vColor ) ) );
+		flash.tEnd = tNow + 1500;
+		unitFlashes.push_back( flash );
+		return;
+	}
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CSetRender::RemoveObsoleteFlashes()
+{
+	CDGPtr<CFuncBase<STime> > pTimer( pTime );
+	pTimer.Refresh();
+	STime tNow = pTimer->GetValue();
+	for ( list<SUnitFlash>::iterator i = unitFlashes.begin(); i != unitFlashes.end(); )
+	{
+		if ( i->tEnd < tNow )
+			i = unitFlashes.erase( i );
+		else
+			++i;
+	}
+}
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CSetRender::SetNewSource( CSyncSrc<NWorld::IVisObj> *_pSrc )
 {
@@ -1213,6 +1265,7 @@ public:
 	CRenderGame( NWorld::IWorld *_pWorld, NGScene::IGameView *_pScene, NSound::ISoundScene *_pSoundScene );
 
 	CObjectBase* Select( CObjectBase *pSelect, const CVec4 &vColor, bool bIgnoreFloorMask = false );
+	virtual void FlashUnit( CObjectBase *pUnit, const CVec4 &vColor ) { rUnits.FlashUnit( pUnit, vColor ); }
 
 	CCTime* GetTime() { return timer.GetTime(); }
 	NLSHead::CHeadsController* GetHeadController() const { return pHeadsController; }
@@ -1551,8 +1604,7 @@ void CRenderGame::UpdateViewWorld( bool bAdvanceTime, STime currentTime, NWorld:
 	rUnits.Sync();
 
 	// retail @0x2cf620 tail: after both Syncs the weather lighting/effect state is advanced.
-	// (Retail also prunes rUnits' expired unit-flashes here -- RemoveObsoleteFlashes @0x2cc0b0;
-	// nothing in this predecessor ever pushes a flash, so there is nothing to prune yet.)
+	rUnits.RemoveObsoleteFlashes();
 	SyncWeather();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1574,6 +1626,7 @@ using namespace NRender;
 BASIC_REGISTER_CLASS( IShowUnit );
 BASIC_REGISTER_CLASS( IRenderGame );
 REGISTER_SAVELOAD_CLASS( 0x01941130, CRenderGame );
+REGISTER_SAVELOAD_CLASS( 0x02973151, CFlashColorFunc );
 REGISTER_SAVELOAD_CLASS( 0x01163130, CParticleFilter );
 REGISTER_SAVELOAD_CLASS( 0x01941131, CSelection );
 REGISTER_SAVELOAD_CLASS( 0x01941132, CShowWorldUnit );

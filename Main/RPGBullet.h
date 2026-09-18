@@ -8,14 +8,11 @@
 // out of CGame into free functions, plus the two carrier PODs they introduced
 // (SAttackRayInfo, SCoverInterval).
 //
-// This lands the carrier types + the subset of the free functions that map cleanly
-// onto already-present engine calls. The equivalent CGame:: members (CalcCovers,
-// ProcessMeleeAttackPortion, ProcessRangedAttackPortion, ProcessThrowingAttackPortion)
-// are left in place untouched -- nothing calls these new functions yet, so the build
-// stays behaviour-neutral (parity surface).
+// PerformRangedAttack is wired into shooting; loose rays include retail reflection,
+// clear-distance filtering and penetration. Some CGame helpers remain alongside them.
 //
 // DEFERRED (genuine gaps -- see RPGBullet.cpp notes):
-//   * TraceLooseRay / TraceLooseRaySegment depend on NRPG::CheckBulletToHit, a
+//   * Incidental unit damage in TraceLooseRaySegment needs NRPG::CheckBulletToHit, a
 //     per-bullet hit roll (RPGToHit module) that does NOT exist as a free function in
 //     the dev tree (the dev implements to-hit via the CToHitCalcer hierarchy).
 //   * CanHitTarget (needs the shooter diplomacy/relation -> ally mapping) and the
@@ -122,7 +119,8 @@ void CalcCoverIntervals( NAI::CFastRenderer::SResult *pList, const SAttackRayInf
 // @0x292830 -- build loose fly-past tracer trail for missed shots
 void TraceLooseRay( NAI::IAIMap *pAIMap, const SAttackRayInfo &rayInfo, vector<STrailPoint> *pTrail );
 // @0x292010 -- trace segment of loose ray through obstacles
-void TraceLooseRaySegment( NAI::IAIMap *pAIMap, const SAttackRayInfo &rayInfo, vector<STrailPoint> *pTrail, const CVec3 &vOrigin, const CVec3 &vDir, float fRange );
+void TraceLooseRaySegment( NAI::IAIMap *pAIMap, const SAttackRayInfo &rayInfo, vector<STrailPoint> *pTrail,
+	const CVec3 &vOrigin, const CVec3 &vDir, float fRange, const CAttackPortion &attack, float fMinClearDistance );
 // @0x2929e0 -- retail ranged attack entry point
 CObjectBase * PerformRangedAttack( NWorld::IWorld *pWorld, const SAttackRayInfo &rayInfo, STime sCast, NDb::CModel *pTrailModel, float fTrailSpeed, NDb::CRPGGrenade *pGrenade = 0, int nEffectType = 0 );
 ////////////////////////////////////////////////////////////////////////////////////////////////////

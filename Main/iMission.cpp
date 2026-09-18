@@ -2329,6 +2329,19 @@ void CMission::ExecWorldCommands()
 		}
 		// LUA convergence PART B: SetupAmbientLight sets the scene's ambient light from the record
 		// (retail CMissionBase::ExecWorldCommand @0x1a30c0: GetLight + scene->SetAmbient; mirrors SetLightMode).
+		else if ( CDynamicCast<NWorld::CUICmdAIUnitWillMove>( pCmd ) )
+		{
+			// Retail 1.2 0x5a3fe0: one additive flash when the AI chooses its next unit.
+			NWorld::CUICmdAIUnitWillMove *pMove = CDynamicCast<NWorld::CUICmdAIUnitWillMove>( pCmd );
+			if ( IsValid( pMove->pUnit ) && IsValid( pActivePlayer ) && IsValid( pWorld ) )
+			{
+				NDb::EDiplomacyState state = pWorld->GetDiplomacyState( pActivePlayer->GetPlayer(), pMove->pUnit->GetPlayer() );
+				if ( state == NDb::DS_ENEMY )
+					pRender->FlashUnit( pMove->pUnit, CVec4( 78.0f / 255, 20.0f / 255, 0, 0 ) );
+				else if ( state == NDb::DS_NEUTRAL || state == NDb::DS_ALLY )
+					pRender->FlashUnit( pMove->pUnit, CVec4( 0, 77.0f / 255, 78.0f / 255, 0 ) );
+			}
+		}
 		else if ( CDynamicCast<NWorld::CUICmdSetAmbient>( pCmd ) )
 		{
 			NWorld::CUICmdSetAmbient *pSetAmbient = CDynamicCast<NWorld::CUICmdSetAmbient>( pCmd );
