@@ -24,10 +24,37 @@
 #include "..\Misc\RandomGen.h"   // SRand -- the SelectTargetHLs HL_ANY roll @0x2b4a7b
 //
 #include "RPGToHit.h"
+#include "RPGBullet.h"
 //
 namespace NRPG
 {
 using NWorld::CUnitServer;
+////////////////////////////////////////////////////////////////////////////////////////////////////
+int GetBulletToHit( const SAttackRayInfo &rayInfo, CObjectBase *pTarget, NAI::EHitLocation hl )
+{
+	// v1.2 0x6b5880: fragments without a shooter and non-unit obstacles always hit.
+	if ( !IsValid( rayInfo.pUS ) )
+		return 100;
+	CDynamicCast<CUnitServer> pUnit( pTarget );
+	if ( !pUnit )
+		return 100;
+	CUnitServer *pShooter = rayInfo.pUS;
+	bool bNight = pShooter->GetWorld()->GetGame()->IsNight();
+	pShooter->GetUnitRPG()->PrintLog( false );
+	int nDistance = int( fabs( rayInfo.vOrigin - pUnit->GetPosition().GetCP() ) * FP_INV_GRID_STEP );
+	vector<int> accessibleHLs;
+	// v1.2 tests direct visibility only (v1.1 also tested audibility).
+	bool bBackstab = !pUnit->IsUnitVisible( pShooter );
+	return GetToHit( pShooter, rayInfo.from.GetPose(), nDistance, rayInfo.vOrigin,
+		pUnit->GetPosition().pos, hl, rayInfo.nExtraAP, pUnit, accessibleHLs, 75,
+		rayInfo.bFirstTurn, CVec3(1,1,1), bBackstab, rayInfo.nBullet, bNight );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+bool CheckBulletToHit( const SAttackRayInfo &rayInfo, CObjectBase *pTarget, NAI::EHitLocation hl )
+{
+	int nToHit = GetBulletToHit( rayInfo, pTarget, hl );
+	return random.Get( 100 ) <= nToHit; // retail 0x6b5aeb: inclusive, even at zero chance
+}
 //
 inline float DistanceFunc( int nDistInTile, float fSlope )
 {
@@ -280,8 +307,8 @@ float CToHitCalcer::GetLight()
 		Clamp(ptIllumination.y, 0.f, 1.f), Clamp(ptIllumination.z, 0.f, 1.f) );
 	float fRes = 0.5f * (1 + fabs( ptLight ) / fabs( CVec3(1,1,1) ) );
 	// release-new: at night the light factor drops 10% unless the unit has night-vision (perk 0x15).
-	// bNight is wired false in this predecessor tree (CWorld::IsNight absent) so this is dormant --
-	// kept for layout/faithfulness.
+	// Incidental bullet rolls pass the mission's night flag; other legacy callers
+	// still default to day and need a separate environment-input audit.
 	if ( bNight && !pUnitMission->HasPerk( 0x15 ) )
 		fRes *= 0.9f;
 	return fRes;

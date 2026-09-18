@@ -77,7 +77,7 @@ class CUnitMission: public IUnitMission
 	friend class CRLauncherToHitCalcer;
 	// release migration: the free-fn to-hit dispatch reaches GetToHitWeaponType / GetSnipeAP /
 	// GetMeleeToHit / bLogActive (all private) -- befriend it (no visibility change to the class).
-	friend int GetToHit( const NWorld::CUnit*, NAI::EPose, int, const CVec3&, const NAI::SPosition&, NAI::EHitLocation, int, const NWorld::CUnit*, const vector<int>&, int, bool, const CVec3&, bool, int );
+	friend int GetToHit( const NWorld::CUnit*, NAI::EPose, int, const CVec3&, const NAI::SPosition&, NAI::EHitLocation, int, const NWorld::CUnit*, const vector<int>&, int, bool, const CVec3&, bool, int, bool );
 	friend int GetTileToHit( const NWorld::CUnit*, NAI::EPose, int, const CVec3&, CVec3, NAI::ETileHitLocation, int, int, bool, const CVec3&, int );
 	friend int GetGrenadeToHit( const NWorld::CUnit*, NAI::EPose, int, const CVec3&, bool, CVec3, const CVec3& );
 	friend int GetRLauncherToHit( const NWorld::CUnit*, NAI::EPose, int, const CVec3&, CVec3, NAI::ETileHitLocation, int, bool, const CVec3& );
@@ -215,6 +215,7 @@ public:
 	virtual void SaveAP( const SSnipeAP &ap );
 	virtual float GetSightDistance( NAI::EPose pose ) const;
 	virtual void StartNewTurn( const CVec3 &ptCP );
+	virtual bool IsFirstTurn() const { return nTurnCounter < 2; } // retail 0x6c5b80
 
 	virtual bool CreateAttack( vector<CAttackPortion> *pRes, bool bSpendAmmo,
 		bool bAnonymous, IUnitMissionInfo *pTarget, bool bBackStab, bool bAdaptWeapon );
@@ -291,7 +292,7 @@ public:
 	virtual NDb::CPanzerklein *GetPanzerklein() { return pPanzerklein; }
 	virtual void SetPanzerklein( NDb::CPanzerklein *pPK, CDynamicSkill *_pPanzerkleinVP, IInventory *_pPKInventory );
 	void InitAsPanzerklein( NDb::CPanzerklein *pPK );   // retail @0x2c4f50 tail (CreateUnit PK-pers VP init)
-	virtual void DoRegenerations();
+	virtual void DoRegenerations( NWorld::IWorld *pWorld, int *pnBleed );
 	virtual bool IsHero() const;
 	virtual bool IsHiding() const { return bHiding; }
 	virtual void SetHiding( bool _bHiding );
@@ -552,7 +553,6 @@ void CUnitMission::StartNewTurn( const CVec3 &ptCP )
 {
 	++nTurnCounter;               // retail @0x2bf8c0 head
 	ResetUnitParameters();
-	ProcessCriticalsOnNewTurnFor();
 	ptLastCP = ptCP;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1273,11 +1273,11 @@ EToHitType GetToHitType( const NWorld::CUnit *pAttacker )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // To-hit dispatch (release migration). Each free fn RTTI-casts the firing unit to its CUnitServer,
 // picks the EToHitType from the held weapon and builds the matching ToHitCalcer (which now takes the
-// CUnitServer*). bNight is wired false (CWorld::IsNight absent in this tree -- documented elision).
+// CUnitServer*). Incidental bullets supply the retail night flag explicitly.
 int GetToHit( const NWorld::CUnit *pAttacker, NAI::EPose curPose, int nDistance, const CVec3 &ptAttacker,
 	const NAI::SPosition &posTarget, NAI::EHitLocation hl, int nExtraAP, const NWorld::CUnit *pTarget,
 	const vector<int> &accessibleHLs, int nHitCover, bool bFirstRound, const CVec3 &ptIllumination, bool bBackstab,
-	int nBullet )   // retail @0x2b4ae0 param: the burst bullet index (Jan03 read the mission's cursor)
+	int nBullet, bool bNight )   // retail @0x2b4ae0: explicit burst index and night flag
 {
 	CDynamicCast<NWorld::CUnitServer> pUS( const_cast<NWorld::CUnit*>( pAttacker ) );
 	// retail RPGUnitGetToHit @0x2b4ae0 head gate: a script-forced to-hit (UnitSetToHit, -1 = off)
@@ -1289,7 +1289,6 @@ int GetToHit( const NWorld::CUnit *pAttacker, NAI::EPose curPose, int nDistance,
 	CDynamicCast<NWorld::CUnitServer> pUSTarget( const_cast<NWorld::CUnit*>( pTarget ) );
 	CUnitMission *pMission = CDynamicCast<CUnitMission>( pUS->GetUnitRPG() );
 	IUnitMissionInfo *pTargetRPG = pTarget ? pTarget->GetRPG() : 0;
-	const bool bNight = false;
 	CPtr<IToHitCalcer> pToHitCalcer;
 	switch ( pMission->GetToHitWeaponType() )
 	{
@@ -2066,8 +2065,28 @@ void CUnitMission::AddVPBoost( float fStrength, int nDuration )
 	vpBoostDurations.push_back( nDuration );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CUnitMission::DoRegenerations()
+static int CalcBleedingDamage( int nVP, int nMaxVP, float fCritical, int nStopped )
 {
+	if ( nVP <= 0 )
+		return 0;
+	int nDamage = int( fCritical );
+	int nHalfVP = Float2Int( nMaxVP * 0.5f );
+	if ( nVP < nHalfVP )
+		nDamage = int( float(nDamage) + ( nHalfVP - nVP ) * 0.1f );
+	return Max( 0, nDamage - nStopped );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CUnitMission::DoRegenerations( NWorld::IWorld *pWorld, int *pnBleed )
+{
+	// Retail v1.2 0x6c49f0: critical lifetimes advance at end of turn / real-time tick,
+	// not when AP is refreshed. Compute whole-number bleeding before PK regeneration.
+	ProcessCriticalsOnNewTurnFor();
+	CCritical *pBleeding = 0;
+	HasCritical( NDb::C_BLEEDING, &pBleeding );
+	CDynamicSkill &vp = pRPGUnit->Skills( NDb::ST_VP );
+	*pnBleed = CalcBleedingDamage( int(vp) + Max( 0, GetHealedVP() ), vp.GetTheoreticalMax(),
+		pBleeding ? pBleeding->GetValue() : 0, nBleedingStopAmount );
+	ApplyCritical( SCritical( NDb::CL_ANY, NDb::C_VP ) );
 	if ( !pPanzerklein )
 		return;
 	if ( !pPanzerklein->fRegenerationValue )

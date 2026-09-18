@@ -143,9 +143,7 @@ class CUnitServer: public CDumbUnitServer, public CUnit, public CTBSUnit<CUnitSe
 												// lostUnits in Die @0x3c2190 / OnUnitMadeUnconscious @0x3c2010.
 	bool bForceNoChangePose = false;	// retail CUnitServer+0x1f4 (serialized tag 28; luaUnitLockPose writes it): a script
 										// "pose lock". Consumed by CannotFreelyChangePoses() -> FindPath move-only.
-	int nBleed = 0;			// retail +0x1fc (tag 32): pending bleed damage, applied+cleared by retail
-							// ProcessCriticalsAndRegenerations @0x3c2770 (dev routes bleeding through the RPG
-							// critical in OnNewPlayerTurnOrTime -- runtime-inert here, format parity only).
+	int nBleed = 0;			// retail +0x1fc (tag 32): current periodic bleeding damage, also shown in the UI
 	SItem sHandItem;		// retail +0x200 (tag 33): the unit's in-hand item slot, and THE live hand state --
 							// written by SetHandItem (@0x387b30), read by CPlayer::GetInHandItem (@0x386ae0).
 							// (PDB-checked: sizeof(SItem) == 0x24, so +0x200 + 0x24 == +0x224 == pHandItemHolder.)
@@ -210,6 +208,8 @@ public:
 	CUnitServer( CWorld *pWorld, NRPG::IUnitMission *_pRPG, NDb::CModel *pModel, CPlayer *pPlayer, const NAI::SUnitPosition &pos, bool bClueUnit = false );
 	// events
 	void OnNewPlayerTurnOrTime( const CEventOnNewPlayerTurnOrTime &event );
+	void ProcessCriticalsAndRegenerations();
+	virtual int GetBleeding() const { return nBleed; }
 	void OnNewPlayerFastTurnOrTime( const CEventOnNewPlayerFastTurnOrTime &event );   // @0x3c0300: re-arm hiding
 	//
 	// CDumdUnit callbacks

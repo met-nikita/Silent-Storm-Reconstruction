@@ -381,9 +381,8 @@ public:
 	virtual bool CanStrafe() = 0;
 	virtual NDb::CPanzerklein *GetWearingDBPK() = 0;
 	virtual CObjectBase* GetAIMapHull() = 0;
-	// release CUnitServer::GetBleeding @0x7c68d0 (int @+0xb0): mission-scripted bleeding counter,
-	// shown as a permanent fake critical icon (NUI::UpdateCriticalIcons). No in-exe writer exists
-	// (trigger/reflection-set); the default 0 = no icon, which matches unscripted play.
+	// Whole-number damage from the last critical/regeneration pass, also displayed
+	// by NUI::UpdateCriticalIcons (retail CUnitServer::GetBleeding @0x7c68d0).
 	virtual int GetBleeding() const { return 0; }
 	////
 	NAI::EPose GetPose() const;

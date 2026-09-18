@@ -790,8 +790,7 @@ void CUnitServer::OnTBSEvent( ETBSEvent event )
 			animator.CalculateAnimFlags();
 			break;			
 		case TBS_FINISH_OWN_TURN:
-			if ( !IsDead() )
-				GetUnitRPG()->DoRegenerations();
+			ProcessCriticalsAndRegenerations();
 			pState->OnFinishOwnTurn();
 			pState->OnFinishTimeOrTurn( false );
 			break;			
@@ -1039,13 +1038,16 @@ void CUnitServer::Segment()
 	CDumbUnitServer::Segment();
 	if ( GetWorld()->IsRealTime() )
 	{
-		if ( tCur - tCriticalPrev >= 3000 )   // retail keeps two throttles (tCriticalPrev/tStatePrev); dev's merged pass rides the criticals one
+		// Retail v1.2 0x7c34e1: state updates and criticals use separate clocks.
+		if ( tCur - tStatePrev >= 6000 )
 		{
-			if ( !IsDead() )
-				GetUnitRPG()->DoRegenerations();
 			pState->OnFinishTimeOrTurn( true );
-			tCriticalPrev = tCur;
 			tStatePrev = tCur;
+		}
+		if ( tCur - tCriticalPrev >= 30000 )
+		{
+			ProcessCriticalsAndRegenerations();
+			tCriticalPrev = tCur;
 		}
 	}
 	pState->Segment();
@@ -1871,18 +1873,28 @@ void CUnitServer::OnNewPlayerFastTurnOrTime( const CEventOnNewPlayerFastTurnOrTi
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CUnitServer::OnNewPlayerTurnOrTime( const CEventOnNewPlayerTurnOrTime &event )
 {
-	if ( CanFight() && ( !IsValid( event.pPlayer ) || event.pPlayer == GetPlayer() ) )
+	// Retail applies bleeding in the unit's critical/regeneration pass, not here.
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CUnitServer::ProcessCriticalsAndRegenerations()
+{
+	// Retail v1.2 0x7c2b30: never submit a zero-strength damage portion. In
+	// particular, fractional criticals must not become a synthetic -1 hit locator.
+	if ( !IsDead() )
 	{
-		// Bleeding
-		NRPG::CCritical *pCritical;
-		if ( GetUnitRPG()->HasCritical( NDb::C_BLEEDING, &pCritical ) )
+		GetUnitRPG()->DoRegenerations( GetWorld(), &nBleed );
+		if ( IsClueUnit() && IsUnconscious() )
+			nBleed = 0;
+		if ( nBleed > 0 )
 		{
-			int nDamage = pCritical->GetCritical().fValue;
-			NRPG::CAttackPortion att( 1, 0, 0.0f, nDamage, -1, 0 );   // retail ProcessCriticalsAndRegenerations @0x3c2770: fPushCoeff=0
-			// retail ProcessCriticalsAndRegenerations @0x3c2770: this->pWorld, straight-down direction.
+			NRPG::CAttackPortion att( 1, 0, 0.0f, nBleed, -1, 0 );
+			att.bBypassPK = true;
 			ProcessAttack( GetWorld(), NAI::HL_BODY, &att, CVec3( 0, 0, -1 ), GetUnitRPG()->GetRPGArmor() );
+			GetWorld()->CreateBloodyMess( GetPosition().GetCP() + CVec3(0,0,1), CVec3(0,0,-1.5f), this, 1 );
+			GetWorld()->GetGlobalAck()->OnSuffersLightDamage( this );
 		}
 	}
+	SyncConscious();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 NDb::EDiplomacyState CUnitServer::GetDiplomacyState( CUnitServer *pTarget ) const

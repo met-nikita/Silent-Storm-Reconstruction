@@ -21,6 +21,7 @@
 
 namespace NWorld
 {
+extern bool bShowBlood;
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CBulletServer
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -135,40 +136,26 @@ bool CBulletServer::Segment()
 					pArmor = ss.pArmor;
 			}
 		}
-		if ( pArmor && sCurrent.nFloor < 100 )
-		{
-			NDb::CTEffect *pShotEffect = pArmor->GetShotEffect( nEffectType );
-			if ( pShotEffect )
-			{
-				CVec3 dir = -trailpointsSet[nTemp].vNormal;
-				CQuat rndX( random.GetFloat(0,10000), CVec3(1,0,0) );
-				if ( fabs( dir.x ) < 0.999f )
-					rndX = CQuat( acos( dir.x ), CVec3( 0, -dir.z, dir.y ), true ) * rndX;
-				else if ( dir.x < 0 )
-					rndX = CQuat( FP_PI, CVec3(0,1,0) ) * rndX;
-				pWorld->CreateParticle( sCurrent.vPosition, rndX, pShotEffect->GetEffect( &rnd ), sCurrent.nFloor );
-			}
-			if ( pArmor->pSoundShot )
-			{
-				NDb::CSound *pS = NDb::GetSound( pArmor->pSoundShot );
-				pWorld->MakeSound( sCurrent.vPosition, pS );
-			}
-		}
 		CObjectBase *pCatcher = trailpointsSet[nTemp].pAttackTarget;
 		CVec3 vPlace = sCurrent.vPosition;
 		CVec3 vNormal = sCurrent.vNormal;
+		bool bShowImpact = nEffectType >= 0;
 		CDynamicCast<NRPG::IAttackable> pAttackCatcher(pCatcher);
 		if (pAttackCatcher)
 		{
 			if ( IsValid( pCatcher ) )
 			{
-				pAttackCatcher->ProcessAttack( pWorld, sCurrent.nUserID, &sCurrent.sAttack, sCurrent.vDir, sCurrent.pArmor );
+				// v1.2 0x746a40: resolve damage before deciding on flesh effects.
+				int nDamage = pAttackCatcher->ProcessAttack( pWorld, sCurrent.nUserID, &sCurrent.sAttack, sCurrent.vDir, sCurrent.pArmor );
 		
 				if ( IsValid( pCatcher ) )
 				{
 					CDynamicCast<NWorld::CUnitServer> pUS(pCatcher);
 					if (pUS)
 					{
+						if ( !IsValid( pNearestTarget ) )
+							pNearestTarget = pUS;
+						bShowImpact = nDamage > 0;
 						pUS->GetUnitRPG()->BulletHit();
 						CPtr<NWorld::CUnitServer> pTarget = pWorld->GetUnitServer( trailpointsSet[nTemp].sAttack.pTarget );
 						if ( IsValid( pShooter ) )
@@ -179,22 +166,45 @@ bool CBulletServer::Segment()
 								pWorld->GetGlobalAck()->OnDoAccidentalDamage( pShooter, pUS );
 						}
 					}
-					if ( pArmor->pShotMaterial )
-					{
-						CDynamicCast<NWorld::IBuilding> pBuilding(pCatcher);
-						if (pBuilding)
-							new CDecal( pWorld, vPlace, vNormal, pArmor->fShotRadius, pArmor->pShotMaterial->GetMaterial(&rnd), pBuilding->GetSceneHandle() );
-						else
-							new CDecal( pWorld, vPlace, vNormal, pArmor->fShotRadius, pArmor->pShotMaterial->GetMaterial(&rnd), pCatcher );
-					}
 				}
 			}
 		}
-		else
+		// v1.2 0x746b1c: a unit's mesh produces an impact only at its damaging
+		// entry point, not at a visual-only exit or a different attack receiver.
+		CDynamicCast<CUnitServer> pObjectUnit( sCurrent.pObject );
+		if ( pObjectUnit )
+			bShowImpact = bShowImpact && sCurrent.pObject == sCurrent.pAttackTarget;
+		if ( !bShowImpact || !pArmor || sCurrent.nFloor >= 100 )
+			continue;
+
+		bool bBloodMaterial = pArmor->pMaterial && pArmor->pMaterial->GetRecordID() == NDb::CRPGMaterial::HUMAN_BODY;
+		if ( !bBloodMaterial || bShowBlood )
 		{
-			// must be a terrain?
-			if ( sCurrent.pObject == 0 && sCurrent.nFloor < 100 && pArmor->pShotMaterial )
-				new CDecal( pWorld, vPlace, vNormal, pArmor->fShotRadius, pArmor->pShotMaterial->GetMaterial(&rnd), pWorld->GetTerrainInfo() );
+			NDb::CTEffect *pShotEffect = pArmor->GetShotEffect( nEffectType );
+			if ( pShotEffect )
+			{
+				CVec3 dir = -vNormal;
+				CQuat rndX( random.GetFloat(0,10000), CVec3(1,0,0) );
+				if ( fabs( dir.x ) < 0.999f )
+					rndX = CQuat( acos( dir.x ), CVec3( 0, -dir.z, dir.y ), true ) * rndX;
+				else if ( dir.x < 0 )
+					rndX = CQuat( FP_PI, CVec3(0,1,0) ) * rndX;
+				pWorld->CreateParticle( vPlace, rndX, pShotEffect->GetEffect( &rnd ), sCurrent.nFloor );
+			}
+			if ( pArmor->pSoundShot )
+				pWorld->MakeSound( vPlace, NDb::GetSound( pArmor->pSoundShot ) );
+		}
+		// Decals follow the surface object, not the damage receiver (exit points
+		// can have a surface even though pAttackTarget is null).
+		if ( pArmor->pShotMaterial && IsValid( sCurrent.pObject ) )
+		{
+			CDynamicCast<IBuilding> pBuilding( sCurrent.pObject );
+			CObjectBase *pDecalTarget = pBuilding ? pBuilding->GetSceneHandle() : sCurrent.pObject.GetPtr();
+			new CDecal( pWorld, vPlace, vNormal, pArmor->fShotRadius, pArmor->pShotMaterial->GetMaterial(&rnd), pDecalTarget );
+		}
+		else if ( pArmor->pShotMaterial && sCurrent.pObject == 0 )
+		{
+			new CDecal( pWorld, vPlace, vNormal, pArmor->fShotRadius, pArmor->pShotMaterial->GetMaterial(&rnd), pWorld->GetTerrainInfo() );
 		}
 	}
 

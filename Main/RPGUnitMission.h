@@ -82,6 +82,7 @@ public:
 	virtual const SSnipeAP& GetSavedAP() const = 0;
 	virtual void SaveAP( const SSnipeAP &ap ) = 0;
 	virtual void StartNewTurn( const CVec3 &ptCP ) = 0;
+	virtual bool IsFirstTurn() const = 0;
 	virtual bool CheckIC() = 0;	// Return true if he managed to dodge
 	virtual void Kill() = 0;
 	virtual bool IsDead() const = 0;
@@ -151,7 +152,7 @@ public:
 	virtual int GetFallDamage( float fHDiff ) = 0;
 	virtual NDb::CPanzerklein *GetPanzerklein() = 0;
 	virtual void SetPanzerklein( NDb::CPanzerklein *pPK, CDynamicSkill *_pPanzerkleinVP, IInventory *_pPKInventory ) = 0; 
-	virtual void DoRegenerations() = 0;
+	virtual void DoRegenerations( NWorld::IWorld *pWorld, int *pnBleed ) = 0;
 	virtual void SetHiding( bool _bHiding ) = 0;
 	virtual void HealVP( const SFirstAid &fa ) = 0;
 	virtual void HealCriticals( int nDC ) = 0;
@@ -217,13 +218,14 @@ EToHitType GetToHitType( const NWorld::CUnit *pAttacker );
 // To-hit dispatch (release migration, session 25): free fns that replace the dev virtual
 // IUnitMissionInfo::Get*ToHit interface. Each RTTI-casts the firing unit to its CUnitServer, picks the
 // EToHitType from the held weapon and builds the matching ToHitCalcer (defined in RPGUnitMission.cpp;
-// friends of CUnitMission). bNight is wired false here (CWorld::IsNight absent -- documented elision).
+// friends of CUnitMission). The incidental-bullet path supplies bNight; legacy callers
+// still use the false default and need a separate to-hit environment audit.
 // retail RPGUnitGetToHit @0x2b4ae0 takes the bullet index as a PARAMETER (the mission-side
 // Jan03 nBullet cursor does not exist in retail); callers pass their burst-loop index.
 int GetToHit( const NWorld::CUnit *pAttacker, NAI::EPose curPose, int nDistance, const CVec3 &ptAttacker,
 	const NAI::SPosition &posTarget, NAI::EHitLocation eHL, int nExtraAP, const NWorld::CUnit *pTarget,
 	const vector<int> &accessibleHLs, int nHitCover, bool bFirstRound,
-	const CVec3 &ptIllumination = CVec3(1,1,1), bool bBackstab = false, int nBullet = 0 );
+	const CVec3 &ptIllumination = CVec3(1,1,1), bool bBackstab = false, int nBullet = 0, bool bNight = false );
 int GetTileToHit( const NWorld::CUnit *pAttacker, NAI::EPose curPose, int nDistance, const CVec3 &ptAttacker,
 	CVec3 ptTilePos, NAI::ETileHitLocation eHitLocation, int nExtraAP, int nHitCover, bool bFirstRound,
 	const CVec3 &ptIllumination = CVec3(1,1,1), int nBullet = 0 );

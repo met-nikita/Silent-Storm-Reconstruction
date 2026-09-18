@@ -31,10 +31,9 @@ SAttackRayInfo::SAttackRayInfo( const CAttackPortion &_atk, const CVec3 &_vOrigi
 	  vOrigin( _vOrigin ), vDir( _vDir ), bTargetIsHit( _bTargetIsHit ),
 	  fMinClearDistance( _fMinClearDistance ), fMaxRange( _fMaxRange ), atk( _atk ), pTarget( _pTarget )
 {
-	// The release sets bFirstTurn from the shooter's "is it the first turn" status. The dev tree
-	// has no direct CUnit/CUnitServer first-turn accessor (IsFirstTurn lives on NWorld::IWorld /
-	// CTBSWorld, which this ctor does not have), so bFirstTurn is left false here. Behaviour-neutral:
-	// SAttackRayInfo is not wired into any call path yet.
+	// Retail v1.2 0x69118a: the shooter's RPG turn counter, not the world's turn.
+	if ( pUS )
+		bFirstTurn = pUS->GetUnitRPG()->IsFirstTurn();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // 8-arg ctor @0x291450 (no shooter / no from-position)
@@ -241,11 +240,6 @@ void TraceLooseRaySegment( NAI::IAIMap *pAIMap, const SAttackRayInfo &rayInfo, v
 			CDynamicCast<NWorld::CUnit> pUnit( pUD );
 			if ( pUnit )
 				seen.push_back( pUD );
-			// Retail 1.2 @0x691f60..0x692070: a loose ray cannot hit its intended
-			// unit. Suppress both entry and exit effects, but retain armor traversal.
-			// Coarse cover rays and the final fragmented mesh trace can disagree;
-			// this gate prevents a rolled miss from producing a blood impact.
-			bool bMissedTarget = pUnit && pUD == rayInfo.pTarget.GetPtr();
 
 			NDb::CRPGArmor *pArmor = i->pSrc->pArmor;
 			if ( !pArmor )
@@ -265,13 +259,17 @@ void TraceLooseRaySegment( NAI::IAIMap *pAIMap, const SAttackRayInfo &rayInfo, v
 				return;
 			}
 
+			// Retail 1.2 0x691f60: never turn a rolled miss into a hit on its
+			// intended target. Other units get one independent roll per traced leg.
+			bool bHit = pUD != rayInfo.pTarget.GetPtr();
+			if ( bHit && IsValid( pUnit ) )
+				bHit = CheckBulletToHit( rayInfo, pUD, (NAI::EHitLocation)i->nUserID );
 			bool bDrawExit = false;
 			if ( !tmpAttackPortion.IsArmorIgnored( pArmor ) )
 			{
-				bDrawExit = !bMissedTarget;
-				// pAttackTarget is NULL so no intended target damage is resolved for loose ray
-				if ( !bMissedTarget )
-					pTrail->push_back( STrailPoint( i->nUserID, ray.ptDir, ray.Get( i->enter.fT ), tmpAttackPortion, 0, pUD, pArmor, -i->enter.ptNormal, i->pSrc->nFloor ) );
+				bDrawExit = bHit || !pUnit;
+				if ( bDrawExit )
+					pTrail->push_back( STrailPoint( i->nUserID, ray.ptDir, ray.Get( i->enter.fT ), tmpAttackPortion, bHit ? pUD : 0, pUD, pArmor, -i->enter.ptNormal, i->pSrc->nFloor ) );
 				if ( !tmpAttackPortion.CanDealDmg( pArmor ) )
 					return;
 			}

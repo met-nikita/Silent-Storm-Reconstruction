@@ -135,6 +135,7 @@ public:
 	// these before every perception sweep from the world's current time-of-day sentinel.
 	virtual void SetVisionMultiplier( float fMultiplier ) = 0;
 	virtual void SetNight( bool bIsNight ) = 0;
+	virtual bool IsNight() const = 0;
 	// retail CGame::GetUnitSightDistance @0x2984d0 (game vtbl+0x34): the unit's sight range --
 	// CUnit::GetSightDistance (flat 20, perk 0x53), x1.5015 at night with the night-vision perk 0x51.
 	virtual float GetUnitSightDistance( CUnit *pRPGUnit ) = 0;

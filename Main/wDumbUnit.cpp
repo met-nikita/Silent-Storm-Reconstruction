@@ -657,7 +657,6 @@ int CDumbUnitServer::ProcessAttack( NWorld::IWorld *_pWorld, int nUserID, NRPG::
 		return 0;
 	}
 	SRand rnd;
-	int nWasVP = pRPG->GetTotalVP();
 	// push the per-mission RPG game down to the target's mission so the combat critical clamp can honor
 	// CGame::nMaxCriticalSeverity (luaSetMaxCriticalSeverity). Retail cached the game in the mission ctor;
 	// this dev fork dropped that ctor arg, so we (re)bind it here at the attack entry.
@@ -676,15 +675,11 @@ int CDumbUnitServer::ProcessAttack( NWorld::IWorld *_pWorld, int nUserID, NRPG::
 		return 0;
 	}
 
-	NRPG::CUnit *pRPGUnit = pRPG->GetRPGUnit();
-	int nHalfVP = Float2Int( 0.5f * pRPGUnit->Skills( NDb::ST_VP ).GetMaxValue() );
+	// Retail v1.2 0x7512a1 has no automatic below-half-VP bleeding rule.
+	// Bleeding criticals come from RPG rolls/scripts; low-health bleeding is
+	// calculated as an integer separately in the periodic regeneration pass.
+	// The dev rule manufactured fractional strengths, including zero on a blocked hit.
 	int nCurrentVP = pRPG->GetTotalVP();
-	if ( nCurrentVP < nHalfVP )
-	{
-		float fStrength = ( Min( nWasVP, nHalfVP ) - nCurrentVP ) / 10.0f;
-		NRPG::SCritical suffer( NDb::CL_ANY, NDb::C_BLEEDING, -1, fStrength );
-		pRPG->ApplyCritical( suffer );
-	}
 
 	if ( !IsDead() )
 	{
