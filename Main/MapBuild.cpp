@@ -247,7 +247,9 @@ void CMapBuilder::AddBuildingObjects( int *pMinFloor, int *pMaxFloor, SRand *pRa
 		if ( !IsValid( pCP->pObject ) || (pCP->nSizeY == 0 && fr.nSubBlockID != NBuilding::GetPartHashID( 1, 1, 1 )) )
 			continue;
 		//
-		CVec3 ptShift;
+		// Retail v1.2 0x673bc7..0x673bd7: walls and unrotated solids have no
+		// pivot correction. An uninitialized offset also corrupts attached lights.
+		CVec3 ptShift( 0, 0, 0 );
 		if ( bSolids )
 		{
 			switch ( fr.nRotationID )

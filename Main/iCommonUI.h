@@ -454,6 +454,7 @@ public:
 	void SetUnit( NRPG::CUnit *pUnit, NDb::CDBCamera *pCamera );    // release @0x1c0310: global-camera variant FaceGen calls (NRPG::CUnit*)
 	void SetRenderGame( NRender::IRenderGame *pRender ) { pRenderGame = pRender; }   // retail @0x1c0490
 	void SetLight( NDb::CTAmbientLight *pLight );
+	void SetAngle( float f ) { fAngle = f; } // retail v1.2 0x5bebb0
 	// release @0x1bf030: (lipsync seq, expression seq) -- both forwarded to the shown unit's head
 	void SetSequence( NDb::CSequence *pSequence, NDb::CSequence *pExpression = 0 );
 	void PlayAnimation( NDb::CAnimation *pAnim, bool bLoop );

@@ -1174,13 +1174,8 @@ private:
 	CPtr<NGame::IMission> pMission;
 	CPtr<NGame::IUnitTracker> pUnit;
 	////
-	vector<CPtr<CImage> > selectionsSet;
 	vector<CObj<CUnitFace> > facesSet;
-	// retail CInfoPanelMultipleUnits::operator& @0x25d5a0 does NOT serialize selectionsSet (it is runtime-only,
-	// rebuilt every load from the template via GetUIWindow<CImage> in EVENT_TEMPLATELOADCOMPLETE). dev's extra
-	// tag-4 selectionsSet shifted facesSet to tag 5 -> a retail save's tag-4 facesSet (CObj<CUnitFace> vector)
-	// was read into selectionsSet as CPtr<CImage> (RTDynamicCast fails -> nulls) and facesSet stayed empty ->
-	// the panel loses its unit faces / null-derefs. Match retail: drop selectionsSet, facesSet at tag 4.
+	// Retail has no selection-image vector; selected portraits turn toward the viewer.
 	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CWindow*)this); f.Add(2,&pMission); f.Add(3,&pUnit); f.Add(4,&facesSet); return 0; }
 
 public:
@@ -1194,7 +1189,7 @@ public:
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CInfoPanelMultipleUnits::CInfoPanelMultipleUnits( const SWindowInfo &sInfo, NGame::IMission *_pMission ):
-	CWindow( sInfo ), pMission( _pMission ), selectionsSet( N_MAXUNITS_COUNT ), facesSet( N_MAXUNITS_COUNT )
+	CWindow( sInfo ), pMission( _pMission ), facesSet( N_MAXUNITS_COUNT )
 {
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1209,12 +1204,6 @@ bool CInfoPanelMultipleUnits::ProcessMessage( const SEvent &sEvent )
 				facesSet[nTemp] = new CUnitFace( sEvent.pLoader->GetControl( NStr::Format( "hero_%d", ( nTemp + 1 ) ) ), pMission );
 				facesSet[nTemp]->SetUnit( 0 );
 			}
-			break;
-		}
-	case EVENT_TEMPLATELOADCOMPLETE:
-		{
-			for ( int nTemp = 0; nTemp < facesSet.size(); nTemp++ )
-				selectionsSet[nTemp] = GetUIWindow<CImage>( this, NStr::Format( "hero_%d_selection", ( nTemp + 1 ) ) );
 			break;
 		}
 	}
@@ -1232,16 +1221,18 @@ void CInfoPanelMultipleUnits::Draw( const STime &sTime, NGScene::I2DGameView *pV
 		{
 			facesSet[nTemp]->SetUnit( unitsSet[nTemp] );
 			facesSet[nTemp]->SetStyle( STYLE_VISIBLE, true );
-			selectionsSet[nTemp]->SetStyle( STYLE_VISIBLE, unitsSet[nTemp]->IsSelected() );
+			facesSet[nTemp]->SetAngle( unitsSet[nTemp]->IsSelected() ? -0.3f : 1.0f );
 		}
 		else
 		{
 			facesSet[nTemp]->SetStyle( STYLE_VISIBLE, false );
-			selectionsSet[nTemp]->SetStyle( STYLE_VISIBLE, false );
 		}
 	}
 
+	// Retail v1.2 0x65747a..0x65749c brackets the portrait draw with depth clears.
+	CreateClearRect( pView, 1.0f );
 	CWindow::Draw( sTime, pView );
+	CreateClearRect( pView, 0.0f );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CLevelSwitchBar
