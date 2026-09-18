@@ -33,6 +33,7 @@ const int
 	                                 // (UITexture 291, Look.cur) -- the Look button's state shows the eye cursor
 	N_CURSOR_HEAL						= 6,    // "heal"    -> Heal.cur     (205)
 	N_CURSOR_ATTACK					= 7,    // "attack"  -> AttackFireArm.cur (218, generic attack fallback)
+	N_CURSOR_ATTACK_FIST			= 8,    // retail unarmed/melee cursor
 	N_CURSOR_ATTACK_MELEE		= 9,    // "attack_coldsteel" (203)
 	N_CURSOR_ATTACK_RIFLE		= 10,   // "attack_firearm"   (218)
 	N_CURSOR_ATTACK_PISTOL	= 10,   // (no pistol-specific cursor -> firearm)

@@ -906,6 +906,9 @@ void CStateAttack::UpdateCursor()
 					switch( eState )
 					{
 						case NWorld::CUnit::ST_NORMAL_MELEE:
+							nDefault = N_CURSOR_ATTACK_FIST;
+							break;
+						case NWorld::CUnit::ST_NORMAL_KNIFE:
 							nDefault = N_CURSOR_ATTACK_MELEE;
 							break;
 						case NWorld::CUnit::ST_NORMAL_GRENADE:
@@ -957,24 +960,36 @@ void CStateAttack::UpdateCursor()
 void CStateAttack::UpdateCursorInfo()
 {
 	sCursorInfo.wsText = L"";
+	// Retail v1.2 0x5dac68: AP survives even when no selected unit can attack
+	// from its current position. A replacement reload has no hit percentage.
+	MakeCursorString( GetMission(), sInfo, &sCursorInfo.wsText );
+	if ( !sInfo.bOk || sInfo.eResult == NWorld::UCR_OK_RELOAD )
+		return;
 
 	int nSelectedCount = GetMission()->CountSelected();
 	if ( nSelectedCount )
 	{
-		CPtr<CObjectBase> pTraceObject = GetMission()->GetStateTarget();
+		CObj<NWorld::CCmd> pCmd = GetTargetCmd();
+		CDynamicCast<NWorld::CCmdShootObject> pObjectCmd( pCmd );
+		CDynamicCast<NWorld::CCmdShootTile> pTileCmd( pCmd );
+		CPtr<CObjectBase> pTraceObject = pObjectCmd ? pObjectCmd->pTarget.GetPtr() : 0;
+		// Use the attack command's exact 3D target, not the snapped movement tile.
+		// A nearby wall can be reachable even when its nearest walk tile is not.
+		CVec3 pos;
+		bool bTraceOk = pTileCmd != 0;
+		if ( pTileCmd )
+			pos = pTileCmd->ptTarget;
+		else
+			bTraceOk = GetMission()->GetTracePosition( &pos );
 
-		int nTotalShootAP = 0;
-		int nMin = 0x7fffffff, nMax = -0x7fffffff; // numeric_limits<int>::max(), numeric_limits<int>::min();
+		int nMin = 100, nMax = -1;
 		vector< CPtr<NGame::IUnitTracker> > unitsSet;
 		GetMission()->GetSelectedUnits( &unitsSet );
 		for ( vector< CPtr<NGame::IUnitTracker> >::iterator iTemp = unitsSet.begin(); iTemp != unitsSet.end(); iTemp++ )
 		{
 			CPtr<NWorld::IWorld> pWorld = GetMission()->GetWorld();
 
-			int nToHit = 0;
-
-			NAI::SPosition pos;
-			bool bTraceOk = GetMission()->GetTracePosition( &pos );
+			int nToHit = -1;
 			CDynamicCast<NWorld::CUnit> pUnit(pTraceObject);
 			if (pUnit)
 			{
@@ -986,7 +1001,7 @@ void CStateAttack::UpdateCursorInfo()
 					else
 					{
 						if ( bTraceOk )
-							nToHit = pWorld->GetGame()->GetBazookaToHit( (*iTemp)->GetUnit(), pos.GetCP(),	NAI::THL_MIDDLE, pWorld->IsFirstTurn() );
+							nToHit = pWorld->GetGame()->GetBazookaToHit( (*iTemp)->GetUnit(), pos,	NAI::THL_MIDDLE, pWorld->IsFirstTurn() );
 					}
 				}
 				else {
@@ -994,7 +1009,7 @@ void CStateAttack::UpdateCursorInfo()
 					if (pGrenade)
 					{
 						if (bTraceOk)
-							nToHit = pWorld->GetGame()->GetGrenadeCompositeToHit((*iTemp)->GetUnit(), pos.GetCP(), pWorld->IsFirstTurn(), pGrenade->GetDBGrenade());
+							nToHit = pWorld->GetGame()->GetGrenadeCompositeToHit((*iTemp)->GetUnit(), pos, pWorld->IsFirstTurn(), pGrenade->GetDBGrenade());
 					}
 					else
 					{
@@ -1013,15 +1028,15 @@ void CStateAttack::UpdateCursorInfo()
 			{
 				CDynamicCast<NRPG::IGrenadeItemInfo> pGrenade((*iTemp)->GetUnit()->GetRPG()->GetInventoryInfo()->GetActive());
 				if (pGrenade)
-					nToHit = pWorld->GetGame()->GetGrenadeCompositeToHit( (*iTemp)->GetUnit(), pos.GetCP(), pWorld->IsFirstTurn(), pGrenade->GetDBGrenade() );
+					nToHit = pWorld->GetGame()->GetGrenadeCompositeToHit( (*iTemp)->GetUnit(), pos, pWorld->IsFirstTurn(), pGrenade->GetDBGrenade() );
 				else {
 					CDynamicCast<NRPG::IWeaponItemInfo> pWeapon((*iTemp)->GetUnit()->GetRPG()->GetInventoryInfo()->GetActive());
 					if (pWeapon)
 					{
 						if (!pWeapon->GetDBWeapon()->bBazookaLogic)
-							nToHit = pWorld->GetGame()->GetTileCompositeToHit((*iTemp)->GetUnit(), pos.GetCP(), NAI::THL_MIDDLE, pWorld->IsFirstTurn());
+							nToHit = pWorld->GetGame()->GetTileCompositeToHit((*iTemp)->GetUnit(), pos, NAI::THL_MIDDLE, pWorld->IsFirstTurn());
 						else
-							nToHit = pWorld->GetGame()->GetBazookaToHit((*iTemp)->GetUnit(), pos.GetCP(),
+							nToHit = pWorld->GetGame()->GetBazookaToHit((*iTemp)->GetUnit(), pos,
 								NAI::THL_MIDDLE, pWorld->IsFirstTurn());
 					}
 					else
@@ -1034,7 +1049,7 @@ void CStateAttack::UpdateCursorInfo()
 						// `if (pMelee)` cast was null and a punch aimed at ground/walls/objects showed 0%;
 						// GetTileCompositeToHit derives TH_MELEE from the unit's default fists weapon and
 						// casts covers from GetMeleeAttackPos, matching retail's TH_MELEE tile rule.
-						nToHit = pWorld->GetGame()->GetTileCompositeToHit((*iTemp)->GetUnit(), pos.GetCP(), NAI::THL_MIDDLE, pWorld->IsFirstTurn());
+						nToHit = pWorld->GetGame()->GetTileCompositeToHit((*iTemp)->GetUnit(), pos, NAI::THL_MIDDLE, pWorld->IsFirstTurn());
 					}
 				}
 			}
@@ -1048,27 +1063,20 @@ void CStateAttack::UpdateCursorInfo()
 
 			nMin = min( nMin, nToHit );
 			nMax = max( nMax, nToHit );
+		}
 
-			// BUG 8: the retail cursor caption is built ENTIRELY from DB strings, in retail's order (retail
-			// MakeCursorString @0x1d7990 then CStateAttack::UpdateCursorInfo @0x1da200 append):
-			//   <format 19807/20276>  then (turn-based only)  <"AP: " 19808> <AP range | "N/A" 19810>  then
-			//   <"<br>ToHit: " 19809> <ToHit %>.
-			// The DB strings carry BOTH the localized labels AND the font/colour markup. There are TWO full
-			// format strings, differing only in <color>: 19807 = RED (0xFFEA511C), 20276 = GREEN (0xFF9BD315).
-			// The AP line is green iff the action is affordable (sInfo.bEnoughAP), the ToHit line is green iff
-			// the hit chance is non-zero (`cmp nToHit,2; jge green`). The AP part is the shared
-			// MakeCursorString over the state's cached sInfo (nMinAP/nMaxAP fold across the selection).
-			wstring wsText;
-			MakeCursorString( GetMission(), sInfo, &wsText );
-			wsText += NUI::GetDBString( nMin >= 2 ? 20276 : 19807 );       // ToHit line: green if hit chance > 0, else red
-			wsText += NUI::GetDBString( 19809 );                   // "<br>ToHit: " (localized label)
+		if ( nMax != -1 )
+		{
+			// Retail 0x5dadbe..0x5dae4b: append once, colour by the best chance,
+			// and omit the range when all valid chances are equal.
+			sCursorInfo.wsText += NUI::GetDBString( nMax >= 2 ? 20276 : 19807 );
+			sCursorInfo.wsText += NUI::GetDBString( 19809 );
 			WCHAR wsToHit[32];
-			if ( unitsSet.size() == 1 )
+			if ( nMin == nMax )
 				swprintf( wsToHit, L"%d%%", nMin );
 			else
 				swprintf( wsToHit, L"%d-%d%%", nMin, nMax );
-			wsText += wsToHit;
-			sCursorInfo.wsText = wsText;
+			sCursorInfo.wsText += wsToHit;
 		}
 	}
 }
