@@ -82,7 +82,9 @@ private:
 public:
 	int operator&( CStructureSaver &f );
 
-	TObject() {}
+	// Retail v1.2 0x816600: unused/new stack slots must have a valid nil tag.
+	// The saver visits the entire stack vector, not just slots below top.
+	TObject(): ttype( LUA_TNIL ) {}
 	TObject( int type ): ttype( type ) {}
 
 	int GetType() const { return ttype; }
