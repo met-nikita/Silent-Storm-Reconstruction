@@ -492,7 +492,18 @@ bool CStateFriend::Initialize( IMission *pMission )
 		pTraceSelection = GetMission()->GetRenderGame()->Select( pObject, GetSelectionColor( 5 ) );	// v1.2 @0x5d9c2a: palette(neutral)
 
 	if ( !pUnit->CanTalk() )
+	{
 		sCursorInfo = NUI::SCursorInfo( NDb::GetUICursor( N_CURSOR_NORMAL ) );
+		SActionInfo sInfo;
+		CObj<NWorld::CCmd> pSwap = new NWorld::CCmdSwap( pUnit );
+		GetMission()->CanDoCommand( pSwap, false, &sInfo );
+		if ( sInfo.bOk )
+		{
+			wstring wsText;
+			MakeCursorString( GetMission(), sInfo, &wsText );
+			sCursorInfo = NUI::SCursorInfo( NDb::GetUICursor( 27 ), wsText.c_str() );
+		}
+	}
 	else
 		sCursorInfo = NUI::SCursorInfo( NDb::GetUICursor( N_CURSOR_TALK ) );	// retail @0x1d90c0: UICursors row 20 "talk" (Talk.cur), not open/close
 
@@ -548,6 +559,13 @@ bool CStateFriend::OnLButtonUp( int nX, int nY )
 	{
 		for ( vector< CPtr<NGame::IUnitTracker> >::iterator i = unitsSet.begin(); i != unitsSet.end(); ++i )
 			GetMission()->Command( (*i)->GetUnit(), new NWorld::CCmdNotHeroWantsToTalk() );
+	}
+	else if ( !unitsSet.empty() )
+	{
+		CObj<NWorld::CCmd> pSwap = new NWorld::CCmdSwap( pUnit );
+		GetMission()->CanDoCommand( pSwap, false, &sInfo );
+		if ( sInfo.eResult == NWorld::UCR_OK )
+			GetMission()->Command( unitsSet.front()->GetUnit(), pSwap );
 	}
 
 	return true;
@@ -1928,7 +1946,7 @@ bool CStateSetTrap::Initialize( IMission *pMission )
 	CStateBase::Initialize( pMission );
 
 	SActionInfo sGeneralInfo;
-	pMission->GetActionInfo( UA_ATTACK, &sGeneralInfo );
+	pMission->GetActionInfo( UA_SETTRAP, &sGeneralInfo );
 	if ( ( GetType() == FORCED ) && ( !sGeneralInfo.bOk || !sGeneralInfo.bEnoughAP ) )
 	{
 		ShowError( GetMission(), sGeneralInfo.eResult );
@@ -1962,7 +1980,7 @@ void CStateSetTrap::UpdateCursor()
 	{
 		wstring wsText;
 		MakeCursorString( GetMission(), sInfo, &wsText );	// retail caption: shared MakeCursorString @0x1d7990
-		sCursorInfo = NUI::SCursorInfo( NDb::GetUICursor( N_CURSOR_HEAL ), wsText.c_str() );
+		sCursorInfo = NUI::SCursorInfo( NDb::GetUICursor( N_CURSOR_SETTRAP ), wsText.c_str() );
 	}
 	else
 		sCursorInfo = NUI::SCursorInfo( NDb::GetUICursor( N_CURSOR_BLOCK ) );
@@ -2098,7 +2116,7 @@ void CStateSetMine::UpdateCursor()
 	{
 		wstring wsText;
 		MakeCursorString( GetMission(), sInfo, &wsText );	// retail caption: shared MakeCursorString @0x1d7990
-		sCursorInfo = NUI::SCursorInfo( NDb::GetUICursor( N_CURSOR_HEAL ), wsText.c_str() );
+		sCursorInfo = NUI::SCursorInfo( NDb::GetUICursor( N_CURSOR_SETTRAP ), wsText.c_str() );
 	}
 	else
 		sCursorInfo = NUI::SCursorInfo( NDb::GetUICursor( N_CURSOR_BLOCK ) );

@@ -28,6 +28,7 @@
 #include "wUnitAttack.h"
 #include "wUnitAttackExec.h"
 #include "aiNearestPosition.h"
+#include "aiMoves.h"
 #include "aiMisc.h"            // NAI::IsAIPlayer (GetActionType AI-silent gate)
 #include "rpgPerkConstants.h"
 #include "wUnitQueue.h"
@@ -1455,14 +1456,13 @@ void CExecShootTile::SelectRay() // false, when it is the last shot
 			attack, pUS, ptAnimTarget, pUS->GetMinClearDistance() );
 		float fHit = NRPG::CheckTileToHit( pUS, ptAnimTarget,
 			GetExtraAP(), NAI::THL_LOWER, pCover, pWorld->IsFirstTurn(), &nTmpToHit, nBulletGone );   // retail: no eHL member, tile always THL_LOWER; the exec's burst cursor is the bullet index
-		CRay r;
-		NRPG::PeekRay( pCover, &r, fHit, &bTmpMissed );
 		// retail @0x3a4720 tail (NRPG::AttackPointRanged @0x2b62b0): the solver rebuilds the FULL
 		// SAttackRayInfo carrier (12-arg ctor @0x291330 semantics) and stores it in the member.
-		rayInfo = NRPG::SAttackRayInfo( attack, r.ptOrigin, r.ptDir, pUS, pUS->GetPosition(),
-			nBulletGone, GetExtraAP(), !bTmpMissed, pUS->GetMinClearDistance(), 30.0f, 0 );
-		rayInfo.bFirstTurn = pWorld->IsFirstTurn();
-		rayInfo.pIgnore = pUS;   // retail: the shooter's own hull is the in-flight ignore object
+		rayInfo = NRPG::SAttackRayInfo( attack, VNULL3, VNULL3, pUS, pUS->GetPosition(),
+			nBulletGone, GetExtraAP(), false, pUS->GetMinClearDistance(), 30.0f, 0 );
+		rayInfo.pIgnore = const_cast<CObjectBase*>( pUS->GetAttackIgnore() );
+		NRPG::PrepareAttackRay( pWorld->GetAIMap(), pCover, &rayInfo, fHit );
+		bTmpMissed = !rayInfo.bTargetIsHit;
 		bMissed &= bTmpMissed;
 		nToHit = max( nToHit, nTmpToHit );
 	}
@@ -1526,17 +1526,18 @@ void CExecShootUnit::SelectRay() // false, when it is the last shot
 		bool bTmpMissed;
 		CPtr<CWorld> pWorld = pUS->GetWorld();
 		vector<int> accessibleHLs;
+		// Retail v1.2 0x7a4e37: carry the requested part into the bullet damage portion.
+		attack.eWantedHL = eHL;
 		// Retail RealCalcCovers applies the same alternating origin to unit shots.
 		CObj<NRPG::CCoverInfo> pCover = pWorld->GetGame()->CalcCovers( pUS->GetAttackOrigin( pUS->GetPosition(), ( nBulletGone & 1 ) != 0 ), attack, pUS, pTarget, eHL, pUS->GetMinClearDistance() );
 		float fHit = NRPG::CheckToHit( pUS, pTarget, GetExtraAP(), eHL, accessibleHLs, pCover, pWorld->IsFirstTurn(), &nTmpToHit, nBulletGone );
-		CRay r;
-		NRPG::PeekRay( pCover, &r, fHit, &bTmpMissed );
 		// retail @0x3a49b0 tail (NRPG::AttackObjectRanged @0x2b6560): rebuild the full SAttackRayInfo
 		// carrier (12-arg ctor @0x291330 semantics; pTarget rides the trailing ctor arg).
-		rayInfo = NRPG::SAttackRayInfo( attack, r.ptOrigin, r.ptDir, pUS, pUS->GetPosition(),
-			nBulletGone, GetExtraAP(), !bTmpMissed, pUS->GetMinClearDistance(), 30.0f, pTarget.GetPtr() );
-		rayInfo.bFirstTurn = pWorld->IsFirstTurn();
-		rayInfo.pIgnore = pUS;   // retail: the shooter's own hull is the in-flight ignore object
+		rayInfo = NRPG::SAttackRayInfo( attack, VNULL3, VNULL3, pUS, pUS->GetPosition(),
+			nBulletGone, GetExtraAP(), false, pUS->GetMinClearDistance(), 30.0f, pTarget.GetPtr() );
+		rayInfo.pIgnore = const_cast<CObjectBase*>( pUS->GetAttackIgnore() );
+		NRPG::PrepareAttackRay( pWorld->GetAIMap(), pCover, &rayInfo, fHit );
+		bTmpMissed = !rayInfo.bTargetIsHit;
 		bMissed &= bTmpMissed;
 		nToHit = max( nToHit, nTmpToHit );
 	}
@@ -3538,6 +3539,42 @@ void CExecPlayAnimation::Cancel()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CExecTalk
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+int CExecSwap::GetStartAP() const
+{
+	return pUS->GetActionAP( NRPG::AC_SWAP );
+}
+EUnitCommandResult CExecSwap::CanDoIt( const NAI::SUnitPosition &from, bool bIgnoreTarget )
+{
+	if ( pUS->GetWorld()->IsBase() )
+		return UCR_GENERAL_FAILURE;
+	if ( !bIgnoreTarget )
+	{
+		const NAI::SUnitPosition &to = pTarget->GetPosition();
+		if ( from.GetPose() == NAI::CRAWL || to.GetPose() == NAI::CRAWL )
+			return UCR_TARGET_OUT_OF_RANGE;
+		NAI::ETransitionType type = NAI::GetTransitionType( from.pos.GetNetwork(), from.pos.p, to.pos.p );
+		if ( type != NAI::TT_MOVE && type != NAI::TT_MOVE_DIAGONAL && type != NAI::TT_INTERGRID )
+			return UCR_TARGET_OUT_OF_RANGE;
+	}
+	return UCR_OK;
+}
+void CExecSwap::Run()
+{
+	pUS->DoAction( NRPG::AC_SWAP );
+	CObj<CExecSwap> pKeepAlive = this;
+	NAI::SUnitPosition from = pUS->GetPosition(), to = pTarget->GetPosition();
+	unsigned short nDirection = from.pos.p.GetDirection();
+	from.pos.p.SetDirection( to.pos.p.GetDirection() );
+	to.pos.p.SetDirection( nDirection );
+	pUS->animator.PlaceUnit( to );
+	pUS->SetPosition( to );
+	pUS->Update();
+	pTarget->animator.PlaceUnit( from );
+	pTarget->SetPosition( from );
+	pTarget->Update();
+	Finished();
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 CExecTalk::CExecTalk( CUnitServer *_pUS, CUnitServer *_pTarget ):
 	CCommandExecute( _pUS ), pTarget( _pTarget )
 {
@@ -3601,6 +3638,7 @@ REGISTER_SAVELOAD_CLASS( 0x51892150, CExecUsePassage )
 REGISTER_SAVELOAD_CLASS( 0x52492170, CExecTakeCorpseOnDeploy )
 REGISTER_SAVELOAD_CLASS( 0x50112152, CExecPlayAnimation )
 REGISTER_SAVELOAD_CLASS( 0x51922130, CExecTalk )
+REGISTER_SAVELOAD_CLASS( 0x71983146, CExecSwap )
 // retail saveload ids (serialization-convergence W1; s2_scratch docs/SERIALIZATION_CONVERGENCE.md)
 REGISTER_SAVELOAD_CLASS( 0x71983141, CExecPanzerklein )
 REGISTER_SAVELOAD_CLASS( 0x71983142, CExecSetTrap )

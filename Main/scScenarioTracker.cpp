@@ -2,6 +2,7 @@
 //
 #include "wInterface.h"
 #include "wUnitServer.h"
+#include "wMain.h"
 //
 #include "RPGUnitMission.h"
 #include "RPGMerc.h"
@@ -496,6 +497,147 @@ void CScenarioTracker::OnScenarioClueDestroyed( int nID, bool bUnit )
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+static NRPG::CUnit *GetCorpse( NWorld::CUnit *pUnit )
+{
+	NWorld::CUnitServer *pServer = CDynamicCast<NWorld::CUnitServer>( pUnit );
+	return pServer && IsValid( pServer->GetCorpse() ) ? pServer->GetCorpse()->GetUnitRPG()->GetRPGUnit() : 0;
+}
+static bool InInventory( NRPG::CUnit *pPers, int nItemID )
+{
+	if ( !IsValid( pPers ) )
+		return false;
+	NRPG::IInventory *pInventory = pPers->pInventory;
+	for ( int n = 0; n < NDb::N_SLOTS; ++n )
+	{
+		NRPG::IInventoryItem *pItem = pInventory->Get( (NDb::ESlot)n );
+		if ( IsValid( pItem ) && pItem->GetDBItem()->GetRecordID() == nItemID )
+			return true;
+	}
+	const vector<NRPG::SBackPackItem> &items = pInventory->GetItems();
+	for ( int n = 0; n < items.size(); ++n )
+		if ( IsValid( items[n].pItem ) && items[n].pItem->GetDBItem()->GetRecordID() == nItemID )
+			return true;
+	return false;
+}
+static bool IsVisiblePersHasItem( int nID, NWorld::CPlayer *pPlayer )
+{
+	list< CPtr<NWorld::CUnit> > units;
+	pPlayer->GetVisible( &units );
+	for ( list< CPtr<NWorld::CUnit> >::iterator i = units.begin(); i != units.end(); ++i )
+		if ( IsValid( *i ) && ( InInventory( (*i)->GetRPG()->GetRPGUnit(), nID ) || InInventory( GetCorpse( *i ), nID ) ) )
+			return true;
+	return false;
+}
+static bool IsPersVisible( int nID, NWorld::CPlayer *pPlayer, NRPG::CUnit **pResult = 0 )
+{
+	list< CPtr<NWorld::CUnit> > units;
+	pPlayer->GetVisible( &units );
+	for ( list< CPtr<NWorld::CUnit> >::iterator i = units.begin(); i != units.end(); ++i )
+	{
+		if ( !IsValid( *i ) )
+			continue;
+		// Retail 0x702950 compares the visible unit's person ID, including
+		// in its redundant corpse branch; it never compares the carried person.
+		NRPG::CUnit *pPers = (*i)->GetRPG()->GetRPGUnit();
+		if ( pPers->GetRPGPersID() == nID )
+		{
+			if ( pResult )
+				*pResult = pPers;
+			return true;
+		}
+	}
+	return false;
+}
+static bool IsItemVisible( int nID, NWorld::CPlayer *pPlayer )
+{
+	list< CPtr<CObjectBase> > objects;
+	pPlayer->GetVisibleObjects( &objects );
+	for ( list< CPtr<CObjectBase> >::iterator i = objects.begin(); i != objects.end(); ++i )
+	{
+		NWorld::IItem *pItem = CDynamicCast<NWorld::IItem>( i->GetPtr() );
+		if ( IsValid( pItem ) && IsValid( pItem->GetInvItem() ) && pItem->GetInvItem()->GetDBItem()->GetRecordID() == nID )
+			return true;
+	}
+	return false;
+}
+static void CompleteTasks( CScenarioClue *pClue, NDb::ETaskTag tag )
+{
+	if ( !IsValid( pClue ) || !IsValid( pClue->GetGoal() ) )
+		return;
+	const vector< CObj<CScenarioTask> > &tasks = pClue->GetGoal()->GetTasks();
+	for ( int n = 0; n < tasks.size(); ++n )
+		if ( IsValid( tasks[n] ) && tasks[n]->GetDBTask()->eTag == tag )
+			tasks[n]->SetState( TS_COMPLETED );
+}
+// Retail v1.2 0x702e80: discovery is driven by the human player's merged visibility.
+void CScenarioTracker::OnUpdateVisible( NWorld::CPlayer *pPlayer, CScenarioZone *pZone )
+{
+	if ( !IsValid( pPlayer ) || !IsValid( pZone ) )
+		return;
+	const vector< CPtr<CScenarioClue> > &clues = pZone->GetClues();
+	for ( int n = 0; n < clues.size(); ++n )
+	{
+		CScenarioClue *pClue = clues[n];
+		if ( !IsValid( pClue ) )
+			continue;
+		NDb::CDBScenarioClue *pDB = pClue->GetDBClue();
+		CScenarioGoal *pGoal = pClue->GetGoal();
+		int nItem = pDB->clueType == NDb::CT_ITEM ? pDB->nItemID : 0;
+		int nPers = pDB->clueType == NDb::CT_PERSON ? pDB->nPersID : 0;
+		if ( nItem > 0 && !pClue->IsDetected() && IsValid( pGoal ) )
+		{
+			bool bCarried = IsVisiblePersHasItem( nItem, pPlayer );
+			const vector< CObj<CScenarioTask> > &tasks = pGoal->GetTasks();
+			if ( bCarried )
+				for ( int t = 0; t < tasks.size(); ++t )
+					if ( IsValid( tasks[t] ) && tasks[t]->GetDBTask()->eTag == NDb::TT_DESTROY_ITEM_CARRIER && !tasks[t]->IsVisible() )
+					{
+						tasks[t]->SetVisible( true );
+						InvalidateLeaveZoneCache();
+					}
+			if ( bCarried || IsItemVisible( nItem, pPlayer ) )
+			{
+				pClue->SetDetected( true );
+				InvalidateLeaveZoneCache();
+			}
+		}
+		NRPG::CUnit *pPers = 0;
+		if ( nPers > 0 && !pClue->IsDetected() && IsPersVisible( nPers, pPlayer, &pPers ) )
+		{
+			pClue->SetDetected( true );
+			InvalidateLeaveZoneCache();
+			if ( pPers->IsUnconscious() )
+				CompleteTasks( pClue, NDb::TT_STUN_PERSON );
+		}
+		if ( !IsValid( pGoal ) )
+			continue;
+		const vector< CObj<CScenarioTask> > &tasks = pGoal->GetTasks();
+		for ( int t = 0; t < tasks.size(); ++t )
+		{
+			CScenarioTask *pTask = tasks[t];
+			if ( !IsValid( pTask ) || pTask->IsDetected() )
+				continue;
+			NDb::ETaskTag tag = pTask->GetDBTask()->eTag;
+			if ( ( tag == NDb::TT_FIND_ITEM && nItem > 0 && ( IsItemVisible( nItem, pPlayer ) || IsVisiblePersHasItem( nItem, pPlayer ) ) ) ||
+				( tag == NDb::TT_FIND_PERSON && nPers > 0 && IsPersVisible( nPers, pPlayer ) ) )
+			{
+				pTask->SetDetected( true );
+				InvalidateLeaveZoneCache();
+			}
+		}
+	}
+}
+// Retail v1.2 0x703fa0: killing a clue carrier completes the carrier task.
+void CScenarioTracker::OnUnitDestroyed( NWorld::CUnit *pUnit )
+{
+	if ( !bScenarioAvailable || !IsValid( pUnit ) )
+		return;
+	list< CPtr<CScenarioClue> > clues;
+	GetCluesFromPers( pUnit->GetRPG()->GetRPGUnit(), GetCorpse( pUnit ), &clues, false );
+	for ( list< CPtr<CScenarioClue> >::iterator i = clues.begin(); i != clues.end(); ++i )
+		CompleteTasks( *i, NDb::TT_DESTROY_ITEM_CARRIER );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 void CScenarioTracker::ProcessCluesList( const list< CPtr<CScenarioClue> > &clues,
 	NDb::EScenarioObjectiveType type )
 {
@@ -786,11 +928,9 @@ NDb::CSide *GetSideForScenario( CScenarioTracker *pScenario )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // script-goal/task API (retail @0x302990 / @0x300720 / @0x3007a0). Goals are appended to the zone's
-// scriptGoals; their completion state is set on the runtime CScenarioGoal/CScenarioTask. ELISION: the
-// retail falls back to a clue-attached goal via GetGoalByID -- omitted (script goals live only in
-// scriptGoals here). The bHasCalcedCanLeaveZone cache-clear IS ported (InvalidateLeaveZoneCache).
+// scriptGoals; completion also resolves clue-attached goals (retail v1.2 0x700fb0/0x701030).
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// First scriptGoal in the zone whose DB goal record id matches nGoalID, or null.
+// Find a standalone script goal first, then a clue-owned goal with the same DB ID.
 static CScenarioGoal* FindScriptGoal( CScenarioZone *pZone, int nGoalID )
 {
 	const vector< CObj<CScenarioGoal> > &goals = pZone->GetScriptGoals();
@@ -798,6 +938,13 @@ static CScenarioGoal* FindScriptGoal( CScenarioZone *pZone, int nGoalID )
 	{
 		CScenarioGoal *pGoal = goals[ i ];
 		if ( IsValid( pGoal ) && IsValid( pGoal->GetDBGoal() ) && pGoal->GetDBGoal()->GetRecordID() == nGoalID )
+			return pGoal;
+	}
+	const vector< CPtr<CScenarioClue> > &clues = pZone->GetClues();
+	for ( int i = 0; i < clues.size(); ++i )
+	{
+		CScenarioGoal *pGoal = clues[i]->GetGoal();
+		if ( IsValid( pGoal ) && pGoal->GetDBGoal()->GetRecordID() == nGoalID )
 			return pGoal;
 	}
 	return 0;

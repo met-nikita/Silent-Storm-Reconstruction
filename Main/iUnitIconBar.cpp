@@ -313,7 +313,8 @@ void CMainIconBarSet::Update()
 			CreateButton( 386, 420, CComplexButton::NORMAL, 4277, SLOT_R1C1, 0, NGame::UA_ATTACK, NWorld::CUnit::ST_NORMAL_MELEE, "attack" );
 			CreateButton( 385, 425, CComplexButton::NORMAL, 4278, SLOT_R1C1, 0, NGame::UA_ATTACK, NWorld::CUnit::ST_NORMAL_KNIFE, "attack" );
 			CreateButton( 384, 424, CComplexButton::NORMAL, 4279, SLOT_R1C1, 0, NGame::UA_ATTACK, NWorld::CUnit::ST_NORMAL_GRENADE,	"attack" );
-			CreateButton( 648, 649, CComplexButton::NORMAL, 4279, SLOT_R1C1, 0, NGame::UA_MINE, NWorld::CUnit::ST_NORMAL_MINE,	"setmine" );
+			CreateButton( 648, 649, CComplexButton::NORMAL, 17411, SLOT_R1C1, 0, NGame::UA_MINE, NWorld::CUnit::ST_NORMAL_MINE, "setmine" );
+			CreateButton( 648, 649, CComplexButton::NORMAL, 17411, SLOT_R1C1, 1, NGame::UA_SETTRAP, NWorld::CUnit::ST_NORMAL_GRENADE, "setmine" );
 			// retail R1 set (oracle s2_cmainiconbarset.h:141): the USE-TOOL button for a unit holding
 			// a tool -- icons 849/850 'Command Tool' (the dev showed the mine icon here instead)
 			CreateButton( 849, 850, CComplexButton::NORMAL, 4405, SLOT_R1C1, 1, NGame::UA_USETOOL, NWorld::CUnit::ST_NORMAL_TOOL, "usetool" );
@@ -328,11 +329,14 @@ void CMainIconBarSet::Update()
 			CreateButton( 382, 570, CComplexButton::NORMAL, 4283, SLOT_R1C4, 0, NGame::UA_STOP, N_ANY_VALUE, "cancelaction" );
 			// R2C1
 			GetMission()->GetActionInfo( NGame::UA_ATTACK, &sActionInfo );
-			if ( sActionInfo.bAvailable )
+			NGame::SActionInfo sTrapInfo;
+			GetMission()->GetActionInfo( NGame::UA_SETTRAP, &sTrapInfo );
+			// Retail 0x651646..0x6518b9: trap availability also keeps grenade modes visible.
+			if ( sActionInfo.bAvailable || sTrapInfo.bAvailable )
 			{
 				int nWeaponMode = GetUnitsGroupWeaponMode( GetMission() );
 				int nGrenadeMode = GetUnitsGroupGrenadeMode( GetMission() );
-				if ( nWeaponMode != N_ICON_UNAVAILABLE )
+				if ( sActionInfo.bAvailable && nWeaponMode != N_ICON_UNAVAILABLE )
 				{
 					switch( nWeaponMode )
 					{
@@ -410,7 +414,7 @@ void CMainIconBarSet::Update()
 				CreateButton( 505, 509, CComplexButton::CHECKED, 4524, SLOT_R2C3, 1, NGame::UA_STRAFE, N_ANY_VALUE, "pose_strafe" );
 				break;
 			}
-			CreateButton( 382, 421, CComplexButton::NORMAL, 4283, SLOT_R2C3, 0, NGame::UA_EXITPK, N_ANY_VALUE, "exitpk" );
+			CreateButton( 686, 687, CComplexButton::NORMAL, 19876, SLOT_R2C3, 0, NGame::UA_EXITPK, N_ANY_VALUE, "exitpk" );
 			// R2C4
 			int nHide = GetUnitsGroupHide( GetMission() );
 			switch( nHide )
@@ -436,7 +440,7 @@ void CMainIconBarSet::Update()
 			CreateButton( 489, 513, CComplexButton::NORMAL, 4442, SLOT_R1C2, 0, NGame::UA_COLLECTAP_MAX, NWorld::CUnit::ST_SNIPE, "collectap_max" );
 			CreateButton( 488, 514, CComplexButton::NORMAL, 4443, SLOT_R1C3, 0, NGame::UA_COLLECTAP_10AP, NWorld::CUnit::ST_SNIPE, "collectap_10ap" );
 			CreateButton( 487, 515, CComplexButton::NORMAL, 4444, SLOT_R1C4, 0, NGame::UA_COLLECTAP_1AP, NWorld::CUnit::ST_SNIPE, "collectap_1ap" );
-			CreateButton( 491, 512, CComplexButton::NORMAL, 4445, SLOT_R2C1, 1, NGame::UA_SNIPE_ATTACK, NWorld::CUnit::ST_SNIPE, "snipe_attack" );
+			CreateButton( 491, 512, CComplexButton::NORMAL, 4445, SLOT_R2C1, 1, NGame::UA_ATTACK, NWorld::CUnit::ST_SNIPE, "snipe_attack" );
 			CreateButton( 382, 570, CComplexButton::NORMAL, 4283, SLOT_R2C4, 0, NGame::UA_STOP, N_ANY_VALUE, "cancelaction" );
 			break;
 		}

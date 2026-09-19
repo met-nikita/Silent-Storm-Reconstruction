@@ -3,6 +3,7 @@
 #include "DG.h"						// ClearHoldQueue
 #include "GResource.h"				// NGScene::{CloseAllResources,ClearResourceDirs,AddResourceDir}
 #include "..\ADOImport\BasicDB.h"	// NDatabase::{ClearDatabaseTables,Serialize} + CFileStream (via BasicChunk1.h)
+namespace NDb { void BuildMapLinks( bool bTranslate ); }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CModManager -- mod enumeration / activation. Reconstructed from
 // .\release\ModManager.obj (Game.exe). All methods are static; state is file-scope.
@@ -117,7 +118,7 @@ bool CModManager::Activate( const vector<SModInfo> &mods )
 	{
 		CFileStream f;
 		f.OpenRead( "game.db" );
-		NDatabase::Serialize( f, CStructureSaver::READ );
+		NDatabase::Serialize( f, CStructureSaver::READ, false );
 	}
 	catch (...)
 	{
@@ -134,18 +135,15 @@ bool CModManager::Activate( const vector<SModInfo> &mods )
 		{
 			CFileStream f;
 			f.OpenRead( ( mods[i].szDirectory + "\\game.db" ).c_str() );
-			NDatabase::Serialize( f, CStructureSaver::READ );
+			NDatabase::Serialize( f, CStructureSaver::READ, false );
 		}
 		catch (...)
 		{
 		}
 		NGScene::AddResourceDir( mods[i].szDirectory.c_str() );
 	}
-	// footer (release @0x6860a8-0x6860c5). The release calls NDb::BuildMapLinks(&status) @0x424150
-	// ONCE here; the dev NDatabase::Serialize already runs NDb::BuildMapLinks(false) after every v1
-	// columnar load (ADOImport\BasicDB.cpp), and BuildMapLinks is append-only (push_back, no clear),
-	// so re-calling it here would duplicate the skeleton-anim / debris / uniform-look / pers-item
-	// links -- intentionally omitted.
+	// Retail builds links once, after all partial overlays have updated the live records.
+	NDb::BuildMapLinks( false );
 	++nDataBaseVersion;
 	activatedMods = mods;
 	return true;

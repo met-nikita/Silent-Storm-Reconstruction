@@ -504,6 +504,17 @@ static CCommandExecute* CreateActionQueueOrReload( CUnitServer *pUS, TCommand *p
 CCommandExecute* CreateActionExecutor( CUnitServer *pUS, CCmd *pCmd, EUnitCommandResult *pError )
 {
 	*pError = UCR_OK;
+	CDynamicCast<CCmdSwap> pSwap( pCmd );
+	if ( pSwap )
+	{
+		CDynamicCast<CUnitServer> pTarget( pSwap->pTarget );
+		if ( !IsValid( pTarget ) )
+		{
+			*pError = UCR_NO_TARGET;
+			return 0;
+		}
+		return CreateSimpleAction( pUS, new CExecSwap( pUS, pTarget ), pError );
+	}
 	CDynamicCast<CCmdPlayAnimation> pAnim(pCmd);
 	if (pAnim)
 		return new CExecPlayAnimation(pUS, pAnim->nDBAnimationID, pAnim->bFreezeAfterLastFrame);
@@ -592,12 +603,16 @@ CCommandExecute* CreateActionExecutor( CUnitServer *pUS, CCmd *pCmd, EUnitComman
 					}
 				}
 
-				CDynamicCast<NWorld::CWindowDoor> pWDTarget(pAttackObject->pTarget);
-				if ((eType == AT_GRENADE) && (IsValid(pWDTarget) || !IsValid(pAttackObject->pTarget))) //// CRAP!: for CanDo
+				if ( eType == AT_GRENADE )
 				{
 					CDynamicCast<NRPG::IGrenadeItemInfo> pGrenade(pUS->GetRPG()->GetInventoryInfo()->GetActive());
 					if (IsValid(pGrenade) && (pGrenade->GetMode() == NRPG::GM_SETTRAP))
-						return CreateActionQueue(pUS, new CCmdSetGrenadeOnObject(pAttackObject->pTarget), new CExecSetTrap(pUS, pWDTarget), ITEM_ACTIVE, pError);
+					{
+						// Retail ShootObject rejects trap mode; its dedicated command is
+						// queried separately by the order bar and trap cursor.
+						*pError = UCR_UNAVAILABLE;
+						return 0;
+					}
 				}
 
 				if (IsValid(pUnitTarget) || !IsValid(pAttackObject->pTarget)) //// CRAP!: for CanDo

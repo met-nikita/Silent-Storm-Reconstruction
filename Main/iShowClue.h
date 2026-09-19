@@ -23,11 +23,12 @@ class CICShowClue: public NMainLoop::CInterfaceCommand
 private:
 	CPtr<NUI::CScreenShot> pScreenShot;
 	CPtr<NRPG::CGlobalGame> pGame;
+	CPtr<NRPG::CGlobalPlayer> pPlayer;
 	CPtr<NScenario::CScenarioClue> pClue;
 
 public:
 	CICShowClue() {}
-	CICShowClue( NRPG::CGlobalGame *pGame, NScenario::CScenarioClue *pClue, NUI::CScreenShot *pScreenShot = 0 );
+	CICShowClue( NRPG::CGlobalGame *pGame, NRPG::CGlobalPlayer *pPlayer, NScenario::CScenarioClue *pClue, NUI::CScreenShot *pScreenShot = 0 );
 
 	virtual void Exec();
 };

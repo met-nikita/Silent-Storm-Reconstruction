@@ -620,6 +620,14 @@ void CMission::GetActionInfo( EUnitAction eAction, SActionInfo *pInfo )
 	*pInfo = actionsInfoSet[eAction];
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+bool CMission::CanPerformAction( EUnitAction eAction )
+{
+	// Retail v1.2 0x5fc030: availability, not the AP/target-dependent bOk flag.
+	SActionInfo sInfo;
+	GetActionInfo( eAction, &sInfo );
+	return sInfo.bAvailable;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 // retail CMission::CanDoCommand @0x1fbf10 (mission vtbl+0xa8): only CCmdEndOfTurn is gated -- a 2s
 // cooldown after the world current-player change (UI clock); every other command is true.
 bool CMission::CanDoCommand( NWorld::CCommand *pCmd )
@@ -852,6 +860,7 @@ void CMission::UpdateActionsInfo()
 
 	CanDoCommand( new NWorld::CCmdHeal( 0 ), true, &actionsInfoSet[UA_HEAL] );
 	CanDoCommand( new NWorld::CCmdSetMineOnTile( NAI::SPosition() ), true, &actionsInfoSet[UA_MINE] );
+	CanDoCommand( new NWorld::CCmdSetGrenadeOnObject( 0 ), true, &actionsInfoSet[UA_SETTRAP] );
 	CanDoCommand( new NWorld::CCmdDropCorpse(), true, &actionsInfoSet[UA_DROPCORPSE] );
 	CanDoCommand( new NWorld::CCmdExitPK(), true, &actionsInfoSet[UA_EXITPK] );
 	CanDoCommand( new NWorld::CCmdHide(), true, &actionsInfoSet[UA_HIDE] );
@@ -862,7 +871,6 @@ void CMission::UpdateActionsInfo()
 	CanDoCommand( new NWorld::CCmdWishPose( NAI::CROUCH ), true, &actionsInfoSet[UA_POSECROUCH] );
 	CanDoCommand( new NWorld::CCmdWishPose( NAI::CRAWL ), true, &actionsInfoSet[UA_POSECRAWL] );
 
-	CanDoCommand( new NWorld::CCmdSnipeAttack(), true, &actionsInfoSet[UA_SNIPE_ATTACK] );
 	CanDoCommand( new NWorld::CCmdCollectSnipeAP( NWorld::CSAP_1AP ), true, &actionsInfoSet[UA_COLLECTAP_1AP] );
 	CanDoCommand( new NWorld::CCmdCollectSnipeAP( NWorld::CSAP_10AP ), true, &actionsInfoSet[UA_COLLECTAP_10AP] );
 	CanDoCommand( new NWorld::CCmdCollectSnipeAP( NWorld::CSAP_MAX ), true, &actionsInfoSet[UA_COLLECTAP_MAX] );
@@ -1771,10 +1779,25 @@ bool CMission::ProcessEvent( const NInput::SEvent &sEvent )
 		CommandState( new CStateMove( true ) );
 	else if ( bindRotate.ProcessEvent( sEvent ) )
 		CommandState( new CStateRotate() );
-	else if ( bindAttack.ProcessEvent( sEvent ) )
+	// Retail v1.2 0x603d8a..0x603da5: shared shortcuts must fall through
+	// when this action is unavailable (e.g. A is also bound to setmine).
+	else if ( bindAttack.ProcessEvent( sEvent ) && CanPerformAction( UA_ATTACK ) )
 		CommandState( new CStateAttack( true ) );
 	else if ( bindSetMine.ProcessEvent( sEvent ) )
-		CommandState( new CStateSetMine() );
+	{
+		// Retail 0x603606..0x603665: the shared setmine button dispatches
+		// a mine or an object trap according to the available action.
+		SActionInfo sInfo;
+		GetActionInfo( UA_MINE, &sInfo );
+		if ( sInfo.bAvailable )
+			CommandState( new CStateSetMine() );
+		else
+		{
+			GetActionInfo( UA_SETTRAP, &sInfo );
+			if ( sInfo.bAvailable )
+				CommandState( new CStateSetTrap() );
+		}
+	}
 	else if ( bindUseTool.ProcessEvent( sEvent ) )
 		CommandState( new CStateUntrap( true ) );	// use the held tool on a target (disassemble/disarm/mount) -- retail @0x202600 constructs the FORCED untrap here
 	else if ( bindSetTrap.ProcessEvent( sEvent ) )
@@ -1834,7 +1857,7 @@ bool CMission::ProcessEvent( const NInput::SEvent &sEvent )
 	if ( bindSnipeAttack.ProcessEvent( sEvent ) )
 	{
 		SActionInfo sAction;
-		GetActionInfo( UA_SNIPE_ATTACK, &sAction );
+		GetActionInfo( UA_ATTACK, &sAction );
 		if ( sAction.eResult == NWorld::UCR_OK )
 		{
 			vector< CPtr<NGame::IUnitTracker> > unitsSet;
@@ -2614,7 +2637,7 @@ void CMission::ExecWorldCommands()
 								if (pClue)
 								{
 									if (IsValid(pClue->pClue))
-										NMainLoop::Command(new NGame::CICShowClue(pGlobalGame, pClue->pClue));
+										NMainLoop::Command(new NGame::CICShowClue(pGlobalGame, GetActivePlayer()->GetGlobalPlayer(), pClue->pClue));
 								}
 								// W5 serialization-convergence: the NGame UICmdExec wrappers are gone -- retail
 								// CMission::ExecWorldCommand @0x1fd8c0 executes these three INLINE:

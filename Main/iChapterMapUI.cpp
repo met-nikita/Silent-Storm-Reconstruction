@@ -1011,7 +1011,7 @@ void CChapterMapUI::Draw( const STime &sTime, NGScene::I2DGameView *pView )
 			if ( !(*iTemp)->IsJustFound() )
 				continue;
 
-			NMainLoop::Command( new NGame::CICShowClue( pChapter->GetRPGGame(), (*iTemp) ) );
+			NMainLoop::Command( new NGame::CICShowClue( pChapter->GetRPGGame(), pChapter->GetRPGGame()->players.front(), (*iTemp) ) );
 			(*iTemp)->SetJustFound( false );
 		}
 	}

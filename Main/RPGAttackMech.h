@@ -50,12 +50,14 @@ public:
 	float fPushCoeff;
 	bool bBypassPK;
 	bool bNoBlowUp;
+	// Requested body part; retail +0x3c. Transient, deliberately absent from save tags.
+	int eWantedHL;
 	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&nK); f.Add(3,&nDmgType); f.Add(4,&nDmgMin); f.Add(5,&nDmgMax); f.Add(6,&nCrtical); f.Add(7,&nCrticalDifficulty); f.Add(8,&pAttacker); f.Add(9,&pTarget); f.Add(10,&fDamageCoeff); f.Add(11,&atkType); f.Add(12,&nUnconsciousProbability); f.Add(13,&bBackStab); f.Add(14,&bAlwaysHumanCritical); f.Add(15,&fStructDmgModifier); f.Add(16,&fPushCoeff); f.Add(17,&bBypassPK); f.Add(18,&bNoBlowUp); return 0; }
 	// retail defaults: the inlined default ctor at the probe/knife/melee-tile sites writes
 	// fPushCoeff(+0x64)=0 and bNoBlowUp(+0x69)=1; the out-of-line 12-arg ctor @0x28faa0 takes
 	// fPushCoeff as its 3rd argument and also sets bNoBlowUp=true. The previous dev defaults
 	// (1.0f/false) gave EVERY attack a full-strength corpse push regardless of the weapon.
-	CAttackPortion() : bAlwaysHumanCritical(false), fStructDmgModifier(1.0f), fPushCoeff(0.0f), bBypassPK(false), bNoBlowUp(true) {}
+	CAttackPortion() : bAlwaysHumanCritical(false), fStructDmgModifier(1.0f), fPushCoeff(0.0f), bBypassPK(false), bNoBlowUp(true), eWantedHL(-1) {}
 	CAttackPortion( int _nK, int _nDmgType, float _fPushCoeff, int _nDmgMin, int _nDmgMax,
 		int _nCrtical, int nCritDifficulty = 0, IUnitMissionInfo *_pAttacker = 0,
 		IUnitMissionInfo *_pTarget = 0, float _fDamageCoeff = 1,
@@ -64,7 +66,7 @@ public:
 			nCrticalDifficulty(nCritDifficulty), pTarget(_pTarget), pAttacker(_pAttacker),
 			fDamageCoeff( _fDamageCoeff ), atkType( AT_NORMAL ),
 			nUnconsciousProbability( _nUnconsciousProbability ), bBackStab( _bBackStab ),
-			bAlwaysHumanCritical(false), fStructDmgModifier(1.0f), fPushCoeff(_fPushCoeff), bBypassPK(false), bNoBlowUp(true) {}
+			bAlwaysHumanCritical(false), fStructDmgModifier(1.0f), fPushCoeff(_fPushCoeff), bBypassPK(false), bNoBlowUp(true), eWantedHL(-1) {}
 
 	float GetPushCorpseCoeff() const;
 	bool CanDealDmg( const NDb::CRPGArmor *pArmor ) const;

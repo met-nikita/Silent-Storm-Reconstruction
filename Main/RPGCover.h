@@ -13,14 +13,9 @@
 // AND a wide SRay that remembers which grid+cell each ray came from (nGrid,x,y), so a later
 // pass can re-walk that cell's SResult depth-interval list.
 //
-// The dev tree's NRPG::CCoverInfo (RPGGame.cpp:36) is the EARLIER, narrow, *serialized* variant
-// -- REGISTER_SAVELOAD_CLASS(0x02841161), { hitRays, src, looseRays, obstRays, fSummAPA } with a
-// 3-field SRay -- and CGame::CalcCovers builds the CFastRenderer grids as locals and discards
-// them. Widening that live save/load record to carry the grids is a forbidden change, so the
-// grid-bearing release layout is reconstructed here under a DISTINCT additive name,
-// CCoverGridInfo, over the real dev NAI::CFastRenderer. It is transient (never serialized,
-// never factory-created), so it is an unregistered POD carrier -- it does NOT collide with the
-// live CCoverInfo save id and adds no class-registry entry.
+// CCoverGridInfo is the earlier additive reconstruction of that carrier. The live CCoverInfo
+// in RPGGame.cpp now also retains its grids for shooting. This separate unregistered carrier
+// remains for the aiPlaceSource helper surface pending consolidation.
 //
 // Nothing in the dev tree calls these two helpers yet (the sole release caller is the
 // not-yet-converged aiPlaceSource path), so this is a behaviour-neutral parity surface.
@@ -60,9 +55,7 @@ struct CCoverGridInfo
 void GetObjectsThatMayBeDamaged( CCoverGridInfo *pCover,
 	unordered_map<CPtr<CObjectBase>, int, SPtrHash> *pRes );
 // @0x293910 -- index a finished ray back into its grid cell, then hand that cell's SResult list to
-// the per-ray GetHitIntersections overload (RPGBullet.obj @0x2915d0). The cell indexing is
-// reconstructed faithfully; the per-ray forward is DEFERRED -- that overload is genuinely absent in
-// the dev tree (RPGBullet.h:17-22 explicitly defers it).
+// the per-ray GetHitIntersections overload (RPGBullet.obj @0x2915d0).
 void GetHitIntersections( NAI::IAIMap *pMap, vector<STrailPoint> *pTrail,
 	CCoverGridInfo *pCover, const CCoverGridInfo::SRay *pRay, SAttackRayInfo *pInfo );
 ////////////////////////////////////////////////////////////////////////////////////////////////////

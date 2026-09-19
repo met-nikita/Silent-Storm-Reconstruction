@@ -253,6 +253,7 @@ protected:
 	void NewGrenadeMode( NRPG::EGrenadeMode eMode );
 	void SelectWeaponMode( int nInc );
 	void UpdateActionsInfo();
+	bool CanPerformAction( EUnitAction eAction );
 	void TraceCursor();
 	void UnitCollectAP( NWorld::ECollectSnipeAP eAP );
 	void ExecWorldCommands();

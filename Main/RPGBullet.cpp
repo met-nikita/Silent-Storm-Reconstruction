@@ -9,6 +9,7 @@
 #include "wTSFlags.h"			// NWorld::TS_*
 #include "RPGUnitMission.h"		// NRPG::IUnitMissionInfo (complete -- for CAttackPortion's CPtr members)
 #include "rpgCheatConstants.h"	// CHEAT_GODMODE
+#include "../DBFormat/DataMap.h"
 
 namespace NRPG
 {
@@ -178,6 +179,7 @@ void CalcCoverIntervals( NAI::CFastRenderer::SResult *pList, const SAttackRayInf
 	float fAP = (float)ray.atk.nK;
 	pOut->push_back( SCoverInterval( -1e30f, fAP ) );	// sentinel: profile before anything is hit
 	vector<CObjectBase*> seen;
+	seen.push_back( ray.pIgnore );
 	for ( NAI::CFastRenderer::SResult *node = pList; node; node = node->pNext )
 	{
 		if ( node->fEnter >= ray.fMaxRange )
@@ -197,7 +199,7 @@ void CalcCoverIntervals( NAI::CFastRenderer::SResult *pList, const SAttackRayInf
 		if ( !pArmor )
 			pArmor = pFallbackArmor;
 		float fNext;
-		if ( ray.atk.IsArmorIgnored( pArmor ) || !ray.atk.CanDealDmg( pArmor ) )
+		if ( !ray.atk.IsArmorIgnored( pArmor ) && !ray.atk.CanDealDmg( pArmor ) )
 			fNext = -100.0f;							// blocked: hard stop at this cover
 		else
 			fNext = fAP - GetAPASubstraction( node->fEnter, node->fExit, pArmor );
@@ -206,6 +208,110 @@ void CalcCoverIntervals( NAI::CFastRenderer::SResult *pList, const SAttackRayInf
 		if ( fAP <= 0 )
 			break;
 	}
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// Retail CalcNormals v1.1 0x690820: the precise trace supplies surface normals ONLY.
+// It must not replace the selected grid's object, body part, or damage decision.
+static void CalcNormals( NAI::IAIMap *pAIMap, vector<STrailPoint> *pTrail,
+	const CVec3 &vOrigin, const CVec3 &vDir )
+{
+	CRay ray; ray.ptOrigin = vOrigin; ray.ptDir = vDir;
+	vector<NAI::SInterval> intersections;
+	pAIMap->Trace( ray, &intersections, NWorld::TS_FRAGMENTED );
+	for ( vector<STrailPoint>::iterator i = pTrail->begin(); i != pTrail->end(); ++i )
+	{
+		if ( i->nFloor == 100 )
+			continue;
+		bool bExit = vDir * i->vNormal <= 0;
+		float fNearest = 1e38f;
+		for ( vector<NAI::SInterval>::const_iterator j = intersections.begin(); j != intersections.end(); ++j )
+		{
+			if ( j->pSrc->pUserData != i->pObject )
+				continue;
+			const NAI::SInterval::SCrossPoint &point = bExit ? j->exit : j->enter;
+			float fDistance = fabs2( i->vPosition - ray.Get( point.fT ) );
+			if ( fDistance < fNearest )
+			{
+				fNearest = fDistance;
+				i->vNormal = -point.ptNormal;
+			}
+		}
+	}
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// Retail v1.2 0x691340 / v1.1 0x6915d0. The hit grid is authoritative; the
+// separate precise trace above only refines entry/exit particle normals.
+void GetHitIntersections( NAI::IAIMap *pAIMap, vector<STrailPoint> *pTrail,
+	NAI::CFastRenderer::SResult *pList, const SAttackRayInfo &rayInfo )
+{
+	NDb::CRPGArmor *pDefaultArmor = NDb::GetArmor( NDb::N_DEFAULT_ARMOR );
+	vector<SCoverInterval> cover;
+	CalcCoverIntervals( pList, rayInfo, pDefaultArmor, &cover );
+	CRay ray = rayInfo.GetRay();
+	CAttackPortion attack( rayInfo.atk );
+	attack.rTtrajectory = ray;
+	vector<CObjectBase*> ignored;
+	ignored.push_back( rayInfo.pIgnore );
+	pTrail->clear();
+	pTrail->push_back( STrailPoint( 0, ray.ptDir, ray.Get( rayInfo.fMinClearDistance ),
+		attack, 0, 0, 0, CVec3(0,0,1), 100 ) );
+	float fEnd = rayInfo.fMaxRange;
+	for ( int i = 0; i < cover.size(); ++i )
+		if ( cover[i].fK < 0 )
+			fEnd = Min( fEnd, cover[i].fEnter );
+	int nCover = 0;
+	for ( NAI::CFastRenderer::SResult *p = pList; p; p = p->pNext )
+	{
+		if ( p->fEnter >= rayInfo.fMaxRange )
+			break;
+		const NAI::SSourceInfo &src = p->GetInfo();
+		if ( p->fExit < rayInfo.fMinClearDistance || !( src.nTSFlags & NWorld::TS_FRAGMENTED ) )
+			continue;
+		NDb::CRPGArmor *pArmor = src.pArmor;
+		if ( !pArmor )
+			pArmor = pDefaultArmor;
+		while ( nCover + 1 < cover.size() && p->fEnter > cover[nCover + 1].fEnter )
+			++nCover;
+		attack.nK = int( cover[nCover].fK );
+		if ( attack.nK < 1 )
+		{
+			fEnd = cover[nCover].fEnter;
+			break;
+		}
+		CObjectBase *pObject = src.pUserData;
+		if ( find( ignored.begin(), ignored.end(), pObject ) != ignored.end() )
+			continue;
+		CDynamicCast<NWorld::CUnit> pUnit( pObject );
+		if ( pUnit || pObject == rayInfo.pTarget )
+			ignored.push_back( pObject );
+		int nUserID = p->pSrc->nUserID;
+		bool bHit = true;
+		if ( IsValid( pUnit ) && pObject != rayInfo.pTarget )
+		{
+			CDynamicCast<NWorld::CUnitServer> pServer( pObject );
+			if ( rayInfo.pUS && pServer && rayInfo.pUS->GetDiplomacyState( pServer ) == NDb::DS_ALLY )
+				bHit = false;
+			else
+				bHit = CheckBulletToHit( rayInfo, pObject, (NAI::EHitLocation)nUserID );
+		}
+		if ( rayInfo.atk.IsArmorIgnored( pArmor ) )
+			continue;
+		bool bCanDealDmg = rayInfo.atk.CanDealDmg( pArmor );
+		bool bDraw = bHit && bCanDealDmg || !pUnit;
+		if ( bDraw )
+			pTrail->push_back( STrailPoint( nUserID, ray.ptDir, ray.Get( p->fEnter ), attack,
+				bHit && bCanDealDmg ? pObject : 0, pObject, pArmor, ray.ptDir, src.nFloor ) );
+		if ( !bCanDealDmg )
+		{
+			fEnd = p->fEnter + 0.01f;
+			break;
+		}
+		if ( bDraw && p->fExit > 0 && p->fExit < rayInfo.fMaxRange )
+			pTrail->push_back( STrailPoint( nUserID, ray.ptDir, ray.Get( p->fExit ), attack,
+				0, pObject, pArmor, -ray.ptDir, src.nFloor ) );
+	}
+	pTrail->push_back( STrailPoint( 0, ray.ptDir, ray.Get( fEnd ), attack, 0, 0, 0, CVec3(0,0,1), 100 ) );
+	CalcNormals( pAIMap, pTrail, rayInfo.vOrigin, rayInfo.vDir );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // NRPG::TraceLooseRaySegment @0x292010

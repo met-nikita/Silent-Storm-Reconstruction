@@ -662,8 +662,9 @@ int CUnitMission::GetActionAP( NAI::EPose curPose, EAction action ) const
 			}
 		// @0x2c0bd0 -- retail sources these from the RPGAP DB table (NDb::GetRPGAP, ids 11/12/13)
 		case AC_ITEM_TAKE:
+		case AC_SWAP:
 		{
-			NDb::CRPGAP *pAP = NDb::GetRPGAP( 11 );
+			NDb::CRPGAP *pAP = NDb::GetRPGAP( action == AC_SWAP ? 10 : 11 );
 			return pAP ? pAP->nAP : 0;
 		}
 		case AC_ITEM_SLOT:
@@ -1113,9 +1114,25 @@ int CUnitMission::ProcessAttack( NWorld::IWorld *pWorld, int nUserID, CAttackPor
 			else
 				nDmg = 100000;
 		}
+		int nCriticalProbability = pAttack->nCrtical;
+		int nCriticalDifficulty = pAttack->nCrticalDifficulty;
+		// Retail v1.2 0x6c4139..0x6c41a4: reward a called shot only when
+		// the ray hits the requested part. v1.1's head bonuses were only 50/100.
+		if ( pWorld->GetGlobalGame()->pDifficulty->bHeadshotShouldKill && pAttack->eWantedHL == nUserID )
+		{
+			switch ( nUserID )
+			{
+			case NAI::HL_HEAD: nCriticalProbability += 90; nCriticalDifficulty += 150; break;
+			case NAI::HL_BODY: nCriticalProbability += 10; nCriticalDifficulty += 20; break;
+			case NAI::HL_RHAND:
+			case NAI::HL_LHAND: nCriticalProbability += 35; nCriticalDifficulty += 65; break;
+			case NAI::HL_RLEG:
+			case NAI::HL_LLEG: nCriticalProbability += 25; nCriticalDifficulty += 40; break;
+			}
+		}
 		// a critical injury may arise inside GetCriticalDmgModifier
 		float fCriticalDmgModifier = 
-			GetCriticalDmgModifier( (NAI::EHitLocation)nUserID, pAttack->nCrtical, pAttack->nCrticalDifficulty );
+			GetCriticalDmgModifier( (NAI::EHitLocation)nUserID, nCriticalProbability, nCriticalDifficulty );
 		fDmgModifier += fCriticalDmgModifier;
 		csRPG << CC_GREY << "\tHL=" << GetHLName( (NAI::EHitLocation)nUserID );
 		csRPG << CC_GREY << " \tDmgModifier=" << fDmgModifier;

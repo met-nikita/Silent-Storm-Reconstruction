@@ -1154,6 +1154,17 @@ void CWorld::UpdateVisible( bool bForce )
 		players[k]->UpdateVisible();
 	MergeFriendlyPlayersVisibleSets();
 	CheckInterrupt( &info );
+	if ( IsValid( GetGlobalGame()->pScenarioTracker ) )
+	{
+		CPlayer *pHuman = 0;
+		for ( int k = 0; k < players.size(); ++k )
+			if ( !NAI::IsAIPlayer( players[k] ) )
+			{
+				pHuman = players[k];
+				break;
+			}
+		GetGlobalGame()->pScenarioTracker->OnUpdateVisible( pHuman, GetGlobalGame()->pCurrentZone );
+	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CWorld::OnUnitAdded( CUnitServer *pUnit )

@@ -43,6 +43,8 @@ public:
 	NDb::CString* GetDescription() const { return IsValid( pDBTask ) ? pDBTask->pDescription.GetPtr() : 0; }
 	bool IsVisible() const { return bVisible; }
 	bool IsDetected() const { return bDetected; }
+	void SetDetected( bool bValue ) { bDetected = bValue; }
+	void SetVisible( bool bValue ) { bVisible = bValue; }
 	ETaskState GetState() const { return eState; }
 	void SetState( ETaskState _eState ) { eState = _eState; }
 };

@@ -213,6 +213,7 @@ void CUnitServer::Die( bool bDeathBeauty, bool bRemove )
 		GetWorld()->GetGlobalAck()->OnUnitDied( this );
 	// remove this unit's acks
 	GetWorld()->GetGlobalAck()->RemoveUnitAcks( this );
+	GetWorld()->GetGlobalGame()->pScenarioTracker->OnUnitDestroyed( this );
 	//
 	if ( !bRemove )
 	{

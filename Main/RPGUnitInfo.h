@@ -93,6 +93,7 @@ enum EAction // Do not change this enum or reorder its lines without agreeing wi
 	AC_USE_KEY = 38,              // 0x26  open a locked door with its key (AP = RPGAP table record 9; CExecOpenClose::GetStartAP @0x3bd340)
 	AC_PICK_LOCK,                 // 0x27 (39)  pick a locked door (AP = the active picklock record's nAPToUse)
 	AC_REPAIR_PK = 0x28,          // 0x28 (40) CExecHeal power-armour REPAIR branch
+	AC_SWAP = 41,
 	AC_ITEM_TAKE = 42,            // 0x2a  ground/other -> hand pickup
 	AC_ITEM_SLOT,                 // 0x2b  slot (re)placement
 	AC_ITEM_TRANSFER              // 0x2c  cross-unit hand transfer

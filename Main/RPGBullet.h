@@ -11,9 +11,7 @@
 // PerformRangedAttack is wired into shooting; loose rays include retail reflection,
 // clear-distance filtering and penetration. Some CGame helpers remain alongside them.
 //
-// DEFERRED (genuine gaps -- see RPGBullet.cpp notes):
-//   * CanHitTarget (needs the shooter diplomacy/relation -> ally mapping) and the
-//     per-ray GetHitIntersections (reads a finished CCoverInfo) are deferred.
+// Cover classification still lives in RPGGame.cpp; hit trails retain its chosen grid cell.
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 #include "time.h"
 #include "RPGGame.h"      // NRPG::STrailPoint, NRPG::CAttackPortion, NRPG::IAttackable, EAttackResult, CRay, CObj/CPtr, vector, NDb::CRPGArmor
@@ -113,6 +111,9 @@ void PerformMeleeAttackPortion( NWorld::IWorld *pWorld, NAI::IAIMap *pAIMap, con
 // @0x290d80 -- build the cumulative AP-left profile across the cover chain.
 void CalcCoverIntervals( NAI::CFastRenderer::SResult *pList, const SAttackRayInfo &ray,
 	NDb::CRPGArmor *pFallbackArmor, vector<SCoverInterval> *pOut );
+void GetHitIntersections( NAI::IAIMap *pAIMap, vector<STrailPoint> *pTrail,
+	NAI::CFastRenderer::SResult *pList, const SAttackRayInfo &rayInfo );
+bool PrepareAttackRay( NAI::IAIMap *pAIMap, CCoverInfo *pCover, SAttackRayInfo *pInfo, float fHit );
 // Retail incidental-hit roll, independent of the original target's hit/miss.
 int GetBulletToHit( const SAttackRayInfo &rayInfo, CObjectBase *pTarget, NAI::EHitLocation hl );
 bool CheckBulletToHit( const SAttackRayInfo &rayInfo, CObjectBase *pTarget, NAI::EHitLocation hl );

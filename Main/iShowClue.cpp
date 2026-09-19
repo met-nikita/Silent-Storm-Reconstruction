@@ -11,6 +11,7 @@
 #include "iMission.h"
 #include "iShowClue.h"
 #include "RPGGlobal.h"
+#include "..\DBFormat\DataRPG.h"
 #include "scScenarioTracker.h"
 #include "scFlowChartItems.h"
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -66,13 +67,13 @@ private:
 
 public:
 	CShowClueView() {}
-	CShowClueView( const SWindowInfo &sInfo, NRPG::CGlobalGame *pGame, NScenario::CScenarioClue *pClue );
+	CShowClueView( const SWindowInfo &sInfo, NRPG::CGlobalGame *pGame, NRPG::CGlobalPlayer *pPlayer, NScenario::CScenarioClue *pClue );
 
 	bool ProcessMessage( const SEvent &sEvent );
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CShowClueView::CShowClueView( const SWindowInfo &sInfo, NRPG::CGlobalGame *_pGame, NScenario::CScenarioClue *_pClue ):
-	CWindow( sInfo ), pGame( _pGame ), pClue( _pClue )
+CShowClueView::CShowClueView( const SWindowInfo &sInfo, NRPG::CGlobalGame *_pGame, NRPG::CGlobalPlayer *_pPlayer, NScenario::CScenarioClue *_pClue ):
+	CWindow( sInfo ), pGame( _pGame ), pPlayer( _pPlayer ), pClue( _pClue )
 {
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -105,6 +106,10 @@ bool CShowClueView::ProcessMessage( const SEvent &sEvent )
 	case EVENT_TEMPLATELOADCOMPLETE:
 		{
 			pDescriptionView->SetVScroll( GetUIWindow<CScroll>( this, "scroll" ) );
+			// Retail v1.2 0x6391b5..0x6392b6: use the player's side-specific paper.
+			pBackground = GetUIWindow<CImage>( this, "background" );
+			if ( IsValid( pPlayer ) && IsValid( pPlayer->pSide ) )
+				pBackground->SetImage( pPlayer->pSide->pCluePaperBackground );
 			break;
 		}
 	}
@@ -128,13 +133,13 @@ private:
 
 public:
 	CShowClueUI() {}
-	CShowClueUI( const SWindowInfo &sInfo, NRPG::CGlobalGame *pGame, NScenario::CScenarioClue *pClue );
+	CShowClueUI( const SWindowInfo &sInfo, NRPG::CGlobalGame *pGame, NRPG::CGlobalPlayer *pPlayer, NScenario::CScenarioClue *pClue );
 
 	bool ProcessMessage( const SEvent &sEvent );
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CShowClueUI::CShowClueUI( const SWindowInfo &sInfo, NRPG::CGlobalGame *_pGame, NScenario::CScenarioClue *_pClue ):
-	CWindow( sInfo ), pGame( _pGame ), pClue( _pClue )
+CShowClueUI::CShowClueUI( const SWindowInfo &sInfo, NRPG::CGlobalGame *_pGame, NRPG::CGlobalPlayer *_pPlayer, NScenario::CScenarioClue *_pClue ):
+	CWindow( sInfo ), pGame( _pGame ), pPlayer( _pPlayer ), pClue( _pClue )
 {
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -144,7 +149,7 @@ bool CShowClueUI::ProcessMessage( const SEvent &sEvent )
 	{
 	case EVENT_TEMPLATELOAD:
 		{
-			pView = new CShowClueView( sEvent.pLoader->GetControl( "view" ), pGame, pClue );
+			pView = new CShowClueView( sEvent.pLoader->GetControl( "view" ), pGame, pPlayer, pClue );
 			break;
 		}
 	}
@@ -182,7 +187,7 @@ private:
 public:
 	CShowClueInterface();
 
-	void Initialize( NRPG::CGlobalGame *pGame, NScenario::CScenarioClue *pClue, NUI::CScreenShot *pScreenShot );
+	void Initialize( NRPG::CGlobalGame *pGame, NRPG::CGlobalPlayer *pPlayer, NScenario::CScenarioClue *pClue, NUI::CScreenShot *pScreenShot );
 
 	void Step();
 	void OnGetFocus();
@@ -195,9 +200,10 @@ CShowClueInterface::CShowClueInterface():
 {
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CShowClueInterface::Initialize( NRPG::CGlobalGame *_pGame, NScenario::CScenarioClue *_pClue, NUI::CScreenShot *_pScreenShot )
+void CShowClueInterface::Initialize( NRPG::CGlobalGame *_pGame, NRPG::CGlobalPlayer *_pPlayer, NScenario::CScenarioClue *_pClue, NUI::CScreenShot *_pScreenShot )
 {
 	pGame = _pGame;
+	pPlayer = _pPlayer;
 	pClue = _pClue;
 
 	pCursor = NUI::ICursor::Create();
@@ -212,8 +218,10 @@ void CShowClueInterface::Initialize( NRPG::CGlobalGame *_pGame, NScenario::CScen
 	else
 		pScreenShot->SetTexture( _pScreenShot->GetTexture() );
 
-	pUI = new NUI::CShowClueUI( NUI::SWindowInfo( pInterface, NUI::SPoint( 0, 0 ), NUI::SPoint( 1024, 768 ), "ingamemenu", NUI::STYLE_ENABLED ), pGame, pClue );
-	NUI::LoadTemplate( pUI, NDb::GetUIContainer( 322 ) );
+	pUI = new NUI::CShowClueUI( NUI::SWindowInfo( pInterface, NUI::SPoint( 0, 0 ), NUI::SPoint( 1024, 768 ), "ingamemenu", NUI::STYLE_ENABLED ), pGame, pPlayer, pClue );
+	// Retail v1.2 0x638ef6: the clue template, not the generic hint paper (322).
+	// Its view contains the named background image replaced by the player's side.
+	NUI::LoadTemplate( pUI, NDb::GetUIContainer( 429 ) );
 	pUI->ShowWindow( NUI::SWTYPE_SHOW );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -257,15 +265,15 @@ void CShowClueInterface::RenderFrame()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CICShowClue
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CICShowClue::CICShowClue( NRPG::CGlobalGame *_pGame, NScenario::CScenarioClue *_pClue, NUI::CScreenShot *_pScreenShot ):
-	pGame( _pGame ), pClue( _pClue ), pScreenShot( _pScreenShot )
+CICShowClue::CICShowClue( NRPG::CGlobalGame *_pGame, NRPG::CGlobalPlayer *_pPlayer, NScenario::CScenarioClue *_pClue, NUI::CScreenShot *_pScreenShot ):
+	pGame( _pGame ), pPlayer( _pPlayer ), pClue( _pClue ), pScreenShot( _pScreenShot )
 {
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CICShowClue::Exec()
 {
 	CShowClueInterface *pRes = new CShowClueInterface();
-	pRes->Initialize( pGame, pClue, pScreenShot );
+	pRes->Initialize( pGame, pPlayer, pClue, pScreenShot );
 	PushInterface( pRes );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////

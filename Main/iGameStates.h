@@ -50,7 +50,8 @@ const int
 	N_CURSOR_USE_TOOL				= 22,   // "usetool"      -> UseTool.cur      (579)
 	N_CURSOR_PICKITEM				= 18,   // "pickitem"     -> PickItem.cur     (296)
 	N_CURSOR_TALK						= 20,   // "talk"         -> Talk.cur         (290)
-	N_CURSOR_UNLOAD					= 24;   // "unload"  -> Unload.cur (210)
+	N_CURSOR_UNLOAD					= 24,   // "unload"  -> Unload.cur (210)
+	N_CURSOR_SETTRAP                  = 19;
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CStateBase
 ////////////////////////////////////////////////////////////////////////////////////////////////////

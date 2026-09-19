@@ -695,6 +695,16 @@ public:
 	int GetID() { return nID; }
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+class CCmdSwap: public CCmd
+{
+	OBJECT_BASIC_METHODS( CCmdSwap );
+public:
+	CPtr<CUnit> pTarget;
+	CCmdSwap() {}
+	CCmdSwap( CUnit *_pTarget ): pTarget( _pTarget ) {}
+	int operator&( CStructureSaver &f ) { f.Add(2,(CCmd*)this); f.Add(3,&pTarget); return 0; }
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
 class CCmdTalk: public CCmd
 {
 	OBJECT_BASIC_METHODS( CCmdTalk );

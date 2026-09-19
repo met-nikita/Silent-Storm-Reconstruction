@@ -34,8 +34,8 @@ ECanSave GetCanSaveByString( const string &szName )
 void CDBDifficulty::Import()
 {
 	string szName;
-	NDatabase::ImportField( "CanSave", &szName );
-	canSave = GetCanSaveByString( szName );
+	if ( NDatabase::ImportField( "CanSave", &szName ) )
+		canSave = GetCanSaveByString( szName );
 	NDatabase::ImportField( "AIAPCoeff", &fAPCoeff );
 	NDatabase::ImportField( "AIVPCoeff", &fVPCoeff );
 	NDatabase::ImportField( "DeathCoeff", &fDeathCoeff );
@@ -60,7 +60,7 @@ void CDBDifficulty::Import()
 	NDatabase::ImportField( "AlwaysCritical", &bAlwaysCritical );
 	NDatabase::ImportField( "HeadshotShouldKill", &bHeadshotShouldKill );
 	NDatabase::ImportField( "AICheckCorpses", &bAICheckCorpses );
-	NDatabase::ImportField( "BackstabMeleeMultiplier", &fBackstabMeleeMultiplier );
+	NDatabase::ImportField( "BackstabMeleeMult", &fBackstabMeleeMultiplier );
 	NDatabase::ImportField( "BackstabMinDamageMult", &fBackstabMinDamageMult );
 	NDatabase::ImportField( "BackstabMaxDamageMult", &fBackstabMaxDamageMult );
 }

@@ -17,6 +17,7 @@ namespace NDatabase {
 	template<class T> void Refresh( T *pDest = 0 ) { T *p = 0; Refresh( GetRecordTypes().GetTypeID( p ) );	}
 	// forward-declared here so CDBTableBase can befriend it (full decl is below, after the class)
 	void Serialize( CDataStream &file, CStructureSaver::EMode mode );
+	void Serialize( CDataStream &file, CStructureSaver::EMode mode, bool bBuildLinks );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CDBTableBase;
@@ -89,6 +90,7 @@ public:
 	friend void NDatabase::Import();
 	friend void NDatabase::Refresh( int nTableID );
 	friend void NDatabase::Serialize( CDataStream &file, CStructureSaver::EMode mode );
+	friend void NDatabase::Serialize( CDataStream &file, CStructureSaver::EMode mode, bool bBuildLinks );
   friend class CDBIteratorBase;
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////

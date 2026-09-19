@@ -400,6 +400,8 @@ void CInterface::SetCursorInfo( const SCursorInfo &sInfo )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CInterface::SetToolTipOwner( CWindow *pOwner )
 {
+	if ( !NGlobal::GetVar( "ui_showtooltips", 1.0f ).GetFloat() )
+		return;
 	// retail @0x31c9e0: a live owner that owns a live tooltip sets the STICKY per-frame flag first
 	// (Step clears it and tears the tooltip down when no window re-claims it this frame).
 	if ( IsValid( pOwner ) && IsValid( pOwner->GetToolTip() ) )
@@ -413,6 +415,15 @@ void CInterface::SetToolTipOwner( CWindow *pOwner )
 
 	pToolTip = 0;
 	pToolTipOwner = pOwner;
+	sToolTipDelay = 0;
+	UpdateToolTip( true, 0 );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CInterface::UpdateToolTip( bool bNewOwner, const STime &sTime )
+{
+	// Retail v1.2 0x71cd40: the option is scaled by 10000, not 1000.
+	if ( sTime && !sToolTipDelay )
+		sToolTipDelay = STime( double( sTime ) + NGlobal::GetVar( "ui_tooltipdelay", 0.1f ).GetFloat() * 10000.0f );
 	if ( IsValid( pToolTipOwner ) )
 	{
 		pToolTip = pToolTipOwner->GetToolTip();
@@ -420,10 +431,12 @@ void CInterface::SetToolTipOwner( CWindow *pOwner )
 		{
 			SRect sWindow;
 			SPoint sPosition;
-			pOwner->ClientToScreen( &sPosition, &sWindow );
+			pToolTipOwner->ClientToScreen( &sPosition, &sWindow );
 
-			pToolTip->SetStyle( STYLE_VISIBLE, true );
-			pToolTip->SetPosition( SPoint( sCursorPoint.x , sPosition.y ) );
+			if ( sToolTipDelay && sToolTipDelay < sTime )
+				pToolTip->SetStyle( STYLE_VISIBLE, true );
+			if ( bNewOwner )
+				pToolTip->SetPosition( SPoint( sCursorPoint.x, sPosition.y ) );
 		}
 
 //	DebugTrace( "%s\n", pToolTipOwner->GetWindowID().c_str() );
@@ -600,6 +613,7 @@ void CInterface::Draw( const STime &sTime )
 	if ( bOwnSoundScene )
 		sCounter.Advance( true, sTime );
 
+	UpdateToolTip( false, sTime );
 	pView->StartNewFrame();
 	CWindow::Draw( sTime, pView );
 

@@ -739,6 +739,19 @@ public:
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CExecTalk
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+class CExecSwap: public CCommandExecute
+{
+	OBJECT_BASIC_METHODS( CExecSwap );
+	CPtr<CUnitServer> pTarget;
+public:
+	CExecSwap() {}
+	CExecSwap( CUnitServer *_pUS, CUnitServer *_pTarget ): CCommandExecute( _pUS ), pTarget( _pTarget ) {}
+	int operator&( CStructureSaver &f ) { f.Add(2,(CCommandExecute*)this); f.Add(3,&pTarget); return 0; }
+	virtual int GetStartAP() const;
+	virtual EUnitCommandResult CanDoIt( const NAI::SUnitPosition &from, bool bIgnoreTarget = false );
+	virtual void Run();
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
 class CExecTalk: public CCommandExecute
 {
 	OBJECT_BASIC_METHODS( CExecTalk );

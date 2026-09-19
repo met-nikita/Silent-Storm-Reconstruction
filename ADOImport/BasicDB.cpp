@@ -584,17 +584,18 @@ void NDatabase::Refresh( int nTableID )
 	CloseConnection();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// v1.2 @0x7ef6d0-family: the scalar ImportFields now report success -- a missing
-// column returns false and leaves *pData untouched (v1.1 zero-filled on the storage
-// path / asserted + read column 0 on the ADO path), so a runtime mod db lacking a
-// column preserves the record's previous field value.
+// Retail v1.2 0x401460/0x4014a0/0x4014f0/0x4015c0: missing columns and
+// fdfdfdfd overlay sentinels leave the previous value untouched and return false.
 bool NDatabase::ImportField( const char *pszFieldName, int *pData )
 {
 	if ( pStorageSource )
 	{
 		if ( !pStorageSource->HasIntField( pszFieldName ) )
 			return false;
-		*pData = pStorageSource->GetInt( pszFieldName );
+		int nValue = pStorageSource->GetInt( pszFieldName );
+		if ( nValue == (int)0xfdfdfdfd )
+			return false;
+		*pData = nValue;
 		return true;
 	}
 	if ( !table.HasField( pszFieldName ) )
@@ -609,7 +610,10 @@ bool NDatabase::ImportField( const char *pszFieldName, bool *pData )
 	{
 		if ( !pStorageSource->HasIntField( pszFieldName ) )   // bools live in the int columns
 			return false;
-		*pData = pStorageSource->GetBool( pszFieldName );
+		int nValue = pStorageSource->GetInt( pszFieldName );
+		if ( nValue == (int)0xfdfdfdfd )
+			return false;
+		*pData = nValue != 0;
 		return true;
 	}
 	if ( !table.HasField( pszFieldName ) )
@@ -624,7 +628,12 @@ bool NDatabase::ImportField( const char *pszFieldName, float *pData )
 	{
 		if ( !pStorageSource->HasFloatField( pszFieldName ) )
 			return false;
-		*pData = pStorageSource->GetFloat( pszFieldName );
+		float fValue = pStorageSource->GetFloat( pszFieldName );
+		unsigned int nBits;
+		memcpy( &nBits, &fValue, sizeof(nBits) );
+		if ( nBits == 0xfdfdfdfd )
+			return false;
+		*pData = fValue;
 		return true;
 	}
 	if ( !table.HasField( pszFieldName ) )
@@ -641,6 +650,8 @@ bool NDatabase::ImportField( const char *pszFieldName, std::string *pData )
 			return false;
 		// narrow strings are stored as wstrings in the columnar storage (ASCII content)
 		std::wstring ws = pStorageSource->GetWString( pszFieldName );
+		if ( ws == L"fdfdfdfd" )
+			return false;
 		pData->resize( ws.size() );
 		for ( int i = 0; i < (int)ws.size(); ++i )
 			(*pData)[i] = (char)ws[i];
@@ -658,7 +669,10 @@ bool NDatabase::ImportField( const char *pszFieldName, std::wstring *pData )
 	{
 		if ( !pStorageSource->HasStringField( pszFieldName ) )
 			return false;
-		*pData = pStorageSource->GetWString( pszFieldName );
+		std::wstring ws = pStorageSource->GetWString( pszFieldName );
+		if ( ws == L"fdfdfdfd" )
+			return false;
+		*pData = ws;
 		return true;
 	}
 	if ( !table.HasField( pszFieldName ) )
@@ -741,6 +755,10 @@ namespace NDb { void BuildMapLinks( bool bTranslate ); }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void NDatabase::Serialize( CDataStream &file, CStructureSaver::EMode mode )
 {
+	Serialize( file, mode, true );
+}
+void NDatabase::Serialize( CDataStream &file, CStructureSaver::EMode mode, bool bBuildLinks )
+{
 	CTablesHash &tables = GetTables();
 	NDatabase::bIsDatabaseLoading = true;
 	bool bDidColumnarLoad = false;
@@ -799,7 +817,7 @@ void NDatabase::Serialize( CDataStream &file, CStructureSaver::EMode mode )
 	NDatabase::bIsDatabaseLoading = false;
 	// v1 columnar load rebuilt the records but not the cross-record links - build them now (the v0
 	// path loads them already-built, so skip it there to avoid double-pushing into pAnimations etc.)
-	if ( bDidColumnarLoad )
+	if ( bDidColumnarLoad && bBuildLinks )
 		NDb::BuildMapLinks( false );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -808,12 +826,15 @@ void NDatabase::Serialize( CDataStream &file, CStructureSaver::EMode mode )
 using namespace NDatabase;
 void CDBTableBase::PreCreate( int nTypeID )
 {
-  records.clear();
 	if ( pStorageSource )
 	{
 		// runtime load from the serialized columnar storage (release/Steam game.db v1)
 		for ( pStorageSource->MoveFirst(); !pStorageSource->IsEof(); pStorageSource->MoveNext() )
 		{
+			// Retail PreCreate (v1.2 0x402740) retains existing record identity for mod overlays.
+			int nID = pStorageSource->GetInt( "ID" );
+			if ( records.find( nID ) != records.end() )
+				continue;
 			CDBRecord *pRes = GetRecordTypes().CreateObject( nTypeID );
 			ASSERT( pRes );
 			if ( !pRes )
@@ -824,6 +845,7 @@ void CDBTableBase::PreCreate( int nTypeID )
 		return;
 	}
 	// iterate through recordset & create records
+	records.clear();
 	for ( ; !table.IsEof(); table.MoveNext() )
 	{
 		CDBRecord *pRes = GetRecordTypes().CreateObject( nTypeID );
