@@ -439,6 +439,8 @@ bool CMission::Initialize( int _nTemplateID, int _nVariantID, NScenario::CScenar
 	// so the snapshot contains the fresh mission (an inline save here would capture the OLD stack).
 	// The pause/lose-menu "Restart mission" button loads it back via CICLoadFile.
 	NMainLoop::Command( new NMainLoop::CICSaveFile( "restart.sav" ) );
+	// Retail v1.2 0x601f76: arm the saved restart permission after queuing the snapshot.
+	bCanRestart = true;
 
 	ShowLoadingScreen( 100 );  // mission fully initialized (release finish helper @0x1fb600 paints 100%)
 
@@ -959,7 +961,7 @@ void CMission::SetCameraParams( ECameraType eType, float _fFOV, const ICamera::S
 // PLACE -- no Initialize runs. Rebuild the two runtime-only caches Initialize normally derives:
 //  - every building's SBuildingInfo shell cache (deliberately never serialized; without the
 //    rebuild the render pipeline re-Builds from an EMPTY cache and the walls/roof/floors vanish)
-//    via CWorld::RestoreRuntimeCaches' building->Update() pass (which also re-binds the world's
+//    via CWorld::RestoreRuntimeCaches' building->UpdateAllParts() pass (also re-binds the world's
 //    pGlobalGame weak ref). NOT CreateRestored: its StartGame tail restarted a player turn, so a
 //    realtime save loaded into turn-based -- retail's load path runs no world hook at all
 //    (CICLoad::Exec @0x1f5fd0 -> CMission::OnLoad @0x1fb8e0 = loading-bar counters only) and the
@@ -1426,7 +1428,7 @@ bool CMission::ProcessEvent( const NInput::SEvent &sEvent )
 	// "mainmenu" is the F10 key; "gamemenu" is the on-screen Pause-Menu (HUD) button -- both open the in-game menu.
 	if ( bindMainMenu.ProcessEvent( sEvent ) || bindGameMenu.ProcessEvent( sEvent ) )
 	{
-		NMainLoop::Command( new CICInGameMenu( GetActivePlayer()->GetGlobalPlayer(), true /*bAllowRestart: opened from a mission*/, bCanSave ) );
+		NMainLoop::Command( new CICInGameMenu( GetActivePlayer()->GetGlobalPlayer(), bCanRestart, bCanSave ) );
 		return true;
 	}
 	else if ( bindSaveMenu.ProcessEvent( sEvent ) )

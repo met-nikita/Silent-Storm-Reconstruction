@@ -15,8 +15,8 @@ class CICInGameMenu: public NMainLoop::CInterfaceCommand
 private:
 	CPtr<NRPG::CGlobalPlayer> pGlobalPlayer;
 	// retail threads bAllowRestart into CInGameMenuInterface::Initialize @0x1e9940: the "Restart
-	// mission" button is enabled only when the menu was opened FROM A MISSION (the chapter/global
-	// map callers leave it disabled -- there restart.sav belongs to the previous mission).
+	// mission" button follows the mission's saved bCanRestart flag. Mission initialization arms it;
+	// chapter/global map callers leave it disabled (restart.sav belongs to the previous mission).
 	bool bAllowRestart = false;
 	bool bAllowSave = true;   // retail: the mission's bCanSave, forwarded to every save/load screen this menu opens
 

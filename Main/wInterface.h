@@ -679,12 +679,14 @@ public:
 	// dangling weak ref to it, so the loaded world must be re-bound (and every building's parts
 	// refreshed) before StartGame. ZONE-REENTER ONLY: StartGame restarts the turn.
 	virtual void CreateRestored( NRPG::CGlobalGame *pGlobalGame ) = 0;
-	// dev-only save-load reconnect (game.sav/restart.sav resume): CreateRestored MINUS StartGame --
+	// dev-only save-load reconnect (game.sav/restart.sav resume): rebuild caches without
+	// starting building actions or restarting turns. bZoneReentry preserves the distinct
+	// CreateRestored path, where retail does call the full building Update.
 	// retail's load path runs NO world restore hook (CICLoad::Exec @0x1f5fd0 post-deserialize call is
 	// CMission::OnLoad @0x1fb8e0 = loading-bar counters only; CICLoadFile::Exec @0x1f6830 runs nothing),
 	// so loading must NOT touch TBS state: a realtime save stores bTurnDone=0 for every live player and
 	// StartGame's IsRealTimePossible (@0x364f10) gate would falsely restart a player turn.
-	virtual void RestoreRuntimeCaches( NRPG::CGlobalGame *pGlobalGame ) {}
+	virtual void RestoreRuntimeCaches( NRPG::CGlobalGame *pGlobalGame, bool bZoneReentry = false ) {}
 	virtual IPlayer* AddPlayer( const wstring &wsName, NRPG::CGlobalPlayer *pGlobalPlayer, 
 		CCommander *pCommander, bool bAddOnManyDeploySpots = false ) = 0;
 	virtual void RemovePlayer( IPlayer *pPlayer ) = 0;

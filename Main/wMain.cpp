@@ -1866,15 +1866,23 @@ void CWorld::CreateDefault()
 // full world graph but (a) each building's render parts need a refresh pass and (b) the world's
 // pGlobalGame is a WEAK CPtr with no owner inside the zone-save graph, so it loads dangling --
 // re-bind it to the LIVE session's global game before anything dereferences it.
-// Save-load resume half of CreateRestored: runtime-only cache rebuild, NO turn restart.
+// Save-load resume: runtime-only cache rebuild, NO building-action or turn restart.
+// CreateRestored explicitly selects the zone-entry building update instead.
 // Retail's load path (CICLoad::Exec @0x1f5fd0 / CICLoadFile::Exec @0x1f6830) runs no world restore at
 // all -- the deserialized TBS state resumes untouched. A realtime save stores bTurnDone=0 for every
 // live player, so running StartGame here made IsRealTimePossible (@0x364f10) fail ("player N has not
 // finished his turn") and falsely restarted a player turn: every realtime save loaded into turn-based.
-void CWorld::RestoreRuntimeCaches( NRPG::CGlobalGame *_pGlobalGame )
+void CWorld::RestoreRuntimeCaches( NRPG::CGlobalGame *_pGlobalGame, bool bZoneReentry )
 {
 	for ( list< CObj<CBuilding> >::iterator i = buildings.begin(); i != buildings.end(); ++i )
-		(*i)->Update();
+	{
+		if ( bZoneReentry )
+			(*i)->Update(); // retail CreateRestored: resume building simulation on zone entry
+		else
+			// Raw save load only needs the unserialized geometry cache rebuilt. Update()
+			// also calls ToggleUpdateFlag, starting a new action and a 30-segment wait.
+			(*i)->UpdateAllParts();
+	}
 
 	pGlobalGame = _pGlobalGame;
 
@@ -1900,7 +1908,7 @@ void CWorld::CreateRestored( NRPG::CGlobalGame *_pGlobalGame )
 {
 	nPartiesAdded = 0;
 
-	RestoreRuntimeCaches( _pGlobalGame );
+	RestoreRuntimeCaches( _pGlobalGame, true );
 
 	StartGame();
 }

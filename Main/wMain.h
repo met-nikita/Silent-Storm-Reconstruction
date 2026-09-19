@@ -549,7 +549,7 @@ public:
 	virtual void RunPostInit( CPostWorldCreateInfo *pPostInfo );
 	virtual void CreateDefault();
 	virtual void CreateRestored( NRPG::CGlobalGame *pGlobalGame );	// retail @0x36e100 (zone-reenter: restarts the turn)
-	virtual void RestoreRuntimeCaches( NRPG::CGlobalGame *pGlobalGame );	// save-load resume: no StartGame (retail load path @0x1f5fd0 runs no world hook)
+	virtual void RestoreRuntimeCaches( NRPG::CGlobalGame *pGlobalGame, bool bZoneReentry = false );	// save-load resume must preserve action state
 	virtual bool IsBase() const { return bIsBase; }					// retail @0x376e20
 	virtual bool IsLinkedZone() const;								// retail @0x361c80
 	virtual void RemoveCarriedCorpses();							// retail @0x365900
