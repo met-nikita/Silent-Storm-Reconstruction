@@ -391,10 +391,12 @@ void luaC_checkGC (lua_State *L)
 {
 	if ( L->nGCAvoid > 0 )
 		return;
-  if ( ++L->nGCticks > 0 )
+  // Retail v1.2 0x821b7d: allow 1000 checks between collections. Collecting
+  // at every check destroys unassigned PlaySound results before the UI can
+  // consume the script's weak command queue.
+  if ( ++L->nGCticks > 1000 )
 	{
     luaC_collectgarbage(L);
 		L->nGCticks = 0;
 	}
 }
-

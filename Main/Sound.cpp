@@ -295,8 +295,9 @@ bool CSoundScene::StartMusic( NDb::CMusic *pTrack, int nStartMs )
 		&& NFMSound::IsPlaying( theCurrentMusic->pStream ) )
 	{
 		pOld = theCurrentMusic->pStream.GetPtr();
-		bSameFile = IsValid( theCurrentMusic->pMusic )
-			&& theCurrentMusic->pMusic->szFileName == pTrack->szFileName;
+		// Applying mods invalidates database records, not the playing stream.
+		// Retail's adopt-existing path compares the stream's own filename.
+		bSameFile = NFMSound::IsStreamFile( pOld, pTrack->szFileName.c_str() );
 	}
 	if ( pOld && !bSameFile )
 		pM->pStream = NFMSound::SwitchStream( pOld, pTrack->szFileName.c_str(), true, fFadeInSec );

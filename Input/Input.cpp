@@ -12,7 +12,9 @@ extern "C" WINBASEAPI BOOL WINAPI IsDebuggerPresent(void);
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 static const int POV_RANGE_VALUE = 1000;
 static const int AXIS_RANGE_VALUE = 10000;
-static const int SAMPLE_BUFFER_SIZE = 32;
+// Retail v1.1 0x7cce74 / v1.2 0x82c7c4: drain up to 1024 device
+// events per frame, before the corresponding Win32 console/edit messages.
+static const int SAMPLE_BUFFER_SIZE = 1024;
 // DDSSOOOO
 #define INPUT_KEYID( vID, vOFFS )								( ( ( vID & 0xFF ) << 24 ) | ( vOFFS ) )
 #define INPUT_KEYIDEX( vID, vOFFS, vSPECIAL )		( ( ( vID & 0xFF ) << 24 ) | ( ( vSPECIAL & 0xFF ) << 16 ) | ( vOFFS ) )

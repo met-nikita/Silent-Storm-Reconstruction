@@ -5,6 +5,7 @@
 #include "GSceneUtils.h"
 #include "wInterface.h"
 #include "wMainTrace.h"
+#include "wUICommands.h"
 #include "Sound.h"
 #include "RWGame.h"
 #include "RPGGame.h"
@@ -30,6 +31,35 @@
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 namespace NGame
 {
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// Shared sound branch of retail ExecWorldCommand (v1.2 0x5a4510..0x5a4619).
+// Menus run world scripts too. The scene owns channels, not the queued command.
+bool CMissionBase::ExecWorldSoundCommand( NWorld::CUICmd *pCmd )
+{
+	CDynamicCast<NWorld::CUICmdPlaySound> pSound( pCmd );
+	if ( !pSound )
+		return false;
+	if ( IsValid( pSound->pChannel ) )
+	{
+		for ( list<CObj<CObjectBase> >::iterator i = soundsList.begin(); i != soundsList.end(); ++i )
+			if ( *i == pSound->pChannel )
+			{
+				soundsList.erase( i );
+				break;
+			}
+	}
+	else if ( IsValid( pSound->pSound ) )
+	{
+		if ( pSound->b3DSound )
+			// CSound has a single CObjectBase base at offset zero; its definition is private to Sound.cpp.
+			pSound->pChannel = reinterpret_cast<CObjectBase *>( GetSoundScene()->Add3DSound(
+				pSound->pSound, new NGScene::CCVec3( pSound->vPos ), 0 ) );
+		else
+			pSound->pChannel = GetSoundScene()->Add2DSound( pSound->pSound );
+		soundsList.push_back( pSound->pChannel.GetPtr() );
+	}
+	return true;
+}
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // retail NGame::iBaseInit::iBaseInit @0x1a4610 (iBase.obj): registers the "ui_followcamera" cvar
 // (default 1) backing bCameraShowEnemyActions -- the "camera follows enemy actions" game option.

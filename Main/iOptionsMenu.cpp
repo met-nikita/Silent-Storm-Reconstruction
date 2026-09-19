@@ -605,23 +605,40 @@ class CAudioOptionsUI: public CEmptyOptionsUI
 	OBJECT_NOCOPY_METHODS(CAudioOptionsUI)
 private:
 	ZDATA_(CEmptyOptionsUI)
-	CObj<CHoverButton> pApply;
+	bool bIgnoreNotify;
 	CObj<CHoverButton> pDefault;
+	CPtr<CCheckButton> pCharResponses;
+	CPtr<CCheckButton> pCharSubtitles;
 	CObj<CComplexScroll> pSoundVolume;
 	CObj<CComplexScroll> pMusicVolume;
-	CObj<CComplexComboBox> pOutputType;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CEmptyOptionsUI*)this); f.Add(2,&pApply); f.Add(3,&pDefault); f.Add(4,&pSoundVolume); f.Add(5,&pMusicVolume); f.Add(6,&pOutputType); return 0; }
+	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CEmptyOptionsUI*)this); f.Add(2,&bIgnoreNotify); f.Add(3,&pDefault); f.Add(4,&pCharResponses); f.Add(5,&pCharSubtitles); f.Add(6,&pSoundVolume); f.Add(7,&pMusicVolume); return 0; }
+
+	void UpdateFromConfig();
 
 public:
-	CAudioOptionsUI() {}
+	CAudioOptionsUI(): bIgnoreNotify( false ) {}
 	CAudioOptionsUI( const SWindowInfo &sInfo );
 
 	bool ProcessMessage( const SEvent &sEvent );
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CAudioOptionsUI::CAudioOptionsUI( const SWindowInfo &sInfo ):
-	CEmptyOptionsUI( sInfo, NGame::OS_AUDIO )
+	CEmptyOptionsUI( sInfo, NGame::OS_AUDIO ), bIgnoreNotify( false )
 {
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// Retail v1.2 0x6218a0: sliders display percentages; config stores normalized volumes.
+void CAudioOptionsUI::UpdateFromConfig()
+{
+	bIgnoreNotify = true;
+	UpdateUIElement( pCharResponses, "ui_charresponses" );
+	UpdateUIElement( pCharSubtitles, "ui_charresponsessubtitles" );
+	pSoundVolume->SetMaxValue( N_SLIDER_STEPS );
+	pMusicVolume->SetMaxValue( N_SLIDER_STEPS );
+	// CComplexScroll's dev ratio helpers hide these retail integer accessors.
+	pSoundVolume->CScroll::SetValue( int( NGlobal::GetVar( "sound_sfxvolume", 0 ).GetFloat() * N_SLIDER_STEPS ) );
+	pMusicVolume->CScroll::SetValue( int( NGlobal::GetVar( "sound_musicvolume", 0 ).GetFloat() * N_SLIDER_STEPS ) );
+	bIgnoreNotify = false;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CAudioOptionsUI::ProcessMessage( const SEvent &sEvent )
@@ -630,48 +647,47 @@ bool CAudioOptionsUI::ProcessMessage( const SEvent &sEvent )
 	{
 	case EVENT_NOTIFY:
 		{
-			if ( sEvent.szID == "apply" )
+			// Retail v1.2 0x627920: changes apply live, excluding notifications
+			// generated while initializing the controls themselves.
+			if ( bIgnoreNotify )
+				return true;
+			bIgnoreNotify = true;
+			if ( sEvent.szID == "default" )
 			{
-				NGlobal::SetVar( "sound_sfxvolume", pSoundVolume->GetValue() );
-				NGlobal::SetVar( "sound_musicvolume", pMusicVolume->GetValue() );
+				NGlobal::ResetVar( "sound_sfxvolume" );
+				NGlobal::ResetVar( "sound_musicvolume" );
+				NGlobal::ResetVar( "sound_outputmode" );
+				NGlobal::ResetVar( "ui_charresponses" );
+				NGlobal::ResetVar( "ui_charresponsessubtitles" );
+				UpdateFromConfig();
+				NGlobal::ProcessCommand( L"sound_update" );
 			}
-			else if ( sEvent.szID == "default" )
+			else
 			{
-				pSoundVolume->SetValue( 1.0f );
-				pMusicVolume->SetValue( 0.5f );
+				UpdateConfig( pCharResponses, "ui_charresponses" );
+				UpdateConfig( pCharSubtitles, "ui_charresponsessubtitles" );
+				NGlobal::SetVar( "sound_sfxvolume", float( pSoundVolume->CScroll::GetValue() ) / pSoundVolume->GetMaxValue() );
+				NGlobal::SetVar( "sound_musicvolume", float( pMusicVolume->CScroll::GetValue() ) / pMusicVolume->GetMaxValue() );
 			}
-
+			bIgnoreNotify = false;
 			break;
 		}
 	case EVENT_TEMPLATELOAD:
 		{
-			pApply = new CHoverButton( sEvent.pLoader->GetControl( "apply" ) );
 			pDefault = new CHoverButton( sEvent.pLoader->GetControl( "default" ) );
 			pSoundVolume = new CComplexScroll( sEvent.pLoader->GetControl( "sound_volume" ) );
 			pMusicVolume = new CComplexScroll( sEvent.pLoader->GetControl( "music_volume" ) );
 
-			pApply->AddTextState( CHoverButton::STATE_NORMAL, GetDBString( 4404 ) + GetDBString( 4376 ) );
-			pApply->AddTextState( CHoverButton::STATE_HOVER, GetDBString( 4405 ) + GetDBString( 4376 ) );
 			pDefault->AddTextState( CHoverButton::STATE_NORMAL, GetDBString( 4404 ) + GetDBString( 4377 ) );
 			pDefault->AddTextState( CHoverButton::STATE_HOVER, GetDBString( 4405 ) + GetDBString( 4377 ) );
 
-			pOutputType = new CComplexComboBox( sEvent.pLoader->GetControl( "outputtype" ) );
-			pOutputType->SetStateInfo( CComplexComboBox::STATE_NORMAL, CComplexComboBox::SInfo( NUI::GetDBString( 4402 ) ) );
-			pOutputType->SetStateInfo( CComplexComboBox::STATE_HILIGHTED, CComplexComboBox::SInfo( NUI::GetDBString( 4401 ) ) );
-			pOutputType->SetStateInfo( CComplexComboBox::STATE_SELECTED, CComplexComboBox::SInfo( NUI::GetDBString( 4402 ) ) );
-			pOutputType->SetStateInfo( CComplexComboBox::STATE_DISABLED, CComplexComboBox::SInfo( NUI::GetDBString( 4402 ) ) );
-			pOutputType->AddItem( 0, CComplexComboBox::SInfo( NUI::GetDBString( 4420 ) ), 171 );
-			pOutputType->AddItem( 1, CComplexComboBox::SInfo( NUI::GetDBString( 4421 ) ), 172 );
-			pOutputType->AddItem( 3, CComplexComboBox::SInfo( NUI::GetDBString( 4422 ) ), 172 );
-			pOutputType->AddItem( 4, CComplexComboBox::SInfo( NUI::GetDBString( 4423 ) ), 172 );
-			pOutputType->AddItem( 5, CComplexComboBox::SInfo( NUI::GetDBString( 4424 ) ), 172 );
-			pOutputType->AddItem( 6, CComplexComboBox::SInfo( NUI::GetDBString( 4425 ) ), 173 );
 			break;
 		}
 	case EVENT_TEMPLATELOADCOMPLETE:
 		{
-			pSoundVolume->SetValue( NGlobal::GetVar( "sound_sfxvolume", 0 ).GetFloat() );
-			pMusicVolume->SetValue( NGlobal::GetVar( "sound_musicvolume", 0 ).GetFloat() );
+			pCharResponses = GetUIWindow<CCheckButton>( this, "char_responses" );
+			pCharSubtitles = GetUIWindow<CCheckButton>( this, "char_subtitles" );
+			UpdateFromConfig();
 			break;
 		}
 	}

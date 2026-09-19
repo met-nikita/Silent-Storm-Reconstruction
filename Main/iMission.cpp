@@ -124,6 +124,22 @@ static void VarCheatAP( const string &szID, const NGlobal::CValue &sValue, void 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CMission
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// Retail v1.1 0x60a830: finish initialization AFTER the restart snapshot.
+class CICSaveRestartMission: public NMainLoop::CICSaveFile
+{
+	OBJECT_BASIC_METHODS(CICSaveRestartMission);
+	CPtr<CMission> pMission;
+public:
+	CICSaveRestartMission() {}
+	CICSaveRestartMission( CMission *_pMission ): CICSaveFile( "restart.sav" ), pMission( _pMission ) {}
+	void Exec();
+};
+void CICSaveRestartMission::Exec()
+{
+	NMainLoop::CICSaveFile::Exec();
+	pMission->InitializeComplete();
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 // W4.2: the base-class members (bPause/bHideInterface/nLightMode/bCheatVisibility/bTutorialMode/...)
 // are initialized by the CMissionBase ctor (retail @0x1a2c70); only the CMission-side state stays here.
 CMission::CMission():
@@ -438,13 +454,19 @@ bool CMission::Initialize( int _nTemplateID, int _nVariantID, NScenario::CScenar
 	// it drains AFTER CICBeginMission::Exec has installed this mission into the interface stack,
 	// so the snapshot contains the fresh mission (an inline save here would capture the OLD stack).
 	// The pause/lose-menu "Restart mission" button loads it back via CICLoadFile.
-	NMainLoop::Command( new NMainLoop::CICSaveFile( "restart.sav" ) );
+	NMainLoop::Command( new CICSaveRestartMission( this ) );
 	// Retail v1.2 0x601f76: arm the saved restart permission after queuing the snapshot.
 	bCanRestart = true;
 
-	ShowLoadingScreen( 100 );  // mission fully initialized (release finish helper @0x1fb600 paints 100%)
-
 	return true;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CMission::InitializeComplete()
+{
+	// Retail v1.1 0x5fb600 / v1.2 0x5fbe20. Discard all loading-time
+	// input, including keys pressed while the restart snapshot was being saved.
+	ShowLoadingScreen( 100 );
+	NInput::PurgeEvents();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CMission::Terminate()
@@ -2323,24 +2345,8 @@ void CMission::ExecWorldCommands()
 			pExecLocator = NGame::CreateCameraExecutor( pLoc, this );
 			// does NOT stall pCmdExec: continue draining the queue (the focus runs in its own slot)
 		}
-		// LUA convergence PART B: PlaySound opens a sound channel on the mission's sound scene and
-		// parks the live handle in the command (retail CMissionBase::ExecWorldCommand @0x1a30c0:
-		// CUICmdPlaySound -> soundsList add channel). StopSound later releases pChannel to stop it.
-		// (Only the 2D path here; the 3D path -- Add3DSound, managed by the render-sound sync -- is a
-		// follow-up once Play3DSound lands.)
-		else if ( CDynamicCast<NWorld::CUICmdPlaySound>( pCmd ) )
+		else if ( ExecWorldSoundCommand( pCmd ) )
 		{
-			NWorld::CUICmdPlaySound *pPlaySound = CDynamicCast<NWorld::CUICmdPlaySound>( pCmd );
-			if ( IsValid( pPlaySound->pSound ) )
-			{
-				if ( pPlaySound->b3DSound )
-					// NSound::CSound is opaque here (defined in Sound.cpp); it derives from CObjectBase
-					// at offset 0 (single inheritance), so reinterpret to park it in the generic handle.
-					pPlaySound->pChannel = reinterpret_cast<CObjectBase *>(
-						GetSoundScene()->Add3DSound( pPlaySound->pSound, new NGScene::CCVec3( pPlaySound->vPos ), GetTime() ) );
-				else
-					pPlaySound->pChannel = GetSoundScene()->Add2DSound( pPlaySound->pSound );
-			}
 		}
 		// LUA convergence PART B: PlayEffect spawns a particle effect at the command's position and parks the
 		// live handle (retail CMissionBase::ExecWorldCommand @0x1a30c0: GetEffect + MakeTransform + render).

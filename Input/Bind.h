@@ -58,6 +58,7 @@ void SetControlCoeff( const string &szControl, float fCoeff );
 void SetCommandCoeff( const string &szCommand, float fCoeff );
 ////
 bool GetEvent( SEvent *sEvent );
+void PurgeEvents();
 void PostEvent( const string &sEvent );
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 };

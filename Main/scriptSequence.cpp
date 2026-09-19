@@ -306,7 +306,8 @@ BEGIN_SCRIPT_COMMAND( PlayVideo, "s" )
 END_SCRIPT_COMMAND
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // retail @0x2f06d0: queue a 2D play-sound command for the DB sound id; nil on a bad id. The command is
-// kept alive (AddMiscObject) so the sound keeps playing, and is RETURNED so the script can StopSound it.
+// tracked weakly by AddMiscObject and RETURNED as owning Lua userdata so a script can StopSound it.
+// After dispatch, the scene owns the channel independently of the command's Lua lifetime.
 BEGIN_SCRIPT_COMMAND( PlaySound, "n" )
 	NDb::CSound *pSound = NDb::GetSound( luaParams[ 0 ].n );
 	if ( !IsValid( pSound ) )
@@ -321,13 +322,14 @@ BEGIN_SCRIPT_COMMAND( PlaySound, "n" )
 	return 1;
 END_SCRIPT_COMMAND
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// retail @0x2f0d00: stop a running play-sound command -- release its live channel handle, which deletes
-// the channel and stops the FMOD playback. (The retail re-queues the command for its soundsList removal;
-// the dev's command-owns-the-channel model needs no re-queue -- releasing pChannel is the stop.)
+// Retail @0x2f0d00: re-queue the command to remove its channel from the scene's owning soundsList.
 BEGIN_SCRIPT_COMMAND( StopSound, "u" )
 	CDynamicCast<NWorld::CUICmdPlaySound> pCmd( luaParams[ 0 ].p );
 	if ( pCmd )
-		pCmd->pChannel = 0;
+	{
+		pCmd->pSound = 0;
+		pScript->AddUICommand( pCmd );
+	}
 	return 0;
 END_SCRIPT_COMMAND
 ////////////////////////////////////////////////////////////////////////////////////////////////////

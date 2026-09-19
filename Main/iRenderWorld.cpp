@@ -4,6 +4,7 @@
 #include "G2DView.h"
 #include "GSceneUtils.h"
 #include "wInterface.h"
+#include "wUICommands.h"
 #include "Sound.h"
 #include "RWGame.h"
 #include "RWSound.h"
@@ -124,6 +125,12 @@ void CRenderBaseInterface::Step()
 {
 	if ( CanRender() )
 	{
+		// Retail's common mission-base pump dispatches script sounds in backdrop
+		// menus as well. In particular, map script 10 plays the menu ambience.
+		while ( CPtr<NWorld::CUICmd> pCmd = pWorld->GetUICommand() )
+			if ( IsValid( pCmd ) )
+				ExecWorldSoundCommand( pCmd );
+		EraseInvalidRefs( &soundsList );
 		pCamera->Update( GetTime() );
 
 		pInterface->UpdateCursor();

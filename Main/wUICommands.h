@@ -125,15 +125,15 @@ public:
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CUICmdPlaySound -- release-new: the script PlaySound/Play3DSound bindings queue this; when the mission
 // processes it (CMissionBase::ExecWorldCommand) it opens a channel on the mission's sound scene and parks
-// the live handle in pChannel so the StopSound binding can release (stop) it. Kept alive while playing by
-// the script's AddMiscObject holder. Retail serializes pChannel as a WEAK ref at tag 5 (@0x2f2e00).
+// a weak handle in pChannel. CMissionBase::soundsList owns playback; StopSound queues its removal.
+// Lua userdata owns the command; AddMiscObject tracks it weakly. Retail tag 5 is WEAK (@0x2f2e00).
 class CUICmdPlaySound: public CUICmd
 {
 	OBJECT_BASIC_METHODS( CUICmdPlaySound );
 	ZDATA
 public:
 	ZPARENT( CUICmd );
-	CPtr<CObjectBase> pChannel;		// the live playing channel (null when stopped / not yet played; owned by the script holder)
+	CPtr<CObjectBase> pChannel;		// weak handle; CMissionBase::soundsList owns playback
 	CDBPtr<NDb::CSound> pSound;		// the DB sound to play
 	bool b3DSound;					// 3D (positional) vs 2D
 	CVec3 vPos;						// the 3D position (when b3DSound)

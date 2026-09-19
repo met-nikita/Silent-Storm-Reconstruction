@@ -115,6 +115,7 @@ void* GetSoundAPI();   // @0x3db240 -- underlying output device handle (the IDir
 void Update( const SListener &listen );
 CSample2D* LoadSample2D( const void *pData, int nLength );
 CSample3D* LoadSample3D( const void *pData, int nLength, float fMinDistance, float fMaxDistance, int nPriority, int nStartSamples = 0, int nEndingSamples = 0 );
+CSample2D* GetDefault2DSound();
 CSample3D* GetDefault3DSound();
 CSound2D* PlaySound( CSample2D *pSample, int nStartMs = 0, int nStartSamples = 0, int nEndingSamples = 0, bool bLoop = false );
 CSound3D* Play3DSound( const SPlayParams &params );
@@ -127,6 +128,7 @@ CStream* PlayStream( const char *pszName, bool bUseExisting, int nStartMs, bool 
 // NEW stream in over the switch (retail SetSwitchStream @0x3dd190 fade-in priming).
 CStream* SwitchStream( CStream *pOldStream, const char *pszNameNewStream, bool bLoop, float fFadeInSec ); // �� ��������� ������� ������������� �� ����� �����
 bool IsPlaying( CStream *pStream );
+bool IsStreamFile( CStream *pStream, const char *pszName );
 unsigned long GetStreamTime( CStream *pStream );   // current play position ms, 0xFFFFFFFF if not playing (retail NSound::CMusic save capture)
 bool IsPlaying( CSound2D *pSound );
 bool IsPlaying( CSound3D *pSound );

@@ -67,20 +67,27 @@ void CFileSoftwareSample3D::RecalcValue( NGScene::CFileRequest *p )
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CFileSample2D::Recalc()
+NGScene::CFileRequest* CFileSample2D::CreateRequest()
 {
-	try
+	return new NGScene::CFileRequest( "Sounds", GetKey() );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// Retail v1.2 0x70a7b0: decode the completed request, just like the 3D loaders.
+// Synchronous loading here let the first menu sample take music's channel 0.
+void CFileSample2D::RecalcValue( NGScene::CFileRequest *p )
+{
+	if ( !NDb::GetSound( GetKey() ) )
+		return;
+	NGScene::CFileRequest &file = *p;
+	const int nSize = file->GetSize();
+	if ( nSize )
 	{
-		NGScene::CResourceFileOpener file( "Sounds", GetKey() );
-
-		const int nSize = file->GetSize();
 		vector<char> buff( nSize );
 		file->Read( &buff[0], nSize );
 		pValue = NFMSound::LoadSample2D( &buff[0], nSize );
 	}
-	catch(...)
-	{
-	}
+	else
+		pValue = NFMSound::GetDefault2DSound();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 }

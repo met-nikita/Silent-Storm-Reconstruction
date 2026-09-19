@@ -270,6 +270,7 @@ protected:
 
 public:
 	CMission();
+	void InitializeComplete();
 
 	// The trivial accessors + player/desktop/light/camera-focus family moved to CMissionBase
 	// (retail placement -- see iMission.h); CMission keeps only its real overrides below.

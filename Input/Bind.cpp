@@ -544,6 +544,16 @@ static bool IsMappingBSubsetA( const SMapping &mSetA, const SMapping &mSetB )
 	return true;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// Retail v1.1 0x7d1460 / v1.2 0x830860: poll once, then consume events
+// through the binding layer so releases and accumulator state are updated too.
+void PurgeEvents()
+{
+	PumpMessages( true );
+	SEvent event;
+	while ( GetEvent( &event ) )
+		;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 static bool IsSameMappingExist( const SCommand &sCommand, const SMapping &sMapping )
 {
 	for ( list<SMapping>::const_iterator iTempMapping = sCommand.mappingsList.begin(); iTempMapping != sCommand.mappingsList.end(); ++iTempMapping )
@@ -720,4 +730,3 @@ START_REGISTER(InputBind)
 	REGISTER_CMD( "bind_update", CommandBindUpdate )
 	REGISTER_CMD( "showbind", CommandShowBind )
 FINISH_REGISTER
-

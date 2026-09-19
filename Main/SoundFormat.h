@@ -33,11 +33,12 @@ class CFileSoftwareSample3D: public NGScene::CLazyResourceLoader<int, NFMSound::
 	virtual void RecalcValue( NGScene::CFileRequest *p );
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-class CFileSample2D: public NGScene::CResourceLoader<int, NFMSound::CSample2D>
+class CFileSample2D: public NGScene::CLazyResourceLoader<int, NFMSound::CSample2D>
 {
 	OBJECT_BASIC_METHODS(CFileSample2D);
 protected:
-	virtual void Recalc();	
+	virtual NGScene::CFileRequest* CreateRequest();
+	virtual void RecalcValue( NGScene::CFileRequest *p );
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 }
