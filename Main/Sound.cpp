@@ -438,7 +438,9 @@ void CSoundScene::Draw( CTransformStack *pTS )
 	//
 	// (a) resume a restored track: a loaded pMusic carries its record and a saved play position
 	// but no live stream (retail: PlayStream WITHOUT the adopt search, seeking to tCurrent).
-	if ( IsValid( pMusic ) && IsValid( pMusic->pMusic ) && !IsValid( pMusic->pStream )
+	// Retail v1.2 0x705b10 tests NULL, not validity: a finished stream remains
+	// referenced after its owner releases it. It must enter silence, not resume again.
+	if ( IsValid( pMusic ) && IsValid( pMusic->pMusic ) && pMusic->pStream == 0
 		&& pMusic->tCurrent != 0xFFFFFFFF )
 	{
 		pMusic->pStream = NFMSound::PlayStream( pMusic->pMusic->szFileName.c_str(), false,
