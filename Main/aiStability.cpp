@@ -207,8 +207,8 @@ public:
 		{
 			// corpses: unstable -> re-drop the ragdoll (CUnitAnimator::BeDropped @0x33b1b0);
 			// removed from tracking either way (BeStopped re-registers it when it rests again).
-			// Retail guards on a server byte +0xbf ("drop already initiated") that is never written
-			// anywhere in the retail image -- effectively always clear, so no dev counterpart.
+			// Retail v1.2 0x4a5d43: server +0xbf is animator.bIsCarried (+0x58 +0x67).
+			// A body picked up since registration must not be detached by its old ground tracker.
 			vector< SStabObject<NWorld::CUnitServer> > keep;
 			for ( int i = 0; i < corpses.size(); ++i )
 			{
@@ -219,7 +219,7 @@ public:
 					continue;
 				}
 				NWorld::CUnitServer *pObj = so.pObj;
-				if ( pObj != 0 && IsValid( pObj ) )
+				if ( pObj != 0 && IsValid( pObj ) && !pObj->animator.bIsCarried )
 					pObj->animator.BeDropped( pObj );
 			}
 			corpses = keep;
