@@ -5,6 +5,7 @@
 #include "RPGUnitInfo.h"
 #include "RPGUnit.h"        // NRPG::CUnit complete type (GetRPGUnit()->GetVoice() for the in-game ack voice)
 #include "wInterface.h"
+#include "wUICommands.h"
 #include "Sound.h"
 #include "Interface.h"
 #include "UIML.h"
@@ -218,6 +219,14 @@ void CMissionDlgUI::UpdateDesktop( const STime &sTime )
 			return;
 		}
 	}
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// Retail v1.2 0x605f80: dialogue also excludes automatic action/death/blast framing.
+bool CMissionDlgUI::IsValidCommand( NWorld::CUICmd *pCmd )
+{
+	if ( CDynamicCast<NWorld::CUICmdScriptMoveCamera>( pCmd ) )
+		return true;
+	return !CDynamicCast<NWorld::CUICmdCameraLocator>( pCmd );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 NGame::CUICmdExec* CMissionDlgUI::CreateExecutor( NWorld::CUICmd *pCmd )

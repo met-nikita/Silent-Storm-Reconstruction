@@ -62,6 +62,7 @@ public:
 	// retail SetSkipFade @0x20e130 (EndSequence's second bool re-arms the flag before HideDesktop)
 	void SetSkipFade( bool bSkip ) { bSkipFadeOut = bSkip; }
 	void UpdateDesktop( const STime &sTime );
+	bool IsValidCommand( NWorld::CUICmd *pCmd );
 	NGame::CUICmdExec* CreateExecutor( NWorld::CUICmd *pCmd );
 
 	bool ProcessEvent( const NInput::SEvent &sEvent );
@@ -104,6 +105,7 @@ public:
 	void ShowDesktop( int nNotifyID );
 	void HideDesktop( int nNotifyID );
 	void UpdateDesktop( const STime &sTime );
+	bool IsValidCommand( NWorld::CUICmd *pCmd );
 
 	// While the fade screen is the top desktop (e.g. a scripted CameraSet/CameraMove between FadeOut and
 	// FadeIn), world UI commands are dispatched through it -- so it must build executors too, else the

@@ -135,6 +135,14 @@ void CMissionMovieUI::UpdateDesktop( const STime &sTime )
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// Retail v1.2 0x60e8c0: scripts retain camera control throughout the movie desktop.
+bool CMissionMovieUI::IsValidCommand( NWorld::CUICmd *pCmd )
+{
+	if ( CDynamicCast<NWorld::CUICmdScriptMoveCamera>( pCmd ) )
+		return true;
+	return !CDynamicCast<NWorld::CUICmdCameraLocator>( pCmd );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 NGame::CUICmdExec* CMissionMovieUI::CreateExecutor( NWorld::CUICmd *pCmd )
 {
 	// (the CUICmdTurn/CUICmdUnit skip guards died with the classes -- W5 serialization-convergence)
@@ -276,6 +284,14 @@ void CMissionFadeUI::UpdateDesktop( const STime &sTime )
 // Mirror CMissionMovieUI::CreateExecutor: while the fade screen is the top desktop, world UI commands
 // route through it, so it must build executors (camera moves etc.) -- otherwise a CameraSet/CameraMove
 // issued between FadeOut and FadeIn is consumed with no executor and its WaitForUI id never releases.
+// Retail v1.2 0x60a5c0: fades apply the same filter even above a movie desktop.
+bool CMissionFadeUI::IsValidCommand( NWorld::CUICmd *pCmd )
+{
+	if ( CDynamicCast<NWorld::CUICmdScriptMoveCamera>( pCmd ) )
+		return true;
+	return !CDynamicCast<NWorld::CUICmdCameraLocator>( pCmd );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 NGame::CUICmdExec* CMissionFadeUI::CreateExecutor( NWorld::CUICmd *pCmd )
 {
 	// (the CUICmdTurn/CUICmdUnit skip guards died with the classes -- W5 serialization-convergence)

@@ -89,6 +89,7 @@ public:
 	virtual void UpdateDesktop( const STime &sTime ) {}
 
 	virtual void PlayAck( NWorld::CAckEvent *pEvent );
+	virtual bool IsValidCommand( NWorld::CUICmd *pCmd ) { return true; }
 	virtual NGame::CUICmdExec* CreateExecutor( NWorld::CUICmd *pCmd ) { return 0; }
 
 	virtual bool ProcessEvent( const NInput::SEvent &sEvent );

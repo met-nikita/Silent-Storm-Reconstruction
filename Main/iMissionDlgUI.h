@@ -94,6 +94,7 @@ public:
 	void HideDesktop();
 	void UpdateDesktop( const STime &sTime );
 
+	bool IsValidCommand( NWorld::CUICmd *pCmd );
 	NGame::CUICmdExec* CreateExecutor( NWorld::CUICmd *pCmd );
 
 	bool ProcessEvent( const NInput::SEvent &sEvent );

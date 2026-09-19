@@ -2243,6 +2243,10 @@ void CMission::ExecWorldCommands()
 		CPtr<NWorld::CUICmd> pCmd = pWorld->GetUICommand();
 		if ( !IsValid( pCmd ) )
 			return;
+		// Retail ProcessWorldCommands v1.2 0x5a30b4..0x5a30c8: the TOP desktop
+		// filters commands before dispatch, including camera-locator arbitration.
+		if ( !GetDesktop()->IsValidCommand( pCmd ) )
+			continue;
 		CDynamicCast<NWorld::CUICmdPartFinished> pPartFinished(pCmd);
 		if (pPartFinished)
 		{
