@@ -545,6 +545,7 @@ protected:
 	// Retail base tag 38 owns script sound channels; commands hold weak references.
 	list<CObj<CObjectBase> > soundsList;
 	bool ExecWorldSoundCommand( NWorld::CUICmd *pCmd );
+	bool ExecWorldBeginZoneCommand( NWorld::CUICmd *pCmd );
 public:
 	// retail NGame::CMissionBase::operator& @0x19f3f0 -- 34 tags, gaps at 6/17/27 preserved
 	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&pGlobalGame); f.Add(3,&pScene); f.Add(4,&pSoundScene); f.Add(5,&pRender); f.Add(7,&bPause); f.Add(8,&bRenderWorld); f.Add(9,&nDeltaTime); f.Add(10,&pWorld); f.Add(11,&pActivePlayer); f.Add(12,&playersSet); f.Add(13,&bHideInterface); f.Add(14,&bSpecialHideInterface); f.Add(15,&pCursor); f.Add(16,&pInterface); f.Add(18,&pCamera); f.Add(19,&cameraLimits); f.Add(20,&cameraPosStack); f.Add(21,&pExecLocator); f.Add(22,&bWaitForPartFinished); f.Add(23,&desktopWindowsList); f.Add(24,&nLightMode); f.Add(25,&pLightSource); f.Add(26,&bCheatVisibility); f.Add(28,&sTimeCounter); f.Add(29,&pTimeFunc); f.Add(30,&bCanSave); f.Add(31,&bTutorialMode); f.Add(32,&bCanRestart); f.Add(33,&sUITimeCounter); f.Add(34,&pUITimeFunc); f.Add(35,&sLastUpdateTime); f.Add(36,&sMinFrameTime); f.Add(37,&sFPSLimitLastTime); f.Add(38,&soundsList); return 0; }

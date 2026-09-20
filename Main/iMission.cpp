@@ -2436,23 +2436,8 @@ void CMission::ExecWorldCommands()
 		}
 		// LUA convergence PART B: BeginZone(zoneName) begins the named scenario zone
 		// (retail CMissionBase::ExecWorldCommand @0x1a30c0: GetZoneByName -> CICBeginMission).
-		else if ( CDynamicCast<NWorld::CUICmdBeginZone>( pCmd ) )
+		else if ( ExecWorldBeginZoneCommand( pCmd ) )
 		{
-			NWorld::CUICmdBeginZone *pBeginZone = CDynamicCast<NWorld::CUICmdBeginZone>( pCmd );
-			if ( !pGlobalGame->pScenarioTracker->IsScenarioAvailable() )
-				csSystem << "ERROR: Scenario not available!" << endl;
-			else
-			{
-				NScenario::CScenarioZone *pZone = pGlobalGame->pScenarioTracker->GetZoneByName( pBeginZone->szZone );
-				if ( IsValid( pZone ) )
-				{
-					vector<string> params;
-					// bEmulateChapter=true: direct mission->zone jump, run the leave-zone bookkeeping
-					NMainLoop::Command( new CICBeginMission( pZone, -1, params, pGlobalGame, true ) );
-				}
-				else
-					csSystem << "ERROR: Zone not found " << pBeginZone->szZone << " !" << endl;
-			}
 		}
 		// LUA convergence PART B: FadeOut(BeginFade) spawns the fade desktop window; FadeIn(EndFade) tells the
 		// running fade to fade back out (retail CMission::ExecWorldCommand @0x1fd8c0 BeginFade/EndFade arms).

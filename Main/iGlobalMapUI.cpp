@@ -166,6 +166,9 @@ bool CZoneGlobalSector::ProcessMessage( const SEvent &sEvent )
 		{
 			pTextNormal = new CText( sEvent.pLoader->GetControl( "text_normal" ) );
 			pTextHilighted = new CText( sEvent.pLoader->GetControl( "text_hilighted" ) );
+			// Retail v1.2 0x5e5986: instantiate the framed caption before
+			// template creation, rather than accepting the default plain window.
+			pDescription = new CFrameText( sEvent.pLoader->GetControl( "description" ) );
 
 			break;
 		}

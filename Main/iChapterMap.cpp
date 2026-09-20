@@ -14,9 +14,12 @@
 #include "iInterMission.h"
 #include "iMission.h"			// NGame::CMissionBase -- the CChapterMap base (retail @0x1a8480 tag 1)
 #include "wInterface.h"
+#include "wUICommands.h"
 #include "RWGame.h"
 #include "PlayerTracker.h"
 #include "iGameStates.h"
+#include "iTeamMngMenu.h"
+#include "iShowHint.h"
 #include "iGlobalMap.h"
 #include "iChapterMap.h"
 #include "iCluesMenu.h"
@@ -52,8 +55,7 @@ private:
 	CDGPtr<CPtrFuncBase<CChapterInfo> > pChapterInfo;
 	//// interface
 	CObj<NUI::CChapterMapUI> pChapterMapUI;
-	// v1.2-only flag (name is ours -- Game.pdb is v1.1). Retail sets it in ExecWorldCommand
-	// @0x5a7140; this fork models neither that nor any consumer yet, so it only round-trips.
+	// v1.2 EnableFeature("reenter") flag, set by ExecWorldCommand @0x5a7140.
 	bool bV12WorldCmdFlag;
 	// retail NGame::CChapterMap::operator& @0x1a8480 -- 4 tags, tag 1 = the CMissionBase base chunk
 	// (emitted non-polymorphically, exactly like CMission's @0x1a03a0).
@@ -89,6 +91,7 @@ private:
 	}
 
 	void UpdateChapterDifficulty();
+	void ProcessWorldCommands();
 
 protected:
 	void RenderFrame( const STime &sTime );
@@ -247,14 +250,66 @@ bool CChapterMap::ProcessEvent( const NInput::SEvent &sEvent )
 	return false;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// Retail chapter dispatch (0x5a7140) plus its CMissionBase handlers. Drain the
+// world's script queue before drawing; the Jan03 2D-only loop never did so.
+void CChapterMap::ProcessWorldCommands()
+{
+	while ( true )
+	{
+		CPtr<NWorld::CUICmd> pCmd = pWorld->GetUICommand();
+		if ( !IsValid( pCmd ) )
+			return;
+		if ( !GetDesktop()->IsValidCommand( pCmd ) )
+			continue;
+		if ( ExecWorldBeginZoneCommand( pCmd ) || ExecWorldSoundCommand( pCmd ) )
+			continue;
+		if ( CDynamicCast<NWorld::CUICmdLoadTemplate> pLoad = pCmd )
+		{
+			NMainLoop::CommandWithAutoSave( NStr::ToAscii( NUI::GetDBString( 20243 ).c_str() ),
+				new CICBeginMission( (NScenario::CScenarioZone*)0, pLoad->nTemplateID, vector<string>(), pGlobalGame ) );
+		}
+		else if ( CDynamicCast<NWorld::CUICmdShowTeamMng> pTeam = pCmd )
+			NMainLoop::Command( new CICTeamMngMenu( pActivePlayer->GetGlobalPlayer(), this, pTeam->GetID() ) );
+		else if ( CDynamicCast<NWorld::CUICmdEnableFeature> pFeature = pCmd )
+		{
+			if ( pFeature->nFeature == 0 )
+				bV12WorldCmdFlag = true;
+		}
+		else if ( CDynamicCast<NWorld::CUICmdShowHint> pHint = pCmd )
+		{
+			if ( NGlobal::GetVar( "ui_showhints" ).GetFloat() == 1.0f || bTutorialMode )
+				NMainLoop::Command( new CICShowHint( this, pHint->GetID(), pHint->pHint, pGlobalGame ) );
+			else
+				DoEvent( new NWorld::CCmdInterfaceEvent( pHint->GetID() ) );
+		}
+	}
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 void CChapterMap::Step()
 {
+	// The chapter shares retail's mission clocks/world update even though it
+	// renders only 2D. This also advances Sleep and WaitForUI in chapter scripts.
+	if ( GetTime() - sFPSLimitLastTime < sMinFrameTime )
+		return;
+	sFPSLimitLastTime = GetTime();
+	sTimeCounter.Advance( !bPause, GetTime() );
+	sUITimeCounter.Advance( true, GetTime() );
+	EraseInvalidRefs( &soundsList );
 	if ( CanRender() )
 	{
+		pRender->UpdateViewWorld( !bPause, GetGameTime(), pActivePlayer->GetPlayer(), bCheatVisibility );
+		ProcessWorldCommands();
+		if ( NMainLoop::HaveInterfaceCommand() )
+			return;
+		for ( int nPlayer = 0; nPlayer < playersSet.size(); ++nPlayer )
+			playersSet[nPlayer]->Update( IsRealTime() );
+		GetDesktop()->UpdateDesktop( GetGameTime() );
 		pInterface->UpdateCursor();
-		pInterface->Step( GetTime() );
-		RenderFrame( GetTime() );
+		pInterface->Step( GetUITime() );
+		RenderFrame( GetUITime() );
 	}
+	else
+		pRender->ResetTiming();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CChapterMap::RenderFrame( const STime &sTime )

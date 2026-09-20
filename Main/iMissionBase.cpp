@@ -10,6 +10,8 @@
 #include "RWGame.h"
 #include "RPGGame.h"
 #include "RPGGlobal.h"
+#include "scScenarioTracker.h"
+#include "scFlowChartItems.h"
 #include "Interface.h"
 #include "iMain.h"
 #include "iMission.h"
@@ -31,6 +33,26 @@
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 namespace NGame
 {
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// Shared retail CMissionBase BeginZone dispatch. Chapter scripts use this too
+// (the final chapters contain only BeginZone("ffight")).
+bool CMissionBase::ExecWorldBeginZoneCommand( NWorld::CUICmd *pCmd )
+{
+	CDynamicCast<NWorld::CUICmdBeginZone> pBeginZone( pCmd );
+	if ( !pBeginZone )
+		return false;
+	if ( !pGlobalGame->pScenarioTracker->IsScenarioAvailable() )
+		csSystem << "ERROR: Scenario not available!" << endl;
+	else
+	{
+		NScenario::CScenarioZone *pZone = pGlobalGame->pScenarioTracker->GetZoneByName( pBeginZone->szZone );
+		if ( IsValid( pZone ) )
+			NMainLoop::Command( new CICBeginMission( pZone, -1, vector<string>(), pGlobalGame, true ) );
+		else
+			csSystem << "ERROR: Zone not found " << pBeginZone->szZone << " !" << endl;
+	}
+	return true;
+}
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // Shared sound branch of retail ExecWorldCommand (v1.2 0x5a4510..0x5a4619).
 // Menus run world scripts too. The scene owns channels, not the queued command.
