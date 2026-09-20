@@ -58,11 +58,13 @@ public:
 	NGlobal::CEventRegister< CAIEventTrackerImpl, NWorld::CEventOnAttackAtUnit >                regOnAttack;
 	NGlobal::CEventRegister< CAIEventTrackerImpl, NWorld::CEventOnUnitUnhide >                  regOnUnhide;
 	CPtr<NWorld::CUnitServer> pUnit;
-	CPtr<CAIEventTracker>     pInterface;
-	int operator&( CStructureSaver &f ) { f.Add( 2, &pUnit ); f.Add( 3, &pInterface ); return 0; }   // retail @0xac1c0 (the CEventRegisters resubscribe on load, not serialized)
+	// Retail's interface is a CAIUnit base subobject: serialize the owner's identity,
+	// not the free-standing adapter used by this source tree.
+	CPtr<IAIUnit>            pInterface;
+	int operator&( CStructureSaver &f );
 
 	CAIEventTrackerImpl();
-	CAIEventTrackerImpl( CAIEventTracker *_pInterface, NWorld::CUnitServer *_pUnit );
+	CAIEventTrackerImpl( IAIUnit *_pInterface, NWorld::CUnitServer *_pUnit );
 
 	NWorld::CUnitServer* GetUnit() const { return pUnit; }
 
@@ -79,13 +81,14 @@ public:
 	void OnAttack   ( const NWorld::CEventOnAttackAtUnit &e );
 	void OnUnhide   ( const NWorld::CEventOnUnitUnhide &e );
 
-	void ThrowAIEvent( IAIEvent *pEvent );   // gate on a live, fight-capable, AI-driven unit -> Notify
+	void ThrowAIEvent( IAIEvent *pEvent );   // gate on a live, fight-capable, AI-driven owner
 	void CheckForVisibleCorpses();
 	void ProcessAISegment();
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// CAIEventTracker (PDB 28): owns the impl via CObj. Notify (release vtbl slot 0) routes the AI event to
-// the unit's threat state; ProcessAISegment forwards to the impl. Free-standing CObjectBase here.
+// CAIEventTracker (PDB 28): owns the impl via CObj. Retail's standalone Notify is
+// empty; its CAIUnit-derived instance handles events. This adapter keeps the owner
+// explicitly in the impl. ProcessAISegment forwards to the impl.
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CAIEventTracker: public CObjectBase
 {
@@ -95,10 +98,10 @@ public:
 	int operator&( CStructureSaver &f ) { f.Add( 2, &pImpl ); return 0; }   // retail @0xac110
 
 	CAIEventTracker() {}
-	CAIEventTracker( NWorld::CUnitServer *pUS );
+	CAIEventTracker( IAIUnit *pOwner, NWorld::CUnitServer *pUS );
 	CAIEventTracker( const CAIEventTracker &src );
 
-	virtual void Notify( IAIEvent *pEvent );   // release vtbl slot 0: hand the event to the subscribers
+	virtual void Notify( IAIEvent *pEvent );   // retail standalone base: no-op
 	void ProcessAISegment();
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////

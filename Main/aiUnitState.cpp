@@ -56,11 +56,32 @@ IAIUnit *FindNearestUnit( IAIUnit *pSelf, vector< CPtr<IAIUnit> > &units )
 SAIUnitState::SAIUnitState(): bHelpCalled( false ), bScared( false ) {}
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void SAIUnitState::AddEnemy( IAIUnit *p )         { if ( IsValid( p ) ) { AddUnique( &enemies.data.units, p ); enemies.SetModified(); } }
-void SAIUnitState::RemoveEnemy( IAIUnit *p )      { RemoveFrom( &enemies.data.units, p ); enemies.SetModified(); }
+// Retail v1.2 0x4b1630/0x4b1690/0x4b16f0 also clear the matching selected contact
+// immediately, without marking selfModified. Deferring the clear until Update()
+// would report a new threat change and cancel the investigation that consumed it.
+void SAIUnitState::RemoveEnemy( IAIUnit *p )
+{
+	RemoveFrom( &enemies.data.units, p );
+	enemies.SetModified();
+	if ( pEnemy.GetPtr() == p )
+		pEnemy = 0;
+}
 void SAIUnitState::AddPossibleEnemy( IAIUnit *p ) { if ( IsValid( p ) ) { AddUnique( &possibleEnemies.data.units, p ); possibleEnemies.SetModified(); } }
-void SAIUnitState::RemovePossibleEnemy( IAIUnit *p ) { RemoveFrom( &possibleEnemies.data.units, p ); possibleEnemies.SetModified(); }
+void SAIUnitState::RemovePossibleEnemy( IAIUnit *p )
+{
+	RemoveFrom( &possibleEnemies.data.units, p );
+	possibleEnemies.SetModified();
+	if ( pPossibleEnemy.GetPtr() == p )
+		pPossibleEnemy = 0;
+}
 void SAIUnitState::AddAlly( IAIUnit *p )          { if ( IsValid( p ) && p != pUnit.GetPtr() ) { AddUnique( &allies.data.units, p ); allies.SetModified(); } }   // retail AddAlly @0xb1630: never yourself
-void SAIUnitState::RemoveAlly( IAIUnit *p )       { RemoveFrom( &allies.data.units, p ); allies.SetModified(); }
+void SAIUnitState::RemoveAlly( IAIUnit *p )
+{
+	RemoveFrom( &allies.data.units, p );
+	allies.SetModified();
+	if ( pAlly.GetPtr() == p )
+		pAlly = 0;
+}
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool SAIUnitState::IsKnownCorpse( IAIUnit *p ) const
 {

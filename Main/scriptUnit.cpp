@@ -935,9 +935,13 @@ BEGIN_SCRIPT_COMMAND( KillEmAll, "" )
 	for ( vector< CPtr<NWorld::CUnit> >::iterator i = units.begin(); i != units.end(); ++i )
 	{
 		CDynamicCast<NWorld::CUnitServer> pUS( *i );
-		if ( IsValid( pUS ) && !pUS->IsDead() && IsValid( pUS->GetPlayer() ) &&
+		if ( IsValid( pUS ) && pUS->CanFight() && IsValid( pUS->GetPlayer() ) &&
 			pScript->pWorld->GetDiplomacyState( pHuman, pUS->GetPlayer() ) == NDb::DS_ENEMY )
+		{
+			// Retail v1.2 0x6fdb72: RPG death precedes the world/animation death.
+			pUS->GetUnitRPG()->Kill();
 			pUS->KillUnit( CVec3( 0, 0, 1 ) );		// VNULL3 with z=1 (death direction seed)
+		}
 	}
 	return 0;
 END_SCRIPT_COMMAND

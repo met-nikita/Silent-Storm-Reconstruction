@@ -113,7 +113,8 @@ void CAIGuardReaction::Update()
 	// (e) chase the suspected enemy: inspect its place from inside the guarded area.
 	if ( bChasePossible )
 	{
-		SPosition pos = pPossible->GetPosition();
+		// Retail v1.2 0x4519d5 reads the server position, not the AI planning copy.
+		SPosition pos = pPossible->GetUnitServer()->GetPosition().pos;
 		IAILogic *pLogic = CreateAICheckPositionLogic( pU, pArea, pos, CROUCH );
 		if ( IsValid( pLogic ) )
 		{
@@ -136,7 +137,7 @@ void CAIGuardReaction::Update()
 		else if ( IsValid( pAlly ) )
 		{
 			// (g) a calling ally: glance toward its place from inside the area.
-			SPosition pos = pAlly->GetPosition();
+			SPosition pos = pAlly->GetUnitServer()->GetPosition().pos;
 			if ( SetLogic( CreateAICheckPositionLogic( pU, pArea, pos, CROUCH ) ) )
 			{
 				// Consume the help call (retail AddEvent(CreateAILostAllyEvent) -- oracle

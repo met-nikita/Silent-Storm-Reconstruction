@@ -222,7 +222,8 @@ void CAINormalReaction::Update()
 	// PrepareEnemies sweep) dropped straight to AfterCombat -> SetLogic(0) and stood around doing nothing.
 	if ( bCheckPossible )
 	{
-		CObj<IAILogic> pHunt = CreateAICheckForEnemyLogic( u, pPossible->GetUnitPosition(), RUN, pPossible );
+		// Retail v1.2 0x47f548 uses the current world position of the contact.
+		CObj<IAILogic> pHunt = CreateAICheckForEnemyLogic( u, pPossible->GetUnitServer()->GetPosition(), RUN, pPossible );
 		if ( IsValid( pHunt ) )
 		{
 			SetLogic( pHunt.GetPtr() );
@@ -249,7 +250,7 @@ void CAINormalReaction::Update()
 	IAIUnit *pAlly = ( us != 0 ) ? us->pAlly.GetPtr() : 0;
 	if ( IsValid( pAlly ) && !bOwnPlaceInvalid )
 	{
-		CObj<IAILogic> pAssist = CreateAICheckForEnemyLogic( u, pAlly->GetUnitPosition(), RUN, 0 );
+		CObj<IAILogic> pAssist = CreateAICheckForEnemyLogic( u, pAlly->GetUnitServer()->GetPosition(), RUN, 0 );
 		if ( IsValid( pAssist ) )
 		{
 			SetLogic( pAssist.GetPtr() );

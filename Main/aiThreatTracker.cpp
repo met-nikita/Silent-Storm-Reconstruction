@@ -68,7 +68,7 @@ CAIEventTrackerImpl::CAIEventTrackerImpl()
 {
 }
 // @0xab4b0: the bound ctor used by CAIEventTracker (interface + unit back-pointers).
-CAIEventTrackerImpl::CAIEventTrackerImpl( CAIEventTracker *_pInterface, CUnitServer *_pUnit )
+CAIEventTrackerImpl::CAIEventTrackerImpl( IAIUnit *_pInterface, CUnitServer *_pUnit )
 	: regOnSeeEnemy ( this, &CAIEventTrackerImpl::OnSeeEnemy ),
 	  regOnLostEnemy( this, &CAIEventTrackerImpl::OnLostEnemy ),
 	  regOnHearEnemy( this, &CAIEventTrackerImpl::OnHearEnemy ),
@@ -84,11 +84,18 @@ CAIEventTrackerImpl::CAIEventTrackerImpl( CAIEventTracker *_pInterface, CUnitSer
 {
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// CAIEventTracker @0xab6b0: news the impl for a live unit (interface = this, unit = pUS).
-CAIEventTracker::CAIEventTracker( CUnitServer *pUS )
+// Retail binds the owning CAIUnit through its CAIEventTracker base. Our separate
+// adapter binds the same owner explicitly so its serialized identity is unchanged.
+CAIEventTracker::CAIEventTracker( IAIUnit *pOwner, CUnitServer *pUS )
 {
 	if ( IsValid( pUS ) )
-		pImpl = new CAIEventTrackerImpl( this, pUS );
+		pImpl = new CAIEventTrackerImpl( pOwner, pUS );
+}
+int CAIEventTrackerImpl::operator&( CStructureSaver &f )
+{
+	f.Add( 2, &pUnit );
+	f.Add( 3, &pInterface );
+	return 0;
 }
 // CAIEventTracker copy ctor @0xabfe0: CObj copy -- alias + AddRef the shared impl.
 CAIEventTracker::CAIEventTracker( const CAIEventTracker &src )
@@ -96,31 +103,25 @@ CAIEventTracker::CAIEventTracker( const CAIEventTracker &src )
 	pImpl = src.pImpl;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// ThrowAIEvent @0xaa910: own the event for the duration, forward it to the interface only for a live,
-// fight-capable, AI-driven unit (a rejected event dies here when the CObj releases it).
+// ThrowAIEvent @0xaa910: own the event for the duration and dispatch to its bound
+// unit, only for a live, fight-capable, AI-driven unit.
 void CAIEventTrackerImpl::ThrowAIEvent( IAIEvent *pEvent )
 {
 	CObj<IAIEvent> ev = pEvent;
-	CAIEventTracker *pIface = pInterface;
+	IAIUnit *pIface = pInterface;
 	CUnitServer *pUS = pUnit;
 	if ( IsValid( pIface ) && IsValid( pUS ) && pUS->CanFight() && pUS->IsAIUnit() )
-		pIface->Notify( pEvent );
+	{
+		SAIUnitState *pState = pIface->GetAIUnitState();
+		if ( IsValid( ev ) && pState != 0 )
+			pEvent->Modify( pState );
+	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// CAIEventTracker::Notify (release vtbl slot 0): mutate the owning unit's threat state.
+// The standalone retail base is a no-op (v1.1 vtable 0x8b4920 -> 0x58b790).
+// Live trackers dispatch to the owning CAIUnit, handled above by the adapter.
 void CAIEventTracker::Notify( IAIEvent *pEvent )
 {
-	if ( !IsValid( pEvent ) || !IsValid( pImpl ) )
-		return;
-	CUnitServer *pUS = pImpl->GetUnit();
-	if ( !IsValid( pUS ) )
-		return;
-	IAIUnit *pAI = GetAIUnit( pUS );
-	if ( !IsValid( pAI ) )
-		return;
-	SAIUnitState *pState = pAI->GetAIUnitState();
-	if ( pState != 0 )
-		pEvent->Modify( pState );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // ---- handlers (oracle s2_threattracker.h, disasm-verified). The dev event factories take ONE
