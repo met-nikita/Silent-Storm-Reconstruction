@@ -987,15 +987,23 @@ void CHitTracker::Draw( const STime &sTime, NGScene::I2DGameView *pView )
 
 	WCHAR wsText[256];
 	int nAlpha = ( 1 - fWeight ) * 0xFF;
-	// retail CHitText colour packing @0x6117c0: a PK hit fades the ORANGE R=243(f3),G=191(bf),B=0
-	// channels; a normal hit keeps the dev damage colour.
+	// Retail v1.2 0x611f09: ARGB, cyan armor damage (R=0,G=191,B=243).
+	// Fade RGB along with alpha; a rejected hit is localized text, not "-1".
 	if ( bPK )
-		swprintf( wsText, L"<color=%.2x%.2x%.2x00>%d", nAlpha, int( ( 1 - fWeight ) * 243 ), int( ( 1 - fWeight ) * 191 ), nHitValue );
+		swprintf( wsText, L"<color=%.2x00%.2x%.2x>", nAlpha, int( ( 1 - fWeight ) * 191 ), int( ( 1 - fWeight ) * 243 ) );
 	else
-		swprintf( wsText, L"<color=%.2xff0000>%d", nAlpha, nHitValue );
+		swprintf( wsText, L"<color=%.2x%.2x0000>", nAlpha, nAlpha );
+	wstring wsHitText = wsText;
+	if ( nHitValue < 0 )
+		wsHitText += NDb::GetString( 21060 )->szStr;
+	else
+	{
+		swprintf( wsText, L"%d", nHitValue );
+		wsHitText += wsText;
+	}
 
 	SetPosition( sPosition );
-	SetText( wsText );
+	SetText( wsHitText );
 
 	bComplete = false;
 

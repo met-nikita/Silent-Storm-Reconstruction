@@ -16,6 +16,13 @@ namespace NWorld
 namespace NRPG
 {
 class IUnitMissionInfo;
+enum EReceivedDmg { RD_UNKNOW, RD_HUMAN, RD_PK };
+struct CReceivedDmg
+{
+	int nDmg;
+	EReceivedDmg type;
+	CReceivedDmg( int _nDmg = -1, EReceivedDmg _type = RD_UNKNOW ): nDmg(_nDmg), type(_type) {}
+};
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 enum EAttackType
 {

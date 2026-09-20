@@ -40,6 +40,7 @@ namespace NRPG
 {
 struct SUnitInfo; // data about any unit that can be shown in interface
 class CAttackPortion;
+struct CReceivedDmg;
 class IInventory;
 class IInventoryInfo;
 class IInventoryItem;
@@ -92,14 +93,8 @@ public:
 	virtual bool CreateAttack( vector<CAttackPortion> *pRes, bool bSpendAmmo,
 		bool bAnonymous = true, IUnitMissionInfo *pTarget = 0, bool bBackStab = false,
 		bool bAdaptWeapon = true ) = 0;
-	// NOTE: this is a SECOND, genuinely different ProcessAttack contract -- IUnitMission does not
-	// derive from IAttackable, and retail's IUnitMission form takes NO CVec3 (PDB: "class
-	// NRPG::CReceivedDmg __thiscall NRPG::CUnitMission::ProcessAttack(class NWorld::IWorld *,int,
-	// class NRPG::CAttackPortion *,class NDb::CRPGArmor *)") where IAttackable's takes one. Only
-	// pWorld is added here, and only so it reaches CalcStructDmg @0x28f960. CDumbUnitServer::
-	// ProcessAttack @0x350e20 is the seam between the two contracts. On the int return see the
-	// IAttackable banner in RPGAttackMech.h -- it is retail's CReceivedDmg::nDmg, -1 sentinel and all.
-	virtual int ProcessAttack( NWorld::IWorld *pWorld, int nUserID, CAttackPortion *pAttack,
+	// Preserve the actual damage receiver (pilot/suit/rejected) through to hit text.
+	virtual CReceivedDmg ProcessAttack( NWorld::IWorld *pWorld, int nUserID, CAttackPortion *pAttack,
 		NDb::CRPGArmor *pArmor ) = 0;
 	// retail @0x2c5a70/@0x2c5a80: the Jan03 bSitting Seat()/Stand() pair became a ref-counted
 	// nMotionless (several motionless sources may overlap); CanMove() == (nMotionless == 0).

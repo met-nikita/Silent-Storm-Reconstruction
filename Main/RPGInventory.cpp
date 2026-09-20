@@ -228,7 +228,9 @@ bool CInventory::CanEquip( NDb::ESlot where, const IInventoryItem *pWhat ) const
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CInventory::Equip( NDb::ESlot where, IInventoryItem *pWhat )
 {
-	if ( !CanEquip( where, pWhat ) )
+	// Retail v1.2 0x69d870: installation is separate from the manual CanEquip
+	// policy. Suit/pilot transfers must preserve even a single-slot PK's weapons.
+	if ( !IsValid( pWhat ) )
 		return false;
 	slots[where] = pWhat;
 	dynamic_cast<CInventoryItem*>(pWhat)->OnEquip( pOwner );
@@ -303,7 +305,8 @@ void CInventory::SetPanzerklein( NDb::CPanzerklein *_pPK, IInventory *pPKInvento
 			for ( int where = NDb::SLOT_1; where < NDb::N_SLOTS; ++where )
 			{
 				IInventoryItem *pWhat = pPKInventory->TakeOff( (NDb::ESlot)where );
-				Equip( (NDb::ESlot)where, pWhat );
+				if ( pWhat )
+					Equip( (NDb::ESlot)where, pWhat );
 			}
 			Activate( NDb::SLOT_1 );
 		}

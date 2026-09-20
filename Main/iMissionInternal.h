@@ -256,6 +256,7 @@ protected:
 	bool CanPerformAction( EUnitAction eAction );
 	void TraceCursor();
 	void UnitCollectAP( NWorld::ECollectSnipeAP eAP );
+	bool GetGroupHideState();
 	void ExecWorldCommands();
 
 	void SaveWorld( const string &szFile );

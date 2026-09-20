@@ -661,7 +661,8 @@ int CDumbUnitServer::ProcessAttack( NWorld::IWorld *_pWorld, int nUserID, NRPG::
 	// CGame::nMaxCriticalSeverity (luaSetMaxCriticalSeverity). Retail cached the game in the mission ctor;
 	// this dev fork dropped that ctor arg, so we (re)bind it here at the attack entry.
 	pRPG->SetGame( pWorld->GetGame() );
-	int nRes = pRPG->ProcessAttack( _pWorld, nUserID, pAttack, pArmor );
+	const NRPG::CReceivedDmg damage = pRPG->ProcessAttack( _pWorld, nUserID, pAttack, pArmor );
+	int nRes = damage.nDmg;
 	// retail gib gate @0x750ef1..0x750f4c: bShowBlood && nRes > 120 && CanBlowUp() (unit
 	// vtbl+0x28, @0x3c0420) && !pAttack->bNoBlowUp -- and a still-living unit DIES first
 	// (Die(1,0) @0x750f25: the FULL death path with a FORCED slow-mo beauty cam) before the gib.
@@ -685,12 +686,7 @@ int CDumbUnitServer::ProcessAttack( NWorld::IWorld *_pWorld, int nUserID, NRPG::
 	{
 		CVec3 ptHit;
 		pWorld->GetAIMap()->GetUnitHLPos( &ptHit, pWorld->GetAIMap()->GetHull(this), NAI::HL_HEAD );
-		// retail @0x350e20: CHitLocator(nRes, bPK, ptHit, unit) -- bPK = the RPG damage receiver was a
-		// Panzerklein (CReceivedDmg.type == RD_PK). Dev's ProcessAttack still returns a plain int, so
-		// the receiver type is derived here: pers-is-PK, or the worn PK ricocheted/blocked (-1 while
-		// wearing -- the human dodge path is gated on !GetPanzerklein(), so no overlap).
-		bool bPK = IsValid( pRPG->GetRPGPers()->pPanzerklein ) ||
-			( IsValid( pRPG->GetPanzerklein() ) && nRes < 0 );
+		bool bPK = damage.type == NRPG::RD_PK;
 		pWorld->AddHitLocator( new CHitLocator( nRes, bPK, ptHit, CDynamicCast<CUnit>( (CObjectBase*)this ) ) );
 		PlaySound( pRPG->GetRPGPers()->pSoundHit );
 

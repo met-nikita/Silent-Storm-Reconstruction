@@ -885,7 +885,7 @@ void CMission::UpdateActionsInfo()
 	CanDoCommand( new NWorld::CCmdSetGrenadeOnObject( 0 ), true, &actionsInfoSet[UA_SETTRAP] );
 	CanDoCommand( new NWorld::CCmdDropCorpse(), true, &actionsInfoSet[UA_DROPCORPSE] );
 	CanDoCommand( new NWorld::CCmdExitPK(), true, &actionsInfoSet[UA_EXITPK] );
-	CanDoCommand( new NWorld::CCmdHide(), true, &actionsInfoSet[UA_HIDE] );
+	CanDoCommand( new NWorld::CCmdHide( !GetGroupHideState() ), true, &actionsInfoSet[UA_HIDE] );
 
 	CanDoCommand( new NWorld::CCmdStrafe( true ), true, &actionsInfoSet[UA_STRAFE] );
 	CanDoCommand( new NWorld::CCmdWishPose( NAI::RUN ), true, &actionsInfoSet[UA_POSERUN] );
@@ -1892,13 +1892,14 @@ bool CMission::ProcessEvent( const NInput::SEvent &sEvent )
 	else if ( bindHide.ProcessEvent( sEvent ) )
 	{
 		SActionInfo sAction;
-		GetActionInfo( UA_STRAFE, &sAction );
+		GetActionInfo( UA_HIDE, &sAction );
 		if ( sAction.eResult == NWorld::UCR_OK )
 		{
 			vector< CPtr<NGame::IUnitTracker> > unitsSet;
 			GetSelectedUnits( &unitsSet );
-			if ( unitsSet.size() == 1 )
-				Command( unitsSet.front()->GetUnit(), new NWorld::CCmdHide() );
+			const bool bHide = !GetGroupHideState();
+			for ( int i = 0; i < unitsSet.size(); ++i )
+				Command( unitsSet[i]->GetUnit(), new NWorld::CCmdHide( bHide ) );
 		}
 		else
 			ShowError( this, sAction.eResult );
@@ -2273,6 +2274,19 @@ void CMission::TraceCursor()
 
 	sTraceResult.pObject = pTraceObject;
 	sTraceResult.bObjectSet = IsValid( pTraceObject );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+bool CMission::GetGroupHideState()
+{
+	// Retail v1.2 0x5feca0: only a nonempty, wholly hidden group means Unhide.
+	vector< CPtr<IUnitTracker> > unitsSet;
+	GetSelectedUnits( &unitsSet );
+	if ( unitsSet.empty() )
+		return false;
+	for ( int i = 0; i < unitsSet.size(); ++i )
+		if ( !unitsSet[i]->GetUnit()->IsHiding() )
+			return false;
+	return true;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CMission::UnitCollectAP( NWorld::ECollectSnipeAP eAP )

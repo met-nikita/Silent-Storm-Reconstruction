@@ -673,12 +673,11 @@ public:
 class CCmdHide: public CCmd
 {
 	OBJECT_BASIC_METHODS( CCmdHide );
-	ZDATA
-	ZPARENT( CCmd )
-	ZEND int operator&( CStructureSaver &f ) { f.Add(2,(CCmd *)this); return 0; }
-	//
 public:
-	CCmdHide() {}
+	ZDATA_( CCmd )
+	bool bState;
+	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CCmd *)this); f.Add(2,&bState); return 0; }
+	CCmdHide( bool _bState = true ): bState( _bState ) {}
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CCmdTakePerk: public CCmd

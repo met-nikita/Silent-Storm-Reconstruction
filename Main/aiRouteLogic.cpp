@@ -62,10 +62,7 @@ int CTaskCommandLookToPosition::operator&( CStructureSaver &f )
 // CExecHide handler (wUnitExec.cpp); this command only decides WHEN to hide. The gate value DS_ENEMY(0) was
 // confirmed from the GetDiplomacyState disasm (== dev NDb DataMap.h DS_ENEMY=0).
 //
-// Documented elision (build-validation scope): the release queues CCmdHide(!IsHiding) carrying an explicit
-// bState; the dev CCmdHide is the predecessor (no bState) and CExecHide::Run toggles on the live IsHiding
-// state. Since this command only proceeds when NOT hidden, the toggle hides -- behaviourally identical here,
-// so the bState is not modelled (it would change a live command's serialization -> deferred).
+// CCmdHide carries the requested state; this command only proceeds when not hidden.
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CTaskCommandHide::Do()
 {

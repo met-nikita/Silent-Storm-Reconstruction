@@ -723,12 +723,12 @@ public:
 class CExecHide: public CCommandExecute
 {
 	OBJECT_BASIC_METHODS( CExecHide );
-	ZDATA
-	ZPARENT( CCommandExecute );
-	ZEND int operator&( CStructureSaver &f ) { f.Add(2,(CCommandExecute *)this); return 0; }
+	ZDATA_( CCommandExecute )
+	bool bState;
+	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CCommandExecute *)this); f.Add(2,&bState); return 0; }
 	//
 public:
-	CExecHide( CUnitServer *_pUS = 0 ): CCommandExecute(_pUS) {}
+	CExecHide( CUnitServer *_pUS = 0, bool _bState = true ): CCommandExecute(_pUS), bState( _bState ) {}
 	//
 	virtual int GetStartAP() const;
 	virtual int GetActionAP() const;
@@ -738,7 +738,7 @@ public:
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 int CExecHide::GetStartAP() const
 {
-	if ( pUS->GetUnitRPG()->IsHiding() )
+	if ( !bState || pUS->GetUnitRPG()->IsHiding() )
 		return 0;
 
 	return pUS->GetActionAP( NRPG::AC_HIDE );
@@ -759,7 +759,7 @@ EUnitCommandResult CExecHide::CanDoIt()
 	if ( pUS->IsWearingPK() )
 		return UCR_GENERAL_FAILURE;
 
-	if ( pUS->GetUnitRPG()->IsHiding() )
+	if ( !bState )
 		return UCR_OK;
 	//
 	vector< CPtr<CPlayer> > players;
@@ -782,13 +782,17 @@ EUnitCommandResult CExecHide::CanDoIt()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CExecHide::Run() 
 { 
-	if ( !pUS->GetUnitRPG()->IsHiding() )
+	// Retail v1.2 0x7b2f40: apply the requested state, never toggle each member.
+	if ( bState && !pUS->GetUnitRPG()->IsHiding() )
 	{
 		pUS->DoAction( NRPG::AC_HIDE );
 		pUS->Hide( true, false );
 	}
-	else
-		pUS->Hide( false, false );   // retail CExecHide @0x3b2b5b: the voluntary toggle passes bThrowEvent=false
+	else if ( !bState && pUS->GetUnitRPG()->IsHiding() )
+	{
+		pUS->Hide( false, false );
+		pUS->GetWorld()->UpdateVisible();
+	}
 
 	Finished();
 }
@@ -961,7 +965,7 @@ CCommandExecute* CreateExecutor( CUnitServer *pUS, CCmd *pCmd, EUnitCommandResul
 																		else {
 																			CDynamicCast<CCmdHide> pHide(pCmd);
 																			if (pHide)
-																				return CreateSimpleExec(new CExecHide(pUS), pError);
+																				return CreateSimpleExec(new CExecHide(pUS, pHide->bState), pError);
 																			else {
 																				CDynamicCast<CCmdTakePerk> pTakePerk(pCmd);
 																				if (pTakePerk)
