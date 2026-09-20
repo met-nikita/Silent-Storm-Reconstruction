@@ -2368,23 +2368,23 @@ bool CExecCorpse::TimeLabelReached()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CExecCorpse::Cancel()
 {
-	// @0x3a6610 -- reversal now gated on !bCorpseInPK; CalmCorpse dropped (retail
-	// dropped it); StopAction() reordered ahead of AlignTime/PlaceUnit.
-	// NOTE: retail gates each SetState on GetStateType()==8 (corpse-carrier state-
-	// machine id); a5dll has no GetStateType -> kept unconditional SetState (FLAGGED).
+	// Retail v1.2 0x7a6a50: reverse attachment, but replace the state only
+	// when entering/leaving the corpse-carrier state actually requires it.
 	if ( !bCorpseInPK )
 	{
 		if ( bTake )
 		{
 			pUS->animator.DropCorpse( pUS->GetPosition() );
 			pDeadUnit->animator.BeDropped( pDeadUnit );
-			pUS->SetState( new CUnitStateNormal( pUS ) );
+			if ( pUS->GetState() == CUnit::ST_CARRY_CORPSE )
+				pUS->SetState( new CUnitStateNormal( pUS ) );
 		}
 		else
 		{
 			pUS->animator.TakeCorpse( pUS->GetPosition() );
 			pDeadUnit->animator.BeTaken( pUS, &pUS->animator, pDeadUnit );
-			pUS->SetState( new CUnitStateCorpseCarrier( pUS, pDeadUnit ) );
+			if ( pUS->GetState() != CUnit::ST_CARRY_CORPSE )
+				pUS->SetState( new CUnitStateCorpseCarrier( pUS, pDeadUnit ) );
 		}
 	}
 

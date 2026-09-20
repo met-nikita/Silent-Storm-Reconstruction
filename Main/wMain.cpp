@@ -1,5 +1,6 @@
 #include "StdAfx.h"
 #include "Transform.h"
+#include "..\Misc\HPTimer.h"
 #include "InterfaceConst.h"
 #include "MapBuild.h"
 #include "wUnitServer.h"
@@ -2803,10 +2804,12 @@ void CWorld::UpdateWorld( STime tScene, IPlayer *pPlayer )
 	CFWContext world( &pCurrentWorld, this );
 	ASSERT( IsValid( pTime ) );
 	STime tCurrent = pTime->GetValue();
-	int nSkipped = 0;
+	float fTimeSpent = 0;
 	tScene += tHiddenDelta;
 	while ( tScene >= tCurrent ) // CRAP - time wrap problem
 	{
+		NHPTimer::STime tStart;
+		NHPTimer::GetTime( &tStart );
 		tCurrent += DW_SEGMENT_TIME;
 		pTime->Set( tCurrent );
 		MarkNewDGFrame();
@@ -2817,11 +2820,12 @@ void CWorld::UpdateWorld( STime tScene, IPlayer *pPlayer )
 		pRefreshAimTime.Refresh();
 		Segment();
 
-		if ( IsValid(pPlayer) && CanSkip( CDynamicCast<CPlayer>(pPlayer) ) && nSkipped < 5 )
+		// Retail v1.2 0x76c61e: budget the measured segment work, not a fixed count.
+		fTimeSpent += NHPTimer::GetTimePassed( &tStart );
+		if ( fTimeSpent < 0.03f && IsValid(pPlayer) && CanSkip( CDynamicCast<CPlayer>(pPlayer) ) )
 		{
 			tHiddenDelta += DW_SEGMENT_TIME;
 			tScene += DW_SEGMENT_TIME;
-			nSkipped++;
 		}
 	}
 }

@@ -268,6 +268,7 @@ public:
 	virtual NDb::CRPGPers* GetRPGPers() const;
 	virtual NDb::CComplexHead* GetRPGPersHead() const;
 	virtual CUnit *GetRPGUnit() const { return pRPGUnit; }
+	virtual SRandomSeed GetBindPlacesSeed() const { return pRPGUnit->GetBindPlacesSeed(); }
 	virtual NDb::SToHitConstants *GetToHitConstants() { return &tohit; }
 	virtual NDb::SAISoundConstants *GetAISoundConstants() { return &sAISoundConstants; }
 	virtual NDb::SInterruptsConstants *GetInterruptsConstants() { return &SInterruptsConstants; }

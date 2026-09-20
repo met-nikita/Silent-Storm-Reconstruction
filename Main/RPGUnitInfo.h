@@ -4,6 +4,7 @@
 #pragma once
 #endif // _MSC_VER > 1000
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+struct SRandomSeed;
 namespace NDb
 {
 	enum EWeaponType;
@@ -153,6 +154,7 @@ public:
 	virtual NDb::CRPGPers* GetRPGPers() const = 0;
 	virtual NDb::CComplexHead* GetRPGPersHead() const = 0;
 	virtual NRPG::CUnit* GetRPGUnit() const = 0;
+	virtual SRandomSeed GetBindPlacesSeed() const = 0;
 
 	virtual bool IsHero() const = 0;
 	virtual bool IsHiding() const = 0;

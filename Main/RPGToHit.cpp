@@ -366,13 +366,10 @@ float CToHitCalcer::GetAllAdd()
 	return fRes;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// release-new terms. Weather (CWorld::BadWeather) + aura (NRPG::GetAuraAdd) are release-new subsystems
-// ABSENT in this predecessor dev tree -> 0 (documented elisions); the careful-shoot perk uses the
-// present IUnitMission::HasPerk(0x45,&out).
+// Retail v1.2 0x6b85b0: any non-clear weather applies the same penalty.
 float CToHitCalcer::GetWeatherPenalty()
 {
-	// release @0x2b85a0: return 5.0 when pUnitServer is valid+alive and the world has bad weather.
-	return 0; // weather subsystem absent -> elided
+	return IsValid( pUnitServer ) && pUnitServer->GetWorld()->GetWeather() != 0 ? 5.0f : 0.0f;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 float CToHitCalcer::GetCarefulShootPerk()

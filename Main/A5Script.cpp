@@ -140,6 +140,8 @@ void CScript::AddUICommand( NWorld::CUICmd *pCmd )
 void CScript::AddMiscObject( CObjectBase *pObj )
 {
 	miscObjectsHolder.push_back( pObj );
+	// Retail v1.2 0x4139d2: retain weak references, removing dead entries.
+	EraseInvalidRefs( &miscObjectsHolder );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void ScriptWarning( const string &message )

@@ -60,10 +60,9 @@ void CLogPanel::AddToHead( int nIndex, const wstring &wsText )
 	linesSet[nIndex].bUsed = true;
 	linesSet[nIndex].sTime = 0;					// reset display-age (stamped on next Draw)
 
-	// retail AddToHead does GetDBString + operator+ + CTextDraw::SetText; keep the dev's Impact font
-	// wrapper (the localized format-string id is not decoded).
+	// Retail v1.2 0x5f2f83: localized font/format prefix.
 	if ( IsValid( linesSet[nIndex].pText ) )
-		linesSet[nIndex].pText->SetText( L"<font face=Impact size=20pt>" + wsText );
+		linesSet[nIndex].pText->SetText( GetDBString( 20952 ) + wsText );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // @0x1f27c0 -- append one line: claim the first free storage slot, else evict the oldest and reuse it.

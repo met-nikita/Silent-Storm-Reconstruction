@@ -347,9 +347,9 @@ bool CWindow::ProcessMessage( const SEvent &sEvent )
 			if ( GetStyle( STYLE_NOACTIVATE ) )
 				return true;
 
-			if ( sEvent.nVal == EAF_ACTIVATE )
+			if ( sEvent.nVal & EAF_ACTIVATE )
 				bActive = true;
-			else if ( sEvent.nVal == EAF_DEACTIVATE )
+			else if ( sEvent.nVal & EAF_DEACTIVATE )
 				bActive = false;
 
 			if ( !listChildren.empty() )

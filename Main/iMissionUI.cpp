@@ -3,6 +3,7 @@
 #include "G2DView.h"
 #include "Transform.h"
 #include "wInterface.h"
+#include "wUICommands.h"
 #include "wMisc.h"			// NWorld::GetDMeshUnit -- clue ("ear") markers over heard-not-seen units
 #include "RPGItemInfo.h"
 #include "..\Misc\StrProc.h"
@@ -1028,6 +1029,15 @@ CMissionUI::CMissionUI( const SWindowInfo &sInfo, NGame::IMission *_pMission ):
 	bindPoseSubMenu( "submenu_poseselect" ), bindWeaponModeSubMenu( "submenu_weaponmode" ), bindGrenadeModeSubMenu( "submenu_grenademode" )
 
 {
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+bool CMissionUI::IsValidCommand( NWorld::CUICmd *pCmd )
+{
+	// Retail v1.2 0x60fb60: the follow-camera preference only blocks
+	// automatic framing, never script-authored camera moves.
+	if ( CDynamicCast<NWorld::CUICmdScriptMoveCamera>( pCmd ) )
+		return true;
+	return pMission->GetFollowCameraState() || !CDynamicCast<NWorld::CUICmdCameraLocator>( pCmd );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 NGame::CUICmdExec* CMissionUI::CreateExecutor( NWorld::CUICmd *pCmd )

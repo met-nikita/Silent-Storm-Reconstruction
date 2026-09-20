@@ -306,6 +306,7 @@ public:
 	NDb::CComplexHead* GetHead() const;          // the head TEMPLATE (resolved via pHeadInfo)
 	NLSHead::CHeadInfo* GetHeadInfo() const { return pHeadInfo; }
 	SRandomSeed GetHeadSeed() const;             // per-unit head-randomization seed (retail CreateLSHead source)
+	SRandomSeed GetBindPlacesSeed() const { return bindSeed; }
 	int GetRPGPersID() const;                    // live read of pPers->nRPGPersID
 	// retail GetAckHolder @0x2ba8f0 (pers-id form): the pers whose ACK rows this unit's barks use.
 	// A HERO maps per-VOICE to the donor pers of its voice family (same Side + gender, nVoice

@@ -67,11 +67,9 @@ public:
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // Release migration (byte-faithful, session 25): the per-shot accumulator now keeps a FLOAT hit-cover
 // (was int nHitCover), plus the attacking unit's server (pUnitServer) and a night flag (bNight). The
-// ctor takes the CUnitServer* and pulls the mission out of it (server->GetUnitRPG()). The aura /
-// weather / day-night to-hit subsystems are release-new and ABSENT in this predecessor dev tree
-// (no NRPG::GetAuraAdd, no CWorld::BadWeather/IsNight) -> GetAuraToHitAdd/GetWeatherPenalty return 0
-// and bNight is wired false at every call site (documented elisions); the members/methods are kept so
-// the save format (operator& tags 9/18/19) is byte-exact and the subsystems can be wired in later.
+// ctor takes the CUnitServer* and pulls the mission out of it (server->GetUnitRPG()).
+// Weather is read from its world; night is supplied by the caller (legacy callers
+// still need the separately recorded environment-input audit).
 class CToHitCalcer: public IToHitCalcer
 {
 	ZDATA

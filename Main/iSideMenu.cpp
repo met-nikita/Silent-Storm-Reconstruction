@@ -137,13 +137,13 @@ private:
 
 	// Build a script-notifying button into a CButtonsLine (the release's AddScriptHoverButton @0x1c5ba0:
 	// a CScriptHoverButton over the generic CButtonsLine::AddButton, NORMAL/HOVER/disabled captions).
-	CScriptHoverButton* AddScriptButton( CButtonsLine *pLine, const string &szID, int nCaption )
+	CScriptHoverButton* AddScriptButton( CButtonsLine *pLine, const string &szID, int nCaption, int nToolTip )
 	{
 		CScriptHoverButton *pButton = new CScriptHoverButton( SWindowInfo( pLine, SPoint( 0, 0 ), SPoint( 0, 0 ), szID, STYLE_ENABLED | STYLE_VISIBLE ), pInterface );
 		// State 3 is the release's "selected" art: the caption bracketed `[ ... ]`. The font/colour tag
 		// (GetDBString 11129) must lead so the brackets share the caption's font (else `[ ` renders in
 		// the default small font).
-		pLine->AddButton( pButton, -1,
+		pLine->AddButton( pButton, nToolTip,
 			GetDBString( 11129 ) + GetDBString( nCaption ),                 // normal
 			GetDBString( 11130 ) + GetDBString( nCaption ),                 // hover
 			GetDBString( 11129 ) + L"[ " + GetDBString( nCaption ) + L" ]", // state 3 = selected
@@ -215,16 +215,16 @@ bool CSideMenuUI::ProcessMessage( const SEvent &sEvent )
 					GetDBString( 11129 ) + GetDBString( 11174 ),
 					GetDBString( 11130 ) + GetDBString( 11174 ),
 					GetDBString( 17338 ) + GetDBString( 11174 ) );
-				pAxis   = AddScriptButton( pButtonsLine1, "axis",   11131 );
-				pAllies = AddScriptButton( pButtonsLine1, "allies", 11132 );
-				pNext = pButtonsLine1->AddHoverButton( "next", -1,
+				pAxis   = AddScriptButton( pButtonsLine1, "axis",   11131, 19254 );
+				pAllies = AddScriptButton( pButtonsLine1, "allies", 11132, 19253 );
+				pNext = pButtonsLine1->AddHoverButton( "next", 19249,
 					GetDBString( 11129 ) + GetDBString( 16820 ),
 					GetDBString( 11130 ) + GetDBString( 16820 ),
 					GetDBString( 17339 ) + GetDBString( 16820 ) );
 
-				pEasy   = AddScriptButton( pButtonsLine2, "easy",   17329 );
-				pNormal = AddScriptButton( pButtonsLine2, "normal", 17330 );
-				pHard   = AddScriptButton( pButtonsLine2, "hard",   17331 );
+				pEasy   = AddScriptButton( pButtonsLine2, "easy",   17329, 19246 );
+				pNormal = AddScriptButton( pButtonsLine2, "normal", 17330, 19247 );
+				pHard   = AddScriptButton( pButtonsLine2, "hard",   17331, 19248 );
 
 				break;
 			}

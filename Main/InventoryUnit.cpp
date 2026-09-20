@@ -96,9 +96,11 @@ const char* GetBoneName( EUnitItemType type, NRPG::IInventoryItem *pItem, bool b
 		case UIT_WAIST_BELT_L1:
 		case UIT_WAIST_BELT_R1:
 		case UIT_CAP:
-		case UIT_BACKPACK:
 		case UIT_PK_LEFT_HAND:
 			pszBoneName = pszItemEffectors[type];
+			break;
+		case UIT_BACKPACK:
+			pszBoneName = bIsPK ? "Slot1" : pszItemEffectors[type];
 			break;
 	}
 	return pszBoneName;
@@ -140,7 +142,7 @@ void GetItemsBindPlaces( vector<IRenderVisitor::SBoundMesh> *pRes, NRPG::IUnitMi
 	bool bUndrawWeapon, NDb::CPanzerklein *pPanzerklein, bool bNoHeavyWeapon, bool bNoCap, bool bNoItems )
 {
 	pRes->clear();
-	SRand rnd;
+	SRand rnd( pRPG->GetBindPlacesSeed() );
 	bool bIsPK = IsValid( pPanzerklein );
 	CPtr<NRPG::IInventoryInfo> pInventory = pRPG->GetInventoryInfo();
 	NDb::CRPGUniform *pDBUniform = pInventory->GetUniform();

@@ -203,9 +203,8 @@ int CObjectServerBase::GetDestroyStage()
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // wOSBase.obj @0x383c00 -- ticks elapsed since this object last changed destroy stage, measured on the
-// same clock that stamps tStageChange. The retail reads pWorld->GetWorldTime() (IWorld vtbl slot 5);
-// in the dev tree that override is protected (CDebrisController) and tStageChange is stamped from
-// GetAimTime()->GetValue() (see SetDestroyStage / ProcessAttack / Kill), so use the same accessible clock.
+// same aim clock that stamps tStageChange. Retail IWorld vtbl+0x14 is GetAimTime,
+// NOT GetTime (which is at +0xf4); confirmed from PDB and CWorld's live vtable.
 int CObjectServerBase::GetTimeSinceLastStageChange()
 {
 	return int( GetWorld()->GetAimTime()->GetValue() - tStageChange );
@@ -316,11 +315,11 @@ int CObjectServerBase::ProcessAttack( NWorld::IWorld *_pWorld, int nUserID, NRPG
 			bindGlobal.Update();
 		}
 		*/
-		tStageChange = pCurrentWorld->GetAimTime()->GetValue();
+		tStageChange = pWorld->GetAimTime()->GetValue();
 		// retail stage-change block @0x385130 (disasm 0x7851f7: push 0xa -- lag 10, unlike SetDestroyStage's
 		// lag 0): scoped counter hold -- see the SetDestroyStage comment (a bare GetActiveCounter leaks an
 		// unowned counter and pins IsAction() forever). Lag 10 = 2.5 segments at four tracker ticks/segment.
-		CObj<CActionCounter> pStageAction = pCurrentWorld->GetActiveCounter( 10 );
+		CObj<CActionCounter> pStageAction = pWorld->GetActiveCounter( 10 );
 		bindGlobal.Update();
 	}
 	// (A) retail @0x785242 -- detonate a grenade already ARMED on this object. NOTE this is deliberately
@@ -580,21 +579,20 @@ void CObjectServerBase::Visit( IAIVisitor *p )
 void CObjectServerBase::AddObject( ISoundVisitor *p, NDb::CObject *pO, const SFBTransform &rv )
 {
 	static SRand rnd;
-	NDb::CContainerModel *pCont = pO->pModels[nDestroyStage];
+	NDb::CContainerModel *pCont = pO->pModels[GetDestroyStage()];
 	if ( pCont && pCont->eSoundType == NDb::ST_PERMANENT && pCont->pSound )
 	{
 		CVec3 ptOrigin;
 		rv.forward.RotateHVector( &ptOrigin, pCont->ptSoundPos );
 		NDb::CSoundVariant *pSVar = pCont->pSound->GetSound( &rnd );
 		if ( IsValid( pSVar ) )
-			p->Add3DSound( 0, pSVar->pSound, new NGScene::CCVec3( ptOrigin ) );
+			p->Add3DSound( tStageChange, pSVar->pSound, new NGScene::CCVec3( ptOrigin ) );
 	}
 	if ( pCont && pCont->pSoundEffect )
 	{
 		CVec3 ptOrigin;
 		rv.forward.RotateHVector( &ptOrigin, pCont->ptSoundPos );
-		STime t = pWorld->GetTime()->GetValue();
-		p->AddEffect( t, pCont->pSoundEffect, new NGScene::CCVec3( ptOrigin ), vCreateFlags );
+		p->AddEffect( tStageChange, pCont->pSoundEffect, new NGScene::CCVec3( ptOrigin ), vCreateFlags );
 	}
 	if ( IsValid( pO->pChild ) )
 		AddObject( p, pO->pChild, rv );

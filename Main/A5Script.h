@@ -70,8 +70,7 @@ public:
 	NScenario::CScenarioTracker *GetScenarioTracker();
 	NRPG::CGlobalGame* GetGlobalGame();
 	void AddUICommand( NWorld::CUICmd *pCmd );
-	// Keep an object alive for the lifetime of the script (release AddMiscObject): the play-sound/
-	// play-effect UI commands park their live handle here so the sound/effect keeps playing.
+	// Track miscellaneous objects weakly and sweep invalid entries on insertion.
 	void AddMiscObject( CObjectBase *pObj );
 	// script-UI bridge: the UI interface this script drives (release CScript::pInterface, a
 	// CPtr<NUI::CInterface>). GetWindow/GetCursorPos root their lookups here. Set by CMission to the
