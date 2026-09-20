@@ -1891,9 +1891,15 @@ void CWorld::RestoreRuntimeCaches( NRPG::CGlobalGame *_pGlobalGame, bool bZoneRe
 		if ( bZoneReentry )
 			(*i)->Update(); // retail CreateRestored: resume building simulation on zone entry
 		else
-			// Raw save load only needs the unserialized geometry cache rebuilt. Update()
-			// also calls ToggleUpdateFlag, starting a new action and a 30-segment wait.
-			(*i)->UpdateAllParts();
+		{
+			// Only the derived geometry caches are absent from the snapshot. Preserve
+			// the saved parts and their sync versions: UpdateAllParts invalidates the
+			// AI hulls, leaving the stability trackers' saved catchers pointing at dead
+			// hulls. The next Sync then treats a load as removal of supporting geometry.
+			// Retail's raw-load path does not update/rebind the building parts at all.
+			(*i)->pBInfo->UpdateInfo();
+			(*i)->pSplitBInfo->UpdateInfo();
+		}
 	}
 
 	pGlobalGame = _pGlobalGame;

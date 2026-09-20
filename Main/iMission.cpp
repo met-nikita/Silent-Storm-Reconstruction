@@ -991,8 +991,9 @@ void CMission::SetCameraParams( ECameraType eType, float _fFOV, const ICamera::S
 // PLACE -- no Initialize runs. Rebuild the two runtime-only caches Initialize normally derives:
 //  - every building's SBuildingInfo shell cache (deliberately never serialized; without the
 //    rebuild the render pipeline re-Builds from an EMPTY cache and the walls/roof/floors vanish)
-//    via CWorld::RestoreRuntimeCaches' building->UpdateAllParts() pass (also re-binds the world's
-//    pGlobalGame weak ref). NOT CreateRestored: its StartGame tail restarted a player turn, so a
+//    via CWorld::RestoreRuntimeCaches' cache-only UpdateInfo() pass (also re-binds the world's
+//    pGlobalGame weak ref). Keep saved building-part bindings and AI hulls intact. NOT
+//    CreateRestored: its StartGame tail restarted a player turn, so a
 //    realtime save loaded into turn-based -- retail's load path runs no world hook at all
 //    (CICLoad::Exec @0x1f5fd0 -> CMission::OnLoad @0x1fb8e0 = loading-bar counters only) and the
 //    deserialized TBS state resumes untouched;
