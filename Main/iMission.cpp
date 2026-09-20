@@ -165,7 +165,7 @@ CMission::CMission():
 	varCheatAP( "cheat_ap", VarCheatAP, this, NGlobal::CValue( L"off" ) ),
 	bindCluesMenu( "clues" ), bindObjectivesMenu( "objectives" ), bindGameMenu( "gamemenu" ),
 	bindStartOfTurn( "startofturn" ), bindEndOfTurn( "endofturn" ), 
-	bindSaveMenu( "savemenu" ), bindLoadMenu( "loadmenu" ), 
+	bindSaveMenu( "savemenu" ), bindLoadMenu( "loadmenu" ), bindQuickSave( "save" ),
 	bindMove( "move" ), bindAttack( "attack" ), bindSetMine( "setmine" ), bindSetTrap( "settrap" ), bindFirstAid( "firstaid" ), bindDropCorpse( "dropcorpse" ), bindExitPK( "exitpk" ), bindRotate( "unit_rotate" ), bindUseTool( "usetool" ),
 	bindSnipeAttack( "snipe_attack" ), bindCollect1AP( "collectap_1ap" ), bindCollect10AP( "collectap_10ap" ), bindCollectMaxAP( "collectap_max" ), bindCollectAllAP( "collectap_all" ),
 	bindNormalPose( "pose_normal" ), bindCrawlPose( "pose_crawl" ), bindCrouchPose( "pose_crouch" ), bindRunPose( "pose_run" ), bindStrafe( "pose_strafe" ), bindHide( "hide" ),
@@ -1217,6 +1217,23 @@ void CMission::InternalStep()
 			tLastCurrentPlayerChange = GetUITime();
 	}
 
+	// v1.2 GameStep 0x6020f4..0x602231: this is live policy, not a load-time flag.
+	// HQ overrides the difficulty; realtime-only saving also excludes scripted sequences.
+	if ( IsValid( GetRPGGame()->pDifficulty ) )
+	{
+		if ( pWorld->IsBase() )
+			bCanSave = true;
+		else
+		{
+			switch ( GetRPGGame()->pDifficulty->canSave )
+			{
+			case NDb::E_CS_CHAPTER: bCanSave = false; break;
+			case NDb::E_CS_REALTIME: bCanSave = IsRealTime() && !IsSequence(); break;
+			case NDb::E_CS_ALWAYS: bCanSave = true; break;
+			}
+		}
+	}
+
 	// retail CMissionBase::InternalStep @0x1a29f0: on a turn change (hot-seat) just Deactivate ->
 	// swap pActivePlayer -> Activate. NO camera copies -- each tracker OWNS its camera (tag 10) and
 	// the GetCamera selector (@0x1a1ee0) switches with the active player automatically.
@@ -1463,7 +1480,17 @@ bool CMission::ProcessEvent( const NInput::SEvent &sEvent )
 	}
 	else if ( bindSaveMenu.ProcessEvent( sEvent ) )
 	{
-		NMainLoop::Command( new CICSaveLoadMenu( SAVE, 0, bCanSave ) );   // retail CMissionBase::ProcessEvent passes this->bCanSave (disasm mov al,[esi+0xe4])
+		// v1.2 0x5a2e94: never open an empty SAVE view with bCanSave == false.
+		NMainLoop::Command( new CICSaveLoadMenu( bCanSave ? SAVE : LOAD, 0, bCanSave ) );
+		return true;
+	}
+	else if ( bindQuickSave.ProcessEvent( sEvent ) )
+	{
+		// v1.2 0x5a2d38..0x5a2e03: consume forbidden quicksaves before the global handler.
+		if ( bCanSave )
+			NMainLoop::Command( new NMainLoop::CICSave( NMainLoop::GetQuickSaveSlot( false ) ) );
+		else
+			csGame << NUI::GetDBString( 19881 ) << endl;
 		return true;
 	}
 	else if ( bindLoadMenu.ProcessEvent( sEvent ) )

@@ -42,13 +42,13 @@ private:
 
 public:
 	CInGameMenuUI() {}
-	CInGameMenuUI( const SWindowInfo &sInfo, NRPG::CGlobalPlayer *pPlayer, bool bAllowRestart );
+	CInGameMenuUI( const SWindowInfo &sInfo, NRPG::CGlobalPlayer *pPlayer, bool bAllowRestart, bool bAllowSave );
 
 	bool ProcessMessage( const SEvent &sEvent );
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CInGameMenuUI::CInGameMenuUI( const SWindowInfo &sInfo, NRPG::CGlobalPlayer *_pPlayer, bool _bAllowRestart ):
-	CWindow( sInfo ), pPlayer( _pPlayer ), bAllowRestart( _bAllowRestart )
+CInGameMenuUI::CInGameMenuUI( const SWindowInfo &sInfo, NRPG::CGlobalPlayer *_pPlayer, bool _bAllowRestart, bool _bAllowSave ):
+	CWindow( sInfo ), pPlayer( _pPlayer ), bAllowRestart( _bAllowRestart ), bAllowSave( _bAllowSave )
 {
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -72,6 +72,7 @@ bool CInGameMenuUI::ProcessMessage( const SEvent &sEvent )
 			pSaveGame->AddTextState( CHoverButton::STATE_HOVER, GetDBString( 11144 ) + GetDBString( 11148 ) );
 			pSaveGame->AddTextState( CHoverButton::STATE_NORMAL, GetDBString( 11143 ) + GetDBString( 11148 ) );
 			pSaveGame->AddTextState( CHoverButton::STATE_DISABLED, GetDBString( 11145 ) + GetDBString( 11148 ) );
+			pSaveGame->SetStyle( STYLE_ENABLED, bAllowSave ); // v1.2 0x5eacad
 
 			pReturnToGame = new CHoverButton( sEvent.pLoader->GetControl( "cancel" ) );
 			pReturnToGame->AddTextState( CHoverButton::STATE_HOVER, GetDBString( 11144 ) + GetDBString( 11151 ) );
@@ -166,7 +167,7 @@ void CInGameMenuInterface::Initialize( NRPG::CGlobalPlayer *_pPlayer, bool _bAll
 	pScreenShot->SetMode( NUI::CScreenShot::BLACKANDWHITE, CVec4( 0.5f, 0.5f, 0.5f, 1 ) );
 	pScreenShot->Generate();
 
-	pMenuUI = new NUI::CInGameMenuUI( NUI::SWindowInfo( pInterface, NUI::SPoint( 0, 0 ), NUI::SPoint( 1024, 768 ), "ingamemenu", NUI::STYLE_ENABLED ), pPlayer, bAllowRestart );
+	pMenuUI = new NUI::CInGameMenuUI( NUI::SWindowInfo( pInterface, NUI::SPoint( 0, 0 ), NUI::SPoint( 1024, 768 ), "ingamemenu", NUI::STYLE_ENABLED ), pPlayer, bAllowRestart, bAllowSave );
 	NUI::LoadTemplate( pMenuUI, NDb::GetUIContainer( 158 ) );
 	pMenuUI->ShowWindow( NUI::SWTYPE_SHOW );
 }
@@ -207,7 +208,8 @@ bool CInGameMenuInterface::ProcessEvent( const NInput::SEvent &sEvent )
 	}
 	else if ( bindSaveGame.ProcessEvent( sEvent ) )
 	{
-		NMainLoop::Command( new CICSaveLoadMenu( SAVE, pScreenShot->GetTexture(), bAllowSave ) );
+		// v1.2 0x5e9dfe: a save binding falls back to Load when saving is forbidden.
+		NMainLoop::Command( new CICSaveLoadMenu( bAllowSave ? SAVE : LOAD, pScreenShot->GetTexture(), bAllowSave ) );
 		return true;
 	}
 	else if ( bindLoadGame.ProcessEvent( sEvent ) )

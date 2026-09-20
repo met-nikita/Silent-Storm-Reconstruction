@@ -140,14 +140,13 @@ private:
 	CScriptHoverButton* AddScriptButton( CButtonsLine *pLine, const string &szID, int nCaption, int nToolTip )
 	{
 		CScriptHoverButton *pButton = new CScriptHoverButton( SWindowInfo( pLine, SPoint( 0, 0 ), SPoint( 0, 0 ), szID, STYLE_ENABLED | STYLE_VISIBLE ), pInterface );
-		// State 3 is the release's "selected" art: the caption bracketed `[ ... ]`. The font/colour tag
-		// (GetDBString 11129) must lead so the brackets share the caption's font (else `[ ` renders in
-		// the default small font).
+		// v1.2 0x63d7dd: selected captions use the brighter DB style 17338, not the normal
+		// style 11129. Put the style before the brackets so they share the caption's font.
 		pLine->AddButton( pButton, nToolTip,
 			GetDBString( 11129 ) + GetDBString( nCaption ),                 // normal
 			GetDBString( 11130 ) + GetDBString( nCaption ),                 // hover
-			GetDBString( 11129 ) + L"[ " + GetDBString( nCaption ) + L" ]", // state 3 = selected
-			GetDBString( 17338 ) + GetDBString( nCaption ) );               // disabled
+			GetDBString( 17338 ) + L"[ " + GetDBString( nCaption ) + L" ]", // state 3 = selected
+			L"" );                                                       // disabled (retail)
 		return pButton;
 	}
 
@@ -294,13 +293,19 @@ bool CSideMenuInterface::ProcessEvent( const NInput::SEvent &sEvent )
 	}
 	else if ( bindNext.ProcessEvent( sEvent ) )
 	{
-		// The release (@0x23e330) threads the chosen difficulty as the 2nd CICHeroMenu arg, with the
-		// enum value passed DIRECTLY as the DB id: GetDBSide(eSide) (SIDE_AXIS=1/SIDE_ALLIES=2 = the
-		// N_SIDE_* ids) + GetDBDifficulty(eDifficulty) (DIF_EASY=0/DIF_HARD=1/DIF_NORMAL=2). We guard the
-		// null-side case for direct bind events too; CSideMenuUI::Draw disables the Next button.
+		// Side enums coincide with DB IDs, but difficulty enums do NOT. Retail v1.2
+		// 0x63e1e3..0x63e21a maps EASY=0 -> DB1, HARD=1 -> DB3, NORMAL=2 -> DB2.
+		// The localized captions call these Normal, Impossible and Hard, respectively.
+		// Guard the null-side case for direct binds too; Draw disables the Next button.
 		NDb::CSide *pDBSide = ( pSideMenuUI->GetSide() != NUI::CSideMenuUI::SIDE_NONE )
 			? NDb::GetDBSide( pSideMenuUI->GetSide() ) : 0;
-		NDb::CDBDifficulty *pDBDifficulty = NDb::GetDBDifficulty( pSideMenuUI->GetDifficulty() );
+		NDb::CDBDifficulty *pDBDifficulty = 0;
+		switch ( pSideMenuUI->GetDifficulty() )
+		{
+		case NUI::CSideMenuUI::DIF_EASY: pDBDifficulty = NDb::GetDBDifficulty( 1 ); break;
+		case NUI::CSideMenuUI::DIF_HARD: pDBDifficulty = NDb::GetDBDifficulty( 3 ); break;
+		case NUI::CSideMenuUI::DIF_NORMAL: pDBDifficulty = NDb::GetDBDifficulty( 2 ); break;
+		}
 		if ( IsValid( pDBSide ) )
 			NMainLoop::Command( new NGame::CICHeroMenu( pDBSide, pDBDifficulty ) );
 		return true;

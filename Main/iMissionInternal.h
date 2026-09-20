@@ -86,7 +86,7 @@ class CMission: public CMissionBase
 	OBJECT_BASIC_METHODS(CMission)
 private:
 	NInput::CBind bindStartOfTurn, bindEndOfTurn, bindNextEnemy; 
-	NInput::CBind bindSaveMenu, bindLoadMenu; 
+	NInput::CBind bindSaveMenu, bindLoadMenu, bindQuickSave;
 	NInput::CBind bindFocusUnit, bindAddFloor, bindSubFloor;
 
 	NInput::CBind bindCancel, bindCancelAction, bindContinue, bindPause, bindMainMenu, bindCluesMenu, bindObjectivesMenu, bindGameMenu, bindEndMission;
