@@ -2911,11 +2911,11 @@ void CWorld::ThrowGrenade( const CVec3 &vFrom, const CVec3 &vSpeed, STime tThrow
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CWorld::ThrowKnife( const CVec3 &vFrom, const CVec3 &vSpeed, STime tThrow, float fDistance,
-	NDb::CModel *pModel, NRPG::CAttackPortion &attack, NRPG::IInventoryItem *pIItem, CUnitServer *pUnitServer )
+void CWorld::ThrowKnife( const NRPG::SAttackRayInfo &rayInfo, float fSpeed, STime tThrow, float fDistance,
+	NDb::CModel *pModel, NRPG::IInventoryItem *pIItem )
 {
-	miscObjects.push_back( CreateKnifeServer( this, vFrom, vSpeed, tThrow, 
-		fDistance, pModel, attack, pIItem, pUnitServer ) );
+	miscObjects.push_back( CreateKnifeServer( this, rayInfo, fSpeed, tThrow,
+		fDistance, pModel, pIItem ) );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CWorld::LaunchRocket( const CVec3 &vFrom, const CVec3 &vSpeed,

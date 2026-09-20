@@ -610,8 +610,8 @@ public:
 	void ThrowGrenade( const CVec3 &vFrom, const CVec3 &vSpeed, STime tThrow, float fTFly,
 		NDb::CModel *pModel, NDb::CRPGGrenade *pRPGGrenade, CUnitServer *pUnitServer,
 		NDb::CRPGEngGrenade *pRPGEngGrenade = 0 );
-	void ThrowKnife( const CVec3 &vFrom, const CVec3 &vSpeed, STime tThrow, float fDistance,
-		NDb::CModel *pModel, NRPG::CAttackPortion &attack, NRPG::IInventoryItem *pIItem, CUnitServer *pUnitServer );
+	void ThrowKnife( const NRPG::SAttackRayInfo &rayInfo, float fSpeed, STime tThrow, float fDistance,
+		NDb::CModel *pModel, NRPG::IInventoryItem *pIItem );
 	void LaunchRocket( const CVec3 &vFrom, const CVec3 &vSpeed,
 		STime tThrow, float fDistance, NDb::CModel *pModel, NRPG::CAttackPortion &attack, 
 		NRPG::IClipItem *pRocket, CUnitServer *pIgnored, NDb::CEffect *_pEffect = 0 );

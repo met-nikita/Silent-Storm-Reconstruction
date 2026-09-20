@@ -13,14 +13,14 @@ namespace NRPG
 {
 	class IInventoryItem;
 	class CAttackPortion;
+	struct SAttackRayInfo;
 }
 namespace NWorld
 {
 class CWorld;
 class CUnitServer;
-IDynamicObject *CreateKnifeServer( CWorld *pWorld, const CVec3 &vFrom, const CVec3 &vSpeed,
-		STime tThrow, float fDistance, NDb::CModel *pModel, NRPG::CAttackPortion &_attack, 
-		NRPG::IInventoryItem *_pIItem, CUnitServer *_pIgnored );
+IDynamicObject *CreateKnifeServer( CWorld *pWorld, const NRPG::SAttackRayInfo &rayInfo, float fSpeed,
+		STime tThrow, float fDistance, NDb::CModel *pModel, NRPG::IInventoryItem *pIItem );
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 }
 #endif

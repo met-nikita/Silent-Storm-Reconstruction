@@ -26,6 +26,9 @@ class CWeaponItem;
 class IInventoryItem;
 class IGrenadeItem;
 class IMeleeWeaponItem;
+class IUnitMission;
+float GetMaxThrowVelocity( IUnitMission *pMission, IMeleeWeaponItem *pItem, bool bFirstRound );
+float GetMaxTrowDistance( IUnitMission *pMission, IMeleeWeaponItem *pItem, bool bFirstRound );
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // STargetHLInfo -- which hit location(s) a melee swing at a unit may strike
 ////////////////////////////////////////////////////////////////////////////////////////////////////

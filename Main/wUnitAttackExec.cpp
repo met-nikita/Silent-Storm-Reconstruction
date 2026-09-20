@@ -425,14 +425,10 @@ void UnitThrowGrenade( CUnitServer *pUS, NDb::CRPGGrenade *pGrenade, const CVec3
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 EUnitCommandResult CanUnitThrowKnife( CUnitServer *pUS, const NAI::SUnitPosition &from, const CVec3 &ptTarget, NRPG::IMeleeWeaponItem *pMelee )
 {
-	CPtr<NRPG::CThrowKnifeTileToHitCalcer> pToHitCalcer;
-	int nDistance = fabs( ptTarget - from.GetCP() ) / FP_GRID_STEP;
-	pToHitCalcer = new NRPG::CThrowKnifeTileToHitCalcer( pUS, from.GetPose(),
-		nDistance, from.GetCP(), 100.f, pUS->GetWorld()->IsFirstTurn(), false, CVec3(1,1,1), ptTarget, 0 );
-
- 	float fKnifeMaxDistance = pToHitCalcer->GetKnifeMaxDistance();
-
-	if ( nDistance > fKnifeMaxDistance )
+	// Retail compares the fractional tile distance against the truncated range.
+	float fDistance = fabs( ptTarget - from.GetCP() ) * FP_INV_GRID_STEP;
+	int nMaxDistance = int( NRPG::GetMaxTrowDistance( pUS->GetUnitRPG(), pMelee, false ) );
+	if ( fDistance > nMaxDistance )
 		return UCR_TARGET_OUT_OF_RANGE;
 
 	return UCR_OK;
@@ -3063,17 +3059,15 @@ CExecThrowKnife::CExecThrowKnife( CUnitServer *_pUS, const CVec3 &_ptTarget, CUn
 {
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// @0x3a7470 -- targeted-unit ctor (RETAIL ADDITION; Jan03 had only the point ctor). Records eHL and
-// derives the aim point from the target unit's hit location instead of taking an explicit ptTarget.
-// The exact retail aim helper (pUS->GetWorld()->...->vtbl[0x28](&ptTarget, pTarget->ObjBase, eHL)) is
-// not mapped in-tree; reproduced with the proven AIMap hit-location idiom (cf. CExecShootUnit ctor).
+// Retail v1.2 0x7a78b0: retain the target and body part, then obtain its aim point
+// through IAIMap::GetUnitHLPos. Used by the unit-target command dispatcher.
 CExecThrowKnife::CExecThrowKnife( CUnitServer *_pUS, NAI::EHitLocation _eHL, CUnitServer *_pTarget ):
 	CExecAttack(_pUS), pTarget(_pTarget), eHL(_eHL)
 {
 	if ( IsValid( pTarget ) )
 	{
-		NAI::EHitLocation eHitLoc = ( eHL == NAI::HL_ANY ) ? NAI::HL_BODY : eHL;
-		pUS->GetWorld()->GetAIMap()->GetUnitHLPos( &ptTarget, pUS->GetWorld()->GetAIMap()->GetHull( pTarget ), eHitLoc );
+		// v1.2 0x7a7954: pass HL_ANY through too (the hull's center).
+		pUS->GetWorld()->GetAIMap()->GetUnitHLPos( &ptTarget, pUS->GetWorld()->GetAIMap()->GetHull( pTarget ), eHL );
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -3138,48 +3132,41 @@ void CExecThrowKnife::ThrowKnife()
 	if ( !IsValid( pMelee ) )
 		return;
 	vector<NRPG::CAttackPortion> attack;
-	CreateAttack( &attack, 0, false );
+	CreateAttack( &attack, pTarget, false );
 	if ( attack.empty() )
 		return;
-	pUS->TearOffItem( &item, (NDb::ESlot)pInventory->GetActiveSlot(), true );
-
+	// v1.2 0x7aa2a0: run the ranged solver while the blade is still equipped.
+	// Carry its chosen ray and hit/miss decision through the flight, as for bullets.
+	attack.front().eWantedHL = eHL;
+	CWorld *pWorld = pUS->GetWorld();
+	NRPG::SAttackRayInfo rayInfo( attack.front(), VNULL3, VNULL3, pUS, pUS->GetPosition(),
+		0, 0, false, pUS->GetMinClearDistance(), 30.f, IsValid(pTarget) ? pTarget.GetBarePtr() : 0 );
+	rayInfo.pIgnore = const_cast<CObjectBase*>( pUS->GetAttackIgnore() );
 	int nToHit;
-	int nDistance = fabs( ptTarget - pUS->GetPosition().GetCP() ) / FP_GRID_STEP;
-	float fMaxDist;
-	if ( pTarget )
+	float fHit;
+	CObj<NRPG::CCoverInfo> pCover;
+	if ( IsValid( pTarget ) )
 	{
-		CPtr<NRPG::CThrowKnifeToHitCalcer> pToHitCalcer =
-			new NRPG::CThrowKnifeToHitCalcer( pUS, pUS->GetPosition().GetPose(),
-			nDistance, pUS->GetPosition().GetCP(), 100.f, pUS->GetWorld()->IsFirstTurn(), false, CVec3(1,1,1), 0, false );
-		nToHit = pToHitCalcer->GetToHit();
-		pToHitCalcer->Log();
-		fMaxDist = pToHitCalcer->GetKnifeMaxDistance() * FP_GRID_STEP;
+		vector<int> accessibleHLs;
+		pCover = pWorld->GetGame()->CalcCovers( pUS->GetAttackOrigin( pUS->GetPosition() ),
+			attack.front(), pUS, pTarget, eHL, pUS->GetMinClearDistance() );
+		fHit = NRPG::CheckToHit( pUS, pTarget, 0, eHL, accessibleHLs, pCover,
+			pWorld->IsFirstTurn(), &nToHit, 0 );
 	}
 	else
 	{
-		CPtr<NRPG::CThrowKnifeTileToHitCalcer> pToHitCalcer =
-			new NRPG::CThrowKnifeTileToHitCalcer( pUS, pUS->GetPosition().GetPose(),
-			nDistance, pUS->GetPosition().GetCP(), 100.f, pUS->GetWorld()->IsFirstTurn(), false, CVec3(1,1,1), ptTarget, 0 );
-		nToHit = pToHitCalcer->GetToHit();
-		pToHitCalcer->Log();
-		fMaxDist = pToHitCalcer->GetKnifeMaxDistance() * FP_GRID_STEP;
+		pCover = pWorld->GetGame()->CalcCoversForTile( pUS->GetAttackOrigin( pUS->GetPosition() ),
+			attack.front(), pUS, ptTarget, pUS->GetMinClearDistance() );
+		fHit = NRPG::CheckTileToHit( pUS, ptTarget, 0, NAI::THL_LOWER, pCover,
+			pWorld->IsFirstTurn(), &nToHit, 0 );
 	}
-
-	float fSpeed = 5.f;
-	CVec3 speed = ptTarget - item.ptCenter;
-	Normalize(&speed);
-	speed *= fSpeed;
-	if ( random.Get( 1, 100 ) > nToHit )
-	{
-		// we miss
-		// find where the knife will actually fly
-		float fD = 0.15f * fabs( fSpeed );
-		speed.x += random.GetFloat( -fD, +fD );
-		speed.y += random.GetFloat( -fD, +fD );
-		speed.z += random.GetFloat( -fD, +fD );
-	}
-	pUS->GetWorld()->ThrowKnife( item.ptCenter, speed, 
-		pUS->animator.GetTimeLabel1(), fMaxDist, item.pModel, attack.front(), item.pItem, pUS ); 
+	NRPG::PrepareAttackRay( pWorld->GetAIMap(), pCover, &rayInfo, fHit );
+	STime tThrow = pUS->animator.GetTimeLabel1();
+	pUS->TearOffItem( &item, (NDb::ESlot)pInventory->GetActiveSlot(), true );
+	// Retail 0x7aa4e8/0x7aa52d: truncate the range and multiply velocity by 1.5.
+	float fMaxDist = int( NRPG::GetMaxTrowDistance( pRPG, pMelee, false ) );
+	float fSpeed = NRPG::GetMaxThrowVelocity( pRPG, pMelee, false ) * 1.5f;
+	pWorld->ThrowKnife( rayInfo, fSpeed, tThrow, fMaxDist, item.pModel, item.pItem );
 	pUS->Update();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////

@@ -103,7 +103,7 @@ bool IsObstacleRay( NAI::CFastRenderer::SResult *pList, float fMaxDist, CObjectB
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // NRPG::PerformThrowingAttackPortion @0x290780 -- free-fn form of
 // CGame::ProcessThrowingAttackPortion. The release added the leading IWorld* and the
-// (unread) vPlace argument; the body is otherwise identical.
+// flight direction argument, forwarded to the target's damage handler.
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 EAttackResult PerformThrowingAttackPortion( NWorld::IWorld *pWorld, CAttackPortion *pA,
 	const CVec3 &vDir, IAttackable *pTarget, NDb::CRPGArmor *pArmor, int nUserID )

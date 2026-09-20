@@ -204,6 +204,7 @@ static EUnitCommandResult GetActionValidPlaces( CUnitServer *pUS, CCmdShootObjec
 		case AT_SNIPE:
 		case AT_SHOOT:
 		case AT_BAZOOKA:
+		case AT_THROW:
 			GetDirectedPoints( pNet, pUS->GetPosition().pos.p, ptTo, pRes );
 			break;
 		default:
@@ -639,6 +640,13 @@ CCommandExecute* CreateActionExecutor( CUnitServer *pUS, CCmd *pCmd, EUnitComman
 						return CreateActionQueueOrReload(pUS, pAttackObject.GetPtr(), new CExecShootUnit(pUS, pUnitTarget, pAttackObject->eHL, pAttackObject->nExtraAttackAP), pError);
 					case AT_CANNON:
 						return CreateSimpleActionOrReload(pUS, pAttackObject.GetPtr(), new CExecShootUnit(pUS, pUnitTarget, pAttackObject->eHL, pAttackObject->nExtraAttackAP), pError);
+					case AT_THROW:
+						// Retail v1.2 0x79dc83 / 0x79dd35: turn toward the target
+						// before throwing. A targetless order-bar query falls through
+						// to the self-tile probe below; it must not construct a unit throw.
+						if ( IsValid( pUnitTarget ) )
+							return CreateActionQueue(pUS, pAttackObject.GetPtr(), new CExecThrowKnife(pUS, pAttackObject->eHL, pUnitTarget), ITEM_ACTIVE, pError);
+						break;
 					}
 				}
 

@@ -40,9 +40,8 @@ class CKnifeServer: public IDynamicObject, public IVisObj
 	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&tFinish); f.Add(3,&pAnimator); f.Add(4,&pModel); f.Add(5,&pWorld); f.Add(6,&bindGlobal); f.Add(7,&pAction); f.Add(8,&pIItem); f.Add(9,&curPos); f.Add(10,&velocity); f.Add(11,&rayInfo); f.Add(12,&ignore); return 0; }
 public:
 	CKnifeServer() {}
-	CKnifeServer( CWorld *pWorld, const CVec3 &vFrom, const CVec3 &vSpeed,
-		STime tThrow, float fDistance, NDb::CModel *pModel, NRPG::CAttackPortion &_attack, 
-		NRPG::IInventoryItem *_pIItem, CUnitServer *_pIgnored );
+	CKnifeServer( CWorld *pWorld, const NRPG::SAttackRayInfo &rayInfo, float fSpeed,
+		STime tThrow, float fDistance, NDb::CModel *pModel, NRPG::IInventoryItem *pIItem );
 	//
 	bool Segment();
 	virtual void Visit( IRenderVisitor *p );
@@ -79,6 +78,13 @@ void CKnifeAnimator::GetFrame( STime t, NAnimation::SSkeletonPose *pPose )
 {
 	// for knife throwing
 	STime tShift = t - tStart;
+	// Retail v1.2 0x75fe8f: an earlier sample rebases the flight clock.
+	// Without this, unsigned underflow sends the initial pose far off-map.
+	if ( t < tStart )
+	{
+		tShift = 0;
+		tStart = t;
+	}
 	float fTShift = tShift / 1000.f;
 	(*pPose)[0].pos = start + vel * fTShift;
 	(*pPose)[0].rot = qRot;
@@ -86,28 +92,23 @@ void CKnifeAnimator::GetFrame( STime t, NAnimation::SSkeletonPose *pPose )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CKnifeServer
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CKnifeServer::CKnifeServer( CWorld *_pWorld, const CVec3 &vFrom, const CVec3 &vSpeed,
-	STime tThrow, float fDistance, NDb::CModel *_pModel, NRPG::CAttackPortion &_attack, NRPG::IInventoryItem *_pIItem, CUnitServer *_pIgnored )
-: pWorld(_pWorld), pModel(_pModel), pIItem(_pIItem), velocity(vSpeed)
+CKnifeServer::CKnifeServer( CWorld *_pWorld, const NRPG::SAttackRayInfo &_rayInfo, float fSpeed,
+	STime tThrow, float fDistance, NDb::CModel *_pModel, NRPG::IInventoryItem *_pIItem )
+: pWorld(_pWorld), pModel(_pModel), pIItem(_pIItem), rayInfo(_rayInfo)
 {
-	// retail ctor @0x360590 receives a pre-built SAttackRayInfo; the dev throw pipeline still hands
-	// the pieces separately, so the carrier is assembled here (same fields the retail copy carries).
-	rayInfo.atk = _attack;
-	rayInfo.vOrigin = vFrom;
-	rayInfo.vDir = vSpeed;
-	Normalize( &rayInfo.vDir );
-	rayInfo.pUS = _pIgnored;        // the thrower
-	rayInfo.pIgnore = _pIgnored;    // the thrower's hull is ignored in flight (retail Segment reads rayInfo.pIgnore)
-	// `ignore` starts empty, exactly like the retail ctor.
-	CKnifeAnimator *pLinear = new CKnifeAnimator( tThrow, vFrom, vSpeed );
+	// v1.2 0x760790: retain the solver's target, hit roll and ignore object.
+	velocity = rayInfo.vDir;
+	Normalize( &velocity );
+	velocity *= fSpeed;
+	CKnifeAnimator *pLinear = new CKnifeAnimator( tThrow, rayInfo.vOrigin, velocity );
 	pAnimator = new NAnimation::CSkeletonAnimator(0);
 	pAnimator->pTime = pWorld->GetTime();
 	pAnimator->AddAnimator( pWorld->GetTime()->GetValue(), pLinear );
 	bindGlobal.Link( pWorld->GetActive(), this );
-	float fTFly = fDistance / fabs( vSpeed ) * 1000;
+	float fTFly = fDistance / fSpeed * 1000;
 	tFinish = tThrow + (STime)Float2Int( fTFly );
 	pAction = pWorld->GetActiveCounter();
-	curPos = vFrom;
+	curPos = rayInfo.vOrigin;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CKnifeServer::Visit( IRenderVisitor *p )
@@ -145,9 +146,34 @@ bool CKnifeServer::Segment()
 			if ( pCollided == rayInfo.pIgnore.GetPtr() )   // retail @0x35fe50: the carrier's ignore object
 				continue;
 			nCollFloor = i->pSrc->nFloor;   // retail @0x7600a8: the hit hull's floor (after the ignore test)
+			// v1.2 0x7602a0: a door/window frame makes the blade bounce.
+			if ( i->pSrc->nTSFlags & ( NWorld::TS_STATE_OPEN | NWorld::TS_STATE_CLOSED ) )
+			{
+				res = NRPG::AR_BOUNCE;
+				break;
+			}
 			CDynamicCast<NRPG::IAttackable> pAttackCatcher( pCollided );
 			if ( pAttackCatcher )
-				res = pWorld->GetGame()->ProcessThrowingAttackPortion( &rayInfo.atk, pAttackCatcher, i->pSrc->pArmor, i->nUserID );
+			{
+				// v1.2 0x7602ba..0x760385: preserve the intended target's roll;
+				// incidental units get one roll each, not another for every hull.
+				if ( pCollided == rayInfo.pTarget.GetPtr() && !rayInfo.bTargetIsHit )
+					continue;
+				CDynamicCast<CUnitServer> pUnit( pCollided );
+				if ( pUnit )
+				{
+					if ( find( ignore.begin(), ignore.end(), pCollided ) != ignore.end() )
+						continue;
+					if ( pCollided != rayInfo.pTarget.GetPtr() &&
+						!NRPG::CheckBulletToHit( rayInfo, pCollided, (NAI::EHitLocation)i->nUserID ) )
+					{
+						ignore.push_back( pCollided );
+						continue;
+					}
+				}
+				res = NRPG::PerformThrowingAttackPortion( pWorld, &rayInfo.atk,
+					ray.ptDir, pAttackCatcher, i->pSrc->pArmor, i->nUserID );
+			}
 			else 
 			{
 				if ( ( i->pSrc->nTSFlags & NWorld::TS_ITEM_BLOCKER ) != 0 )
@@ -184,11 +210,10 @@ bool CKnifeServer::Segment()
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-IDynamicObject *CreateKnifeServer( CWorld *pWorld, const CVec3 &vFrom, const CVec3 &vSpeed,
-		STime tThrow, float fDistance, NDb::CModel *pModel, NRPG::CAttackPortion &_attack, 
-		NRPG::IInventoryItem *_pIItem, CUnitServer *_pIgnored )
+IDynamicObject *CreateKnifeServer( CWorld *pWorld, const NRPG::SAttackRayInfo &rayInfo, float fSpeed,
+		STime tThrow, float fDistance, NDb::CModel *pModel, NRPG::IInventoryItem *pIItem )
 {
-	return new CKnifeServer( pWorld, vFrom, vSpeed, tThrow, fDistance, pModel, _attack, _pIItem, _pIgnored );
+	return new CKnifeServer( pWorld, rayInfo, fSpeed, tThrow, fDistance, pModel, pIItem );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 }

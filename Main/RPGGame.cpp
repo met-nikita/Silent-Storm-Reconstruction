@@ -15,6 +15,7 @@
 #include "rpgCheatConstants.h"
 #include "rpgUnit.h"
 #include "wUnitServer.h"   // NWorld::CUnitServer::GetDiplomacyState -- friendly-fire ally block in cover penetration
+#include "wMain.h"
 #include "wObject.h"       // NWorld::CCannon::GetCurrentUnit -- resolve a cannon/mech shooter for the ally block
 
 // NWorld::CanMeleeAttack @0x3a1db0 (wUnitAttackExec.cpp) -- melee-swing reach gate in the composite
@@ -708,14 +709,16 @@ int GetAttackerToHit( const NWorld::CUnit *pAttacker, NWorld::CUnit *pTarget, in
 		return 0;
 	//
 	int nHitCover = GetHitCover( pAttacker, pCover );
-	int nDistance = fabs(pAttacker->GetPosition().GetCP() - pTarget->GetPosition().GetCP()) / FP_GRID_STEP;
-	// CRAP: this parameter is no longer used anywhere
-	CVec3 ptAttacker = pAttacker->GetPosition().GetCenter();
+	// Retail v1.2 0x6b5143: measure from the cover solver's attack origin.
+	int nDistance = fabs(pCover->src - pTarget->GetPosition().GetCP()) * FP_INV_GRID_STEP;
+	CVec3 ptAttacker = pCover->src;
 	//
-	bool bBackStab = !pTarget->IsUnitAudible( pAttacker ) && !pTarget->IsUnitVisible( pAttacker );
+	bool bBackStab = !pTarget->IsUnitVisible( pAttacker );
+	CDynamicCast<NWorld::CUnitServer> pUS( const_cast<NWorld::CUnit*>( pAttacker ) );
+	bool bNight = pUS->GetWorld()->GetGame()->IsNight();
 	return NRPG::GetToHit( pAttacker, pAttacker->GetPose(), nDistance, ptAttacker,
 		pTarget->GetPosition().pos, eHL, nExtraAP,
-		pTarget, accessibleHLs, nHitCover, bFirstRound, CVec3( 1, 1, 1 ), bBackStab, nBullet );
+		pTarget, accessibleHLs, nHitCover, bFirstRound, CVec3( 1, 1, 1 ), bBackStab, nBullet, bNight );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // Used only for inteface tasks. Returns not exactly correct value.
@@ -740,7 +743,9 @@ int CGame::GetCompositeToHit( NWorld::CUnit *pAttacker,
 	// cursor even though the executor (min-clear 0) computed and landed a non-zero chance. Mirrors the already-
 	// faithful sibling CGame::GetTileCompositeToHit.
 	float fMinClearDistance;
-	if ( NDb::IsMeleeWeapon( pRealAttacker->GetWeaponType() ) )
+	// Classify the action, not the model/animation weapon type: a throwing knife
+	// is ranged here (retail GetToHitType), despite NDb::IsMeleeWeapon(WT_KNIFE).
+	if ( NRPG::GetToHitType( pAttacker ) == NRPG::TH_MELEE )
 	{
 		CVec3 pTargetHL;
 		pAIMap->GetUnitHLPos( &pTargetHL, pAIMap->GetHull(pTarget), eHL );
@@ -757,7 +762,7 @@ int CGame::GetCompositeToHit( NWorld::CUnit *pAttacker,
 	}
 	CObj<NRPG::CCoverInfo> pCover = CalcCovers( ptAttackPos, attack.front(), pAttacker, pTarget, eHL, fMinClearDistance );
 	vector<int> accessibleHLs; // needed only for computing Melee ToHit
-	if ( NDb::IsMeleeWeapon( pRealAttacker->GetWeaponType() ) )
+	if ( NRPG::GetToHitType( pAttacker ) == NRPG::TH_MELEE )
 	{
 		pAIMap->GetAccessibleUnitHL( &accessibleHLs, pAttacker->GetPosition().GetCenter(), pAIMap->GetHull(pAttacker), F_MELEE_DISTANCE );
 		if ( NAI::HL_ANY != eHL && find( accessibleHLs.begin(), accessibleHLs.end(), eHL ) != accessibleHLs.end() )

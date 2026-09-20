@@ -103,7 +103,7 @@ void MakeAccidentalShot( SAttackRayInfo *dst, NWorld::CUnitServer *pUnit, const 
 // @0x290740 -- is there a weapon-blocking obstacle (other than pIgnore) within fMaxDist?
 bool IsObstacleRay( NAI::CFastRenderer::SResult *pList, float fMaxDist, CObjectBase *pIgnore );
 // @0x290780 -- throwing attack resolution (free-fn form of CGame::ProcessThrowingAttackPortion).
-EAttackResult PerformThrowingAttackPortion( NWorld::IWorld *pWorld, CAttackPortion *pA, const CVec3 &vPlace,
+EAttackResult PerformThrowingAttackPortion( NWorld::IWorld *pWorld, CAttackPortion *pA, const CVec3 &vDir,
 	IAttackable *pTarget, NDb::CRPGArmor *pArmor, int nUserID );
 // @0x290f70 -- melee attack resolution (free-fn form of CGame::ProcessMeleeAttackPortion + pFilter).
 void PerformMeleeAttackPortion( NWorld::IWorld *pWorld, NAI::IAIMap *pAIMap, const CAttackPortion &a,

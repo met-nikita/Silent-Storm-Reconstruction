@@ -159,20 +159,45 @@ NAI::EPose GetBestPose( const NDb::CRPGWeaponType &wt )
 	return NAI::WALK;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// NRPG::GetMaxTrowDistance  @0x2b7c70 (RVA) -- release-new free helper. The release range is the
-// 45-degree ballistic r = v^2/g, then * FP_INV_GRID_STEP (1/0.625 = 1.6) to convert metres -> grid
-// tiles:  return (v/g)*v*1.6f .  The max throw VELOCITY v (NRPG::GetMaxThrowVelocity @0x2b7b50) and the
-// throw-physics gravity g (a vtbl[0xdc]()[+0x24] read) are a deep opaque IUnitMission-vtable chain
-// (0x58/0x74/0xdc/0x188/0x78 + weapon-DB reads + pow(x,0.74) + a clamp query) that is undecoded and
-// ABSENT in this tree -- the same elision already documented in CThrowKnifeToHitCalcer::FillWeaponInfo
-// (the fixed 1..15 range). A faithful port is NOT possible without reconstructing GetMaxThrowVelocity,
-// so this is a documented elision returning the dev's fixed throw range. STANDALONE: no caller; it must
-// NOT be wired into FillWeaponInfo (that would change behaviour). Landing it is a parity marker only.
-float GetMaxTrowDistance( IUnitMission *, IInventoryItem *, bool )
+// The blade branch of retail GetWeaponSkill (v1.2 0x6c09f4..0x6c0a96,
+// 0x6c0be4). Extra aiming AP and bullet index are zero for a thrown blade.
+static float GetKnifeThrowSkill( IUnitMission *pMission, IMeleeWeaponItem *pItem )
 {
-	// elided: the (v/g)*v*FP_INV_GRID_STEP formula needs the absent GetMaxThrowVelocity / gravity chain.
-	return 15.0f; // matches CThrowKnifeToHitCalcer's fixed nMaxRange elision (RPGToHit.cpp ~line 605)
+	bool bThrowing = pItem->GetDBMeleeWeapon()->bThrowing;
+	float fSkill = pMission->GetRPGUnit()->Skills( bThrowing ? NDb::ST_THROWING : NDb::ST_MELEE );
+	float fBonus;
+	if ( pMission->HasPerk( bThrowing ? 0x59 : 0x46, &fBonus ) )
+		fSkill += fBonus;
+	return fSkill * GetVPPenalty( pMission->GetRPGUnit()->Skills( NDb::ST_VP ),
+		pMission->GetHealedVP(), pMission->GetRPGUnit()->Skills( NDb::ST_VP ).GetMaxValue() );
 }
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// v1.2 0x6b7b60: shared throw physics, specialized here to the blade caller.
+// Weight is stored in grams. The perk multiplies velocity, not range.
+float GetMaxThrowVelocity( IUnitMission *pMission, IMeleeWeaponItem *pItem, bool bFirstRound )
+{
+	float fStrength = pMission->GetRPGUnit()->Skills( NDb::ST_STR );
+	if ( pMission->GetPanzerklein() )
+		fStrength = pMission->GetPanzerklein()->nGrenadeStrength;
+	fStrength += GetKnifeThrowSkill( pMission, pItem ) * ( 1.f / 18.f );
+	const NDb::SToHitConstants &constants = *pMission->GetToHitConstants();
+	float fPower = constants.fGrenadeBaseCoeff + fStrength * constants.fGrenadeSTRCoeff;
+	float fWeight = pItem->GetDBItem()->nWeight;
+	fPower *= pow( double(fWeight), double(0.74f) );
+	float fVelocity = fPower / ( fWeight * 0.001f );
+	float fMultiplier;
+	if ( pMission->HasPerk( 0x58, &fMultiplier ) )
+		fVelocity *= fMultiplier;
+	return fVelocity;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+float GetMaxTrowDistance( IUnitMission *pMission, IMeleeWeaponItem *pItem, bool bFirstRound )
+{
+	// v1.2 0x6b7c80: ballistic distance, converted to grid tiles.
+	float fVelocity = GetMaxThrowVelocity( pMission, pItem, bFirstRound );
+	return ( fVelocity / pMission->GetToHitConstants()->fGravity ) * fVelocity * FP_INV_GRID_STEP;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 // The release gates the per-hit-location headshot reweighting on the campaign DIFFICULTY record:
 // world->GetGlobalGame()->pDifficulty->bHeadshotShouldKill (retail chain [+0x48][+0x69], resolved
 // 2026-07-12 -- CGlobalGame+0x48 = pDifficulty, CDBDifficulty+0x69 = bHeadshotShouldKill). For
@@ -307,8 +332,8 @@ float CToHitCalcer::GetLight()
 		Clamp(ptIllumination.y, 0.f, 1.f), Clamp(ptIllumination.z, 0.f, 1.f) );
 	float fRes = 0.5f * (1 + fabs( ptLight ) / fabs( CVec3(1,1,1) ) );
 	// release-new: at night the light factor drops 10% unless the unit has night-vision (perk 0x15).
-	// Incidental bullet rolls pass the mission's night flag; other legacy callers
-	// still default to day and need a separate environment-input audit.
+	// Unit-target previews, attacks and incidental bullet rolls pass the night flag.
+	// Remaining tile/grenade callers need the separate environment-input audit.
 	if ( bNight && !pUnitMission->HasPerk( 0x15 ) )
 		fRes *= 0.9f;
 	return fRes;
@@ -718,18 +743,15 @@ int CRLauncherToHitCalcer::GetMaxDistance()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 int CThrowKnifeToHitCalcer::GetKnifeMaxDistance()
 {
-	return pUnitMission->GetRPGUnit()->Skills( NDb::ST_STR ) * 1.5f;
+	return int( GetMaxTrowDistance( pUnitMission, pMeleeWeapon, bFirstRound ) );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CThrowKnifeToHitCalcer::FillWeaponInfo()
 {
-	// release routes the ballistic range through GetMaxThrowVelocity()/fGravity; that velocity formula
-	// is a deep opaque IUnitMission-vtable chain (@0x2b7b50) absent in this tree -> keep the dev's
-	// fixed 1..15 range (documented elision).
+	// v1.2 0x6b81f0: both conversions truncate, including the first range.
 	CToHitCalcer::FillWeaponInfo();
-	sWeaponInfo.nQuality = 0;
-	sWeaponInfo.nMinRange = 1;
-	sWeaponInfo.nMaxRange = 15;
+	sWeaponInfo.nMinRange = GetKnifeMaxDistance();
+	sWeaponInfo.nMaxRange = int( sWeaponInfo.nMinRange * 1.5f );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CThrowKnifeToHitCalcer::Prepare()
@@ -777,7 +799,7 @@ int CThrowKnifeUnitToHitCalcer::GetToHit()
 	else
 		fToHit = fToHit - GetThrowToHitPenalty( eHitLocation );
 	fToHit = Clamp( fToHit, 2.0f, 100.0f );
-	return int( fToHit + 0.5f );  // release rounds the result (fistp), unlike the dev's truncation
+	return int( fToHit );  // v1.2 0x6b8b50..0x6b8b70 selects truncate mode, not round-to-nearest.
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CThrowKnifeTileToHitCalcer
