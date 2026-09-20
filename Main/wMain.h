@@ -547,6 +547,7 @@ public:
 		const list< CPtr<NScenario::CScenarioClue> > &clues, int nMobsLevel,
 		CObj<CPostWorldCreateInfo> *pPostInfo, SRandomSeed sSeed, bool bLeanAndMean = false );
 	virtual void RunPostInit( CPostWorldCreateInfo *pPostInfo );
+	virtual void RunPostInitScript( NDb::CScript *pScript );
 	virtual void CreateDefault();
 	virtual void CreateRestored( NRPG::CGlobalGame *pGlobalGame );	// retail @0x36e100 (zone-reenter: restarts the turn)
 	virtual void RestoreRuntimeCaches( NRPG::CGlobalGame *pGlobalGame, bool bZoneReentry = false );	// save-load resume must preserve action state

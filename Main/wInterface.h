@@ -674,6 +674,8 @@ public:
 		const list< CPtr<NScenario::CScenarioClue> > &clues, int nMobsLevel,
 		CObj<CPostWorldCreateInfo> *pPostInfo, SRandomSeed sSeed, bool bLeanAndMean = false ) = 0;
 	virtual void RunPostInit( CPostWorldCreateInfo *pPostInfo ) = 0;
+	// Retail's single-script overload (v1.2 0x761eb0): no tactical warm-up.
+	virtual void RunPostInitScript( NDb::CScript *pScript ) = 0;
 	virtual void CreateDefault() = 0;
 	// retail @0x36e100 takes the LIVE session's CGlobalGame: the zone-reenter save carries only a
 	// dangling weak ref to it, so the loaded world must be re-bound (and every building's parts

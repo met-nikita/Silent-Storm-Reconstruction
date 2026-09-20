@@ -78,6 +78,7 @@ void CGlobalMap::Import()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CChapterMap::Import()
 {
+	campZonesSet.clear();
 	for ( int nTemp = 0; nTemp < 4; nTemp++ )
 	{
 		int nID = 0;
@@ -87,6 +88,7 @@ void CChapterMap::Import()
 			campZonesSet.push_back( nID );
 	}
 
+	NDatabase::ImportField( "ScriptID", &pScript ); // v1.2 0x8039c8; save tag 3 (0x7f7fac)
 	NDatabase::ImportField( "Background", &pBackground );
 	NDatabase::ImportField( "PWLImageID", &pPWLImage );		// retail CChapterMap import (s2_dbimport.h:3274): the chapter loading splash
 }
