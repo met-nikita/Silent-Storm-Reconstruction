@@ -1627,7 +1627,7 @@ void CGScene::CalcNewLightState()
 				CPointLight::SRadianceInfo info;
 				pPoint->GetRadianceInfo(&info, RP_GF3_CL);
 				lsGlobal.points.push_back(
-					SGlobalIlluminationInfo::SPoint(info.vColor, info.vCenter, info.fRadius, info.bIsRendered)
+					SGlobalIlluminationInfo::SPoint(info.vColor, info.vCenter, info.fRadius, info.bIsRendered, info.bCastShadow)
 				);
 			}
 		}

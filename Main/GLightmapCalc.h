@@ -36,10 +36,11 @@ struct SGlobalIlluminationInfo
 		CVec3 vColor, vCenter;
 		float fRadius;
 		bool bIsRendered;
+		bool bCastShadow;
 		
 		SPoint() {}
-		SPoint( const CVec3 &_vColor, const CVec3 &_vCenter, float _fRadius, bool _bIsRendered )
-			: vColor(_vColor), vCenter(_vCenter), fRadius(_fRadius), bIsRendered(_bIsRendered) {}
+		SPoint( const CVec3 &_vColor, const CVec3 &_vCenter, float _fRadius, bool _bIsRendered, bool _bCastShadow )
+			: vColor(_vColor), vCenter(_vCenter), fRadius(_fRadius), bIsRendered(_bIsRendered), bCastShadow(_bCastShadow) {}
 	};
 	ZDATA
 	SSphere globalBounds;
@@ -64,7 +65,7 @@ class CLightState
 {
 	void AddRay( const CVec3 &vFrom, const CVec3 &vDir, const CVec3 &vColor );
 	void AddParallel( bool bDoRender, const SSphere &_bound, const CVec3 &vDir, const CVec3 &vColor );
-	void AddPoint( bool bDoRender, const CVec3 &vCenter, float fRadius, const CVec3 &_vColor );
+	void AddPoint( bool bDoRender, const CVec3 &vCenter, float fRadius, const CVec3 &_vColor, bool bCastShadow );
 	void TraceDynamicLMPointLight( SDynamicAmbientInfo *pRes, const CVec3 &vTarget, float fTargetR, 
 		const CVec3 &vCenter, float fRadius, const CVec3 &vColor, const CVec3 &vSemiNormal, IGScene *pVis ) const;
 	CPtr<IGScene> pVis;
@@ -91,11 +92,14 @@ public:
 	{
 		CVec3 vColor, vCenter;
 		float fRadius;
+		bool bCastShadow;
 		
 		SPointLight() {}
-		SPointLight( const CVec3 _vColor, const CVec3 &_vCenter, float _fR )
-			: vColor(_vColor), vCenter(_vCenter), fRadius(_fR) {}
+		SPointLight( const CVec3 _vColor, const CVec3 &_vCenter, float _fR, bool _bCastShadow )
+			: vColor(_vColor), vCenter(_vCenter), fRadius(_fR), bCastShadow(_bCastShadow) {}
 	};
+	// v1.2 0x532f50 writes count * 32 raw bytes, with the shadow flag at +28.
+	static_assert( sizeof(SPointLight) == 32, "Retail point-light save layout" );
 	ZDATA
 	vector<SParallelLight> parallel;
 	vector<SSemiPointLight> semiPoints;

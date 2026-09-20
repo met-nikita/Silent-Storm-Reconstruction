@@ -488,7 +488,9 @@ bool CInterface::ProcessEvent( const NInput::SEvent &eEvent )
 	{
 		// retail @0x71C0CB: locked console still consumes the toggle event
 		if ( bEnableConsole )
-			pConsole->SetConsoleState( !pConsole->GetStyle( NUI::STYLE_VISIBLE ) );
+			// v1.2 0x71c654..0x71c67b toggles visibility directly. The older
+			// sliding path leaves a hidden console above the screen in saves.
+			pConsole->ShowWindow( pConsole->GetStyle( STYLE_VISIBLE ) ? SWTYPE_HIDE : SWTYPE_SHOW );
 		return true;
 	}
 	if ( pConsole->ProcessEvent( eEvent ) )

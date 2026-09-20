@@ -1104,9 +1104,20 @@ void CPointLight::Render( CTransformStack *pTS, CTransformStack *pClipTS, NGfx::
 void CPointLight::GetRadianceInfo( SRadianceInfo *pRes, ERenderPath renderPath )
 {
 	pRes->bIsRendered = IsPointLightSupported( renderPath ) && !bLightmapOnly && bStencilShadows;
-	pRes->vColor = vColor;
+	// v1.2 0x550ad0: normalize radiance and fold its strength into the radius.
+	float fStrength = Max( vColor.x, Max( vColor.y, vColor.z ) );
+	if ( fStrength > 0 )
+	{
+		pRes->vColor = vColor * ( 1 / fStrength );
+		pRes->fRadius = vRadius.x * sqrt( fStrength );
+	}
+	else
+	{
+		pRes->vColor = vColor;
+		pRes->fRadius = vRadius.x;
+	}
 	pRes->vCenter = CVec3( ptCenter.x, ptCenter.y, ptCenter.z );
-	pRes->fRadius = vRadius.x;
+	pRes->bCastShadow = bCastShadow;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CDynamicPointLight
