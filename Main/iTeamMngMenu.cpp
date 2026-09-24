@@ -758,9 +758,7 @@ bool CUnitMedalsPanelItem::ProcessMessage( const SEvent &sEvent )
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CUnitMedalsPanel -- the recruit menu's "medals" tab: the merc's earned medals as a scroll list.
-// Retail ctor @0x245040 / ProcessMessage @0x2496e0 / Generate @0x246ab0. NOTE: the row source
-// CMedalsGainer::GetGainedMedals is still the documented dev STUB (empty until NDb::CSide::medals
-// lands) -- the tab lights up and shows the retail "no awards" empty list until then.
+// Retail ctor @0x245040 / ProcessMessage @0x2496e0 / Generate @0x246ab0.
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CUnitMedalsPanel: public CWindow
 {

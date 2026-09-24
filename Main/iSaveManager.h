@@ -12,9 +12,9 @@ class CFileStream;
 namespace NMainLoop
 {
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// Retail v1.x save magic (the Jan03 0x818B9F21 bumped byte-by-byte, +0x01010101). Retail also
-// still accepts the old v1.0 value on read (dual check in CICLoad::Exec / GetSlotScreenShot),
-// but this fork targets retail v1.x saves only, so only the v1.x magic is accepted/written.
+// Retail v1.x save magic (the Jan03 0x818B9F21 bumped byte-by-byte, +0x01010101). Retail still
+// accepts the old v1.0 value on every read path (CICLoad::Exec and GetSlotScreenShot); writes use
+// the current v1.x value.
 const int N_SAVE_MAGIC_NUMBER = 0x828CA022;
 // The old v1.0 magic. retail CICLoad::Exec @0x1f5fd0 does a DUAL check (nMagic != 0x818B9F21 &&
 // nMagic != 0x828CA022 -> throw) and then parses BOTH identically -- the format is the same, only

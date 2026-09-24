@@ -1,5 +1,6 @@
 #include "StdAfx.h"
 #include "iMain.h"
+#include "GView.h"
 #include "G2DView.h"
 #include "RPGGlobal.h"
 #include "Sound.h"
@@ -28,48 +29,28 @@ namespace NGame
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CGlobalMap
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-class CGlobalMap: public IGlobalMap
+class CGlobalMap: public CMissionBase
 {
 	OBJECT_NOCOPY_METHODS(CGlobalMap);
 private:
+	// Retail owns the game-menu bind on CMissionBase. Keep this one non-serialized stand-in until
+	// the common mission pump is moved there, as CChapterMap currently does.
 	NInput::CBind bindClose, bindMenu, bindJournal, bindBaseZone;
 	NGlobal::CCmd cmdSetDifficulty;
-	ZDATA
-	EMode eMode;
-	CPtr<NRPG::CGlobalGame> pGame;
+	ZDATA_(CMissionBase)
+	bool bShowMode;
 	//// global
 	CDBPtr<NDb::CGlobalMap> pGlobalMap;
 	CDGPtr<CPtrFuncBase<CGlobalInfo> > pGlobalInfo;
 	//// interface
-	CObj<NUI::ICursor> pCursor;
-	CObj<NUI::CInterface> pInterface;
 	CObj<NUI::CGlobalMapUI> pGlobalMapUI;
-	//// sound
-	CObj<NSound::ISoundScene> pSoundScene;
-	// retail NGame::CGlobalMap::operator& @0x1e4180: retail's CGlobalMap DERIVES from CMissionBase,
-	// so the wire is { 1 = the CMissionBase base chunk, 2 = bShowMode (1-byte bool), 3 = pGlobalMap,
-	// 4 = pGlobalInfo, 5 = pGlobalMapUI }. This fork keeps CGlobalMap a standalone IGlobalMap (the
-	// shared game/interface/cursor/sound members are flat here, not a CMissionBase base), so -- same
-	// as CChapterMap (iChapterMap.cpp) -- we emit the tag-1 base chunk through SBaseChunk, mapping our
-	// four shared members onto retail CMissionBase's own tags (pGlobalGame=2, pSoundScene=4,
-	// pCursor=15, pInterface=16 -- the CMissionBase table @0x19f3f0). Retail's 1-byte bShowMode is
-	// mapped onto the dev EMode enum (MODE_SHOW <-> true) so the WIRE stays 1 byte.
-	struct SBaseChunk
-	{
-		CPtr<NRPG::CGlobalGame> *pGame;
-		CObj<NSound::ISoundScene> *pSoundScene;
-		CObj<NUI::ICursor> *pCursor;
-		CObj<NUI::CInterface> *pInterface;
-		int operator&( CStructureSaver &f ) { f.Add(2,pGame); f.Add(4,pSoundScene); f.Add(15,pCursor); f.Add(16,pInterface); return 0; }
-	};
+	// Retail NGame::CGlobalMap::operator& @0x1e4180: tag 1 is the COMPLETE 34-tag
+	// CMissionBase chunk. The former four-member SBaseChunk silently discarded the other 30 tags
+	// whenever a campaign was saved on the global map.
 	ZEND int operator&( CStructureSaver &f )
 	{
-		SBaseChunk sBase = { &pGame, &pSoundScene, &pCursor, &pInterface };
-		f.Add(1,&sBase);				// retail CMissionBase base chunk
-		bool bShowMode = ( eMode == MODE_SHOW );
-		f.Add(2,&bShowMode);			// retail tag 2: 1-byte bShowMode (PDB bool@312)
-		if ( f.IsReading() )
-			eMode = bShowMode ? MODE_SHOW : MODE_NORMAL;
+		f.Add(1,(CMissionBase*)this);
+		f.Add(2,&bShowMode);
 		f.Add(3,&pGlobalMap);
 		f.Add(4,&pGlobalInfo);
 		f.Add(5,&pGlobalMapUI);
@@ -82,16 +63,9 @@ protected:
 public:
 	CGlobalMap();
 
-	void Initialize( NRPG::CGlobalGame* pGame, EMode eMode = MODE_NORMAL );
+	void Initialize( NRPG::CGlobalGame* pGame, bool bShowMode = false );
 
-	EMode GetMode() const;
-
-	NUI::ICursor* GetCursor() const;
-	NUI::CInterface* GetInterface() const;
-
-	NRPG::CGlobalGame* GetGlobalGame() const;
-	NRPG::CGlobalPlayer* GetGlobalPlayer() const;
-	NSound::ISoundScene* GetSoundScene() const;
+	bool IsGlobalMapShowMode() const;
 	NDb::CGlobalMap* GetGlobalMap() const;
 	CPtrFuncBase<CGlobalInfo>* GetGlobalInfo() const;
 
@@ -104,17 +78,18 @@ static void CommandSetDifficulty( const string &szID, const vector<wstring> &par
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CGlobalMap::CGlobalMap():
 	bindClose( "cancel" ), bindMenu( "gamemenu" ), bindJournal( "clues" ), bindBaseZone( "basezone" ),
-	cmdSetDifficulty( "difficulty", CommandSetDifficulty, this )
+	cmdSetDifficulty( "difficulty", CommandSetDifficulty, this ), bShowMode( false )
 {
+	bRenderWorld = false;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CGlobalMap::Initialize( NRPG::CGlobalGame *_pGame, EMode _eMode )
+void CGlobalMap::Initialize( NRPG::CGlobalGame *_pGame, bool _bShowMode )
 {
-	eMode = _eMode;
-	pGame = _pGame;
+	bShowMode = _bShowMode;
+	pGlobalGame = _pGame;
 
-	pGlobalMap = NDb::GetGlobalMap( pGame->nGlobalMapID );
-	pGlobalInfo = shareGlobalInfo.Get( pGame->nGlobalMapID );
+	pGlobalMap = NDb::GetGlobalMap( pGlobalGame->nGlobalMapID );
+	pGlobalInfo = shareGlobalInfo.Get( pGlobalGame->nGlobalMapID );
 
 #ifdef _MAPEDIT
 	pCursor = NUI::ICursor::CreateEditorCursor();
@@ -131,35 +106,9 @@ void CGlobalMap::Initialize( NRPG::CGlobalGame *_pGame, EMode _eMode )
 	pGlobalMapUI->ShowWindow( NUI::SWTYPE_SHOW );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-IGlobalMap::EMode CGlobalMap::GetMode() const
+bool CGlobalMap::IsGlobalMapShowMode() const
 {
-	return eMode;
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-NUI::ICursor* CGlobalMap::GetCursor() const
-{
-	return pCursor;
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-NUI::CInterface* CGlobalMap::GetInterface() const
-{
-	return pInterface;
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-NRPG::CGlobalGame* CGlobalMap::GetGlobalGame() const
-{
-	return pGame;
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-NRPG::CGlobalPlayer* CGlobalMap::GetGlobalPlayer() const
-{
-	ASSERT( pGame->players.size() == 1 );
-	return pGame->players.front();
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-NSound::ISoundScene* CGlobalMap::GetSoundScene() const
-{
-	return pSoundScene;
+	return bShowMode;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 NDb::CGlobalMap* CGlobalMap::GetGlobalMap() const
@@ -183,7 +132,7 @@ bool CGlobalMap::ProcessEvent( const NInput::SEvent &sEvent )
 	// Retail routes CMissionBase's gamemenu bind before cursor/UI events.
 	if ( bindMenu.ProcessEvent( sEvent ) )
 	{
-		NMainLoop::Command( new CICInGameMenu( pGame->players.front(), false, true ) );
+		NMainLoop::Command( new CICInGameMenu( pGlobalGame->players.front(), false, bCanSave ) );
 		return true;
 	}
 
@@ -192,7 +141,7 @@ bool CGlobalMap::ProcessEvent( const NInput::SEvent &sEvent )
 	if ( pInterface->ProcessEvent( sEvent ) )
 		return true;
 
-	if ( ( eMode == MODE_SHOW ) && bindClose.ProcessEvent( sEvent ) )
+	if ( bShowMode && bindClose.ProcessEvent( sEvent ) )
 	{
 		NMainLoop::Command( new NMainLoop::CICExitModal() ); 
 		return true;
@@ -200,16 +149,16 @@ bool CGlobalMap::ProcessEvent( const NInput::SEvent &sEvent )
 
 	if ( bindJournal.ProcessEvent( sEvent ) )
 	{
-		NMainLoop::Command( new CICClues( pGame ) ); 
+		NMainLoop::Command( new CICClues( pGlobalGame ) );
 		return true;
 	}
 
 	if ( bindBaseZone.ProcessEvent( sEvent ) )
 	{
 		vector<string> templParams;
-		CPtr<NScenario::CScenarioZone> pZone = pGame->pScenarioTracker->GetZoneByDBZone( pGlobalMap->pBaseZone );
+		CPtr<NScenario::CScenarioZone> pZone = pGlobalGame->pScenarioTracker->GetZoneByDBZone( pGlobalMap->pBaseZone );
 		if ( IsValid( pZone ) )
-			NMainLoop::Command( new NGame::CICBeginMission( pZone, -1, templParams, pGame ) );
+			NMainLoop::Command( new NGame::CICBeginMission( pZone, -1, templParams, pGlobalGame ) );
 	}
 
 	return false;
@@ -320,7 +269,7 @@ void CICShowGlobal::Exec()
 	}
 
 	CGlobalMap *pRes = new CGlobalMap();
-	pRes->Initialize( pGame, IGlobalMap::MODE_SHOW );
+	pRes->Initialize( pGame, true );
 	PushInterface( pRes );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -332,7 +281,7 @@ static void CommandSetDifficulty( const string &szID, const vector<wstring> &par
 	CObjectBase *pObject = (CObjectBase *)pContext;
 	CDynamicCast<CGlobalMap> pMap(pObject);
 	if (pMap)
-		pMap->GetGlobalGame()->ChangeDifficulty( wcstol( paramsSet[ 0 ].c_str(), 0, 10 ) );
+		pMap->GetRPGGame()->ChangeDifficulty( wcstol( paramsSet[ 0 ].c_str(), 0, 10 ) );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 } // NAMESPACE

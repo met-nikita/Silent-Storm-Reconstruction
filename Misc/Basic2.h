@@ -197,7 +197,7 @@ struct SPtrTest
 struct SPtrHash
 {
 	template <class T,class T1> 
-		inline int operator()( const CPtrBase<T,T1> &a ) const { return (int)a.GetBarePtr(); }
+		inline size_t operator()( const CPtrBase<T,T1> &a ) const { return reinterpret_cast<size_t>(a.GetBarePtr()); }
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // walks container of pointers and erases references on invalid entries

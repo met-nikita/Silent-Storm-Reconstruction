@@ -18,9 +18,8 @@
 //   CAINearEnemyPlaceSource::Prepare@0x0048ece0   CAIToPlacePlaceSource::Prepare @0x0048f0e0
 //   CAIOnePlacePlaceSource::Prepare @0x004901f0
 //
-// NOTE: this header is the reverse-engineered CONTRACT (WIP for the substrate port). It is NOT yet in
-// Main.vcxproj; the .cpp method bodies (Prepare implementations, AddAllPoses, IsPosDangerousForAllies)
-// are reconstructed in the build-settle phase. See reconstruction/integration-plan.md.
+// NOTE: this header is the reverse-engineered release contract. The implementation is in the live
+// build; the place preparation and pose enumeration bodies are reconstructed in aiActionPlaceSource.cpp.
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 #include "aiActionBase.h"  // SPlaceWithAP (complete), CAIAction, SActionInfo
 #include "aiPosition.h"    // SPathPlace, SUnitPosition, IPathNetwork, SPosition
@@ -182,7 +181,8 @@ public:
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // Factories (return IAIActionPlaceSource*). Signatures verified from the decompiled factory bodies.
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-IAIActionPlaceSource* CreateAttackPlaceSource( IAIUnit *pUnit, CUnitArea *pArea );          // @0x0048e310
+IAIActionPlaceSource* CreateAttackPlaceSource( IAIUnit *pUnit, int nMaxAP, bool bCheckDangerousForAllies );
+IAIActionPlaceSource* CreateAttackPlaceSource( IAIUnit *pUnit, CUnitArea *pArea );
 IAIActionPlaceSource* CreateCurrentPlaceSource( IAIUnit *pUnit );                           // @0x0048e380
 IAIActionPlaceSource* CreateNearEnemyPlaceSource( IAIUnit *pUnit );                         // @0x0048e3c0
 IAIActionPlaceSource* CreateToPlacePlaceSource( IAIUnit *pUnit, const SPathPlace &pos, int nMaxAP ); // @0x0048e400

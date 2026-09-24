@@ -5,6 +5,7 @@
 #endif // _MSC_VER > 1000
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 #include "GDecalInfo.h"
+#include <cstdint>
 
 namespace NGScene
 {
@@ -22,7 +23,8 @@ struct SDecalTargetPart
 };
 struct SDecalTargetPartHash
 {
-	int operator()( const SDecalTargetPart &p ) const { return (int)p.pUser.GetPtr() ^ p.nUserID;}
+	std::size_t operator()( const SDecalTargetPart &p ) const
+	{ return reinterpret_cast<std::uintptr_t>( p.pUser.GetPtr() ) ^ static_cast<std::size_t>( p.nUserID ); }
 };
 struct SSrcPosInfo
 {
@@ -38,7 +40,12 @@ struct SSrcPosInfo
 };
 struct SSrcPosInfoHash
 {
-	int operator()( const SSrcPosInfo &p ) const { return (int)p.pUser.GetPtr() ^ p.nUserID ^ (int)p.pSource.GetPtr(); }
+	std::size_t operator()( const SSrcPosInfo &p ) const
+	{
+		return reinterpret_cast<std::uintptr_t>( p.pUser.GetPtr() ) ^
+			static_cast<std::size_t>( p.nUserID ) ^
+			reinterpret_cast<std::uintptr_t>( p.pSource.GetPtr() );
+	}
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CNonePart;

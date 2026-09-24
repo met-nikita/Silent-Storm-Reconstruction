@@ -882,7 +882,10 @@ void CUnitServer::OnTBSEvent( ETBSEvent event )
 			// move down the SAFE way via CancelAction -> CExecMove::Cancel(), which only MARKS the exec
 			// FAILED (no free); CheckCmdExecState then drops pExec on a later Segment tick. Same on-grid end
 			// state, no re-entrant free.
-			if ( CDynamicCast<IExecMove>( pExec ) && CanFight() && IsAddedToVisitor() )
+			// A mount can finish inside the move executor just as combat interrupts movement.
+			// Its animation is already attached to the cannon; snapping it to the grid
+			// would leave the model standing beside the weapon while the unit stays mounted.
+			if ( !animator.GetCannon() && CDynamicCast<IExecMove>( pExec ) && CanFight() && IsAddedToVisitor() )
 				animator.PlaceUnit( GetPosition() );
 			CancelAction();
 			// TURN-STALL FIX (dev-bugs s6 retest#5, bug B): retail @0x3c2a90 RELEASES the move executor

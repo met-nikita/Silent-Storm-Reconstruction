@@ -3,10 +3,11 @@
 #if _MSC_VER > 1000
 #pragma once
 #endif // _MSC_VER > 1000
+#include <cstddef>
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 struct SDefaultPtrHash
 {
-	int operator()( const void *pData ) const { return (int)pData; }
+	std::size_t operator()( const void *pData ) const { return reinterpret_cast<std::size_t>(pData); }
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // factory is using RTTI

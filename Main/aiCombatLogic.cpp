@@ -16,19 +16,14 @@
 //
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // Release CAICombatLogic substrate - engine + concrete-logic bodies (structural port). Reconstructed from
-// reconstruction/exports/{engine.c, defence.c, decisions.c}. WIP - NOT yet in Main.vcxproj.
+// reconstruction/exports/{engine.c, defence.c, decisions.c}. The complete combat-logic engine and
+// concrete decision ladders are part of the live build.
 //
-// FAITHFUL: DoAction, GenerateCommand, AddPlaceSource, the ctors' place-source/action wiring (defence.c),
-// the engine flow (DoJob pipeline: Prepare sources -> run chooser -> MakeDecision -> finish).
-// DEEP CONTENT (deferred to build-settle, sign-lists in decisions.c): each MakeDecision's exact CRule/CSign
-// thresholds. The MakeDecisions below build the real CDecision<CAIAction*> over the right actions and pick
-// the best; the per-rule sign sets are the tactical tuning to transcribe from decisions.c.
+// DoAction, GenerateCommand, AddPlaceSource, the ctor action wiring, the complete DoJob pipeline and
+// the concrete CDecision/CRule/CSign ladders are all active below.
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 namespace NAI
 {
-// helper: the unit-area an attacker searches (release derives it from the unit's mission). Build-settle.
-static CUnitArea* GetUnitArea( IAIUnit *pUnit );
-////////////////////////////////////////////////////////////////////////////////////////////////////
 // CAICombatLogic engine
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CAICombatLogic::CAICombatLogic( IAIUnit *pUnit, IAIChoosePlaceJob *_pChoosePlace ):
@@ -305,15 +300,16 @@ bool CAICombatLogic::HasSameAP()             // @0x00432730
 	return IsValid( pUS ) && pUS->GetAP() == nUnitLastAP;  // match StopThinking's snapshot source (was pU->GetAP)
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-static CUnitArea* GetUnitArea( IAIUnit * ) { return 0; /* build-settle: derive from unit mission */ }
-////////////////////////////////////////////////////////////////////////////////////////////////////
 // CAIAttackLogic - full repertoire (3 place sources + 19 actions). ctor @0x00420f30
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CAIAttackLogic::CAIAttackLogic( IAIUnit *pUnit ):
 	CAICombatLogic( pUnit, CreateAIChoosePlaceForAttackJob( 0, 0 ) )
 {
 	IAIUnit *u = GetUnit();
-	attackPlaceSource  = AddPlaceSource( CreateAttackPlaceSource( u, GetUnitArea( u ) ) );
+	// Retail RussianGold ctor @0x00420ce0 loads edx=0x0e and pushes true before calling the
+	// (IAIUnit*,int,bool) overload. Ordinary attack logic is deliberately NOT area-gated; the
+	// CUnitArea overload belongs to guard logic, whose post/reaction area is already prepared.
+	attackPlaceSource  = AddPlaceSource( CreateAttackPlaceSource( u, 14, true ) );
 	currentPlaceSource = AddPlaceSource( CreateCurrentPlaceSource( u ) );
 	enemyPlaceSource   = AddPlaceSource( CreateNearEnemyPlaceSource( u ) );
 	pShoot            = AddAction( new CAIShootAction( u ),        attackPlaceSource );

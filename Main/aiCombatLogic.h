@@ -20,8 +20,8 @@
 // concrete logics (Attack/Defence/Guard/Retreat/AfterCombat) differ only in their ctor repertoire +
 // MakeDecision rules.
 //
-// WIP - NOT yet in Main.vcxproj; the engine method bodies + the per-logic MakeDecisions land in the
-// phase-5 / build-settle work. Decompiles: reconstruction/exports/{defence.c, decisions.c}.
+// The engine, concrete action repertoires and decision ladders are compiled into the live build.
+// Reconstruction notes: reconstruction/exports/{defence.c, decisions.c}.
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 #include "aiLogic.h"          // IAILogic, CAILogic
 #include "aiJob.h"            // CAIJob

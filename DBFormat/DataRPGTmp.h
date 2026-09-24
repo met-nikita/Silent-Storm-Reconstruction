@@ -37,8 +37,8 @@ public:
 	virtual void Import()
 	{
 		// retail Import @0x412c10: the shared ImportItem inner body, then the DifficultyID tail
-		// column. (CRPGClip4Pers::Import @0x42eff0 does NOT import DifficultyID -- clips get theirs
-		// from the chunk stream only.)
+		// column. CRPGClip4Pers has a separate importer but consumes the same column in the
+		// reconstructed columnar load path.
 		ImportItem(this);
 		NDatabase::ImportField( "DifficultyID", &pDifficulty );
 	}

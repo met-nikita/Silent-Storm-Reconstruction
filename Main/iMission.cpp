@@ -2373,6 +2373,16 @@ void CMission::ExecWorldCommands()
 				pActivePlayer->GetCamera()->FreezeCamera( bLock );
 			pScene->SetCutFloorLock( bLock );
 		}
+		// retail CMissionBase::ExecWorldCommand @0x5a15e4: CameraSetClipping(near, far) queues a
+		// CUICmdSetCameraClipDistance; dispatch it to the currently selected camera. This used to fall
+		// through the command chain and disappear, so campaign camera scripts could never change their
+		// near/far planes even though the Lua binding and the command's save-load class were present.
+		else if ( CDynamicCast<NWorld::CUICmdSetCameraClipDistance>( pCmd ) )
+		{
+			NWorld::CUICmdSetCameraClipDistance *pClip =
+				CDynamicCast<NWorld::CUICmdSetCameraClipDistance>( pCmd );
+			GetCamera()->SetClipDistance( pClip->fMinDistance, pClip->fMaxDistance );
+		}
 		// release CMissionBase::ExecWorldCommand @0x1a30c0: a camera-locator command (CUICmdUnitCamera
 		// auto-focus) goes to the dedicated pExecLocator slot, NOT the general pCmdExec -- so it never stalls
 		// the UI-command drain and is preempted by priority (MustReplaceCameraExecutor: higher wins; equal
@@ -2389,7 +2399,7 @@ void CMission::ExecWorldCommands()
 		}
 		else if ( ExecWorldSoundCommand( pCmd ) )
 		{
-		}
+			}
 		// LUA convergence PART B: PlayEffect spawns a particle effect at the command's position and parks the
 		// live handle (retail CMissionBase::ExecWorldCommand @0x1a30c0: GetEffect + MakeTransform + render).
 		// Mirrors CMission::ShowWeatherEffect; StopEffect later releases pHandle to remove it.
@@ -2451,7 +2461,7 @@ void CMission::ExecWorldCommands()
 		// LUA convergence PART B: BeginZone(zoneName) begins the named scenario zone
 		// (retail CMissionBase::ExecWorldCommand @0x1a30c0: GetZoneByName -> CICBeginMission).
 		else if ( ExecWorldBeginZoneCommand( pCmd ) )
-		{
+				{
 		}
 		// LUA convergence PART B: FadeOut(BeginFade) spawns the fade desktop window; FadeIn(EndFade) tells the
 		// running fade to fade back out (retail CMission::ExecWorldCommand @0x1fd8c0 BeginFade/EndFade arms).
@@ -3380,6 +3390,7 @@ void CICBeginMission::Exec()
 	{
 		pGlobalGame->HealOnLeaveZone();
 		pGlobalGame->UpdateScenarioOnLeaveZone();
+		pGlobalGame->UpdateMedalsOnLeaveZone();
 	}
 
 	// Retail 1.1 0x60bb3d / 1.2 0x60c28d: scenario-zone parameters

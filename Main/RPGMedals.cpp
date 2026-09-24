@@ -1,6 +1,7 @@
 #include "StdAfx.h"
 #include "RPGMedals.h"
 #include "RPGUnit.h"
+#include "RPGGlobal.h"
 #include "..\MiscDll\LogStream.h"   // CLogStream / csSystem / EConsoleColor (CC_RED=1, CC_GREEN=2)
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 namespace NRPG
@@ -25,6 +26,111 @@ CMedalsGainer::CMedalsGainer( NDb::CRPGPers *_pPers, bool _bDisabled ):
 		info.fPoints = 0;
 		info.nProbability = 0;
 		info.pMedal = pSide->medals[i];
+	}
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// Retail @0x6a6530. The inclusive comparison is intentional: probability 0 can win only when the
+// generator returns 0, matching the shipped executable.
+void CMedalsGainer::ThrowCheck( int nMedal )
+{
+	SMedalInfo &info = medalInfos[nMedal];
+	SRand rand;
+	csSystem << CC_GREEN << "Medal probability: " << info.nProbability << endl;
+	if ( rand.Get( 100 ) <= info.nProbability )
+	{
+		info.bWillBeGiven = true;
+		csSystem << CC_GREEN << "Medal check succeeded" << endl;
+	}
+	else
+		csSystem << CC_RED << "Medal check failed" << endl;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// Retail @0x6a6600. Progress is retained after each threshold, so one event performs at most one
+// probability check for a medal; this is observable with large lock/trap difficulty awards.
+void CMedalsGainer::AddMedalPoints( CGlobalGame *pGame, EMedalPointCases eCase, float fAmount )
+{
+	if ( bDisabled || !IsValid( pGame ) || !IsValid( pPers ) || !IsValid( pPers->pSide ) )
+		return;
+
+	const float fMedalPoints = GetMedalPoints( eCase, fAmount );
+	for ( int n = 0; n < medalInfos.size(); ++n )
+	{
+		SMedalInfo &info = medalInfos[n];
+		if ( !info.bIsCollectingPoints || info.bIsGained || info.bWillBeGiven || !IsValid( info.pMedal ) )
+			continue;
+		NDb::CMedal *pMedal = info.pMedal;
+		if ( pMedal->bIsRussianOnly && !pGame->IsActiveZoneRussian() )
+			continue;
+
+		info.fPoints += fMedalPoints;
+		if ( info.nProbability == 0 )
+		{
+			if ( info.fPoints >= pMedal->nPointsToStart )
+			{
+				info.fPoints -= pMedal->nPointsToStart;
+				info.nProbability = pMedal->nStartingProbability;
+				ThrowCheck( n );
+			}
+		}
+		else if ( info.fPoints >= pMedal->nPointsToAddProbability )
+		{
+			info.fPoints -= pMedal->nPointsToAddProbability;
+			info.nProbability += pMedal->nAddToProbability;
+			ThrowCheck( n );
+		}
+	}
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// Retail @0x6a6810. A newly awarded medal unlocks every medal that directly follows it in the
+// side's award chain. The just-found bit survives save/load until the presentation code consumes it.
+void CMedalsGainer::GainMedalsAfterMissionEnd()
+{
+	if ( bDisabled || !IsValid( pPers ) || !IsValid( pPers->pSide ) )
+		return;
+
+	for ( int n = 0; n < medalInfos.size(); ++n )
+	{
+		SMedalInfo &awarded = medalInfos[n];
+		if ( !awarded.bWillBeGiven || !IsValid( awarded.pMedal ) )
+			continue;
+
+		awarded.bWillBeGiven = false;
+		awarded.bIsGained = true;
+		awarded.bJustFound = true;
+		for ( int next = 0; next < medalInfos.size(); ++next )
+			if ( IsValid( medalInfos[next].pMedal ) &&
+				medalInfos[next].pMedal->pPrecedingMedal == awarded.pMedal )
+				medalInfos[next].bIsCollectingPoints = true;
+	}
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// Retail @0x6a6a70: output uses the side's ordered medal vector, not the cached pointer in SMedalInfo.
+void CMedalsGainer::GetGainedMedals( vector<CDBPtr<NDb::CMedal> > *pOut )
+{
+	if ( !pOut || !IsValid( pPers ) || !IsValid( pPers->pSide ) )
+		return;
+	const vector< CPtr<NDb::CMedal> > &medals = pPers->pSide->medals;
+	pOut->reserve( medalInfos.size() );
+	for ( int n = 0; n < medalInfos.size() && n < medals.size(); ++n )
+		if ( medalInfos[n].bIsGained )
+			pOut->push_back( CDBPtr<NDb::CMedal>( medals[n].GetPtr() ) );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// Retail @0x6a6b80: querying notifications consumes only bJustFound, never the gained state.
+void CMedalsGainer::GetJustFoundMedals( vector<CDBPtr<NDb::CMedal> > *pOut )
+{
+	if ( !pOut || !IsValid( pPers ) || !IsValid( pPers->pSide ) )
+		return;
+	const vector< CPtr<NDb::CMedal> > &medals = pPers->pSide->medals;
+	pOut->reserve( medalInfos.size() );
+	for ( int n = 0; n < medalInfos.size() && n < medals.size(); ++n )
+	{
+		SMedalInfo &info = medalInfos[n];
+		if ( info.bIsGained && info.bJustFound )
+		{
+			info.bJustFound = false;
+			pOut->push_back( CDBPtr<NDb::CMedal>( medals[n].GetPtr() ) );
+		}
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////

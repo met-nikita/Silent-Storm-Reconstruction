@@ -11,7 +11,7 @@ namespace NGScene
 }
 namespace NGame
 {
-	class IGlobalMap;
+	class IMission;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 namespace NUI
@@ -26,7 +26,7 @@ class CGlobalMapUI: public CWindow
 	OBJECT_NOCOPY_METHODS(CGlobalMapUI);
 private:
 	ZDATA_(CWindow)
-	CPtr<NGame::IGlobalMap> pGlobal;
+	CPtr<NGame::IMission> pGlobal;
 	////
 	SCursorInfo sCursor;
 	////
@@ -44,7 +44,7 @@ protected:
 
 public:
 	CGlobalMapUI() {}
-	CGlobalMapUI( const SWindowInfo &sInfo, NGame::IGlobalMap *pGlobal );
+	CGlobalMapUI( const SWindowInfo &sInfo, NGame::IMission *pGlobal );
 
 	bool ProcessMessage( const SEvent &sEvent );
 	void Update( const STime &sTime, NGScene::I2DGameView *pView );

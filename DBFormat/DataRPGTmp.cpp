@@ -19,6 +19,9 @@ void CRPGClip4Pers::Import()
 {
 	ImportItem(this);
 	NDatabase::ImportField( "RPGAmmoID", &pAmmo );
+	// The v1 columnar table carries this gate explicitly. Without importing it, clip
+	// assignments bypass the same difficulty filtering used by every other ...4Pers row.
+	NDatabase::ImportField( "DifficultyID", &pDifficulty );
 }
 /*void CRPGGrenade4Pers::Import()
 {

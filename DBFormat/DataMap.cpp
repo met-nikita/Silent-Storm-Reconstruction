@@ -68,6 +68,7 @@ void UnpackVariantFlags( const string &str, vector<SVariantFlags> *pFlags )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CGlobalMap::Import()
 {
+	NDatabase::ImportField( "ScriptID", &pScript );
 	NDatabase::ImportField( "Scenario", &pScenario );
 	NDatabase::ImportField( "Background", &pBackground );
 	NDatabase::ImportField( "BaseZoneID", &pBaseZone );

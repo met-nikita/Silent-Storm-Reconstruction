@@ -63,11 +63,12 @@ class CGlobalMap: public CDBRecord
 	OBJECT_BASIC_METHODS(CGlobalMap);
 public:
 	ZDATA_(CDBRecord)
+	CPtr<CScript> pScript;                  // retail +0x10, column ScriptID, save tag 2
 	CPtr<CUITexture> pBackground;
 	CPtr<CDBScenario> pScenario;
 	CPtr<CDBScenarioZone> pBaseZone;
 	CPtr<CDBScenarioZone> pStartZone;            // release pStartZone (GlobalMaps.StartZoneID): the faction intro-mission zone
-	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CDBRecord*)this); f.Add(2,&pBackground); f.Add(3,&pScenario); f.Add(4,&pBaseZone); f.Add(5,&pStartZone); return 0; }
+	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CDBRecord*)this); f.Add(2,&pScript); f.Add(3,&pBackground); f.Add(4,&pScenario); f.Add(5,&pBaseZone); f.Add(6,&pStartZone); return 0; }
 	virtual void Import();
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////

@@ -27,31 +27,6 @@ namespace NSound
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 namespace NGame
 {
-////////////////////////////////////////////////////////////////////////////////////////////////////
-// IGlobalMap
-////////////////////////////////////////////////////////////////////////////////////////////////////
-class IGlobalMap: public NMainLoop::IInterfaceBase
-{
-public:
-	enum EMode
-	{
-		MODE_SHOW,
-		MODE_NORMAL
-	};
-
-public:
-	virtual EMode GetMode() const = 0;
-
-	virtual NUI::ICursor* GetCursor() const = 0;
-	virtual NUI::CInterface* GetInterface() const = 0;
-
-	virtual NRPG::CGlobalGame* GetGlobalGame() const = 0;
-	virtual NRPG::CGlobalPlayer* GetGlobalPlayer() const = 0;
-	virtual NSound::ISoundScene* GetSoundScene() const = 0;
-	virtual NDb::CGlobalMap* GetGlobalMap() const = 0;
-	virtual CPtrFuncBase<CGlobalInfo>* GetGlobalInfo() const = 0;
-};
-////////////////////////////////////////////////////////////////////////////////////////////////////
 class CICBeginGame: public NMainLoop::CInterfaceCommand
 {
 	OBJECT_BASIC_METHODS(CICBeginGame);

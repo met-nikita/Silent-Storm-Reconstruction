@@ -1520,6 +1520,10 @@ void CGun::Import()
 {
 	NDatabase::ImportField( "ObjectID", &pObject );
 	NDatabase::ImportField( "RPGWeaponID", &pWeapon );
+	NDatabase::ImportField( "MinClearDistance", &fMinClearDist );
+	NDatabase::ImportField( "AttackOriginX", &ptCannonAttackOrig.x );
+	NDatabase::ImportField( "AttackOriginY", &ptCannonAttackOrig.y );
+	NDatabase::ImportField( "AttackOriginZ", &ptCannonAttackOrig.z );
 	ASSERT( IsValid( pObject ) );
 	if ( IsValid( pObject ) )
 		pObject->pGun = this;

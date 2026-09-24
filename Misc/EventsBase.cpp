@@ -14,35 +14,33 @@ static struct SExecutionTracker
 } tracker;
 //
 typedef vector<IEventRegister*> CCallInfoHash;
-static unordered_map< int, CCallInfoHash > *pEventHandlers = 0;
+typedef unordered_map< const type_info *, CCallInfoHash > CEventHandlers;
+static CEventHandlers *pEventHandlers = 0;
 static int nEventHandlersCount = 0;
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-inline unordered_map< int, CCallInfoHash > &GetEventHandlers()
+inline CEventHandlers &GetEventHandlers()
 {
 	if ( pEventHandlers == 0 )
-		pEventHandlers = new unordered_map< int, CCallInfoHash >();
+		pEventHandlers = new CEventHandlers();
 	return *pEventHandlers;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void ThrowEventInner( const type_info &eventID, const void *pStuff )
 {
-	int nEventID = (int)&eventID;
-	CCallInfoHash &handlers = GetEventHandlers()[ nEventID ];
+	CCallInfoHash &handlers = GetEventHandlers()[ &eventID ];
 	for ( CCallInfoHash::iterator i = handlers.begin(); i != handlers.end(); ++i )
 		(*i)->Call( pStuff );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void RegisterEventHandler( IEventRegister *pReg, const type_info &eventID )
 {
-	int nEventID = (int)&eventID;
-	GetEventHandlers()[ nEventID ].push_back( pReg );
+	GetEventHandlers()[ &eventID ].push_back( pReg );
 	++nEventHandlersCount;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void UnregisterEventHandler( IEventRegister *pReg, const type_info &eventID )
 {
-	int nEventID = (int)&eventID;
-	vector<IEventRegister*> &handlers = GetEventHandlers()[ nEventID ];
+	vector<IEventRegister*> &handlers = GetEventHandlers()[ &eventID ];
 	vector<IEventRegister*>::iterator i = find( handlers.begin(), handlers.end(), pReg );
 	if ( i != handlers.end() )
 	{

@@ -13,6 +13,8 @@
 #include "iGlobalMap.h"
 #include "iChapterMap.h"
 #include "iShowClue.h"
+#include "iShowMedal.h"
+#include "RPGUnit.h"
 #include "ChapterInfo.h"
 #include "iLogPanel.h"			// NUI::CLogPanel + STREAM_GAME (the chapter map's tag-19 log panel)
 #include "iChapterMapUI.h"
@@ -1013,6 +1015,22 @@ void CChapterMapUI::Draw( const STime &sTime, NGScene::I2DGameView *pView )
 
 			NMainLoop::Command( new NGame::CICShowClue( pChapter->GetRPGGame(), pChapter->GetRPGGame()->players.front(), (*iTemp) ) );
 			(*iTemp)->SetJustFound( false );
+			if ( !pChapter->GetRPGGame()->players.empty() )
+				pChapter->GetRPGGame()->players.front()->AddMedalPointsForClue( pChapter->GetRPGGame() );
+		}
+
+		// Retail continues the same second-frame drain with every newly awarded medal of every roster
+		// merc. GetJustFoundMedals consumes the notification bit, so each popup is queued exactly once.
+		for ( vector< CObj<NRPG::CGlobalPlayer> >::iterator p = pChapter->GetRPGGame()->players.begin();
+			p != pChapter->GetRPGGame()->players.end(); ++p )
+		{
+			for ( vector< CObj<NRPG::CUnit> >::iterator u = (*p)->mercs.begin(); u != (*p)->mercs.end(); ++u )
+			{
+				vector< CDBPtr<NDb::CMedal> > medals;
+				(*u)->GetJustFoundMedals( &medals );
+				for ( int n = 0; n < medals.size(); ++n )
+					NMainLoop::Command( new NGame::CICShowMedal( (*p)->pSide, (*u)->GetName(), medals[n] ) );
+			}
 		}
 	}
 

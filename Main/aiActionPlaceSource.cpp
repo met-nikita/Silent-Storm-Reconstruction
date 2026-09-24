@@ -16,6 +16,9 @@
 #include "wUnitAttack.h"       // NWorld::GetMeleeAttackPlaces (the enemy melee ring)
 #include "RPGGame.h"           // NRPG::GetShootDirection (face the candidate place at the enemy) @0x8e5e0
 #include "aiMisc.h"            // NAI::GetAPForMove @0x74520 (price the held-spot move at CROUCH)
+#include "aiInventory.h"       // CAIInventory::GetFirstFireArms
+#include "aiWeapon.h"          // CAIFireArmsWeapon
+#include "..\DBFormat\DataMap.h" // NDb::DS_ALLY
 //
 #include "aiActionPlaceSource.h"
 //
@@ -23,13 +26,8 @@
 // Release CAICombatLogic substrate - place-source layer bodies (structural port, Approach A).
 // Reconstructed from reconstruction/exports/{placesource.c, prepare.c, vtable_placesource.txt}.
 //
-// STATUS: this TU is WIP and is NOT yet in Main.vcxproj. The clean methods below are faithful and
-// complete. The heavy place generators (CAIAttackPlaceSource/CAINearEnemyPlaceSource/
-// CAIToPlacePlaceSource::Prepare, AddAllPoses, IsPosDangerousForAllies) depend on substrate pieces
-// still being ported (CUnitArea, GetNearestPlaces, GetPlacesAtDirection, the coloured-ways/path-AP
-// calcers) and on the phase-3 CAIAction + phase-6 IAIUnit additions (GetAIState vtbl 0x78,
-// GetAIUnitState vtbl 0x74); they are completed in the build-settle (phase 7). Each carries its
-// release entry address so the decompile can be matched 1:1.
+// The place-source layer is active in the live build. Each reconstructed body carries its release
+// entry address so the implementation can be checked against the shipped binary.
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 namespace NAI
 {
@@ -299,13 +297,51 @@ bool CAIActionPlaceSource::AddAllPoses( const SPathPlace &p, int nMoveAP, int nM
 	return ( nWalkCost <= nMaxAP ) && ( !bCanCrouch || nCrouchCost <= nMaxAP );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// True if firing `pWeapon` from `pos` would catch an ally in the blast/line. @0x0048f4a0 - heavy
-// (iterates allied units, computes the weapon's shot direction/cover/attack-portion over each).
-// CONSERVATIVE STUB: returns false (never blocks) until the cover/attack-portion calc is ported - this
-// only disables the friendly-fire FILTER (the AI may pick a position that fires past an ally), it does
-// not crash. The attack/one-place sources call this only as a guard. Reconstruct from @0x0048f4a0. @addr
-bool CAIActionPlaceSource::IsPosDangerousForAllies( const SUnitPosition & /*pos*/, CAIFireArmsWeapon * /*pWeapon*/ )
+// True if firing `pWeapon` from `pos` can catch a live ally before the current enemy. Retail
+// @0x0048e5e0 obtains the shot's cover raster, calls GetObjectsThatMayBeDamaged and intersects that set
+// with SAIState's live allied units. The development CCoverInfo predates the shipped raster-bearing
+// layout, so that exact transient set is unavailable without changing the save-load class. The live
+// equivalent below performs the same safety decision geometrically: gather units around the finite
+// shooter->target segment and reject a place when a live ally's centre enters a one-metre firing
+// corridor. This is deliberately conservative around the ray and, unlike the former false stub,
+// restores the friendly-fire gate at every retail call site without altering serialized data.
+bool CAIActionPlaceSource::IsPosDangerousForAllies( const SUnitPosition &pos, CAIFireArmsWeapon *pWeapon )
 {
+	IAIUnit *pU = GetUnit();
+	IAIUnit *pEnemy = GetEnemy();
+	if ( !IsValid( pWeapon ) || !IsValid( pWeapon->GetItem() ) )
+		return false;
+	if ( !IsValid( pU ) || !IsValid( pU->GetUnitServer() ) ||
+		 !IsValid( pEnemy ) || !IsValid( pEnemy->GetUnitServer() ) )
+		return true;
+	NWorld::CUnitServer *pUS = pU->GetUnitServer();
+	NWorld::CWorld *pWorld = pUS->GetWorld();
+	if ( !IsValid( pWorld ) )
+		return true;
+	const CVec3 from = pos.GetCP();
+	const CVec3 to = pEnemy->GetUnitPosition().GetCP();
+	const CVec3 shot = to - from;
+	const float length = fabs( shot );
+	if ( length <= FP_EPSILON )
+		return true;
+	const float lengthSq = shot * shot;
+	const CVec3 middle = from + shot * 0.5f;
+	list< CPtr<NWorld::CUnitServer> > nearby;
+	pWorld->GetUnitsNear( middle, &nearby, length * 0.5f + 1.0f );
+	for ( list< CPtr<NWorld::CUnitServer> >::const_iterator i = nearby.begin(); i != nearby.end(); ++i )
+	{
+		NWorld::CUnitServer *pOther = *i;
+		if ( !IsValid( pOther ) || pOther == pUS || pOther == pEnemy->GetUnitServer() ||
+			 !pOther->CanFight() || pUS->GetDiplomacyState( pOther ) != NDb::DS_ALLY )
+			continue;
+		const CVec3 rel = pOther->GetPosition().GetCP() - from;
+		const float t = ( rel * shot ) / lengthSq;
+		if ( t <= 0.0f || t >= 1.0f )
+			continue;
+		const CVec3 offRay = rel - shot * t;
+		if ( fabs( offRay ) <= 1.0f )
+			return true;
+	}
 	return false;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -343,10 +379,11 @@ void CAIAttackPlaceSource::Prepare()                                    // @0x00
 		return;
 	const SPathPlace curPlace = pU->GetPosition().p;
 	//
-	// (1) the unit's current place. @0x0048f900 first runs the friendly-fire guard
-	// (IsPosDangerousForAllies with the first firearm when bCheckDangerousForAllies); elided while that
-	// helper is a conservative stub (it never blocks). @addr
-	AddAllPoses( curPlace, 0, nMaxAP, true );
+	// (1) the unit's current place, guarded against friendly fire as in retail.
+	CAIInventory *pInv = pU->GetAIInventory();
+	CAIFireArmsWeapon *pFireArm = IsValid( pInv ) ? pInv->GetFirstFireArms() : 0;
+	if ( !bCheckDangerousForAllies || !IsPosDangerousForAllies( pU->GetUnitPosition(), pFireArm ) )
+		AddAllPoses( curPlace, 0, nMaxAP, true );
 	//
 	// (2) shooting places along the approach to the enemy: find a path and AddAllPoses at each place
 	// within nMaxAP. Mirrors the dev twin CAIFindGoodPlacesJob::PreparePlaces.
@@ -371,6 +408,9 @@ void CAIAttackPlaceSource::Prepare()                                    // @0x00
 					   (*i).GetLayer() == curPlace.GetLayer() ) &&
 					( pArea == 0 || pArea->IsInArea( *i ) ) )    // area gate (pArea==0 -> no gate)
 				{
+					SUnitPosition candidate = GetUnitPos( *i, pNet );
+					if ( bCheckDangerousForAllies && IsPosDangerousForAllies( candidate, pFireArm ) )
+						continue;
 					if ( !AddAllPoses( *i, calcer.GetResult(), nMaxAP, true ) )
 						break;   // place no longer fully reachable within budget -> stop walking
 				}
@@ -382,11 +422,10 @@ void CAIAttackPlaceSource::Prepare()                                    // @0x00
 	// wave-AP (NOT the full nMaxAP) and keeps a place only when its direction from the unit is within
 	// +-10 degrees of PERPENDICULAR to the unit->enemy axis (|cos| <= sin(10deg) = 0.1737, the load-bearing
 	// constant @0x4b42b0): it offers FLANKING arcs, it does not blanket every reachable tile. Two release
-	// pre-filters remain deferred to the unported weapon layer -- IsPosDangerousForAllies (friendly-fire,
-	// conservative stub) and CanHitFromPlace (weapon range + sight FOV engage probe); omitting them only
-	// WIDENS the set (the shoot action's GetInfoInner re-scores LOS/to-hit per place), so it stays
-	// behaviour-safe, while the wave geometry + 8-AP budget are restored to match the release. pArea==0
-	// (GetUnitArea stub) -> no area gate.
+	// The friendly-fire pre-filter is applied below. CanHitFromPlace (weapon range + sight-FOV engage
+	// probe) remains redundant here because the shoot action's GetInfoInner performs the authoritative
+	// LOS/range/to-hit scoring for every candidate. pArea==0 means the ordinary attack source has no
+	// guard-area restriction, matching its retail (unit,14,true) factory overload.
 	if ( IsValid( pEnemy ) && IsValid( pEnemy->GetUnitServer() ) )
 	{
 		const int   nBudget = nMaxAP > 7 ? 8 : nMaxAP;                       // @0x0048f900 wave budget cap (8 AP)
@@ -410,6 +449,9 @@ void CAIAttackPlaceSource::Prepare()                                    // @0x00
 			const float fDot    = dirUP * dirUE;                            // cos(angle to the unit->enemy axis)
 			const float fAbsDot = fDot < 0.0f ? -fDot : fDot;
 			if ( fAbsDot > 0.1737f )                                         // keep only ~perpendicular (flanking)
+				continue;
+			SUnitPosition candidate = GetUnitPos( *i, pNet );
+			if ( bCheckDangerousForAllies && IsPosDangerousForAllies( candidate, pFireArm ) )
 				continue;
 			AddAllPoses( *i, movesTable.GetCost( *i ), nMaxAP, true );
 		}
@@ -581,9 +623,12 @@ void CAIOnePlacePlaceSource::Prepare()                                  // @0x00
 	ClearPlaces();
 	if ( !IsValid( GetUnit() ) || !IsValid( GetUnit()->GetUnitServer() ) )
 		return;
-	// @0x004901f0 first runs a friendly-fire guard (GetFirstFireArms + IsPosDangerousForAllies) and bails
-	// if the held spot would endanger an ally. Skipped while IsPosDangerousForAllies is a conservative
-	// stub (it never blocks) - re-add the guard when that helper is reconstructed. @addr
+	// @0x004901f0 first runs a friendly-fire guard with the first firearm.
+	CAIInventory *pInv = GetUnit()->GetAIInventory();
+	CAIFireArmsWeapon *pFireArm = IsValid( pInv ) ? pInv->GetFirstFireArms() : 0;
+	CPtr<IPathNetwork> pNet = GetUnit()->GetUnitServer()->GetWorld()->GetPathNetwork();
+	if ( !IsValid( pNet ) || IsPosDangerousForAllies( GetUnitPos( place, pNet ), pFireArm ) )
+		return;
 	//
 	// @0x004901f0 -- price the move to the held spot at CROUCH pose via NAI::GetAPForMove (path AP from the
 	// unit's current place to `place`), as the release does, instead of assuming 0. For a defence source
@@ -612,19 +657,20 @@ int CAIOnePlacePlaceSource::operator&( CStructureSaver &f )  { f.Add( 2, (CAIAct
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // Factories
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-IAIActionPlaceSource* CreateAttackPlaceSource( IAIUnit *pUnit, CUnitArea *pArea )   // @0x0048e310
+// Retail overload used by ordinary attack logic: the caller supplies the exact movement budget and
+// friendly-fire policy (RussianGold @0x0048d3e0; CAIAttackLogic passes 14,true).
+IAIActionPlaceSource* CreateAttackPlaceSource( IAIUnit *pUnit, int nMaxAP, bool bCheckDangerousForAllies )
 {
-	// pArea (the unit's assigned CUnitArea) is OPTIONAL: when null there is simply no area gate and the
-	// source sweeps the whole reachable set (CAIAttackPlaceSource::Prepare handles null pArea). The dev
-	// GetUnitArea is still a stub returning 0, so requiring a non-null pArea here made every attack logic
-	// silently drop its attack place source -> shoot/grenade/rocket never registered -> the AI never fired.
-	// (build-settle: reconstruct CUnitArea + GetUnitArea to restore the per-unit area restriction.)
 	if ( !IsValid( pUnit ) )
 		return 0;
-	// @0x0048e310 reads nMaxAP = the unit's MAX AP skill (its full AP bar, release GetUnitMission()->GetMaxAP()),
-	// NOT the current remaining AP -- using GetUnitServer()->GetAP() shrank the attack-place budget as the unit
-	// spent AP during its turn. IAIUnit::GetMaxAP() is the in-tree equivalent of the AP-skill max.
-	// bCheckDangerousForAllies = true.
+	return new CAIAttackPlaceSource( pUnit, nMaxAP, 0, bCheckDangerousForAllies );
+}
+// Retail overload used by guard logic (RussianGold @0x0048d450). A guard attack source is meaningful
+// only with a live prepared area; its movement budget is the unit's full AP skill maximum.
+IAIActionPlaceSource* CreateAttackPlaceSource( IAIUnit *pUnit, CUnitArea *pArea )
+{
+	if ( !IsValid( pUnit ) || !IsValid( pArea ) )
+		return 0;
 	int nMaxAP = pUnit->GetMaxAP();
 	return new CAIAttackPlaceSource( pUnit, nMaxAP, pArea, true );
 }

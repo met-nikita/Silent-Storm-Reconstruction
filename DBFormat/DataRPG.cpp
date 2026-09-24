@@ -81,6 +81,7 @@ void CRPGItem::Import()
 	NDatabase::ImportField( "CameraPitch",	&sCamera.fPitch );
 	NDatabase::ImportField( "CameraRoll",	&sCamera.fRoll );
 	NDatabase::ImportField( "CameraDistance",	&sCamera.fDistance );
+	NDatabase::ImportField( "CameraFOV", &sCamera.fFOV );
 
 	SCameraParams &sSlotCamera = sCameras[CAMERA_SLOT];
 	NDatabase::ImportField( "SlotCameraAnchorX",	&sSlotCamera.vAnchor.x );
@@ -90,6 +91,7 @@ void CRPGItem::Import()
 	NDatabase::ImportField( "SlotCameraPitch",	&sSlotCamera.fPitch );
 	NDatabase::ImportField( "SlotCameraRoll",	&sSlotCamera.fRoll );
 	NDatabase::ImportField( "SlotCameraDistance",	&sSlotCamera.fDistance );
+	NDatabase::ImportField( "SlotCameraFOV", &sSlotCamera.fFOV );
 
 	SCameraParams &sReloadCamera = sCameras[CAMERA_RELOADBUTTON];
 	NDatabase::ImportField( "AmmoCameraAnchorX",	&sReloadCamera.vAnchor.x );
@@ -99,6 +101,7 @@ void CRPGItem::Import()
 	NDatabase::ImportField( "AmmoCameraPitch",	&sReloadCamera.fPitch );
 	NDatabase::ImportField( "AmmoCameraRoll",	&sReloadCamera.fRoll );
 	NDatabase::ImportField( "AmmoCameraDistance",	&sReloadCamera.fDistance );
+	NDatabase::ImportField( "AmmoCameraFOV", &sReloadCamera.fFOV );
 
 	NDatabase::ImportField( "PlacableID", &pPlaceObj );
 	if ( IsValid( pPlaceObj ) )
@@ -278,6 +281,10 @@ void CRPGWeaponType::Import()
 	NDatabase::ImportField( "BurstAISoundID", &pBurstAISound );
 	NDatabase::ImportField( "ID", &nWeaponTypeID );
 	NDatabase::ImportField( "NameID", &pName );
+	NDatabase::ImportField( "PrepareCost", &nPrepareCost );
+	NDatabase::ImportField( "HandlingEasyRange", &nHandlingEasyRange );
+	NDatabase::ImportField( "HandlingMediumRange", &nHandlingMediumRange );
+	NDatabase::ImportField( "MeleePenalty", &fMeleePenalty );
 
 	string szStoreType;
 	NDatabase::ImportField( "StoreType", &szStoreType );
@@ -452,7 +459,6 @@ void CRPGWeapon::Import()
 	NDatabase::ImportField( "RoF", &nRoF );
 	NDatabase::ImportField( "DamageMod", &nDamageMod );
 	NDatabase::ImportField( "WeaponTypeID", &pWeaponType );
-	NDatabase::ImportField( "AmmoTypeID", &pAmmo );
 	NDatabase::ImportField( "ItemID", &pItem );
 	NDatabase::ImportField( "MinRange", &nMinRange );
 	NDatabase::ImportField( "MaxRange", &nMaxRange );
@@ -463,7 +469,7 @@ void CRPGWeapon::Import()
 	NDatabase::ImportField( "SoundID", &pSound );
 	NDatabase::ImportField( "BurstSoundID", &pSoundBurst );
 	NDatabase::ImportField( "ReloadSoundID", &pSoundReload );
-	//NDatabase::ImportField( "BurstStartSoundID", &pSoundStartBurst );
+	NDatabase::ImportField( "BurstStartSoundID", &pSoundStartBurst );
 	NDatabase::ImportField( "BurstEndSoundID", &pSoundFinishBurst );
 	NDatabase::ImportField( "LongBurstSoundID", &pSoundCycleBurst );	
 	//
@@ -485,7 +491,6 @@ void CRPGWeapon::Import()
 	NDatabase::ImportField( "SnipeShot", &shootModes[SM_Snipe] );
 	// CRAP - must somehow else detemine it's a bazooka?
 	bBazookaLogic = 
-		//( pAmmo->pExplosiveBullet != 0 ); 
 		//( pAnimWeaponType->type == WT_RLAUNCHER );
 		( pWeaponType->nWeaponTypeID == 5 );
 	//
@@ -531,11 +536,17 @@ void CRPGUniform::Import()
 	fixedModels.resize( N_ITEM_PLACES );
 	for ( int i = 0; i < N_ITEM_PLACES; ++i )
 	{
-		string szTmp, szSubType;
+		string szTmp;
 		szTmp = "ST";
 		szTmp += pszUniformPlaces[i];
-		NDatabase::ImportField( szTmp.c_str(), &szSubType );
-		subTypes[i] = GetSubTypeByName( szSubType );
+		for ( int priority = 0; priority < 4; ++priority )
+		{
+			string szColumn = szTmp;
+			string szSubType;
+			szColumn += char( '0' + priority );
+			NDatabase::ImportField( szColumn.c_str(), &szSubType );
+			subTypes[i].priorities[priority] = GetSubTypeByName( szSubType );
+		}
 		szTmp = "Model";
 		szTmp += pszUniformPlaces[i];
 		NDatabase::ImportField( szTmp.c_str(), &fixedModels[i] );
@@ -657,6 +668,7 @@ void CRPGFirstAid::Import()
 	NDatabase::ImportField( "Power", &fPower );
 	NDatabase::ImportField( "TotalHealVP", &nTotalHealVP );
 	NDatabase::ImportField( "APToUse", &nAPToUse );
+	NDatabase::ImportField( "RequiredPerkID", &nRequiredPerkID );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CRPGMeleeWeapon
@@ -821,14 +833,18 @@ void CRPGPers::Import()
 	NDatabase::ImportField( "FaceGenCameraAnchorZ",	&sFaceGenCamera.vAnchor.z );
 	NDatabase::ImportField( "FaceGenCameraYaw",	&sFaceGenCamera.fYaw );
 	NDatabase::ImportField( "FaceGenCameraPitch",	&sFaceGenCamera.fPitch );
+	NDatabase::ImportField( "FaceGenCameraRoll", &sFaceGenCamera.fRoll );
 	NDatabase::ImportField( "FaceGenCameraDistance",	&sFaceGenCamera.fDistance );
+	NDatabase::ImportField( "FaceGenCameraFOV", &sFaceGenCamera.fFOV );
 	////
 	NDatabase::ImportField( "CameraAnchorX",	&sPortraitCamera.vAnchor.x );
 	NDatabase::ImportField( "CameraAnchorY",	&sPortraitCamera.vAnchor.y );
 	NDatabase::ImportField( "CameraAnchorZ",	&sPortraitCamera.vAnchor.z );
 	NDatabase::ImportField( "CameraYaw",	&sPortraitCamera.fYaw );
 	NDatabase::ImportField( "CameraPitch",	&sPortraitCamera.fPitch );
+	NDatabase::ImportField( "CameraRoll", &sPortraitCamera.fRoll );
 	NDatabase::ImportField( "CameraDistance",	&sPortraitCamera.fDistance );
+	NDatabase::ImportField( "CameraFOV", &sPortraitCamera.fFOV );
 	////
 	NDatabase::ImportField( "WearingPanzerkleinID", &pDefaultWearsPanzerklein );
 	// retail @0x429540 (+0x38): non-null = this pers IS a PK suit. IsEmptyPK @0x34eca0 reads it;
@@ -1108,6 +1124,10 @@ void CPanzerklein::Import()
   NDatabase::ImportField( "LeftHandItemID", &pLeftHandItem );
   NDatabase::ImportField( "StrengthForGrenades", &nGrenadeStrength );
   NDatabase::ImportField( "HasNoHead", &bHasNoHead );
+	NDatabase::ImportField( "CanHide", &bCanHide );
+	NDatabase::ImportField( "SingleSlot", &bSingleSlot );
+	NDatabase::ImportField( "EngineSoundID", &pEngineSound );
+	NDatabase::ImportField( "StepSoundID", &pStepSound );
 	char buf[ 32 ];
 	for ( int i = 1; i <= N_PK_SPECIAL_WEAPONS; ++i )
 	{
@@ -1187,7 +1207,9 @@ void CSide::Import()
 	// retail CSide::Import @0x42a240 tail order (oracle s2_dbimport.h:2891-2897): ESCMenuBackground,
 	// UICMInfoBackgroundID, UICluePaperBackgroundID, UIMedalPaperContainerID, UIBaseFlag,
 	// UIBaseFlagActive, HeroDialogPersID. medals is NOT imported here -- CMedal records install
-	// themselves (CMedal::Import @0x42a110); pKIAPaper is chunk-stream-only (no column) in retail too.
+	// themselves (CMedal::Import @0x42a110). The reconstructed v1 loader reads the release
+	// columnar game.db directly, so also consume its UIKIAPaperID column here; otherwise the
+	// tag-18 field never receives the KIA panel template.
   NDatabase::ImportField( "ESCMenuBackground", &pESCMenuBackground );
   NDatabase::ImportField( "UICMInfoBackgroundID", &pChapterMapInfoBackground );
   NDatabase::ImportField( "UICluePaperBackgroundID", &pCluePaperBackground );
@@ -1195,6 +1217,7 @@ void CSide::Import()
   NDatabase::ImportField( "UIBaseFlag", &pBaseFlag );
   NDatabase::ImportField( "UIBaseFlagActive", &pBaseFlagActive );
   NDatabase::ImportField( "HeroDialogPersID", &pDialogHero );
+  NDatabase::ImportField( "UIKIAPaperID", &pKIAPaper );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 }

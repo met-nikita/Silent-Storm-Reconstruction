@@ -7,6 +7,7 @@
 #include "..\DBFormat\DataMap.h"
 #include "..\DBFormat\DataRPG.h"
 #include "scScenarioTracker.h"
+#include "scFlowChartItems.h"
 #include "RPGDiplomacy.h"
 #include "..\DBFormat\DataDifficulty.h"
 #include "..\MiscDll\LogStream.h"
@@ -332,6 +333,32 @@ void CGlobalGame::UpdateScenarioOnLeaveZone()
 		for ( vector<CObj<CUnit> >::iterator i = pPlayer->mercs.begin(); i != pPlayer->mercs.end(); ++i )
 			pPlayer->deployData.unitsDeployData[ (*i).GetPtr() ].pCorpse = 0;
 	}
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// Release @0x2936a0: every roster merc receives the fixed clue-discovery medal event.
+void CGlobalPlayer::AddMedalPointsForClue( CGlobalGame *pGame )
+{
+	for ( vector< CObj<CUnit> >::iterator i = mercs.begin(); i != mercs.end(); ++i )
+		(*i)->AddMedalPoints( pGame, MPC_CLUE_GAINED, 0.0f );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// Release @0x2936f0. Camp/base transitions do not finalize pending medal rolls.
+void CGlobalGame::UpdateMedalsOnLeaveZone()
+{
+	if ( bWasCampOrBase )
+		return;
+	for ( vector< CObj<CGlobalPlayer> >::iterator p = players.begin(); p != players.end(); ++p )
+		for ( vector< CObj<CUnit> >::iterator u = (*p)->mercs.begin(); u != (*p)->mercs.end(); ++u )
+			(*u)->GainMedalsAfterMissionEnd();
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// Release @0x293b90. Authored scenario-zone descriptions start with R/r for Russian territory.
+bool CGlobalGame::IsActiveZoneRussian() const
+{
+	if ( !IsValid( pCurrentZone ) || !IsValid( pCurrentZone->GetDBZone() ) )
+		return false;
+	const string &description = pCurrentZone->GetDBZone()->sSmallDescription;
+	return !description.empty() && ( description[0] == 'R' || description[0] == 'r' );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // release @0x299a60: award fXP to every unit of every player (the per-merc loop the retail open-codes).

@@ -279,7 +279,8 @@ int CInventory::GetPlaceBySubType( NDb::EItemSubType subType ) const
 	NDb::CRPGUniform *pDBUniform = GetUniform();
 	for ( int i = 0; i < NDb::N_ITEM_PLACES; ++i )
 	{
-		if ( pDBUniform->subTypes[i] == subType )
+		// Retail GetPlaceBySubType compares the first (preferred) subtype only.
+		if ( pDBUniform->subTypes[i].priorities[0] == subType )
 			return i;
 	}
 	return -1;

@@ -29,11 +29,7 @@ class CMedalsPanelItem;   // SetSelected() argument + the medal-list row
 //   ctor( SWindowInfo, IMission* ) @0x1f9da0 ; SetSelected @0x1f9740 ; Generate @0x1fa680 ;
 //   Draw @0x1fa8e0 ; ProcessMessage @0x1f9ff0.
 //
-// DEFERRED SEAM: the awarded-medal source NRPG::CMedalsGainer::GetGainedMedals (and the per-unit
-// "current award" flash) require NDb::CSide::medals, a release-new DB column ABSENT from this tree
-// (see RPGUnit.h CMedalsGainer). Those two gainer accessors are landed as documented STUBS that return
-// an empty list / false, so the panel compiles and runs behaviour-neutral (no rows, no flash) until the
-// DB-schema convergence lands. The panel structure / dispatch / preview math are otherwise exact.
+// Award rows come from CMedalsGainer; the sibling perks button flashes for unspent perk points.
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CMedalsPanel: public CWindow
 {

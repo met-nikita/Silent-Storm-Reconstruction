@@ -10,6 +10,7 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <time.h>
+#include <cstdint>
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 namespace NMainLoop
 {
@@ -45,8 +46,8 @@ void CSaveManager::GetProfilesList( list<string> *pList ) const
 	string szProfilesDir( string( S_SAVE_TEMPLATE ) + "*.*" );
 
 	_finddata_t sFindData;
-	int nHandle = _findfirst( szProfilesDir.c_str(), &sFindData );
-	int nRet = nHandle;
+	std::intptr_t nHandle = _findfirst( szProfilesDir.c_str(), &sFindData );
+	int nRet = nHandle == -1 ? -1 : 0;
 	while ( nRet != -1 )
 	{
 		if ( sFindData.attrib & _A_SUBDIR )
@@ -55,7 +56,7 @@ void CSaveManager::GetProfilesList( list<string> *pList ) const
 		nRet = _findnext( nHandle, &sFindData );
 	}
 
-	_findclose( nHandle );
+	if ( nHandle != -1 ) _findclose( nHandle );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 string CSaveManager::GetActiveProfile() const
@@ -137,8 +138,8 @@ void CSaveManager::GetSlotsList( list<string> *pList ) const
 	string szSourceMask( szSource + "*.*" );
 
 	_finddata_t sFindData;
-	int nHandle = _findfirst( szSourceMask.c_str(), &sFindData );
-	int nRet = nHandle;
+	std::intptr_t nHandle = _findfirst( szSourceMask.c_str(), &sFindData );
+	int nRet = nHandle == -1 ? -1 : 0;
 	while ( nRet != -1 )
 	{
 		string szName( sFindData.name );
@@ -148,7 +149,7 @@ void CSaveManager::GetSlotsList( list<string> *pList ) const
 		nRet = _findnext( nHandle, &sFindData );
 	}
 
-	_findclose( nHandle );
+	if ( nHandle != -1 ) _findclose( nHandle );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CSaveManager::GetSlotTime( const string &szName, wstring *pTime )
@@ -205,7 +206,9 @@ void CSaveManager::GetSlotScreenShot( const string &szName, CArray2D<NGfx::SPixe
 		SSaveFileHeader sHeader;
 		sFile.Read( &sHeader, sizeof(SSaveFileHeader) );
 
-		if ( sHeader.nMagic != N_SAVE_MAGIC_NUMBER )
+		// Retail GetSlotScreenShot @0x232720 accepts the same two wire-compatible magics as
+		// CICLoad::Exec. Old autosaves therefore remain visible/selectable in the save menu.
+		if ( sHeader.nMagic != N_SAVE_MAGIC_NUMBER && sHeader.nMagic != N_SAVE_MAGIC_NUMBER_V0 )
 			throw L"Invalid save file";
 
 		pScreenShot->SetSizes( N_SAVE_SCREENSHOT_X, N_SAVE_SCREENSHOT_Y );
@@ -249,8 +252,8 @@ void RemoveDir( const string &szDir )
 	string szSourcePath( szDir + "*.*" );
 
 	_finddata_t sFindData;
-	int nHandle = _findfirst( szSourcePath.c_str(), &sFindData );
-	int nRet = nHandle;
+	std::intptr_t nHandle = _findfirst( szSourcePath.c_str(), &sFindData );
+	int nRet = nHandle == -1 ? -1 : 0;
 	while ( nRet != -1 )
 	{
 		string szName( sFindData.name );
@@ -268,7 +271,7 @@ void RemoveDir( const string &szDir )
 		nRet = _findnext( nHandle, &sFindData );
 	}
 
-	_findclose( nHandle );
+	if ( nHandle != -1 ) _findclose( nHandle );
 
 	if ( !RemoveDirectory( szDir.c_str() ) )
 		csSystem << "Can't delete directory " << szDir << endl;
@@ -279,8 +282,8 @@ void CopyFiles( const string &szSource, const string &szTarget, const string &sz
 	string szSourcePath( szSource + szMask );
 
 	_finddata_t sFindData;
-	int nHandle = _findfirst( szSourcePath.c_str(), &sFindData );
-	int nRet = nHandle;
+	std::intptr_t nHandle = _findfirst( szSourcePath.c_str(), &sFindData );
+	int nRet = nHandle == -1 ? -1 : 0;
 	while ( nRet != -1 )
 	{
 		string sSourceFile( szSource + sFindData.name );
@@ -290,7 +293,7 @@ void CopyFiles( const string &szSource, const string &szTarget, const string &sz
 		nRet = _findnext( nHandle, &sFindData );
 	}
 
-	_findclose( nHandle );
+	if ( nHandle != -1 ) _findclose( nHandle );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // Profile free-fns (release iSaveManager.obj).  The profile UI talks to these.  Dir ops delegate to

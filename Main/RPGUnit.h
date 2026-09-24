@@ -182,7 +182,7 @@ public:
 // CMedalsGainer -- per-unit medal bookkeeper (release-new CUnit base, RPGMedals.obj compiland).
 // Owns one SMedalInfo per medal the unit can earn. Serialized as a CUnit base subobject
 // (operator& tags 2/3/4). New units initialize it from their persona's side; the default
-// constructor is for loading. Medal-progress and award methods remain to be restored.
+// constructor is for loading.
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CMedalsGainer
 {
@@ -215,16 +215,13 @@ public:
 	CMedalsGainer(): bDisabled(false) {}
 	CMedalsGainer( NDb::CRPGPers *pPers, bool bDisabled );
 
-	// TODO: restore retail medal gathering / notification; CSide::medals is imported already.
-	void GetGainedMedals( vector<CDBPtr<NDb::CMedal> >* /*pOut*/ ) {}
-	bool HasNewMedalToShow() const { return false; }
-
-	// @0x2ac660 -- credit medal-progress points for one combat/utility event (EMedalPointCases).
-	// This is the DIRECT SINK the medal awards funnel into (disarm-trap MPC_DISARM_TRAP @0x3a84f0,
-	// CGlobalPlayer::AddMedalPointsForClue, AddMedalPointsForNoticedMines, and the rpgAttackSession
-	// tally, all call it as (CMedalsGainer*)(unit+0x38)->AddMedalPoints(game,case,amount)).
-	// TODO: restore the medalInfos loop, ThrowCheck and mission-end awards from disassembly.
-	void AddMedalPoints( CGlobalGame* /*pGame*/, EMedalPointCases /*eCase*/, float /*fAmount*/ ) {}
+private:
+	void ThrowCheck( int nMedal );
+public:
+	void GetGainedMedals( vector<CDBPtr<NDb::CMedal> > *pOut );
+	void GetJustFoundMedals( vector<CDBPtr<NDb::CMedal> > *pOut );
+	void AddMedalPoints( CGlobalGame *pGame, EMedalPointCases eCase, float fAmount );
+	void GainMedalsAfterMissionEnd();
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 //! CUnit holds a unit's stats/skills and the items it carries.

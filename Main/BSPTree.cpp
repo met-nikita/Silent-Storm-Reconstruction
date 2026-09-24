@@ -1153,7 +1153,7 @@ CBSPTree* CreateBSPTree( const vector<CVec3> &points, const vector<STriangle> &m
 	if ( bLogBSPConstruction )
 	{
 		char buf[128];
-		sprintf( buf, "Created BSP tree depth %d, nodes %d for nTris = %d, beveling nodes = %d \n",
+		sprintf( buf, "Created BSP tree depth %d, nodes %d for nTris = %zu, beveling nodes = %d \n",
 			pTree->CalcDepth(), pTree->CalcNodes(), mesh.size(), nBevelingPlanes );
 		OutputDebugString( buf );
 	}
@@ -1212,7 +1212,7 @@ CBSPTree *BSPChecker()
 	CPtr<CBSPTreeConstructor> pConstructor = new CBSPTreeConstructor( bspMesh );
 	CBSPTree *pTree = pConstructor->CreateBSPTree();
 	char buf[128];
-	sprintf( buf, "Created BSP tree depth %d, nodes %d for nPolygons = %d \n",
+	sprintf( buf, "Created BSP tree depth %d, nodes %d for nPolygons = %zu \n",
 	pTree->CalcDepth(), pTree->CalcNodes(), bspMesh.polygons.size() );
 	OutputDebugString( buf );
 	return pTree;

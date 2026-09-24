@@ -375,7 +375,10 @@ struct SRenderFragmentKey
 };
 struct SRenderFragmentHash
 {
-	int operator()( const SRenderFragmentKey &a ) const { return (int)a.pMat + (int)a.pLM; }
+	size_t operator()( const SRenderFragmentKey &a ) const
+	{
+		return reinterpret_cast<size_t>(a.pMat) ^ ( reinterpret_cast<size_t>(a.pLightmap) << 1 ) ^ ( reinterpret_cast<size_t>(a.pLM) << 2 );
+	}
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 enum EFragmentsSplit

@@ -397,7 +397,6 @@ public:
 	int nRoF;
 	int nDamageMod;
 	CPtr<CRPGWeaponType> pWeaponType;
-	CPtr<CRPGAmmo> pAmmo;
 	CPtr<CRPGItem> pItem;
 	CPtr<CSound> pSound, pSoundBurst, pSoundReload, pSoundStartBurst, pSoundFinishBurst, pSoundCycleBurst;
 	bool bScope; // ����������� ������
@@ -445,13 +444,20 @@ enum EItemPlace
 	WAIST_BELT_R1,
 	N_ITEM_PLACES
 };
+// Retail RussianGold/EnglishGold PDB: each visible uniform place stores four
+// subtype priorities (sizeof(SRPGSlot) == 0x10), not one subtype.  The renderer
+// tries the next priority when no item can fill the earlier one.
+struct SRPGSlot
+{
+	EItemSubType priorities[4];
+};
 class CRPGUniform: public CDBRecord
 {
 	OBJECT_BASIC_METHODS(CRPGUniform);
 public:
 	CPtr<CTRndModel> pCapModel;
 	CPtr<CTRndModel> pBackpackModel;
-	EItemSubType subTypes[N_ITEM_PLACES];
+	SRPGSlot subTypes[N_ITEM_PLACES];
 	vector< CPtr<CTRndModel> > fixedModels;
 
 	virtual void Import();
@@ -1042,7 +1048,7 @@ public:
 	CPtr<CUITexture> pBaseFlagActive;
 	CPtr<NDb::CDBDialogPers> pDialogHero;
 	CPtr<CUIContainer> pMedalPaperContainer;	// release-new CSide field (retail +0x60, save tag 14): the "medal paper" UI template loaded by NGame::CShowMedalInterface::Initialize (iShowMedal convergence). Additive -- fills the previously-skipped tag 14 slot, existing 2..17 numbering undisturbed.
-	CPtr<CUIContainer> pKIAPaper;	// release-new CSide field (retail +0x70, save tag 18): the per-side "killed in action" name-plate template the recruit menu loads into its CKIAPanel (CTeamMngUI::ProcessMessage @0x2498f0 reads side+0x70). Not imported by retail CSide::Import @0x42a240 -- populated from the game.db chunk stream (tag 18) only. Additive.
+	CPtr<CUIContainer> pKIAPaper;	// release-new CSide field (retail +0x70, save tag 18): the per-side "killed in action" name-plate template the recruit menu loads into its CKIAPanel (CTeamMngUI::ProcessMessage @0x2498f0 reads side+0x70). The reconstructed columnar loader binds it from UIKIAPaperID in CSide::Import. Additive.
 	vector<CPtr<CString> > defaultPersToolTipsSet;	// release-new CSide field (retail +0x78, save tag 0x14=20): the 6 per-preset (nationality x gender) class-description tooltips shown on the HeroMenu portraits. POPULATED FROM THE STEAM game.db BY Import() below (the v1 columnar DB binds by named column, NOT by operator& tags); the f.Add(20,..) tag is parity / savegame round-trip only.
 	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CDBRecord*)this); f.Add(2,&nGlobalMapID); f.Add(3,&nHeroSelectTemplate); f.Add(4,&pName); f.Add(5,&pNationality1); f.Add(6,&pNationality2); f.Add(7,&pNationality3); f.Add(8,&malePersesSet); f.Add(9,&femalePersesSet); f.Add(10,&defaultPersesSet); f.Add(11,&medals); f.Add(12,&pESCMenuBackground); f.Add(13,&pChapterMapInfoBackground); f.Add(14,&pMedalPaperContainer); f.Add(15,&pBaseFlag); f.Add(16,&pBaseFlagActive); f.Add(17,&pDialogHero); f.Add(18,&pKIAPaper); f.Add(19,&pCluePaperBackground); f.Add(20,&defaultPersToolTipsSet); return 0; }	// FULL retail CSide tag table (release @0x41dea0): 2..10 record scalars/rosters, 11=medals, 12=pESCMenuBackground, 13=pChapterMapInfoBackground, 14=pMedalPaperContainer, 15=pBaseFlag, 16=pBaseFlagActive, 17=pDialogHero, 18=pKIAPaper, 19=pCluePaperBackground, 20=defaultPersToolTipsSet (last chunk).
 	//

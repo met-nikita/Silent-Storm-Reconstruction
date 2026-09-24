@@ -28,6 +28,7 @@ enum EChapterMapMode
 class CUnit;
 class IInventoryItem;
 class CGlobalDiplomacy;
+class CGlobalGame;
 class CStore;   // per-player vendor stock model (RPGStore.h); the CObj member works over the fwd-decl via the saveload class registration
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 struct SStoreItem
@@ -123,6 +124,7 @@ public:
 	void FreeUnit( NRPG::CUnit *pCarrier );
 	//
 	void GetAliveUnits( vector< CPtr<NRPG::CUnit> > *pUnits );
+	void AddMedalPointsForClue( CGlobalGame *pGame );
 	float GetAverageLevel();
 	void Heal( EHeal eHeal, bool bNeedCarryOutCorpse, float fHealCoeff, float fSkillCoeff );
 	void Hire( CUnit *pUnit );
@@ -174,6 +176,8 @@ public:
 	void HealOnLeaveZone();
 	void HealOnRest();
 	void UpdateScenarioOnLeaveZone();
+	void UpdateMedalsOnLeaveZone();
+	bool IsActiveZoneRussian() const;
 	// release @0x299a60 (RPGGlobal.obj): award fXP to every unit of every player. Used by the ShowHint screen
 	// (NGame::CICShowHint::Exec) -- a shown hint grants its CUIHint+0x10 reward to the whole party.
 	void AddXPToAllUnits( float fXP );

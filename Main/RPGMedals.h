@@ -13,9 +13,7 @@
 // out-of-range default returns 0. Every recognised case also emits one coloured
 // console line to the global csSystem naming the event.
 //
-// Currently a leaf: its natural callers (CMedalsGainer::AddMedalPoints and the
-// rpgAttackSession subsystem) are deferred pending NDb::CSide::medals, so nothing
-// invokes this yet. Landed for release parity of the RPGMedals compiland surface.
+// CMedalsGainer consumes this mapping while accumulating per-unit award progress.
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 namespace NRPG
 {

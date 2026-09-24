@@ -7,6 +7,7 @@
 #include "DG.h"
 #include "GPixelFormat.h"
 #include "GRenderCore.h"
+#include <cstdint>
 
 namespace NGfx
 {
@@ -89,7 +90,7 @@ public:
 	virtual CTRect<int> GetLMRegion() const { return CTRect<int>(0,0,0,0); }
 	virtual int GetLMLOD() const { return 0; }
 	virtual bool Is2Sided() const { return false; }
-	virtual int GetSortValue() const { return 0; }
+	virtual std::uintptr_t GetSortValue() const { return 0; }
 	bool IsSolid() const { return bIsSolid; }
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////

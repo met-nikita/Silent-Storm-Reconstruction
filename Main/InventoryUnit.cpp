@@ -129,7 +129,8 @@ const char* GetBoneName( NDb::ESlot slot, NRPG::IUnitMissionInfo *pRPG, bool bUn
 		return GetBoneName( UIT_HAND, pItem );
 	for ( int i = 0; i < NDb::N_ITEM_PLACES; ++i )
 	{
-		if ( pDBUniform->subTypes[i] == pItem->GetDBItem()->subType )
+		// Retail GetBoneName uses the preferred subtype of each visual place.
+		if ( pDBUniform->subTypes[i].priorities[0] == pItem->GetDBItem()->subType )
 		{
 			EUnitItemType uit = (EUnitItemType)nItemPlaces2UnitItemTypes[i];
 			return GetBoneName( uit, pItem );
@@ -238,25 +239,41 @@ void GetItemsBindPlaces( vector<IRenderVisitor::SBoundMesh> *pRes, NRPG::IUnitMi
 		return;
 	// do not use any item twice
 	vector<char> itemsUsed( pInventory->GetItems().size(), 0 );
+	// Retail keeps one flag per visual place and makes four passes over the
+	// uniform's priority list.  A lower-priority subtype is considered only when
+	// no model/item filled that place in an earlier pass.
+	vector<char> placesUsed( NDb::N_ITEM_PLACES, 0 );
 	bool slotsUsed[ NDb::N_SLOTS + 1 ] = { false, false, false };
 
+	for ( int priority = 0; priority < 4; ++priority )
 	for ( int i = 0; i < NDb::N_ITEM_PLACES; ++i )
 	{
+		if ( placesUsed[i] )
+			continue;
 		EUnitItemType uit = (EUnitItemType)nItemPlaces2UnitItemTypes[i];
-		NDb::EItemSubType subType = pDBUniform->subTypes[i];
+		NDb::EItemSubType subType = pDBUniform->subTypes[i].priorities[priority];
 		ASSERT( subType != NDb::SUBTYPE_HEAVY );
 		if ( subType == NDb::SUBTYPE_NONE )
 		{
 			if ( pDBUniform->fixedModels[i] )
+			{
+				placesUsed[i] = 1;
 				AttachItem( pRes, &rnd, uit, pDBUniform->fixedModels[i], bIsPK );
+			}
 			continue;
 		}
 		if ( pActiveItem && pActiveItem->subType == subType )
 		{
 			if ( bUndrawWeapon )
+			{
+				placesUsed[i] = 1;
 				AttachItem( pRes, &rnd, uit, pActiveItem->GetItemModel( false, pDBUniform ), bIsPK );
+			}
 			else if ( subType == NDb::SUBTYPE_PISTOL || subType == NDb::SUBTYPE_KNIFE )
+			{
+				placesUsed[i] = 1;
 				AttachItem( pRes, &rnd, uit, pActiveItem->GetItemModel( true, pDBUniform ), bIsPK );
+			}
 			else
 			{
 				NDb::CRPGItem *pResultItem = 0;
@@ -287,6 +304,7 @@ void GetItemsBindPlaces( vector<IRenderVisitor::SBoundMesh> *pRes, NRPG::IUnitMi
 				{
 					if ( nResultIt >= 0 )
 						itemsUsed[ nResultIt ] = 1;
+					placesUsed[i] = 1;
 					AttachItem( pRes, &rnd, uit, pResultItem->GetItemModel( false, pDBUniform ), bIsPK );
 				}
 			}
@@ -303,6 +321,7 @@ void GetItemsBindPlaces( vector<IRenderVisitor::SBoundMesh> *pRes, NRPG::IUnitMi
 				if ( slotsUsed[ slotItems[subType] + 1 ] )
 					continue;
 				slotsUsed[ slotItems[subType] + 1 ] = true;
+				placesUsed[i] = 1;
 				AttachItem( pRes, &rnd, uit, pRPGItem->GetItemModel( false, pDBUniform ), bIsPK );
 			}
 			else
@@ -327,6 +346,7 @@ void GetItemsBindPlaces( vector<IRenderVisitor::SBoundMesh> *pRes, NRPG::IUnitMi
 				{
 					if ( nResultIt >= 0 )
 						itemsUsed[ nResultIt ] = 1;
+					placesUsed[i] = 1;
 					AttachItem( pRes, &rnd, uit, pResultItem->GetItemModel( false, pDBUniform ), bIsPK );
 				}
 			}

@@ -120,7 +120,7 @@ class CZoneGlobalSector: public CGlobalSector
 	OBJECT_BASIC_METHODS(CZoneGlobalSector)
 private:
 	ZDATA_(CGlobalSector)
-	CPtr<NGame::IGlobalMap> pGlobal;
+	CPtr<NGame::IMission> pGlobal;
 	////
 	bool bRecommended;
 	////
@@ -140,7 +140,7 @@ protected:
 
 public:
 	CZoneGlobalSector() {}
-	CZoneGlobalSector( const SWindowInfo &sInfo, NGame::IGlobalMap *pGlobal, const SGlobalSector &sSector, bool bRecommended );
+	CZoneGlobalSector( const SWindowInfo &sInfo, NGame::IMission *pGlobal, const SGlobalSector &sSector, bool bRecommended );
 
 	bool HitTest( int nX, int nY );
 
@@ -148,7 +148,7 @@ public:
 	void Update( const STime &sTime );
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CZoneGlobalSector::CZoneGlobalSector( const SWindowInfo &sInfo, NGame::IGlobalMap *_pGlobal, const SGlobalSector &sSector, bool _bRecommended ):
+CZoneGlobalSector::CZoneGlobalSector( const SWindowInfo &sInfo, NGame::IMission *_pGlobal, const SGlobalSector &sSector, bool _bRecommended ):
 	CGlobalSector( sInfo, sSector ), pGlobal( _pGlobal ), bRecommended( _bRecommended ), fCoeff( 0 ), sFlashTime( 0 ), sMorphTime( 0 )
 {
 }
@@ -198,7 +198,7 @@ void CZoneGlobalSector::Update( const STime &sTime )
 		fTargetCoeff = fTargetCoeff * 0.5f + 0.3f;
 	}
 
-	if ( pGlobal->GetGlobalGame()->bChapterMapSet && ( pGlobal->GetMode() == NGame::IGlobalMap::MODE_SHOW ) && ( GetSector().nTemplate == pGlobal->GetGlobalGame()->nChapterMapID ) )
+	if ( pGlobal->GetRPGGame()->bChapterMapSet && pGlobal->IsGlobalMapShowMode() && ( GetSector().nTemplate == pGlobal->GetRPGGame()->nChapterMapID ) )
 		fTargetCoeff = 1.0f;
 
 	fCoeff = CalcFlashCoeff( fCoeff, fTargetCoeff, sTime, sMorphTime );
@@ -207,8 +207,8 @@ void CZoneGlobalSector::Update( const STime &sTime )
 	pZoneNormal->SetColor( NGfx::SPixel8888( 0xFF, 0xFF, 0xFF, 0xFF * fCoeff ) );
 	pZoneDisabled->SetColor( NGfx::SPixel8888( 0xFF, 0xFF, 0xFF, 0xFF * fCoeff ) );
 
-	pZoneNormal->SetStyle( STYLE_VISIBLE, pGlobal->GetMode() == NGame::IGlobalMap::MODE_NORMAL );
-	pZoneDisabled->SetStyle( STYLE_VISIBLE, pGlobal->GetMode() == NGame::IGlobalMap::MODE_SHOW );
+	pZoneNormal->SetStyle( STYLE_VISIBLE, !pGlobal->IsGlobalMapShowMode() );
+	pZoneDisabled->SetStyle( STYLE_VISIBLE, pGlobal->IsGlobalMapShowMode() );
 
 	pTextNormal->SetStyle( STYLE_VISIBLE, !IsSelected() );
 	pTextHilighted->SetStyle( STYLE_VISIBLE, IsSelected() );
@@ -218,7 +218,7 @@ void CZoneGlobalSector::Update( const STime &sTime )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CGlobalMapUI
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CGlobalMapUI::CGlobalMapUI( const SWindowInfo &sInfo, NGame::IGlobalMap *_pGlobal ):
+CGlobalMapUI::CGlobalMapUI( const SWindowInfo &sInfo, NGame::IMission *_pGlobal ):
 	CWindow( sInfo ), pGlobal( _pGlobal )
 {
 	// retail CGlobalMapUI ctor @0x1e4b20: disasm @0x5e4bfb `mov ecx,1` -> NDb::GetUICursor(1) =
@@ -242,9 +242,10 @@ bool CGlobalMapUI::ProcessMessage( const SEvent &sEvent )
 	case EVENT_TEMPLATELOAD:
 		{
 			pReturn = new CFlashButton( sEvent.pLoader->GetControl( "cancel" ) );
-			pReturn->SetStyle( STYLE_VISIBLE, pGlobal->GetMode() == NGame::IGlobalMap::MODE_SHOW );
+			pReturn->SetStyle( STYLE_VISIBLE, pGlobal->IsGlobalMapShowMode() );
 
-			NDb::CSide *pSide = pGlobal->GetGlobalPlayer()->pSide;
+			ASSERT( pGlobal->GetRPGGame()->players.size() == 1 );
+			NDb::CSide *pSide = pGlobal->GetRPGGame()->players.front()->pSide;
 			CPtr<NDb::CUITexture> pBaseFlag, pBaseFlagActive;
 			if ( IsValid( pSide ) )
 			{
@@ -252,7 +253,7 @@ bool CGlobalMapUI::ProcessMessage( const SEvent &sEvent )
 				pBaseFlagActive = pSide->pBaseFlagActive;
 			}
 			pBaseZone = new CFlashButton( sEvent.pLoader->GetControl( "basezone" ), pBaseFlag, pBaseFlagActive );
-			pBaseZone->SetStyle( STYLE_VISIBLE, IsValid( pSide ) && ( pGlobal->GetMode() != NGame::IGlobalMap::MODE_SHOW ) );
+			pBaseZone->SetStyle( STYLE_VISIBLE, IsValid( pSide ) && !pGlobal->IsGlobalMapShowMode() );
 
 			break;
 		}
@@ -293,7 +294,7 @@ bool CGlobalMapUI::ProcessMessage( const SEvent &sEvent )
 	{
 	case EVENT_LBUTTONUP:
 		{
-			if ( ( pGlobal->GetMode() == NGame::IGlobalMap::MODE_NORMAL ) && pMapView->HitTest( sEvent.nX, sEvent.nY ) )
+			if ( !pGlobal->IsGlobalMapShowMode() && pMapView->HitTest( sEvent.nX, sEvent.nY ) )
 			{
 				for ( int nTemp = 0; nTemp < sectorsSet.size(); nTemp++ )
 				{
@@ -301,7 +302,7 @@ bool CGlobalMapUI::ProcessMessage( const SEvent &sEvent )
 					const SGlobalSector &sSector = pSector->GetSector();
 					if ( pSector->HitTest( sEvent.nX, sEvent.nY ) )
 					{
-						NMainLoop::Command( new NGame::CICBeginChapter( sSector.nTemplate, pGlobal->GetGlobalGame() ) );
+						NMainLoop::Command( new NGame::CICBeginChapter( sSector.nTemplate, pGlobal->GetRPGGame() ) );
 						break;
 					}
 				}
@@ -344,7 +345,7 @@ void CGlobalMapUI::GetGlobalSectorInfo( const SGlobalSector &sSector, bool *pbVi
 	if ( sSector.nTemplate == -1 )
 		return;
 
-	CPtr<NRPG::CGlobalGame> pGame = pGlobal->GetGlobalGame();
+	CPtr<NRPG::CGlobalGame> pGame = pGlobal->GetRPGGame();
 
 	*pbVisible = false;
 	list<CPtr<NScenario::CScenarioZone> > zonesList;

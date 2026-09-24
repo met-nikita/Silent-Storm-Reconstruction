@@ -20,8 +20,10 @@ namespace NDb
 {
 	enum EDiplomacyState;
 	class CChapterMap;		// IMission::GetChapterMap (retail mission vtbl+0x14c) -- see below
+	class CGlobalMap;		// IMission::GetGlobalMap (retail mission vtbl+0x154)
 }
 class CChapterInfo;			// IMission::GetChapterInfo (retail mission vtbl+0x150) -- see below
+class CGlobalInfo;			// IMission::GetGlobalInfo (retail mission vtbl+0x158)
 namespace NGScene
 {
 	class ILight;
@@ -460,6 +462,12 @@ public:
 	// (The CChapterMap ctor @0x1a6a60 vftable store `mov dword ptr [esi], 0x8b9adc` confirms the VA.)
 	virtual NDb::CChapterMap* GetChapterMap() const = 0;
 	virtual CPtrFuncBase<CChapterInfo>* GetChapterInfo() const = 0;
+	// Retail CGlobalMap uses the same common mission interface. The three following slots are
+	// +0x150/+0x154/+0x158 in the RussianGold CGlobalMap vtable (CChapterMap/base leave them as
+	// folded false/null stubs); CGlobalMap overrides all three.
+	virtual bool IsGlobalMapShowMode() const = 0;
+	virtual NDb::CGlobalMap* GetGlobalMap() const = 0;
+	virtual CPtrFuncBase<CGlobalInfo>* GetGlobalInfo() const = 0;
 
 	virtual void Step() = 0;
 	virtual bool ProcessEvent( const NInput::SEvent &sEvent ) = 0;
@@ -652,6 +660,9 @@ public:
 	// hold the same folded stub) -- a mission simply has no chapter.
 	virtual NDb::CChapterMap* GetChapterMap() const { return 0; }
 	virtual CPtrFuncBase<CChapterInfo>* GetChapterInfo() const { return 0; }
+	virtual bool IsGlobalMapShowMode() const { return false; }
+	virtual NDb::CGlobalMap* GetGlobalMap() const { return 0; }
+	virtual CPtrFuncBase<CGlobalInfo>* GetGlobalInfo() const { return 0; }
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // Interface commands

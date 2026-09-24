@@ -391,11 +391,11 @@ void CScenarioFlowChartBase::LoadItems()
 	//
 	//DEBUG{
 	char szStr[128];
-	sprintf( szStr, "[SCENARIO TRACKER] %d zones loaded\n", zones.size() );
+	sprintf( szStr, "[SCENARIO TRACKER] %zu zones loaded\n", zones.size() );
 	OutputDebugString( szStr );
-	sprintf( szStr, "[SCENARIO TRACKER] %d clues loaded\n", clues.size() );
+	sprintf( szStr, "[SCENARIO TRACKER] %zu clues loaded\n", clues.size() );
 	OutputDebugString( szStr );
-	sprintf( szStr, "[SCENARIO TRACKER] %d objectives loaded\n", objectives.size() );
+	sprintf( szStr, "[SCENARIO TRACKER] %zu objectives loaded\n", objectives.size() );
 	OutputDebugString( szStr );
 	//DEBUG}
 }

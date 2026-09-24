@@ -80,7 +80,7 @@ public:
 	const SGroupInfo& GetGroupInfo() const { return group.fullGroupInfo.groupInfo; }
 	const SFullGroupInfo& GetFullGroupInfo() const { return group.fullGroupInfo; }
 	virtual bool Is2Sided() const { return group.pMaterial->Is2Sided(); }
-	virtual int GetSortValue() const { return (int)group.pMaterial.GetPtr(); }
+	virtual std::uintptr_t GetSortValue() const { return reinterpret_cast<std::uintptr_t>( group.pMaterial.GetPtr() ); }
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CSimplePart : public CNonePart

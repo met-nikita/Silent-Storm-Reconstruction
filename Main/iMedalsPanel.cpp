@@ -4,7 +4,8 @@
 #include "G2DView.h"
 #include "Transform.h"				// MakeMatrix (camera + spin transforms)
 #include "wInterface.h"				// NGame::IUnitTracker, NWorld::CUnit::GetRPG
-#include "RPGUnit.h"				// NRPG::CUnit, NRPG::CMedalsGainer::GetGainedMedals / HasNewMedalToShow
+#include "RPGUnit.h"				// NRPG::CUnit, NRPG::CMedalsGainer::GetGainedMedals
+#include "rpgPerk.h"
 #include "RPGUnitInfo.h"			// NRPG::IUnitMissionInfo::GetRPGUnit
 #include "..\DBFormat\DataRPG.h"		// NDb::CRPGItem, SCameraParams (medal model + preview camera)
 #include "..\DBFormat\DataMisc.h"	// NDb::CMedal (pModel @+0x2c, pName @+0x28)
@@ -24,11 +25,6 @@
 // "camera from SCameraParams" idiom); CMedalsPanel mirrors CBiographyPanel (the tab-strip panel). All
 // layouts + save tags are verbatim from the matched Game.exe + PDB. Retail RVAs noted per function
 // (VA = RVA + 0x400000).
-//
-// DEFERRED SEAM (documented at each call site): the awarded-medal source and the per-unit award flag
-// both live on NRPG::CMedalsGainer behind the absent NDb::CSide::medals column. The two gainer methods
-// the panel needs (GetGainedMedals / HasNewMedalToShow) are landed in RPGUnit.h as behaviour-neutral
-// STUBS (empty list / false), so the panel builds GREEN and runs as the binary's "no awards" path.
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 namespace NUI
 {
@@ -290,16 +286,14 @@ void CMedalsPanel::SetSelected( CMedalsPanelItem *pItem )
 // CMedalsPanel::Generate @0x1fa680 -- rebuild the medal list for a unit: clear the rows, fetch the unit's
 // gained medals, build one CMedalsPanelItem per medal, and show the first live row's medal in the preview.
 //
-// DEFERRED SEAM: GetGainedMedals is a documented STUB (RPGUnit.h) that returns an empty list because the
-// NDb::CSide::medals source column is absent from this tree -- so the loop body and preview-Set are
-// presently never reached at runtime (no rows), but compile against the real engine types.
+// The row source is the retail CMedalsGainer state, ordered by the unit side's medal list.
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CMedalsPanel::Generate( NWorld::CUnit *pUnit )
 {
 	pMedals->RemoveAllItems();
 
 	vector<CDBPtr<NDb::CMedal> > gainedMedals;
-	pUnit->GetRPG()->GetRPGUnit()->GetGainedMedals( &gainedMedals );   // STUB -> empty (see RPGUnit.h)
+	pUnit->GetRPG()->GetRPGUnit()->GetGainedMedals( &gainedMedals );
 
 	CMedalsPanelItem *pSelected = 0;
 	for ( int nTemp = 0; nTemp < gainedMedals.size(); nTemp++ )
@@ -321,11 +315,7 @@ void CMedalsPanel::Generate( NWorld::CUnit *pUnit )
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CMedalsPanel::Draw @0x1fa8e0 -- when exactly one (different) unit is selected, re-generate the list and
-// hide the preview; then arm the perks-tab flash off the unit's "new medal" flag, and base-paint.
-//
-// DEFERRED SEAM: the per-unit "current award" flag (release CMedalsGainer +0x84) belongs to the same
-// deferred subsystem; HasNewMedalToShow is a documented STUB (RPGUnit.h) returning false, so the flash is
-// never armed -- the binary's "no current award" path.
+// hide the preview; then arm the perks-tab flash when the unit has unspent perk points, and base-paint.
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CMedalsPanel::Draw( const STime &sTime, NGScene::I2DGameView *pView )
 {
@@ -340,7 +330,10 @@ void CMedalsPanel::Draw( const STime &sTime, NGScene::I2DGameView *pView )
 	}
 
 	if ( IsValid( pUnit ) )
-		pPerks->SetShowFlash( pUnit->GetRPG()->GetRPGUnit()->HasNewMedalToShow() );   // STUB -> false
+	{
+		NRPG::CPerksTree *pTree = pUnit->GetRPG()->GetRPGUnit()->GetPerksTree();
+		pPerks->SetShowFlash( IsValid( pTree ) && pTree->GetPerkPoints() != 0 );
+	}
 
 	CWindow::Draw( sTime, pView );
 }

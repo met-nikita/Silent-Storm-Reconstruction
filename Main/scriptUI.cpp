@@ -9,10 +9,10 @@
 //  the real csScript log stream -- so NO hooks are needed (every seam the
 //  answer-key modelled with a pfn* is a real engine call here).
 //
-//  Registered global lua C-functions (the 7 pRegList entries, declared in
+//  Registered global lua C-functions (the 8 pRegList entries, declared in
 //  scriptUI.h, registered in ScriptFunctions.cpp):
 //    CreateWindow  GetWindow  windowGetProperty  windowSetProperty
-//    ButtonGetState  ButtonCreateState  GetCursorPos
+//    ButtonGetState  ButtonCreateState  GetCursorPos  GetUITime
 //
 //  Internal machinery reconstructed (the "absent infra" from the worklist):
 //    SRegProperty / GetRegPropMap   -- the registered-property table (17 props)
@@ -32,12 +32,12 @@
 //   * window userdata tag == retail's 8 (tagLuaWindow, a third RegisterNewTag).
 //   * `onmessage` needs the lua callinfo C-API (lua_tocallinfo/pushcallinfo),
 //     ABSENT in this lua build -> both onmessage thunks report "unsupported"
-//     (so CWindow's save format is untouched -- no eventsMap member added).
+//     (CWindow still carries the retail eventsMap/pScript save fields).
 //   * text property: retail SetText(GetDBString(s)); dev GetDBString takes an
 //     int id -> SetText(GetDBString(atoi(s))). image likewise GetUITexture(atoi).
-//   * CScript::pInterface is never assigned in dev (no lua-driven screen yet),
-//     so GetWindow/GetCursorPos root at null and no-op gracefully until a
-//     UI-script context wires it. CreateWindow (explicit parent) is fully live.
+//   * CMission wires CScript::pInterface to its HUD interface. GetWindow,
+//     GetCursorPos, GetUITime and CreateWindow are therefore live in missions;
+//     they still fail gracefully before a mission interface exists.
 // ============================================================================
 //
 #include "Gfx.h"
@@ -517,8 +517,8 @@ END_SCRIPT_COMMAND
 // NScript::luaGetUITime @0x2f49b0 -- push the interface's UI millisecond clock (CInterface::sLastTime,
 // retail @+0xb8, refreshed each Step). Pushed UNSIGNED-widened: retail's `if(n<0) n+=2^32` is the
 // int->unsigned fixup the compiler emits for (double)(unsigned long); reproduced by casting the DWORD
-// clock through unsigned long into the double PushNumber takes. Roots at the script interface, so it
-// no-ops to 0 until a UI-script context wires CScript::pInterface (same as GetWindow/GetCursorPos).
+// clock through unsigned long into the double PushNumber takes. Roots at the script interface, which
+// CMission wires to its HUD; before that context exists it deliberately returns 0.
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 BEGIN_SCRIPT_COMMAND( GetUITime, "" );
 	NUI::CInterface *pIface = pScript->GetScriptInterface();

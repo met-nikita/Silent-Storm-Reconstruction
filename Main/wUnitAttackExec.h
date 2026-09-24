@@ -130,7 +130,7 @@ protected:
 	STime GetNextBulletTime( STime t ) const;    // @0x3a20e0 -- advance a bullet timestamp by one inter-bullet period
 	void OnBulletGo();                           // @0x3a26f0 -- a bullet departs: fire it, then continue/stop the burst
 	void CreateFlash( bool bFirstBullet );       // @0x3a4240 -- muzzle flash (dev CreateFlash is arg-less; bFirstBullet unused)
-	void CheckUnhide();                          // @0x3a40d0 -- reveal-on-shoot (stub: no dev DB field / hidden-predicate)
+	void CheckUnhide();                          // @0x3a40d0 -- unsilenced shots reveal a concealed shooter
 
 public:
 	CExecShoot() {}

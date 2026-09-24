@@ -169,13 +169,12 @@ public:
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CPathConflictsRemover (release module wWaitForOthers.obj): the release factored the move wait-state
 // out of CExecMove into this CCommandExecute-derived base and widened nTimeToWait char->int
-// (nTimeToWait). On the binary this class also carries the CheckCanDoMove gate + the locker-chain
-// recovery helpers (GetWhoLocks/TryToSetNewPath/UseAnotherPCR/CheckLockerState/Segment) -- those are
-// BEHAVIOR (not serialized) and are DEFERRED here; CExecMove's existing CanDoMove/IsWaitingForPath (the
-// predecessor of CheckCanDoMove) stay the live driver, now operating on these inherited fields. This
-// leg lands the SAVE-FORMAT change: the wait-state moves to the base + the timer widens to int, with
-// the operator& tags byte-faithful to the release (CPathConflictsRemover @0x3bc810 / CExecMove @0x3bcb70).
-class CPathConflictsRemover: public CCommandExecute
+// (nTimeToWait). Retail also puts IExecMove on THIS base (the second vtable is at +0x18), so the
+// path-conflict helpers can reroute any concrete mover through the interface. Keeping IExecMove on
+// CExecMove instead happened to work for its one implementation, but gave CPathConflictsRemover the
+// wrong layout and hid the actual release contract. The operator& tags remain byte-faithful to the
+// release (CPathConflictsRemover @0x3bc810 / CExecMove @0x3bcb70).
+class CPathConflictsRemover: public CCommandExecute, public IExecMove
 {
 	ZDATA_(CCommandExecute)
 protected:
@@ -195,9 +194,17 @@ public:
 	// @0x3babd0 -- retail's trivial wait-state accessor (supersedes the Jan03 heavy
 	// CExecMove::IsWaitingForPath, retired below): report bWaiting + the parked pose.
 	virtual bool IsWaitingForPath( NAI::SUnitPosition *p = 0 ) { if ( p ) *p = posToWait; return bWaiting; }
+	virtual void Segment();
+	virtual CPathConflictsRemover* GetPathConflictsRemover() { return this; }
+
+	bool CheckCanDoMove( NAI::SUnitPosition *reqPos );
+	CUnitServer* GetWhoLocks();
+	void TryToSetNewPath();
+	bool UseAnotherPCR( CUnitServer *server, CPathConflictsRemover *other );
+	void CheckLockerState();
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-class CExecMove: public CPathConflictsRemover, public IExecMove
+class CExecMove: public CPathConflictsRemover
 {
 	OBJECT_BASIC_METHODS(CExecMove);
 	ZDATA_(CPathConflictsRemover)
@@ -232,13 +239,6 @@ class CExecMove: public CPathConflictsRemover, public IExecMove
 	// blanket park. CheckCanDoMove parks the unit + drives recovery and reports "may proceed now".
 	bool CanDoMove( CCmdTravel *pCmd ) { return CheckCanDoMove( &pCmd->pos ); }
 
-	// CPathConflictsRemover wait-state recovery (release wWaitForOthers.obj), reconstructed on CExecMove.
-	bool CheckCanDoMove( NAI::SUnitPosition *reqPos );                        // @0x3cc570
-	CUnitServer* GetWhoLocks();                                              // @0x3cc0d0
-	void TryToSetNewPath();                                                  // @0x3cc130
-	bool UseAnotherPCR( CUnitServer *server, CPathConflictsRemover *other ); // @0x3cc280
-	void CheckLockerState();                                                // @0x3cc2d0
-	
 	bool TestSingleGameMove( CCmdTravel *pCmd )
 	{
 		if ( !CanDoMove(pCmd) )
@@ -271,8 +271,6 @@ class CExecMove: public CPathConflictsRemover, public IExecMove
 public:
 	CExecMove() {}
 	CExecMove( CUnitServer *_pUS, NAI::CPath *pPath, NAI::EFindPathParams _eParams, ENeedActiveItem eActive, bool _bCheckCanRotate );
-	virtual void Segment();                                                  // @0x3cc670 per-tick wait service + resume
-	virtual CPathConflictsRemover* GetPathConflictsRemover() { return this; }// @0x3bc3f0 (CExecMove IS-A CPathConflictsRemover)
 	virtual void Run();
 	virtual bool TimeLabelReached();
 	virtual void AnimationFinished();
@@ -324,7 +322,7 @@ void CExecMove::DoGameMove( const NAI::SUnitPosition &dst )
 // @0x3cc570 -- may this move proceed now? On CMR_YES clear the wait and report "go". Otherwise park the
 // unit and recover per the ECanMoveRes verdict: CMR_LOCKED -> walk the locker chain + wait 10 ticks;
 // CMR_DOOR -> reroute; else (a pathed cell that isn't passable -- shouldn't happen) abort the move.
-bool CExecMove::CheckCanDoMove( NAI::SUnitPosition *reqPos )
+bool CPathConflictsRemover::CheckCanDoMove( NAI::SUnitPosition *reqPos )
 {
 	ECanMoveRes res = pUS->CanDoGameMove( *reqPos );
 	if ( res == CMR_YES )
@@ -333,7 +331,7 @@ bool CExecMove::CheckCanDoMove( NAI::SUnitPosition *reqPos )
 		return true;
 	}
 	// blocked: stop any in-progress turn-in-place, then enter the waiting state
-	if ( CDynamicCast<CCmdRotate>( pCurCmd ) )
+	if ( pUS->animator.bStandIfRecalcCommand )
 		pUS->animator.EndRotate( pUS->GetPosition() );
 	bWaiting = true;
 	posToWait = *reqPos;
@@ -362,7 +360,7 @@ bool CExecMove::CheckCanDoMove( NAI::SUnitPosition *reqPos )
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // @0x3cc0d0 -- who currently locks the cell we want (posToWait)? null if nobody, or if it is not a live unit.
-CUnitServer* CExecMove::GetWhoLocks()
+CUnitServer* CPathConflictsRemover::GetWhoLocks()
 {
 	CObjectBase *locker = pUS->GetWorld()->GetPathNetwork()->GetWhoLocksThisPlace( posToWait.pos.p );
 	CDynamicCast<CUnitServer> who( locker );
@@ -373,7 +371,7 @@ CUnitServer* CExecMove::GetWhoLocks()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // @0x3cc130 -- reroute around the obstacle: find a fresh path to the desired place and install it
 // (clearing the wait), or abort the move if none exists.
-void CExecMove::TryToSetNewPath()
+void CPathConflictsRemover::TryToSetNewPath()
 {
 	NAI::SPathPlace desiredPlace;
 	NAI::EFindPathParams eParams2;
@@ -400,7 +398,7 @@ void CExecMove::TryToSetNewPath()
 // @0x3cc280 -- decide whether we may defer to the unit locking us. If it has no remover of its own it
 // cannot step aside, so we reroute ourselves and report handled; otherwise we may pass only once it is
 // no longer waiting for a path.
-bool CExecMove::UseAnotherPCR( CUnitServer *server, CPathConflictsRemover *other )
+bool CPathConflictsRemover::UseAnotherPCR( CUnitServer *server, CPathConflictsRemover *other )
 {
 	if ( !other )
 	{
@@ -420,7 +418,7 @@ bool CExecMove::UseAnotherPCR( CUnitServer *server, CPathConflictsRemover *other
 // for chains 3+ deep it reroutes in cases retail would leave waiting -- non-crashing, and a reroute is
 // the safer resolution than an unbounded wait. The head-of-chain rotation housekeeping (Hide +
 // interrupted-counter bump, retail 0x7cc332-0x7cc384) is animation-only and elided.
-void CExecMove::CheckLockerState()
+void CPathConflictsRemover::CheckLockerState()
 {
 	CUnitServer *who = GetWhoLocks();
 	if ( !who )
@@ -466,7 +464,7 @@ void CExecMove::CheckLockerState()
 // queued path ender (CCmdEndMove::pWhatToEnd) which DoCommand consumes once bWaiting clears (bAfterWaiting was
 // latched at park) -- retail-faithful @0x3cc670, so NO ender is re-emitted here (the Stage-4 dev-preserving
 // push is dropped now that CCmdEndMove carries pWhatToEnd).
-void CExecMove::Segment()
+void CPathConflictsRemover::Segment()
 {
 	if ( nTimeToWait > 0 )
 		nTimeToWait--;

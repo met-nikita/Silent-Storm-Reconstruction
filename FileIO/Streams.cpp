@@ -152,13 +152,13 @@ void CMemoryStream::AllocForDirectReadAccess( unsigned int nSize )
 	FixupBufferSize( GetPosition() + nSize );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// должна сохранять текущее содержимое буфера в памяти
+// РґРѕР»Р¶РЅР° СЃРѕС…СЂР°РЅСЏС‚СЊ С‚РµРєСѓС‰РµРµ СЃРѕРґРµСЂР¶РёРјРѕРµ Р±СѓС„РµСЂР° РІ РїР°РјСЏС‚Рё
 void CMemoryStream::AllocForDirectWriteAccess( unsigned int nSize )
 {
 	FixupBufferSize( GetPosition() + nSize );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// c) чтение/запись не укладывающиеся в текущий буфер
+// c) С‡С‚РµРЅРёРµ/Р·Р°РїРёСЃСЊ РЅРµ СѓРєР»Р°РґС‹РІР°СЋС‰РёРµСЃСЏ РІ С‚РµРєСѓС‰РёР№ Р±СѓС„РµСЂ
 void CMemoryStream::DirectRead( void *pDest, unsigned int nSize )
 {
 	// should never happen
@@ -240,14 +240,17 @@ void CBufferedStream::SetNewBufferSize( unsigned int nSize )
 	if ( nNewSize < pReservedEnd - pBuffer )
 		return;
 	unsigned char *pNewBuf = dbgnew unsigned char [ nNewSize ];
+	const ptrdiff_t nCurrentOffset = pBuffer ? pCurrent - pBuffer : 0;
+	const ptrdiff_t nFileEndOffset = pBuffer ? pFileEnd - pBuffer : 0;
 	if ( pBuffer )
 	{
 		memcpy( pNewBuf, pBuffer, pReservedEnd - pBuffer );
 		delete[] pBuffer;
 	}
-	int nFixup = pNewBuf - pBuffer;
-	pCurrent += nFixup;
-	pFileEnd += nFixup;
+	// Preserve offsets within the buffer: two x64 allocations need not be
+	// within INT_MAX bytes of each other.
+	pCurrent = pNewBuf + nCurrentOffset;
+	pFileEnd = pNewBuf + nFileEndOffset;
 	pBuffer = pNewBuf;
 	pReservedEnd = pNewBuf + nNewSize;
 }
@@ -278,8 +281,12 @@ void CBufferedStream::LoadBufferForced( int nPos )
 	int nRead = __Min( pReservedEnd - pBuffer, pFileEnd - pCurrent );
 	if ( DoRead( nPos, pBuffer, nRead ) != nRead )
 		throw SFileIOError( "read error" );//SetFailed(); // throw
-	pCurrent += nBufferStart - nPos;
-	pFileEnd += nBufferStart - nPos;
+	// The subtraction must be signed. An unsigned 32-bit wrap happened to
+	// produce the intended negative displacement on x86, but moves pointers
+	// four gigabytes forward on x64 and makes DirectRead recurse forever.
+	const ptrdiff_t nOffset = static_cast<ptrdiff_t>( nBufferStart ) - nPos;
+	pCurrent += nOffset;
+	pFileEnd += nOffset;
 	nBufferStart = nPos;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -292,7 +299,7 @@ void CBufferedStream::ShiftBuffer()
 	LoadBufferForced( nPos ); // also shifts pCurrent to pBuffer
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// a) недостаток размера буфера для операция прямого доступа
+// a) РЅРµРґРѕСЃС‚Р°С‚РѕРє СЂР°Р·РјРµСЂР° Р±СѓС„РµСЂР° РґР»СЏ РѕРїРµСЂР°С†РёСЏ РїСЂСЏРјРѕРіРѕ РґРѕСЃС‚СѓРїР°
 void CBufferedStream::AllocForDirectReadAccess( unsigned int nSize )
 {
 	if ( nSize > pReservedEnd - pBuffer )

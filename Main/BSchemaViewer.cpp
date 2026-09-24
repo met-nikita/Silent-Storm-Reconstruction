@@ -132,7 +132,7 @@ CObjectBase* ViewBuildingSchema( NGScene::IGameView *pScene, NBuilding::CSolidAn
 	}
 	//
 	char buf[512];
-	sprintf( buf, "Min moment = %f \tMax Moment = %f\tMax pressure=%f  num juncs=%d, num rods=%d, weight=%f\n", 
+	sprintf( buf, "Min moment = %f \tMax Moment = %f\tMax pressure=%f  num juncs=%zu, num rods=%zu, weight=%f\n",
 		fMin, fMax, fMaxPressure, juncs.size(), rods.size(), fWeight );
 	OutputDebugString( buf );
 	//
