@@ -152,6 +152,16 @@ bool CMainMenuUI::ProcessMessage( const SEvent &sEvent )
 			pQuit       = pButtonsLine2->AddHoverButton( "quit",       0x4bec, GetDBString( 0x2b79 ) + GetDBString( 0x2a9a ), GetDBString( 0x2b7a ) + GetDBString( 0x2a9a ), GetDBString( 0x43bb ) + GetDBString( 0x2a9a ) );
 			break;
 		}
+		case EVENT_TEMPLATELOADCOMPLETE:
+		{
+			// Retail v1.2 0x5f8205..0x5f82ad: replace the template caption
+			// with the localized version, right-aligned styling and build date.
+			CPtr<CText> pVersion = GetUIWindow<CText>( this, "version" );
+			pVersion->SetText( NStr::Format(
+				L"<font size=14pt face=Courier><right><color=grey>%s %hs",
+				GetDBString( 0x4f17 ).c_str(), __DATE__ ), true );
+			break;
+		}
 	}
 
 	return CWindow::ProcessMessage( sEvent );
