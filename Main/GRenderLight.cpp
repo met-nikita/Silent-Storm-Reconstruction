@@ -1252,7 +1252,9 @@ void CDynamicPointLight::Render( CTransformStack *pTS, CTransformStack *pClipTS,
 	float fScale = 0.5f;
 	CVec3 lColor = CVec3( fScale * sqrt(l.color.x), fScale * sqrt(l.color.y), fScale * sqrt(l.color.z) );
 
-	if ( fabs2( lColor ) < 0.001f || l.bEnd )
+	// Retail v1.2 0x55367c..0x55369e: an inactive animator may not have
+	// produced position/radius data yet; tiny radii must not reach InitRadius.
+	if ( fabs2( lColor ) < 0.001f || l.bEnd || !l.bActive || l.fRadius < 0.1f )
 		return;
 
 	SBound sBound;
