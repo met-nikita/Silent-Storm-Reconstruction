@@ -2,6 +2,7 @@
 //
 #include "aiUnitState.h"
 #include "aiUnit.h"        // IAIUnit
+#include "aiEvent.h"
 #include "aiMisc.h"        // GetAIUnit
 #include "aiState.h"       // SAIState
 #include "aiPlayer.h"      // IAIPlayer::GetUnits / IsContain
@@ -54,6 +55,24 @@ IAIUnit *FindNearestUnit( IAIUnit *pSelf, vector< CPtr<IAIUnit> > &units )
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 SAIUnitState::SAIUnitState(): bHelpCalled( false ), bScared( false ) {}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void SAIUnitState::Notify( IAIEvent *pEvent )
+{
+	// Retail v1.2 0x4b0e80: keep the event alive and defer collection-dirty
+	// consumption while its Modify callback (including nested delivery) runs.
+	if ( !IsValid( pEvent ) )
+		return;
+	CPtr<IAIEvent> pHold = pEvent;
+	if ( !IsValid( pUnit ) || !IsValid( pUnit->GetUnitServer() ) || !pUnit->GetUnitServer()->CanFight() )
+		return;
+	++enemies.nLock;
+	++possibleEnemies.nLock;
+	++allies.nLock;
+	pEvent->Modify( this );
+	--enemies.nLock;
+	--possibleEnemies.nLock;
+	--allies.nLock;
+}
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void SAIUnitState::AddEnemy( IAIUnit *p )         { if ( IsValid( p ) ) { AddUnique( &enemies.data.units, p ); enemies.SetModified(); } }
 // Retail v1.2 0x4b1630/0x4b1690/0x4b16f0 also clear the matching selected contact

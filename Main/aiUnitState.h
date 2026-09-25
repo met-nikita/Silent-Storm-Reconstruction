@@ -14,13 +14,15 @@
 // CheckScared/Update) follow the release (reconstruction/exports/aiunitstate_*.txt). The release maintains
 // the lists incrementally through the AI event system (Notify/OnAIEvent -> AddEnemy/AddAlly) and a
 // begin-turn visibility sweep (PrepareEnemies). The
-// SUnitsAndPositions per-unit position cache and the SModifiable lazy-recompute lock are kept structurally
-// but driven eagerly. State is transient on CAIUnit (rebuilt each turn), so it is not serialized.
+// SUnitsAndPositions position-cache maintenance is still partial. Notify brackets the three
+// collection locks; Update leaves their dirty flags set while delivery is in progress.
+// State is serialized by value in CAIUnit tag 9.
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 #include "aiPosition.h"     // SUnitPosition
 namespace NAI
 {
 class IAIUnit;
+class IAIEvent;
 struct SAIState;
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // SModifiable<T> - a value with a dirty flag + a lock that defers clearing the flag during iteration.
@@ -66,6 +68,7 @@ struct SAIUnitState
 	//
 	SAIUnitState();
 	void SetUnit( IAIUnit *_pUnit ) { pUnit = _pUnit; }
+	void Notify( IAIEvent *pEvent );
 	//
 	void AddEnemy( IAIUnit *p );           void RemoveEnemy( IAIUnit *p );
 	void AddPossibleEnemy( IAIUnit *p );   void RemovePossibleEnemy( IAIUnit *p );

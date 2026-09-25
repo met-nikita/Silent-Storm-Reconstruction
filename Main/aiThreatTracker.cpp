@@ -114,7 +114,7 @@ void CAIEventTrackerImpl::ThrowAIEvent( IAIEvent *pEvent )
 	{
 		SAIUnitState *pState = pIface->GetAIUnitState();
 		if ( IsValid( ev ) && pState != 0 )
-			pEvent->Modify( pState );
+			pState->Notify( pEvent );
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
