@@ -477,9 +477,16 @@ private:
 	CPtr<ICameraCutFloor>  pCutFloorSource;             // the render cut-floor accessor (see ICameraCutFloor)
 	//
 	int  CutFloorGet() const { return IsValid( pCutFloorSource ) ? pCutFloorSource->GetCutFloor() : 0; }
-	// the LIVE owner stays the render scene (dev relocation); nCutFloor is the retail save slot
-	// (CBaseCamera tag 3), mirrored here so a save carries the floor the camera framing chose.
-	void CutFloorSet( int nF ) { nCutFloor = nF; if ( IsValid( pCutFloorSource ) ) pCutFloorSource->SetCutFloor( nF ); }
+	// Retail framing calls the virtual SetCutFloor (v1.2 0x4cf12d).
+	// Keep the render-scene bridge, but publish only a floor accepted by the camera.
+	void CutFloorSet( int nF )
+	{
+		if ( nLockNoUpdate >= 1 )
+			return;
+		SetCutFloor( nF );
+		if ( IsValid( pCutFloorSource ) )
+			pCutFloorSource->SetCutFloor( GetCutFloor() );
+	}
 	bool CanSeeOneRay( const CVec3 &target ) const;                             // release @0xceb20
 	bool CanSeeNow( const CVec3 &target );                                      // release @0xcecd0
 	int  TestCurrentDesiredPosition( const CVec3 &p1, const CVec3 &p2 );        // release @0xcee10
@@ -655,7 +662,8 @@ int CCamera::TryShowPlaces( const CVec3 &ptA, const CVec3 &ptB, int /*nFloor*/, 
 // ShowTwoPlaces @0xceff0: frame BOTH points -- fast path, then a two-yaw x rod-candidate sweep.
 int CCamera::ShowTwoPlaces( const CVec3 &ptA, const CVec3 &ptB, int nFloor, float fRodIn )
 {
-	if ( CanSeeNow( ptA ) && CanSeeNow( ptB ) && sDesiredPlacement.fRod >= F_FOV )
+	// v1.2 0x4cf106..0x4cf117: ordered rod < 35; equality uses the search.
+	if ( CanSeeNow( ptA ) && CanSeeNow( ptB ) && sDesiredPlacement.fRod < F_FOV )
 	{
 		if ( nFloor != CutFloorGet() ) CutFloorSet( nFloor );
 		return 1;

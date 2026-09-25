@@ -759,7 +759,9 @@ EUnitCommandResult CExecHide::CanDoIt()
 	if ( !pUS->CanHide() )
 		return UCR_GENERAL_FAILURE;
 
-	if ( pUS->IsWearingPK() )
+	// Retail v1.2 0x7b38fd..0x7b391a: only PKs without CanHide forbid it.
+	NDb::CPanzerklein *pPK = pUS->GetWearingDBPK();
+	if ( IsValid( pPK ) && !pPK->bCanHide )
 		return UCR_GENERAL_FAILURE;
 
 	if ( !bState )
