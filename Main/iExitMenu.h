@@ -17,10 +17,11 @@ class CICExitMenu: public NMainLoop::CInterfaceCommand
 {
 	OBJECT_BASIC_METHODS(CICExitMenu);
 private:
+	bool bAllowSave;
 	CObj<NGScene::CScreenshotTexture> pScreenShotTexture;
 
 public:
-	CICExitMenu( NGScene::CScreenshotTexture *pScreenShotTexture = 0 );
+	CICExitMenu( NGScene::CScreenshotTexture *pScreenShotTexture = 0, bool bAllowSave = false );
 
 	virtual void Exec();
 };

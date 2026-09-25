@@ -30,13 +30,13 @@ private:
 
 public:
 	CExitMenuUI() {}
-	CExitMenuUI( const SWindowInfo &sInfo );
+	CExitMenuUI( const SWindowInfo &sInfo, bool bAllowSave );
 
 	bool ProcessMessage( const SEvent &sEvent );
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CExitMenuUI::CExitMenuUI( const SWindowInfo &sInfo ):
-	CWindow( sInfo )
+CExitMenuUI::CExitMenuUI( const SWindowInfo &sInfo, bool _bAllowSave ):
+	CWindow( sInfo ), bAllowSave( _bAllowSave )
 {
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -51,6 +51,7 @@ bool CExitMenuUI::ProcessMessage( const SEvent &sEvent )
 			pExit->AddTextState( CHoverButton::STATE_NORMAL, GetDBString( 11198 ) + GetDBString( 11199 ) );
 
 			pSave = new CHoverButton( sEvent.pLoader->GetControl( "save" ) );
+			pSave->SetStyle( STYLE_VISIBLE, bAllowSave ); // retail v1.2 0x5d263a
 			pSave->AddTextState( CHoverButton::STATE_HOVER, GetDBString( 11197 ) + GetDBString( 11200 ) );
 			pSave->AddTextState( CHoverButton::STATE_NORMAL, GetDBString( 11198 ) + GetDBString( 11200 ) );
 
@@ -84,12 +85,12 @@ private:
 	CObj<NUI::CExitMenuUI> pUI;
 	CObj<NUI::CScreenShot> pScreenShot;
 	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&bAllowSave); f.Add(3,&pCursor); f.Add(4,&pInterface); f.Add(5,&pUI); f.Add(6,&pScreenShot); return 0; }
-	bool bAllowSave = true;   // retail threads a CICExitMenu ctor arg; dev's only opener (iMain, the global Alt+F4 modal) allows saving
+	bool bAllowSave = false;
 
 public:
 	CExitMenuInterface();
 
-	void Initialize( NGScene::CScreenshotTexture *pScreenShotTexture = 0 );
+	void Initialize( NGScene::CScreenshotTexture *pScreenShotTexture, bool bAllowSave );
 
 	void Step();
 	void OnGetFocus();
@@ -102,8 +103,9 @@ CExitMenuInterface::CExitMenuInterface():
 {
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CExitMenuInterface::Initialize( NGScene::CScreenshotTexture *pScreenShotTexture )
+void CExitMenuInterface::Initialize( NGScene::CScreenshotTexture *pScreenShotTexture, bool _bAllowSave )
 {
+	bAllowSave = _bAllowSave;
 	pCursor = NUI::ICursor::Create();
 	pInterface = new NUI::CInterface( pCursor );
 
@@ -116,7 +118,7 @@ void CExitMenuInterface::Initialize( NGScene::CScreenshotTexture *pScreenShotTex
 	else
 		pScreenShot->SetTexture( pScreenShotTexture );
 
-	pUI = new NUI::CExitMenuUI( NUI::SWindowInfo( pInterface, NUI::SPoint( 0, 0 ), NUI::SPoint( 1024, 768 ), "exitmenu", NUI::STYLE_ENABLED ) );
+	pUI = new NUI::CExitMenuUI( NUI::SWindowInfo( pInterface, NUI::SPoint( 0, 0 ), NUI::SPoint( 1024, 768 ), "exitmenu", NUI::STYLE_ENABLED ), bAllowSave );
 	NUI::LoadTemplate( pUI, NDb::GetUIContainer( 357 ) );
 	pUI->ShowWindow( NUI::SWTYPE_SHOW );
 }
@@ -150,7 +152,7 @@ bool CExitMenuInterface::ProcessEvent( const NInput::SEvent &sEvent )
 		NMainLoop::Command( new NMainLoop::CICExitModal() );
 		return true;
 	}
-	else if ( bindSaveGame.ProcessEvent( sEvent ) )
+	else if ( bindSaveGame.ProcessEvent( sEvent ) && bAllowSave )
 	{
 		NMainLoop::Command( new NGame::CICSaveLoadMenu( SAVE, pScreenShot->GetTexture(), bAllowSave ) );   // retail @0x1d1310 forwards the screen's own gate
 		return true;
@@ -173,15 +175,15 @@ void CExitMenuInterface::RenderFrame()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CICExitMenu
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CICExitMenu::CICExitMenu( NGScene::CScreenshotTexture *_pScreenShotTexture ):
-	pScreenShotTexture( _pScreenShotTexture )
+CICExitMenu::CICExitMenu( NGScene::CScreenshotTexture *_pScreenShotTexture, bool _bAllowSave ):
+	bAllowSave( _bAllowSave ), pScreenShotTexture( _pScreenShotTexture )
 {
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CICExitMenu::Exec()
 {
 	CExitMenuInterface *pRes = new CExitMenuInterface();
-	pRes->Initialize( pScreenShotTexture );
+	pRes->Initialize( pScreenShotTexture, bAllowSave );
 	PushInterface( pRes );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
