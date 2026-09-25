@@ -835,30 +835,12 @@ void CUnitServer::OnTBSEvent( ETBSEvent event )
 			CancelAction();
 			break;
 		case TBS_RECALC_COMMAND:
-			// is called when something happens that might affect current command execution plan.
-			// TURN-STUCK FIX (dev-bugs s7): retail @0x3c2a90 does NOT drop the executor unconditionally:
-			//   if ( !cannon && IsCancelableExec( pExec ) ) {           // NWorld::IsCancelableExec @0x392fe0
-			//       if ( CanFight() && visible ) animator.PlaceUnit( GetPosition() );  // re-seat the model
-			//       pExec = 0;
-			//   }
-			// The dev bare `pExec = 0` (a) dropped cannon actions a recalc must NOT drop, and (b) never
-			// re-seated a unit whose move executor it released, leaving the model mid-stride off its
-			// grid cell. NOTE: dropping a RUNNING forced-critical executor here (RECALC fires from
-			// OnPassControl right after turn-start bleed damage rolls a critical) leaves
-			// bIsRunningForcedAction latched in retail too -- retail tolerates that because its Do()
-			// accepts commands regardless and the next executor retire clears the flag; the matching
-			// dev-only hard refusal in Do() is removed this session (see the comment there).
-			// (The cannon-action guard is carried by IsCancelableExec's CExecCannon check.)
-			// DEV DEVIATION (hold-aim safety): the PlaceUnit re-seat is gated on the exec being an
-			// IExecMove (same pattern as the TBS_STOP arm below). Retail's arm re-seats whenever
-			// visible, but retail coalesces RECALC through its deferred STBSEvent queue -- this dev
-			// tree fires RecalcCurrentPlayerCommands on EVERY action-end edge, which would re-seat a
-			// FINISHED shoot executor holding its aiming pose after every shot. Re-seating is only
-			// MEANT for a dropped mid-stride mover; non-movers are dropped without a re-seat exactly
-			// as the pre-session dev code did (hold-aim visuals confirmed working under that drop).
-			if ( IsCancelableExec( pExec ) )
+			// Retail v1.2 0x7c319f..0x7c31de: preserve forced actions, and only
+			// re-seat an animation explicitly marked for it. [animator+0x6a]
+			// is bStandIfRecalcCommand, not the unit's visibility flag.
+			if ( !bIsRunningForcedAction && IsCancelableExec( pExec ) )
 			{
-				if ( CDynamicCast<IExecMove>( pExec ) && CanFight() && IsAddedToVisitor() )
+				if ( CanFight() && animator.bStandIfRecalcCommand )
 					animator.PlaceUnit( GetPosition() );
 				pExec = 0;
 			}
@@ -878,10 +860,9 @@ void CUnitServer::OnTBSEvent( ETBSEvent event )
 			// move down the SAFE way via CancelAction -> CExecMove::Cancel(), which only MARKS the exec
 			// FAILED (no free); CheckCmdExecState then drops pExec on a later Segment tick. Same on-grid end
 			// state, no re-entrant free.
-			// A mount can finish inside the move executor just as combat interrupts movement.
-			// Its animation is already attached to the cannon; snapping it to the grid
-			// would leave the model standing beside the weapon while the unit stays mounted.
-			if ( !animator.GetCannon() && CDynamicCast<IExecMove>( pExec ) && CanFight() && IsAddedToVisitor() )
+			// Retail v1.2 0x7c3234 tests this same animation flag. Vaults,
+			// ladders and mounted poses must retain their current animation.
+			if ( CDynamicCast<IExecMove>( pExec ) && CanFight() && animator.bStandIfRecalcCommand )
 				animator.PlaceUnit( GetPosition() );
 			CancelAction();
 			// TURN-STALL FIX (dev-bugs s6 retest#5, bug B): retail @0x3c2a90 RELEASES the move executor

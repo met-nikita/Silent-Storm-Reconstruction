@@ -2,10 +2,16 @@
 #define __SCRIPTCOMMON_H_
 //
 union ULuaParams;
+namespace NWorld
+{
+	class CUnitServer;
+	class CCmd;
+}
 //
 namespace NScript
 {
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+void DoCommand( NWorld::CUnitServer *pUnit, NWorld::CCmd *pCmd, bool bContinue );
 int luaGetParamCount( lua_State *pState );
 bool luaPrepareData( lua_State *pState, 
 	string szFuncName, string szParams, CScript **ppScript, vector<SLuaParams> *pParams );

@@ -424,7 +424,7 @@ BEGIN_SCRIPT_COMMAND( UnitKill, "ub[false]" )
 END_SCRIPT_COMMAND
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // retail luaUnitPlayAnimation @0x2f80f0 ("unbb[false]"): the 3rd bool selects the MODE, not looping.
-// false -> play as a cancellable COMMAND (4th bool = bLoop). true -> install the clip as the unit's
+// false -> play as a queued COMMAND (4th bool = freeze last frame). true -> install the clip as the unit's
 // CUSTOM IDLE (CUnitAnimator::SetCustomIdleAnimation): no command at all -- the animator plays it
 // whenever the unit idles, it can't be cancelled by commands, and the unit auto-returns to it after
 // any interruption. The old Jan03 "unb" reading (3rd arg = bCircled command loop) turned scripted
@@ -437,8 +437,7 @@ BEGIN_SCRIPT_COMMAND( UnitPlayAnimation, "unbb[false]" )
 		int nDBAnimationID = luaParams[ 1 ].n;
 		if ( !luaParams[ 2 ].b )
 		{
-			pUS->Do( new NWorld::CCmdSetCommand( pUS, new NWorld::CCmdPlayAnimation( nDBAnimationID, luaParams[ 3 ].b ) ) );
-			pUS->Do( new NWorld::CCmdSetCommand( pUS, new NWorld::CCmdContinue() ) );
+			DoCommand( pUS, new NWorld::CCmdPlayAnimation( nDBAnimationID, luaParams[ 3 ].b ), true );
 		}
 		else
 			pUS->animator.SetCustomIdleAnimation( NDb::GetAnimation( nDBAnimationID ) );

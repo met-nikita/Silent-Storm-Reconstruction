@@ -2,6 +2,7 @@
 #include "A5Script.h"
 #include "wMain.h"
 #include "wUnitServer.h"
+#include "wUnitCommands.h"
 #include "wUnitGroup.h"
 #include "wOSBase.h"
 #include "..\DBFormat\DataCamera.h"
@@ -27,6 +28,20 @@ namespace NScript
 {
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 static void ShowLuaLog( const string &szFuncName, int nThread, const vector<SLuaParams> &params, bool bOK );
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// Retail v1.1 0x6e4890 / v1.2 0x6e4e80: enqueue on the player's commander,
+// not CUnitServer::Do. Scripts run after the world pose update; direct execution
+// exposes the old server pose when a custom idle is replaced by an action.
+void DoCommand( NWorld::CUnitServer *pUnit, NWorld::CCmd *pCmd, bool bContinue )
+{
+	if ( !IsValid( pCmd ) || !IsValid( pUnit ) )
+		return;
+	CPtr<NWorld::CCommander> pCommander = pUnit->GetPlayer()->GetCommander();
+	CPtr<NWorld::CCmd> pHoldCommand = pCmd;
+	pCommander->Do( new NWorld::CCmdSetCommand( pUnit, pCmd ) );
+	if ( bContinue )
+		pCommander->Do( new NWorld::CCmdSetCommand( pUnit, new NWorld::CCmdContinue() ) );
+}
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 int luaGetParamCount( lua_State* pState )
 {
