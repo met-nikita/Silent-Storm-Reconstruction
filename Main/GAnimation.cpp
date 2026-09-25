@@ -761,7 +761,8 @@ void CASmartAimer::GetFrame( STime t, SSkeletonPose *pPose )
 		current = aim;
 	}
 
-	if ( t > tNext || tCurrent == tNext )
+	// Retail v1.2 0x4dee27: the exact endpoint returns aim without reseeding current.
+	if ( t >= tNext || tCurrent == tNext )
 	{
 		*pPose = aim;
 		return;

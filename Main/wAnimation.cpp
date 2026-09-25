@@ -1616,7 +1616,8 @@ void CUnitAnimator::Jump( const NAI::SUnitPosition &prevPos, const NAI::SUnitPos
 // !IsDead()
 void CUnitAnimator::StartNewTurn( const NAI::SUnitPosition &cmdPos )
 {
-	if ( !bAimed && !bInactivePose && !IsValid( pCannon ) && !bHealing && !bLadder )
+	// Retail v1.2 0x73ede3 tests +0xa0 (PK skeleton), not the carried-body flag.
+	if ( !bAimed && !bInactivePose && !IsValid( pCannon ) && !bHealing && !bLadder && !bHasPKSkeleton )
 		Stand( cmdPos, bAimedStrafe );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////

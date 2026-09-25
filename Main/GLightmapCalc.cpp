@@ -277,7 +277,8 @@ void CLightState::TraceDynamicLMPointLight( SDynamicAmbientInfo *pRes, const CVe
 	float f;
 	CVec3 vA, vColor;
 	CRay r;
-	if ( fDist > fTargetR )
+	// Retail v1.2 0x52b109..0x52b12b: a null scene means no shadow test.
+	if ( pVis && fDist > fTargetR )
 	{
 		float fStep = fTargetR / fDist;
 		r.ptOrigin = vCenter;
@@ -338,7 +339,8 @@ void CLightState::TraceDynamicLM( SDynamicAmbientInfo *pRes, const SSphere &bv, 
 	for ( int k = 0; k < points.size(); ++k )
 	{
 		const SPointLight &p = points[k];
-		TraceDynamicLMPointLight( pRes, bv.ptCenter, bv.fRadius, p.vCenter, p.fRadius, p.vColor, CVec3(0,0,0), pVis );
+		// Retail v1.2 0x52b930..0x52b94c forwards the saved shadow flag.
+		TraceDynamicLMPointLight( pRes, bv.ptCenter, bv.fRadius, p.vCenter, p.fRadius, p.vColor, CVec3(0,0,0), p.bCastShadow ? pVis : 0 );
 	}
 	for ( int k = 0; k < semiPoints.size(); ++k )
 	{
