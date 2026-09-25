@@ -152,7 +152,7 @@ public:
 	virtual void SetParticleShow( bool bNewState ) = 0;
 	virtual void SetAmbient( const CVec3 &vBottomAmbientColor, const CVec3 &vTopAmbientColor ) = 0;
 	virtual CObjectBase* AddDirectionalLight( const CVec3 &ptColor, const CVec3 &ptLight, const CVec3 &ptOrigin, const CVec2 &ptSize, float fMaxHeight, bool bLightmapOnly = false ) = 0;
-	virtual CObjectBase* AddPointLight( const CVec3 &ptColor, const CVec3 &ptOrigin, float fR, bool bLightmapOnly ) = 0;
+	virtual CObjectBase* AddPointLight( const CVec3 &ptColor, const CVec3 &ptOrigin, float fR, bool bLightmapOnly, bool bCastShadow ) = 0;
 	virtual CObjectBase* AddFlare( CFuncBase<CVec3> *pOrigin, CFuncBase<STime> *pTime, int nFloor, float fFlareRadius, NDb::CTexture *pFlareTexture, float fOnTime, float fOffTime ) = 0;
 	virtual CObjectBase* AddPostFilter( const vector<CObjectBase*> &target, IPostProcess *pEffect ) = 0;
 	virtual CObjectBase* AddSpotLight( const CVec3 &ptColor, const CVec3 &ptOrigin, const CVec3 &ptDir, float fFOV, float fRadius, NDb::CTexture *pMask, bool bLightmapOnly = false ) = 0;

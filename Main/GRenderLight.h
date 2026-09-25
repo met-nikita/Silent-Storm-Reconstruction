@@ -131,7 +131,7 @@ class CPointLight: public ILight
 	void FinalPass( NGfx::CRenderContext *pRC, float fHullRadius );
 public:
 	CPointLight() {}
-	CPointLight( const CVec3 &_vColor, const CVec3 &ptCenter, float fRadius, CVersioningBase *_pStaticTracker, bool bLightmapOnly );
+	CPointLight( const CVec3 &_vColor, const CVec3 &ptCenter, float fRadius, CVersioningBase *_pStaticTracker, bool bLightmapOnly, bool bCastShadow );
 	virtual int GetPriority() const { return 3; }
 	virtual void Render( CTransformStack *pTS, CTransformStack *pClipTS, NGfx::CRenderContext *pRC, ERenderPath renderPath, 
 		IRender *pRender, CSceneFragments &scene, const SParticleLMRenderTargetInfo &particleLM );

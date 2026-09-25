@@ -74,7 +74,7 @@ struct IRenderVisitor
 	virtual NGScene::CLightGroup* MakeGroup() { return 0; }
 	virtual void AddParticleEffect( STime tBegin, NDb::CEffect *pEffect, int nFloor, CFuncBase<SFBTransform> *pPosition, NAnimation::CSkeletonAnimator *pScAnimator = 0 ) {}
 	virtual void AddParticleEffect( STime tBegin, NDb::CEffect *pEffect, int nFloor, const SFBTransform &place ) {}
-	virtual void AddPointLight( const CVec3 &ptColor, const CVec3 &ptOrigin, float fRadius, bool bLightmapOnly ) {}
+	virtual void AddPointLight( const CVec3 &ptColor, const CVec3 &ptOrigin, float fRadius, bool bLightmapOnly, bool bCastShadow ) {}
 	virtual void AddFlare( CFuncBase<CVec3> *pOrigin, float fFlareRadius, NDb::CTexture *pFlareTexture, int nFloor, float fOnTime = 0.33f, float fOffTime = 0.05f ) {}
 	virtual void AddSpotLight( const CVec3 &ptColor, const CVec3 &ptOrigin, const CVec3 &ptDir, float fFOV, float fRadius, NDb::CTexture *pMask, bool bLightmapOnly ) {}
 	virtual void AddMesh( NDb::CModel *pModel, const SFBTransform &position, NGScene::CLightGroup *pGroup, int nFloor, int nUserID = -1 ) {}

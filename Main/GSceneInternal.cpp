@@ -982,11 +982,11 @@ void CGScene::AddLight( ILight *pGroup )
 	bLightStateCalced = false;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CObjectBase* CGScene::AddPointLight( const CVec3 &_vColor, const CVec3 &ptOrigin, float fR, bool bLightmapOnly )
+CObjectBase* CGScene::AddPointLight( const CVec3 &_vColor, const CVec3 &ptOrigin, float fR, bool bLightmapOnly, bool bCastShadow )
 {
 	if ( fR <= 0 )
 		return 0;
-	ILight *pRes = new CPointLight( _vColor, ptOrigin, fR, trackers.pSolidTracker, bLightmapOnly );
+	ILight *pRes = new CPointLight( _vColor, ptOrigin, fR, trackers.pSolidTracker, bLightmapOnly, bCastShadow );
 	AddLight( pRes );
 	return pRes;
 }

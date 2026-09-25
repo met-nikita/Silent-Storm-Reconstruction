@@ -135,7 +135,7 @@ public:
 	virtual CObjectBase* AddDirectionalLight( CFuncBase<CVec3> *pColor, CFuncBase<CVec3> *pGlossColor, const CVec3 &vShadowColor, 
 		const CVec3 &ptLight, const CVec3 &ptOrigin, 
 		const CVec2 &ptSize, float fMaxHeight, bool bLightmapOnly, float fBlurShift ) = 0; 
-	virtual CObjectBase* AddPointLight( const CVec3 &_vColor, const CVec3 &ptOrigin, float fR, bool bLightmapOnly ) = 0;
+	virtual CObjectBase* AddPointLight( const CVec3 &_vColor, const CVec3 &ptOrigin, float fR, bool bLightmapOnly, bool bCastShadow ) = 0;
 	virtual CObjectBase* AddPointLight( CPtrFuncBase<CAnimLight> *pLight ) = 0;
 	virtual CObjectBase* AddSpotLight( CFuncBase<CVec3> *pColor, const CVec3 &ptOrigin, const CVec3 &ptDir, float fFOV, 
 		float fRadius, CPtrFuncBase<NGfx::CTexture> *pMask, bool bLightmapOnly ) = 0;
@@ -175,7 +175,6 @@ CFuncBase<vector<NGfx::SCompactTransformer> >* MakeMMXAnimation( CFuncBase<vecto
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 #endif
-
 
 
 

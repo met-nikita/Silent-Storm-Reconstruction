@@ -190,7 +190,7 @@ public:
 	virtual void AddParticleEffect( STime tBegin, NDb::CEffect *pEffect, int nFloor, CFuncBase<SFBTransform> *pPosition,
 		NAnimation::CSkeletonAnimator *pScAnimator = 0 );
 	virtual void AddParticleEffect( STime tBegin, NDb::CEffect *pEffect, int nFloor, const SFBTransform &place );
-	virtual void AddPointLight( const CVec3 &ptColor, const CVec3 &ptOrigin, float fRadius, bool bLightmapOnly );
+	virtual void AddPointLight( const CVec3 &ptColor, const CVec3 &ptOrigin, float fRadius, bool bLightmapOnly, bool bCastShadow );
 	virtual void AddFlare( CFuncBase<CVec3> *pOrigin, float fFlareRadius, NDb::CTexture *pFlareTexture, int nFloor, float fOnTime, float fOffTime );
 	virtual void AddSpotLight( const CVec3 &ptColor, const CVec3 &ptOrigin, const CVec3 &ptDir, float fFOV, float fRadius, NDb::CTexture *pMask, bool bLightmapOnly );
 	virtual void AddMesh( NDb::CModel *pModel, const SFBTransform &position, NGScene::CLightGroup *pGroup, int nFloor, int nUserID );
@@ -356,9 +356,9 @@ void CSetRender::AddParticleEffect( STime tBegin, NDb::CEffect *pEffect, int nFl
 	Register( pScene->CreateParticles( pEffect, tBegin, pTime, pPosition, NGScene::SRoomInfo( nFloor ), pScAnimator ) );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CSetRender::AddPointLight( const CVec3 &ptColor, const CVec3 &ptOrigin, float fRadius, bool bLightmapOnly )
+void CSetRender::AddPointLight( const CVec3 &ptColor, const CVec3 &ptOrigin, float fRadius, bool bLightmapOnly, bool bCastShadow )
 {
-	Register( pScene->AddPointLight( ptColor, ptOrigin, fRadius, bLightmapOnly ) );
+	Register( pScene->AddPointLight( ptColor, ptOrigin, fRadius, bLightmapOnly, bCastShadow ) );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CSetRender::AddFlare( CFuncBase<CVec3> *pOrigin, float fFlareRadius, NDb::CTexture *pFlareTexture, int nFloor, float fOnTime, float fOffTime )

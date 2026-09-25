@@ -233,8 +233,19 @@ static bool IsDoor( CFastRenderer::SResult *p )
 	return ( p->pSrc->pSrc->nTSFlags & ( NWorld::TS_STATE_OPEN |  NWorld::TS_STATE_CLOSED ) ) != 0;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CalcHeightMap( NAI::IAIMap *pMap, CHeightMapBlockInfo *pRes, const float fH, const list<CVec3> &specialPoints )
+void CalcHeightMap( NAI::IAIMap *pMap, CHeightMapBlockInfo *pRes, const CVec3 &center, const CVec3 &specialPoint, int nFloor1, int nFloor2 )
 {
+	// Retail v1.2 0x453c60: restrict sampling to the movement's two floors,
+	// select the nearest supporting source, and fall back to the unit's height.
+	const float fH = center.z;
+	vector<int> floors;
+	floors.push_back( nFloor1 );
+	if ( nFloor2 != nFloor1 )
+		floors.push_back( nFloor2 );
+	list<CVec3> specialPoints;
+	specialPoints.push_back( center );
+	if ( specialPoint != center )
+		specialPoints.push_back( specialPoint );
 	CTRect<int> rect;
 	int nXSize = pRes->height.GetXSize();
 	int nYSize = pRes->height.GetYSize();
@@ -242,7 +253,7 @@ void CalcHeightMap( NAI::IAIMap *pMap, CHeightMapBlockInfo *pRes, const float fH
 
 	NAI::CFastRenderer render;
 	render.InitParallel( CVec2(0,0), 0, HEIGHT_MAP_SAMPLE_SIZE, rect );
-	pMap->TraceGrid( &render, NWorld::TS_PASS_BLOCKER, IAIMap::STH_NOSORT, CFloorsSet() );
+	pMap->TraceGrid( &render, NWorld::TS_PASS_BLOCKER, IAIMap::STH_NOSORT, CFloorsSet( floors ) );
 
 	// Get info about source for every special point
 	unordered_map<CObjectBase *, bool> hSources;
@@ -252,7 +263,7 @@ void CalcHeightMap( NAI::IAIMap *pMap, CHeightMapBlockInfo *pRes, const float fH
 		int nY = Float2Int( i->y / HEIGHT_MAP_SAMPLE_SIZE );
 		float fBestDiff = 100;
 		CObjectBase *pI = 0;
-		if ( nY < rect.top || nX < rect.left || nY - rect.top >= rect.bottom || nX - rect.left >= rect.right )
+		if ( nY < rect.top || nX < rect.left || nY >= rect.bottom || nX >= rect.right )
 			continue; // happens when "relocating" unit very far
 		for ( CFastRenderer::SResult *p = render.resGrid[nY-rect.top][nX-rect.left]; p; p = p->pNext )
 		{
@@ -273,7 +284,6 @@ void CalcHeightMap( NAI::IAIMap *pMap, CHeightMapBlockInfo *pRes, const float fH
 	{
 		for ( int x = rect.left; x < rect.right; ++x )
 		{
-			float fRes = 0;
 			float fBestDiff = 100;
 			for ( CFastRenderer::SResult *p = render.resGrid[y-rect.top][x-rect.left]; p; p = p->pNext )
 			{
@@ -281,35 +291,14 @@ void CalcHeightMap( NAI::IAIMap *pMap, CHeightMapBlockInfo *pRes, const float fH
 					continue;
 				CObjectBase *pObj = p->pSrc->pSrc->pUserData;
 				CObjectBase *pInfo = pObj;
-				if ( hSources.find( pInfo ) != hSources.end() )
+				if ( hSources.find( pInfo ) != hSources.end() && fabs( fH - p->fExit ) < fBestDiff )
 				{
 					pRes->height[ Wrap( y, nYSize ) ][ Wrap( x, nXSize ) ] = p->fExit;
 					fBestDiff = fabs( fH - p->fExit );
-					break;
 				}
 			}
 			if ( fBestDiff > 1 )
-			{
-				if ( !specialPoints.empty() )
-					pRes->height[ Wrap( y, nYSize ) ][ Wrap( x, nXSize ) ] = fH;
-				else
-				{
-					for ( CFastRenderer::SResult *p = render.resGrid[y-rect.top][x-rect.left]; p; p = p->pNext )
-					{
-						if ( IsDoor( p ) )
-							continue;
-						float fDiff = fabs( fH - p->fExit );
-						if ( p->fExit > fH )
-							fDiff *= 3;
-						if ( fDiff < fBestDiff )
-						{
-							fRes = p->fExit;
-							fBestDiff = fDiff;
-						}
-					}
-					pRes->height[ Wrap( y, nYSize ) ][ Wrap( x, nXSize ) ] = fRes;
-				}
-			}
+				pRes->height[ Wrap( y, nYSize ) ][ Wrap( x, nXSize ) ] = fH;
 		}
 	}
 	for ( list<CVec3>::const_iterator i = specialPoints.begin(); i != specialPoints.end(); ++i )

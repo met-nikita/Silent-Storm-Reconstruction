@@ -333,6 +333,8 @@ bool CMission::Initialize( int _nTemplateID, int _nVariantID, NScenario::CScenar
 	// deploy pose into it -- the deploy view IS the active player's own camera (seeded in the
 	// CPlayerTracker ctor @0x287d70); the cinematic camera only gets a pose when a script drives it.
 	SetCameraParams( CAMERA_PC, fFOV, defaultCameraLimits );
+	// Retail Initialize also stamps the cinematic camera, not only player cameras.
+	pCamera->SetCutFloorRange( nMinCutFloor, nMaxCutFloor );
 
 	TraceCursor();
 
@@ -1018,6 +1020,14 @@ void CMission::OnSnapshotRestored()
 	{
 		if ( IsValid( *iPlayer ) && (*iPlayer)->GetCamera() )
 			InstallCameraRuntimeHandles( (*iPlayer)->GetCamera(), this );
+	}
+	// Retail's floor bar and hotkeys use the camera's serialized clamp range.
+	// Mirror that range into the dev scene/mission runtime owners after a snapshot load.
+	ICamera *pRestoredCamera = GetCamera();
+	if ( pRestoredCamera )
+	{
+		pRestoredCamera->GetCutFloorRange( &nMinCutFloor, &nMaxCutFloor );
+		GetScene()->SetCutFloorRange( nMinCutFloor, nMaxCutFloor );
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////

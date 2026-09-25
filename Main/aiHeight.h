@@ -28,7 +28,7 @@ public:
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CalcHeightMapSize( CTRect<int> *pRes, const CVec3 &ptCenter, float fSize );
 void CalcHeightMap( NAI::IAIMap *pMap, CHeightMapBlockInfo *pRes, const SHeightCalcInfo &hInfo );
-void CalcHeightMap( NAI::IAIMap *pMap, CHeightMapBlockInfo *pRes, const float fH, const list<CVec3> &specialPoints );
+void CalcHeightMap( NAI::IAIMap *pMap, CHeightMapBlockInfo *pRes, const CVec3 &center, const CVec3 &specialPoint, int nFloor1, int nFloor2 );
 // sampleSize == 0 means default sample size
 void CheckGradient( CHeightMapBlockInfo *pRes, float fSampleSize = 0 );
 ////////////////////////////////////////////////////////////////////////////////////////////////////

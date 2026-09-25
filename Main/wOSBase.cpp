@@ -381,7 +381,9 @@ void CObjectServerBase::AddLights( IRenderVisitor *p, NDb::CContainerModel *pCon
 		SFBTransform m;
 		CVec3 ptOrigin;
 		rv.forward.RotateHVector( &ptOrigin, pCont->ptPLightPos );
-		p->AddPointLight( pCont->ptPLightCr, ptOrigin, pCont->fPLightRadius, bLightMap );
+		// Retail v1.2 0x784206: propagate the authored shadow flag through
+		// the visitor, view and scene into CPointLight (also saved at tag 12).
+		p->AddPointLight( pCont->ptPLightCr, ptOrigin, pCont->fPLightRadius, bLightMap, pCont->bPLightShadow );
 		if ( pCont->fPFlareRadius > 0 )
 		{
 			CVec3 ptFlareOrigin;

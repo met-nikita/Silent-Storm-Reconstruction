@@ -843,9 +843,9 @@ inline int IsPointLightSupported( ERenderPath renderPath )
 	return renderPath == RP_GF2 || renderPath == RP_GF2_CL || renderPath == RP_GF3_CL;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CPointLight::CPointLight( const CVec3 &_vColor, const CVec3 &_ptCenter, float _fRadius, CVersioningBase *_pStaticTracker, bool _bLightmapOnly )
+CPointLight::CPointLight( const CVec3 &_vColor, const CVec3 &_ptCenter, float _fRadius, CVersioningBase *_pStaticTracker, bool _bLightmapOnly, bool _bCastShadow )
 	: vColor(_vColor), ptCenter(_ptCenter, 1),
-	bLightmapOnly(_bLightmapOnly)
+	bLightmapOnly(_bLightmapOnly), bCastShadow(_bCastShadow)
 {
 	NGfx::InitRadius( &vRadius, _fRadius );
 	sTransform.MakeParallel( 2 * _fRadius, 2 * _fRadius, -_fRadius, _fRadius );

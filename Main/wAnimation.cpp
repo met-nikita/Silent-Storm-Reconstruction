@@ -56,9 +56,7 @@ class CHeightMapBlock: public CPtrFuncBase< NAI::CHeightMapBlockInfo >
 	ZDATA
 	CPtr<NAI::IAIMap> pMap;
 	CVec3	center;
-	list<CVec3> specialPoints;   // kept for Move()/CalcHeightMap behavior; release dropped it from serialize
-	// release save-format @5/6/7 (replaces the serialized specialPoints list): a single special point + 2 floors.
-	// Dead in this predecessor (Move drives the list); save-format member only, behavior deferred.
+	// Retail v1.2 0x73b2c0/0x73b3e0: both live movement and reload use these samples.
 	CVec3 specialPoint = CVec3( 0.0f, 0.0f, 0.0f );
 	int nFloor1 = 0;
 	int nFloor2 = 0;
@@ -67,10 +65,10 @@ protected:
 	virtual void Recalc();
 public:
 	CHeightMapBlock() {}
-	CHeightMapBlock( const CVec3 &_center, NAI::IAIMap *_pMap ) : pMap(_pMap), center(_center) {}
+	CHeightMapBlock( const CVec3 &_center, NAI::IAIMap *_pMap, int nFloor )
+		: pMap(_pMap), center(_center), specialPoint(_center), nFloor1(nFloor), nFloor2(nFloor) {}
 
-	void Move( const CVec2 &newCenter, const NAI::SHeightCalcInfo &hNew );
-	void Move( const CVec3 &newPoint, const list<CVec3> &specialPoints  );
+	void Move( const CVec3 &newCenter, const CVec3 &newSpecialPoint, int nNewFloor1, int nNewFloor2 );
 
 	float GetHeight( float fX, float fY );
 	CVec3 GetNormal( float fX, float fY );
@@ -86,16 +84,20 @@ CVec3 CHeightMapBlock::GetNormal( float fX, float fY )
 	return GetValue()->GetNormal( fX, fY );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CHeightMapBlock::Move( const CVec3 &newCenter, const list<CVec3> &_specialPoints )
+void CHeightMapBlock::Move( const CVec3 &newCenter, const CVec3 &newSpecialPoint, int nNewFloor1, int nNewFloor2 )
 {
+	if ( center == newCenter )
+		return;
 	center = newCenter;
-	specialPoints = _specialPoints;
+	specialPoint = newSpecialPoint;
+	nFloor1 = nNewFloor1;
+	nFloor2 = nNewFloor2;
 	if ( IsValid( pValue ) && IsValid( pHeightsUnchanged ) )
 	{
 		CTRect<int> r;
 		NAI::CalcHeightMapSize( &r, center, F_HEIGHT_MAP_SIZE );
 		pHeightsUnchanged->Move( r.left, r.top );
-		NAI::CalcHeightMap( pMap, pHeightsUnchanged, newCenter.z, specialPoints );
+		NAI::CalcHeightMap( pMap, pHeightsUnchanged, center, specialPoint, nFloor1, nFloor2 );
 		*pValue = *pHeightsUnchanged;
 		NAI::CheckGradient( pValue );
 		//pHeightsUnchanged->ShowSpheres();
@@ -113,7 +115,7 @@ void CHeightMapBlock::Recalc()
 	CTRect<int> r;
 	NAI::CalcHeightMapSize( &r, center, F_HEIGHT_MAP_SIZE );
 	pHeightsUnchanged->Init( r );
-	NAI::CalcHeightMap( pMap, pHeightsUnchanged, center.z, specialPoints );
+	NAI::CalcHeightMap( pMap, pHeightsUnchanged, center, specialPoint, nFloor1, nFloor2 );
 	*pValue = *pHeightsUnchanged;
 	NAI::CheckGradient( pValue );
 	//pValue->ShowSpheres();
@@ -127,7 +129,7 @@ class CUnitTerrain: public NAnimation::ITerrainFunction
 	CDGPtr< CHeightMapBlock > pBlock;
 public:
 	CUnitTerrain() {}
-	CUnitTerrain( const CVec3 &center, NAI::IAIMap *pAIMap );
+	CUnitTerrain( const CVec3 &center, NAI::IAIMap *pAIMap, int nFloor );
 	void Move( const NAI::SUnitPosition &pos );
 	void Move( const NAI::SUnitPosition &pos1, const NAI::SUnitPosition &pos2 );
 
@@ -136,9 +138,9 @@ public:
 	int operator&( CStructureSaver &f );
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CUnitTerrain::CUnitTerrain( const CVec3 &center, NAI::IAIMap *pAIMap )
+CUnitTerrain::CUnitTerrain( const CVec3 &center, NAI::IAIMap *pAIMap, int nFloor )
 {
-	pBlock = new CHeightMapBlock( center, pAIMap );
+	pBlock = new CHeightMapBlock( center, pAIMap, nFloor );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CUnitTerrain::Move( const NAI::SUnitPosition &pos )
@@ -146,9 +148,7 @@ void CUnitTerrain::Move( const NAI::SUnitPosition &pos )
 //	NAI::SHeightCalcInfo hInfo;
 //	pos.pos.GetHInfo( &hInfo );
 //	pBlock->Move( pos.GetCPNoHeight(), hInfo );
-	list<CVec3> specialPoints;
-	specialPoints.push_back( pos.GetCP() );
-	pBlock->Move( pos.GetCP(), specialPoints ); 
+	pBlock->Move( pos.GetCP(), pos.GetCP(), pos.pos.GetFloor(), pos.pos.GetFloor() );
 //	CVec2 ps = pos.GetCPNoHeight();
 //	NGScene::particleWaveTexture.Wave( Float2Int(ps.x / NGScene::WAVE_GRID_SIZE), Float2Int(ps.y / NGScene::WAVE_GRID_SIZE) );
 }
@@ -159,10 +159,7 @@ void CUnitTerrain::Move( const NAI::SUnitPosition &pos1, const NAI::SUnitPositio
 //	pos1.pos.GetHInfo( &hInfo1 );
 //	pos2.pos.GetHInfo( &hInfo2 );
 //	hInfo1.Merge( hInfo2 );
-	list<CVec3> specialPoints;
-	specialPoints.push_back( pos1.GetCP() );
-	specialPoints.push_back( pos2.GetCP() );
-	pBlock->Move( pos2.GetCP(), specialPoints );
+	pBlock->Move( pos2.GetCP(), pos1.GetCP(), pos2.pos.GetFloor(), pos1.pos.GetFloor() );
 //	CVec2 ps = pos1.GetCPNoHeight();
 //	NGScene::particleWaveTexture.Wave( Float2Int(ps.x / NGScene::WAVE_GRID_SIZE), Float2Int(ps.y / NGScene::WAVE_GRID_SIZE) );
 }
@@ -195,7 +192,7 @@ CUnitAnimator::CUnitAnimator( CFuncBase<STime> *_pTime, const NAI::SUnitPosition
 	NDb::CSkeleton *_pSkeleton, NAI::IAIMap *_pAIMap, NDb::CRPGPers *_pPers, CWorld *_pWorld ) 
 : pTime( _pTime ), pSkeleton(_pSkeleton), pAIMap(_pAIMap), pPers(_pPers), pWorld(_pWorld)
 {
-	pTerrainFunc = new CUnitTerrain( pos.GetCP(), pAIMap );
+	pTerrainFunc = new CUnitTerrain( pos.GetCP(), pAIMap, pos.pos.GetFloor() );
 	ASSERT ( _pSkeleton );
 	bStart = false;
 	bStrafing = false;

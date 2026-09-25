@@ -185,7 +185,7 @@ public:
 	virtual void SetParticleShow( bool bNewState ) { bShowParticles = bNewState; }
 	virtual void SetAmbient( const CVec3 &vBottomAmbientColor, const CVec3 &vTopAmbientColor );
 	virtual CObjectBase* AddDirectionalLight( const CVec3 &ptColor, const CVec3 &ptLight, const CVec3 &ptOrigin, const CVec2 &ptSize, float fMaxHeight, bool bLightmapOnly );
-	virtual CObjectBase* AddPointLight( const CVec3 &ptColor, const CVec3 &ptOrigin, float fR, bool bLightmapOnly );
+	virtual CObjectBase* AddPointLight( const CVec3 &ptColor, const CVec3 &ptOrigin, float fR, bool bLightmapOnly, bool bCastShadow );
 	virtual CObjectBase* AddFlare( CFuncBase<CVec3> *pOrigin, CFuncBase<STime> *pTime, int nFloor, float fFlareRadius, NDb::CTexture *pFlareTexture, float fOnTime, float fOffTime );
 	virtual CObjectBase* AddPostFilter( const vector<CObjectBase*> &target, IPostProcess *pEffect );
 	virtual CObjectBase* AddSpotLight( const CVec3 &ptColor, const CVec3 &ptOrigin, const CVec3 &ptDir, float fFOV, float fRadius, NDb::CTexture *pMask, bool bLightmapOnly );
@@ -1133,11 +1133,11 @@ CObjectBase* CGameView::AddDirectionalLight( const CVec3 &ptColor, const CVec3 &
 	return pScene->AddDirectionalLight( pCColor, pCColor, CVec3(0,0,0), ptLight, ptOrigin, ptSize, fMaxHeight, bLightmapOnly, 1.5f );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CObjectBase* CGameView::AddPointLight( const CVec3 &ptColor, const CVec3 &ptOrigin, float fR, bool bLightmapOnly )
+CObjectBase* CGameView::AddPointLight( const CVec3 &ptColor, const CVec3 &ptOrigin, float fR, bool bLightmapOnly, bool bCastShadow )
 {
 	if ( fR <= 0 )
 		return 0;
-	return pScene->AddPointLight( ptColor, ptOrigin, fR, bLightmapOnly );
+	return pScene->AddPointLight( ptColor, ptOrigin, fR, bLightmapOnly, bCastShadow );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CObjectBase* CGameView::AddFlare( CFuncBase<CVec3> *pOrigin, CFuncBase<STime> *pTime, int nFloor, float fFlareRadius, NDb::CTexture *pFlareTexture, float fOnTime, float fOffTime )
