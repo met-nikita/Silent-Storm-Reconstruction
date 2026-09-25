@@ -469,6 +469,8 @@ public:
 			return;
 		}
 		nStage = 2;
+		// Retail v1.2 0x7b556c/0x7b55cc: explicitly equipping cancels scripted holstering.
+		pUS->SetWalkWithoutWeapon( false );
 		NDb::EItemSubType subType = pInventory->Get(slot)->GetDBItem()->subType;
 		if ( subType == NDb::SUBTYPE_HEAVY || subType == NDb::SUBTYPE_MINE_DETECTOR )
 			pUS->animator.ActivateItem( pUS->GetPosition(), true, bTwoHeavy, NDb::BELT_M1, pRPG->GetWeaponType() );

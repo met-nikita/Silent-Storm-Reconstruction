@@ -606,6 +606,8 @@ BEGIN_SCRIPT_COMMAND( UnitActivateWeapon, "ub[true]" )
 		pUS->Do( new NWorld::CCmdSetCommand( pUS, 
 			new NWorld::CCmdPath( pUS->GetPosition().pos, NAI::PF_DEFAULT, needActiveItem ) ) );
 		pUS->Do( new NWorld::CCmdSetCommand( pUS, new NWorld::CCmdContinue() ) );
+		// Retail v1.2 0x6f9d30: later movement must preserve a scripted holster.
+		pUS->SetWalkWithoutWeapon( !luaParams[ 1 ].b );
 	}
 	return 0;
 END_SCRIPT_COMMAND

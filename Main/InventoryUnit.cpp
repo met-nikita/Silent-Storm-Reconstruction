@@ -193,7 +193,8 @@ void GetItemsBindPlaces( vector<IRenderVisitor::SBoundMesh> *pRes, NRPG::IUnitMi
 		{
 			if ( pActiveItem->subType == NDb::SUBTYPE_HEAVY )
 			{
-				if ( !bNoHeavyWeapon )
+				// Retail v1.2 0x61e434: a holstered active heavy weapon has no visible mesh.
+				if ( !bUndrawWeapon && !bNoHeavyWeapon )
 					AttachItem( pRes, &rnd, UIT_WEAPON_HEAVY, pActiveItem->pModel, bIsPK, pActiveIItem );
 				bHeavy = true;
 			}

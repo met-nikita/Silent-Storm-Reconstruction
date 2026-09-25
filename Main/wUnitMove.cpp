@@ -696,6 +696,7 @@ void CExecMove::DoCommand()
 								CPtr<NRPG::IInventoryItem> pItem = pInventory->Get((NDb::ESlot)pActivateItem->nSlot);
 								if (IsValid(pItem))
 								{
+									pUS->SetWalkWithoutWeapon( false );
 									NDb::EItemSubType subType = pItem->GetDBItem()->subType;
 									if (subType == NDb::SUBTYPE_HEAVY)
 										animator.ActivateItem(position, true, false, NDb::BELT_M1, pRPG->GetWeaponType());
@@ -982,7 +983,7 @@ void CExecMove::ConvertPath( NAI::CPath *pPath, ENeedActiveItem eActive )
 	NRPG::IInventory *pInventory = pUS->GetUnitRPG()->GetInventory();
 	int nSlot = pInventory->GetActiveSlot();
 	CUnitAnimator &animator = pUS->animator;
-	bool bActive = animator.IsActiveItem();
+	bool bActive = animator.IsActiveItem() && !pUS->GetUndrawItem();
 	bool bInactivePose = ( pUS->GetPosition().pos.p.GetPose() == NAI::CM_INACTIVE );
 
 	bLastCommand = false;
@@ -1002,6 +1003,10 @@ void CExecMove::ConvertPath( NAI::CPath *pPath, ENeedActiveItem eActive )
 	NRPG::IInventoryItem *pActiveItem = pInventory->GetActive();
 	//CDynamicCast<NRPG::IWeaponItem> pWeapon(pActiveItem);
 	bool bWeapon = ( pActiveItem != 0 && !animator.IsCarryingCorpse() );
+	// Retail v1.2 0x7b988f: owning a weapon is separate from drawing it for movement.
+	bool bAutoActivate = bWeapon && !pUS->IsWalkingWithoutWeapon();
+	if ( pPath->points.size() <= 3 && eActive == ITEM_INACTIVE )
+		bAutoActivate = false;
 	if ( !bWeapon && bActive )
 	{
 		commandsQueue.push_back( new CCmdDeactivateItem( pUS, nSlot ) );
@@ -1066,7 +1071,7 @@ void CExecMove::ConvertPath( NAI::CPath *pPath, ENeedActiveItem eActive )
 				// retail @0x3b9330: a cross-layer in-place turn goes through CreateRotateQueue @0x3b9000
 				// (end the pending move, then rotate to cur's heading) -- NOT the inter-grid fold below,
 				// which silently drops the heading change.
-				if ( bWeapon && !bActive )
+				if ( bAutoActivate && !bActive )
 				{
 					commandsQueue.push_back( new CCmdActivateItem( pUS, nSlot ) );
 					bActive = true;
@@ -1087,7 +1092,7 @@ void CExecMove::ConvertPath( NAI::CPath *pPath, ENeedActiveItem eActive )
 				bMoving = true;
 				continue;
 			}
-			if ( bWeapon && !bActive )
+			if ( bAutoActivate && !bActive )
 			{
 				commandsQueue.push_back( new CCmdActivateItem( pUS, nSlot ) );
 				bActive = true;
@@ -1132,7 +1137,7 @@ void CExecMove::ConvertPath( NAI::CPath *pPath, ENeedActiveItem eActive )
 		}
 		else if ( prev.GetPose() != cur.GetPose() )
 		{
-			if ( bWeapon && !bActive )
+			if ( bAutoActivate && !bActive )
 			{
 				commandsQueue.push_back( new CCmdActivateItem( pUS, nSlot ) );
 				bActive = true;
@@ -1141,7 +1146,7 @@ void CExecMove::ConvertPath( NAI::CPath *pPath, ENeedActiveItem eActive )
 		}
 		else if ( prev.GetX() == cur.GetX() && prev.GetY() == cur.GetY() && prev.GetDirection() != cur.GetDirection() )
 		{
-			if ( bWeapon && !bActive )
+			if ( bAutoActivate && !bActive )
 			{
 				commandsQueue.push_back( new CCmdActivateItem( pUS, nSlot ) );
 				bActive = true;
@@ -1157,7 +1162,7 @@ void CExecMove::ConvertPath( NAI::CPath *pPath, ENeedActiveItem eActive )
 		}
 		else if ( prev.GetX() != cur.GetX() || prev.GetY() != cur.GetY() )
 		{
-			if ( bWeapon && !bActive )
+			if ( bAutoActivate && !bActive )
 			{
 				commandsQueue.push_back( new CCmdActivateItem( pUS, nSlot ) );
 				bActive = true;

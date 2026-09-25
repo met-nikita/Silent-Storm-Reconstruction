@@ -136,9 +136,7 @@ class CUnitServer: public CDumbUnitServer, public CUnit, public CTBSUnit<CUnitSe
 	int nDialog;
 	bool bCanTalk;
 	int nScriptToHit = -1;	// UnitSetToHit override (retail CUnitServer+0x1e8, serialized tag 25); -1 = use the computed to-hit
-	bool bWalkWithoutWeapon = false;	// retail +0x1ec (tag 26): walk-with-holstered-weapon flag; retail
-										// CCmdActivateItem::AnimateCommand @0x3bb1a0 clears it before ActivateItem
-										// (dev's activation path has no AnimateCommand yet -- runtime-inert here).
+	bool bWalkWithoutWeapon = false;	// retail +0x1ec (tag 26): suppress automatic weapon activation during movement
 	list< CPtr<CUnitServer> > hiddenAtSight;	// retail +0x1f0 (tag 27): sight-bookkeeping list, cleared together with
 												// lostUnits in Die @0x3c2190 / OnUnitMadeUnconscious @0x3c2010.
 	bool bForceNoChangePose = false;	// retail CUnitServer+0x1f4 (serialized tag 28; luaUnitLockPose writes it): a script
@@ -181,6 +179,8 @@ private:
 public:
 	int GetScriptToHit() const { return nScriptToHit; }			// UnitSetToHit override (-1 = none)
 	void SetScriptToHit( int n ) { nScriptToHit = n; }
+	bool IsWalkingWithoutWeapon() const { return bWalkWithoutWeapon; }
+	void SetWalkWithoutWeapon( bool b ) { bWalkWithoutWeapon = b; }
 	// --- wCheckTooMuchCorpses corpse-density failsafe convergence surface ---
 	// Release CUnitServer carried a death timestamp (retail +0x228) and a quest-clue counter
 	// (retail +0x1e4). Read by the corpse helpers to flag the OLDEST corpse first and spare
