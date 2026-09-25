@@ -7,9 +7,7 @@
 // NRPG::CreateHintItem @0x6a21a0 is now REAL (RPGItemSet.cpp, declared in RPGItem.h): db item 0x1b6
 // wrapped in the CSimpleItem<IHintItem> analog CHintItem. The former deferred stub here is gone --
 // the hint-item subsystem (NRPG::IHintItem + the CMissionUI CHintIcon overlay pass, retail
-// UpdateVisibleItems @0x2130c0) exists in this fork now. NOTE: PlaceHintsToMap still has no caller
-// in this fork (the retail world-side hint-slot feed is not wired yet), so no pickups spawn until
-// that lands.
+// UpdateVisibleItems @0x2130c0) receives the pickups placed by CWorld::CreateRandom.
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 namespace NAI
 {

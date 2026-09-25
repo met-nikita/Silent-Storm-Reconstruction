@@ -650,18 +650,12 @@ END_SCRIPT_COMMAND
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 BEGIN_SCRIPT_COMMAND( UnitGetRoute, "u" )
 	CDynamicCast<NWorld::CUnitServer> pUS(luaParams[0].p);
-	if (pUS)
+	CPtr<NAI::IAIUnit> pUnit = NAI::GetAIUnit( pUS );
+	if ( IsValid( pUnit ) )
 	{
-		CDynamicCast<NAI::CAICommander> pCommander(pUS->GetPlayer()->GetCommander());
-		if (pCommander)
-		{
-			CPtr<NAI::IAIUnit> pUnit( pCommander->GetAIUnit( pUS ) );
-			if ( IsValid( pUnit ) )
-			{
-				luaPushCPtr( pState, pUnit->GetRoute() );
-				return 1;
-			}
-		}
+		// Retail 0x6f9790 returns the mode-selected IAILogic, not the obsolete CTask.
+		luaPushCPtr( pState, pUnit->GetRouteLogic() );
+		return 1;
 	}
 	pScript->PushNil();
 	return 1;
@@ -669,9 +663,9 @@ END_SCRIPT_COMMAND
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 BEGIN_SCRIPT_COMMAND( RouteIsFinished, "u" )
 	bool bFinished = true;
-	CDynamicCast<NAI::CTask> pTask(luaParams[0].p);
-	if (pTask)
-		bFinished = pTask->IsEndOfTask();
+	CDynamicCast<NAI::IAILogic> pRoute(luaParams[0].p);
+	if ( IsValid( pRoute ) )
+		bFinished = pRoute->IsFinished();
 	luaPushBool( pState, bFinished );
 	return 1;
 END_SCRIPT_COMMAND

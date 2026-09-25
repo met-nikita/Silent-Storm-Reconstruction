@@ -109,7 +109,7 @@ public:
 	// (sequence -> routes[1]; else pCurrentLogic if set, else routes[0]); SetLogic @0xaddc0 PAUSES the
 	// route under a new combat logic and NO-OPS during a sequence; SetLogic(0)/CancelCurrentLogic
 	// @0xadcd0 RESUMES the paused route. Named *RouteLogic here because the legacy dev GetRoute() (the
-	// CTask stub above) still occupies the GetRoute name for the lua UnitGetRoute binding. Non-pure
+	// CTask stub above) still occupies the GetRoute name. Script bindings use GetRouteLogic. Non-pure
 	// defaults (vtable-order append) so any other IAIUnit impl builds.
 	virtual IAILogic* GetRouteLogic() const { return 0; }
 	virtual void SetRouteLogic( IAILogic * ) {}

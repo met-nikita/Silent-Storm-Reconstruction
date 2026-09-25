@@ -206,6 +206,7 @@ public:
 	CDFrozenItem* AddFrozenItem( NAI::IAIMap *pMap, const CVec3 &pos, const CQuat &rot, NRPG::IInventoryItem *pInvItem, bool bTemporaryVisible = false, int nFloor = 0 );
 	//! remove frozen item by RPG pointer
 	void RemoveFrozenItem( NRPG::IInventoryItem *pInvItem );
+	void RemoveAllHintItems();
 	//! get frozen (on-ground) items that can be seen in some area (retail @0x34a400, ctrl vtbl+0x1c)
 	void GetVisibleItems( const SSphere &sphere, list<IVisible*> *pRes );
 	//! get in-flight (dynamic) vision-candidate items in some area (retail @0x34a420, ctrl vtbl+0x20:

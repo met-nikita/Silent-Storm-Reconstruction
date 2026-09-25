@@ -1730,8 +1730,12 @@ void CWorld::CreateRandom( int nVariantID, const vector<string> &params,
 	if ( !bLeanAndMean )
 	{
 		ClueToSlot personClueToSlot, itemClueToSlot;
+		// Retail synchronizes placed geometry before dropping clue/hint items onto it.
+		pAIMap->Sync();
 		DistributeClues( mapInfo, clues, &personClueToSlot, &itemClueToSlot );
 		PlaceItemSlotsToMap( itemClueToSlot );
+		if ( !IsValid( pGlobalGame ) || !pGlobalGame->bNoMoreHints )
+			PlaceHintsToMap( this, pAIMap, mapInfo.hintSlots );
 		//CreateFakeTerrainInfo( &terrain );
 		//
 		// after this point do not place objects that affect passability
@@ -2411,10 +2415,8 @@ void CWorld::ScriptWantTurnBased( bool bWant )
 // LUA convergence (hint machinery): retail NWorld::CWorld::AddNextUIHint @0x368140 (IWorld vtbl+0x118).
 // Walk the CUIHint table and pick the not-yet-shown hint with the smallest nSequenceID strictly greater
 // than the global game's cursor (nHintSequenceID); advance the cursor onto it and remember it in hintsSet.
-// When bSilent is false it also pops the hint modal -- but the sole caller (lua AddHints) passes true, so the
-// sequence advances silently. When fewer than two unshown hints remained, the sequence is exhausted: set
-// bNoMoreHints and refresh. (Retail also RemoveAllHintItems()s the in-world hint pickups here; this
-// predecessor fork has no in-world hint-item subsystem, so there is nothing to remove.)
+// Non-silent pickups show the hint modal; lua AddHints advances silently. On exhaustion,
+// remove the remaining in-world books and stop placing hints in subsequent maps.
 void CWorld::AddNextUIHint( bool bSilent )
 {
 	NRPG::CGlobalGame *pGlobalGame = GetGlobalGame();
@@ -2456,6 +2458,7 @@ void CWorld::AddNextUIHint( bool bSilent )
 	if ( nUnshown < 2 )
 	{
 		pGlobalGame->bNoMoreHints = true;
+		RemoveAllHintItems();
 		UpdateVisible();
 	}
 }

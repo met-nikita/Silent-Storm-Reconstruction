@@ -6,6 +6,7 @@
 #include "aiWaypoint.h"
 #include "TerrainInfo.h"
 #include "MapBuildingInfo.h"
+#include "wHintsFunc.h"
 #include "..\Misc\RandomGen.h"
 #include "..\DBFormat\DataChest.h"	// NDb::CRPGChestReal (SMapUnit::pBackpack), NDb::CTRPGChest
 
@@ -196,6 +197,7 @@ struct SMapInfo
 	CPtr<NDb::CTAmbientLight> pDefaultLight;
 	vector<SDeploySpot> deploySpots;
 	vector<SClueSlot> slots;
+	vector<NWorld::SHintSlot> hintSlots;
 	unordered_map<int, SUnitGroup> groups;
 	bool bShowTerrain;
 	// retail SMapInfo carries the variant's NoAttack flag next to bShowTerrain (TraverseTemplateTree

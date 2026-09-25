@@ -6,8 +6,7 @@
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // wHintsFunc -- retail-new module (release compiland wHintsFunc.obj, no Jan03 counterpart).
 // Scatters freshly created in-world hint pickups over the map. The hint-item factory
-// (NRPG::CreateHintItem @0x2a21a0, RPGItemSet.cpp) is real now; PlaceHintsToMap itself still has
-// no caller in this fork (the world-side hint-slot feed is not wired yet).
+// (NRPG::CreateHintItem @0x2a21a0, RPGItemSet.cpp) is fed by MapBuild's hint slots.
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 #include "MapBuildingInfo.h"		// SMapPosition
 ////////////////////////////////////////////////////////////////////////////////////////////////////

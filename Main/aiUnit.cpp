@@ -534,12 +534,7 @@ void CAIUnit::ActivateCurrentControl()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CTask* CAIUnit::GetRoute() const
 {
-	// CAITaskCommander removal: routes no longer install a CAITaskControl wrapping a CTask -- they install a
-	// per-unit CAIRouteLogic (SetLogic). There is therefore no CTask to hand back, so GetRoute returns 0. The
-	// only caller is the lua UnitGetRoute/RouteIsFinished pair (scriptUnit.cpp): UnitGetRoute pushes nil and
-	// RouteIsFinished(nil) then reports the route "finished" (its CDynamicCast<CTask> fails). Retail's
-	// CAIRouteLogic-based route-finished query is not reconstructed in this stage (runtime is deferred until
-	// the AI layer is fully converged); the signature is kept so the lua binding + IAIUnit vtable stay intact.
+	// Legacy CTask interface: routes now use IAILogic. Script queries use GetRouteLogic().
 	return 0;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
