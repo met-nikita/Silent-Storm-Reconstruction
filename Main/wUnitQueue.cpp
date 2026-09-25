@@ -282,6 +282,18 @@ static bool CanSimplyOpen( NAI::IPathNetwork *pNet, NAI::SPathPlace &from, IWind
 	for ( int nRes = 0; nRes < res.size(); ++nRes )
 	{
 		int nNewDir = pNet->GetClosestDir( from, res[ nRes ] );
+		// Retail v1.2 0x7bd9cd: blend the approach heading when already beside the door.
+		if ( fabs2( NAI::SPosition( from, pNet ).GetCP() - NAI::SPosition( res[nRes], pNet ).GetCP() ) < 0.5f )
+		{
+			int nApproachDir = res[nRes].GetDirection();
+			int nApproachDiff = abs( nApproachDir - nNewDir );
+			if ( nApproachDiff > 4 )
+				nNewDir = ( nApproachDir + nNewDir ) / 2 + 4;
+			else if ( nApproachDiff < 4 )
+				nNewDir = ( nApproachDir + nNewDir ) / 2;
+			if ( nNewDir > 7 )
+				nNewDir -= 8;
+		}
 		int nDiff = abs( nNewDir - nDir ); 
 		if ( nDiff > 4 )
 			nDiff = 8 - nDiff;

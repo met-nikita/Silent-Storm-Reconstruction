@@ -95,6 +95,8 @@ public:
 	// bound). Zeroes *pRes and returns false when the object has no hulls. Consumer:
 	// CUnitServer::UpdateVisible's mine-LOS probe pull-back (@0x7c4d53).
 	virtual bool GetObjectBound( SBound *pRes, CObjectBase *pSrc ) = 0;
+	// Retail v1.2 0x4664b0: centers of the closed/open collision hulls, including the inactive state.
+	virtual bool GetWindowPos( CObjectBase *pSrc, CVec3 *pClosed, CVec3 *pOpen ) = 0;
 	virtual bool CalcIntersection( const CVec3 &ptCenter, float fRadius, int s, CObjectBase *pIgnoreUser = 0 ) = 0;
 	virtual void PrepareCollider( IPrepareCollider *pRes, const SBound &bound, float fElementSize,
 		const int nMask, bool bSelect2DoorHulls = false ) = 0;

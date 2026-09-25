@@ -96,26 +96,14 @@ bool CWindowDoor::IsBroken() const
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CVec3 CWindowDoor::GetChangeStateDirection( bool bOpen ) const
 {
-	CVec3 ptDir = VNULL3;
-	CDynamicCast<NAI::CPathNetwork> pNetwork( pWorld->GetPathNetwork() );
-	NAI::CPathNetwork::SFlipper *pFlipper = 0;
-	pFlipper = pNetwork->GetFlipper( this );
-	if ( pFlipper != 0 && !pFlipper->locksOpen.empty() && !pFlipper->locksClosed.empty() )
-	{
-		//CRAP{
-		bool bBigGates = pFlipper->locksOpen.size() > 100 || pFlipper->locksClosed.size() > 100;
-		//CRAP}
-		if ( !bBigGates )
-		{
-			CVec3 ptOpened, ptClosed;
-			ptOpened = pNetwork->GetCP( pFlipper->locksOpen.begin()->first );
-			ptClosed = pNetwork->GetCP( pFlipper->locksClosed.begin()->first );
-			if ( bOpen )
-				ptDir = ptOpened - ptClosed;
-			else	
-				ptDir = ptClosed - ptOpened;
-		}
-	}
+	// Retail v1.2 0x7818d0: use the actual door hulls, not arbitrary locked grid tiles.
+	if ( !IsValid( pWorld ) )
+		return VNULL3;
+	CVec3 ptClosed, ptOpened;
+	if ( !pWorld->GetAIMap()->GetWindowPos( const_cast<CWindowDoor*>( this ), &ptClosed, &ptOpened ) )
+		return VNULL3;
+	CVec3 ptDir = bOpen ? ptOpened - ptClosed : ptClosed - ptOpened;
+	Normalize( &ptDir );
 	return ptDir;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////

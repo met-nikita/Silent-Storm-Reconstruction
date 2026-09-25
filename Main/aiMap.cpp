@@ -437,6 +437,7 @@ class CAIMap: public IAIMap, public COrdinarySyncDst<NWorld::IVisObj,CAIMap>, pu
 public:
 	// retail IAIMap vtbl+0x2c @0x465800 -- see aiMap.h.
 	virtual bool GetObjectBound( SBound *pRes, CObjectBase *pSrc );
+	virtual bool GetWindowPos( CObjectBase *pSrc, CVec3 *pClosed, CVec3 *pOpen );
 private:
 	template<class TTest>
 		void SelectHulls( SHullSet *pRes, const TTest &f, CVolumeNode *pNode, const SFloorsSelector &fSelect, int nMask, bool bSelect2DoorHulls = false )
@@ -1287,6 +1288,18 @@ bool CAIMap::GetUnitHLPos( CVec3 *pRes, CObjectBase *_pHull, int nUserID )
 	}
 	pHull->pos.forward.RotateHVector( pRes, tmp );
 	return true;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+bool CAIMap::GetWindowPos( CObjectBase *pSrc, CVec3 *pClosed, CVec3 *pOpen )
+{
+	vector<CConvexHull*> hulls;
+	pUserHullsTracker->GetHulls( pSrc, &hulls, false );
+	if ( hulls.size() < 2 )
+		return false;
+	const int nOpen = ( hulls[0]->src.nTSFlags & NWorld::TS_STATE_OPEN ) ? 0 : 1;
+	bool bOpen = GetUnitHLPos( pOpen, hulls[nOpen], -1 );
+	bool bClosed = GetUnitHLPos( pClosed, hulls[1 - nOpen], -1 );
+	return bClosed && bOpen;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CAIMap::GetAccessibleUnitHL( vector<int> *pRes, const CVec3 &ptFrom, CObjectBase *_pHull, float fMaxDistance )
