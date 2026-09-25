@@ -569,8 +569,9 @@ CCommandExecute* CreateActionExecutor( CUnitServer *pUS, CCmd *pCmd, EUnitComman
 				*pError = UCR_INVALID_COMMAND;
 				return 0;
 			default:
-				*pError = UCR_GENERAL_FAILURE;
-				ASSERT(0);
+				// Retail v1.2 0x79d821: non-attack items (including keys and tools)
+				// have no attack action, rather than an available but disabled one.
+				*pError = UCR_UNAVAILABLE;
 				return 0;
 			}
 		}
