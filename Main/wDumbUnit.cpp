@@ -685,13 +685,23 @@ int CDumbUnitServer::ProcessAttack( NWorld::IWorld *_pWorld, int nUserID, NRPG::
 	// The dev rule manufactured fractional strengths, including zero on a blocked hit.
 	int nCurrentVP = pRPG->GetTotalVP();
 
+	// Retail v1.2 0x7512e6: already unconscious units do not voice pain.
+	// This uses world state before the death/unconscious reconciliation below.
+	if ( CanFight() )
+	{
+		NDb::CRPGPers *pAckPers = pRPG->GetRPGUnit()->GetAckHolder();
+		if ( !pAckPers )
+			pAckPers = pRPG->GetRPGPers();
+		if ( pAckPers )
+			PlaySound( pAckPers->pSoundHit );
+	}
+
 	if ( !IsDead() )
 	{
 		CVec3 ptHit;
 		pWorld->GetAIMap()->GetUnitHLPos( &ptHit, pWorld->GetAIMap()->GetHull(this), NAI::HL_HEAD );
 		bool bPK = damage.type == NRPG::RD_PK;
 		pWorld->AddHitLocator( new CHitLocator( nRes, bPK, ptHit, CDynamicCast<CUnit>( (CObjectBase*)this ) ) );
-		PlaySound( pRPG->GetRPGPers()->pSoundHit );
 
 		if ( nRes > 5 )
 		{
