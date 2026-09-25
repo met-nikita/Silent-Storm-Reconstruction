@@ -173,6 +173,7 @@ void CMapColourer::ConstructColouring( CPathNetwork* pNet )
 	CreateZonesMap( &zonesAnyMove, &pLayer->ladders );
 
 	zonesToRecalc.clear();
+	bAlreadyConstructed = true; // Retail v1.2 0x42f657.
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CMapColourer::InvestigateSquareMap( const vector< CTRect<unsigned char> > &areas )
@@ -746,10 +747,17 @@ bool CMapColourer::IsColorTouchingArea( WORD wColor, const vector< CTRect<unsign
 	return IsPointTouchingArea( cAX, cAY, areas );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CMapColourer::RecalcColouring( CPathNetwork *pNet, int nCurrentLayer )
+bool CMapColourer::RecalcColouring( CPathNetwork *pNet, int nCurrentLayer )
 {
+	// Retail v1.2 0x42f692..0x42f6a8: a newly created layer has no colour
+	// tables yet. Build them before entering the incremental update path.
+	if ( !bAlreadyConstructed )
+	{
+		ConstructColouring( pNet );
+		return true;
+	}
 	if ( zonesToRecalc.empty() )
-		return;
+		return false;
 /*	DebugTrace("Recalc %d zones\n", zonesToRecalc.size());
 	for ( int i = 0; i < zonesToRecalc.size(); ++i ) 
 	{
@@ -918,9 +926,10 @@ void CMapColourer::RecalcColouring( CPathNetwork *pNet, int nCurrentLayer )
 		}
 	}
 
+	return true;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CMapColourer::FindAdjacentColours( unsigned char cMinX, unsigned char cMinY, 
+void CMapColourer::FindAdjacentColours( unsigned char cMinX, unsigned char cMinY,
 	unsigned char cMaxX, unsigned char cMaxY, 
 	EPathfinderMode mode, vector<CNodesLayer::SLadder> *pLadders  )
 {
@@ -1268,8 +1277,18 @@ void CMapColourer::AttachLadderTransition( CPathNetwork* pNet, int nLadder, cons
 	pAnother->zonesAnyMove.nodes[ wColor ].AddNeighbour( wLadderColor, wDistance + wDistance1, nLayer );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CMapColourer::RecalcTransitions( CPathNetwork* pNet )
+bool CMapColourer::RecalcTransitions( CPathNetwork* pNet )
 {
+	// Retail v1.2 0x42f203..0x42f257: first attachment is a full pass,
+	// even when ConstructColouring has consumed all dirty rectangles.
+	if ( !bTransitionsAttached )
+	{
+		AttachTransitions( pNet );
+		zonesToRecalc.clear();
+		return true;
+	}
+	if ( zonesToRecalc.empty() )
+		return false;
 	RecalcTransitions( pNet, PM_STAND_ONLY );
 	RecalcTransitions( pNet, PM_ANY_MOVE );
 	for ( int i = 0; i < pMap->pLayer->ladders.size(); ++i )
@@ -1316,6 +1335,7 @@ void CMapColourer::RecalcTransitions( CPathNetwork* pNet )
 		}
 	}*/
 	zonesToRecalc.clear();
+	return true;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CMapColourer::RecalcTransitions( CPathNetwork* pNet, EPathfinderMode mode )
@@ -1395,9 +1415,10 @@ void CMapColourer::AttachTransitions(	CPathNetwork* pNet )
 			}
 		}
 	}
+	bTransitionsAttached = true; // Retail v1.2 0x42e7ee.
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CMapColourer::GetColorNeighbourCenters( CPathNetwork *pNet, WORD wColor, 
+void CMapColourer::GetColorNeighbourCenters( CPathNetwork *pNet, WORD wColor,
 	vector<unsigned char> *cX, vector<unsigned char> *cY, vector<int> *layers, EPathfinderMode mode )
 {
 	list<SNeighbour> *myNeighbours;
