@@ -103,6 +103,10 @@ public:
 			cNewX = cX + cTranslations[direction][0],
 			cNewY = cY + cTranslations[direction][1];
 		CNodesLayer::STile &t2 = pLayer->tiles[ cNewY ][ cNewX ];
+		// Retail v1.2 0x4300a9: colour invalid regions internally, but never
+		// connect an invalid source to a valid tile through this branch.
+		if ( !IsValidPoint( t ) )
+			return IsValidPoint( t2 ) ? 0 : modifier;
 		/*if ( !IsValidPoint( cX, cY ) )
 		{
 			if ( !IsValidPoint( cNewX, cNewY ) )

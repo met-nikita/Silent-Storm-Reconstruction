@@ -348,8 +348,10 @@ void CExecQueue::AddPath( NAI::CPath *pPath, NAI::EFindPathParams _eParams, ENee
 				continue;
 			}
 
-			// add an extra turn point so the character opens the door from the correct side
-			if ( nBestDir != p.GetDirection() )
+			// Retail v1.2 0x7bebed: this segment stops to operate the door.
+			pSimplePath->points.back().SetMoving( false );
+			// Inactive places (e.g. ladders) cannot add a normal turning step.
+			if ( nBestDir != p.GetDirection() && p.GetPose() != NAI::CM_INACTIVE )
 			{
 				NAI::SPathPlace newPoint( p );
 				newPoint.SetDirection( nBestDir );

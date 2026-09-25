@@ -764,7 +764,7 @@ int CGame::GetCompositeToHit( NWorld::CUnit *pAttacker,
 	vector<int> accessibleHLs; // needed only for computing Melee ToHit
 	if ( NRPG::GetToHitType( pAttacker ) == NRPG::TH_MELEE )
 	{
-		pAIMap->GetAccessibleUnitHL( &accessibleHLs, pAttacker->GetPosition().GetCenter(), pAIMap->GetHull(pAttacker), F_MELEE_DISTANCE );
+		pAIMap->GetAccessibleUnitHL( &accessibleHLs, pAttacker->GetPosition().GetCenter(), pAIMap->GetHull(pTarget), F_MELEE_DISTANCE );
 		if ( NAI::HL_ANY != eHL && find( accessibleHLs.begin(), accessibleHLs.end(), eHL ) != accessibleHLs.end() )
 		{
 			accessibleHLs.clear();

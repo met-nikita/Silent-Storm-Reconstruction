@@ -697,15 +697,16 @@ void CExecMove::DoCommand()
 								if (IsValid(pItem))
 								{
 									pUS->SetWalkWithoutWeapon( false );
+									bool bHide = !IsActiveItemToShow( pInventory );
 									NDb::EItemSubType subType = pItem->GetDBItem()->subType;
 									if (subType == NDb::SUBTYPE_HEAVY)
-										animator.ActivateItem(position, true, false, NDb::BELT_M1, pRPG->GetWeaponType());
+										animator.ActivateItem(position, true, false, NDb::BELT_M1, pRPG->GetWeaponType(), bHide);
 									else if (subType == NDb::SUBTYPE_MINE_DETECTOR)
-										animator.ActivateItem(position, true, true, NDb::BELT_M1, pRPG->GetWeaponType());
+										animator.ActivateItem(position, true, true, NDb::BELT_M1, pRPG->GetWeaponType(), bHide);
 									else
 									{
 										int nPlace = pInventory->GetPlaceBySubType(subType);
-										animator.ActivateItem(position, false, nPlace == -1, (NDb::EItemPlace)nPlace, pRPG->GetWeaponType());
+										animator.ActivateItem(position, false, nPlace == -1, (NDb::EItemPlace)nPlace, pRPG->GetWeaponType(), bHide);
 									}
 								}
 							}
