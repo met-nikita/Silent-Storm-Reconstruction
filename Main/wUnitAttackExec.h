@@ -212,7 +212,7 @@ public:
 	virtual EUnitCommandResult CanDoIt( const NAI::SUnitPosition &from, bool bIgnoreTarget = false ) const;
 	virtual int GetStartAP() const;
 	virtual void Start();
-	virtual void PerformAttack( const vector<NRPG::CAttackPortion> &attack, const CRay &ray, float fHit = 1.0f );
+	virtual void PerformAttack( const vector<NRPG::CAttackPortion> &attack, const CRay &ray, CObjectBase *pFilter = 0 );
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CExecMeleeTile

@@ -1632,18 +1632,16 @@ void CExecMelee::Start()
 	pUS->animator.CloseAttack( position, NAI::GetBlowHeight( position, ptTarget ) );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CExecMelee::PerformAttack( const vector<NRPG::CAttackPortion> &attack, const CRay &ray, float fHit )
+void CExecMelee::PerformAttack( const vector<NRPG::CAttackPortion> &attack, const CRay &ray, CObjectBase *pFilter )
 {
 	vector<NRPG::IAttackable*> ignores;
-	CCannon *pCannon = pUS->animator.GetCannon();
-	if ( pCannon )
-		ignores.push_back( pCannon );
-	else
-		ignores.push_back( pUS );
+	ignores.push_back( pUS );
+	CWorld *pWorld = pUS->GetWorld();
 
+	// Retail v1.2 0x7a5366..0x7a538b forwards the world, AI map and target filter.
 	for ( vector<NRPG::CAttackPortion>::const_iterator i = attack.begin(); i != attack.end(); ++i )
 	{
-		pUS->GetWorld()->GetGame()->ProcessMeleeAttackPortion( *i, ray, ignores );
+		NRPG::PerformMeleeAttackPortion( pWorld, pWorld->GetAIMap(), *i, ray, ignores, pFilter );
 	}
 
 	if ( !attack.empty() )
@@ -1768,8 +1766,7 @@ void CExecMeleeUnit::OnLabel()
 		bool bIsMiss;
 		if ( NRPG::PeekRay( pCover, &ray, fHit, &bIsMiss ) )
 		{
-			PerformAttack( attack, ray, fHit );
-			//PerformAttack( attack, ray, bIsMiss, fHit );
+			PerformAttack( attack, ray, pTarget );
 			// @0x3a9677 -- retail's ONLY throw here is CEventOnUnitSuccessfulMelee( attacker ) (typeid
 			// VA 0x98273c), consumed by CAckSuccessfulMeleeAttack (the "landed a melee hit" voice ack).
 			// The earlier CEventOnAttackAtUnit( pUS, pTarget ) throw was a mis-decode -- retail never

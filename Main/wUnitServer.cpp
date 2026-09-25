@@ -624,6 +624,7 @@ CUnit::EState CUnitServer::GetState()
 		case AT_BAZOOKA:
 			break;//return ST_NORMAL;
 		case AT_MELEE: return ST_NORMAL_MELEE;
+		case AT_KNIFE: return ST_NORMAL_KNIFE;
 		case AT_GRENADE: return ST_NORMAL_GRENADE;
 		case AT_FIRSTAID: return ST_NORMAL_MEDKIT;
 		case AT_MINE: return ST_NORMAL_MINE;

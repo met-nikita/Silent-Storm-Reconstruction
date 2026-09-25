@@ -126,7 +126,7 @@ EAttackResult PerformThrowingAttackPortion( NWorld::IWorld *pWorld, CAttackPorti
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // NRPG::PerformMeleeAttackPortion @0x290f70 -- free-fn form of CGame::ProcessMeleeAttackPortion.
-// The release added explicit IWorld* (unread) + IAIMap* + a pFilter object that, when non-null,
+// The release added explicit IWorld* + IAIMap* + a pFilter object that, when non-null,
 // restricts the ProcessAttack callback to that one hit object.
 // DECOMP-vs-dev divergence (followed the release): the dev CGame version `continue`s on a
 // god-moded unit; the release only withholds it from the ignore list and still runs the

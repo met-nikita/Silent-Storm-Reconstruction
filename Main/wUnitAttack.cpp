@@ -91,7 +91,7 @@ EActionType GetActionType( CUnitServer *pUS )
 				if (pMelee->GetDBMeleeWeapon()->bThrowing)
 					return AT_THROW;
 
-				return AT_MELEE;
+				return AT_KNIFE;
 			}
 		}
 	}
@@ -170,6 +170,7 @@ static EUnitCommandResult GetActionValidPlaces( CUnitServer *pUS, CCmdShootTile 
 	switch ( GetActionType( pUS ) )
 	{
 		case AT_MELEE:
+		case AT_KNIFE:
 			GetMeleeAttackPlaces( pUS, pCmd->ptTarget, pRes );
 			break;
 		case AT_SHOOT:
@@ -199,6 +200,7 @@ static EUnitCommandResult GetActionValidPlaces( CUnitServer *pUS, CCmdShootObjec
 	switch ( GetActionType( pUS ) )
 	{
 		case AT_MELEE:
+		case AT_KNIFE:
 			GetMeleeAttackPlaces( pUS, ptTo, pRes );
 			break;
 		case AT_SNIPE:
@@ -538,6 +540,7 @@ CCommandExecute* CreateActionExecutor( CUnitServer *pUS, CCmd *pCmd, EUnitComman
 				*pError = UCR_UNAVAILABLE;
 				return 0;
 			case AT_MELEE:
+			case AT_KNIFE:
 			{
 				NRPG::IUnitMission* pRPG = pUS->GetUnitRPG();
 				ENeedActiveItem eActive = (pRPG->GetWeaponType() == NDb::WT_DEFAULT ? ITEM_INACTIVE : ITEM_ACTIVE);
@@ -625,6 +628,7 @@ CCommandExecute* CreateActionExecutor( CUnitServer *pUS, CCmd *pCmd, EUnitComman
 						*pError = UCR_UNAVAILABLE;
 						return 0;
 					case AT_MELEE:
+					case AT_KNIFE:
 					{
 						NRPG::IUnitMission* pRPG = pUS->GetUnitRPG();
 						ENeedActiveItem eActive = (pRPG->GetWeaponType() == NDb::WT_DEFAULT ? ITEM_INACTIVE : ITEM_ACTIVE);
