@@ -391,11 +391,13 @@ void CMissionDlgUI::UpdatePhrases( NGScene::I2DGameView *pView )
 		NDb::CSequence *pExpression = NDb::GetSequenceByExpression( sVoice.eExpression );
 		do
 		{
+			CVec2 vScreenRect = pView->GetViewportSize();
 			pML->SetText( wsText, 0 );
-			pML->Generate( pView, pDialog->GetSize().x );
+			// Retail v1.2 0x6076d4..0x607707: IML wraps in screen pixels,
+			// not the dialog's virtual 1024x768 coordinates (truncate here).
+			pML->Generate( pView, int( pDialog->GetSize().x * vScreenRect.x / 1024.0f ) );
 
 			sRealSize = pML->GetSize();
-			CVec2 vScreenRect = pView->GetViewportSize();
 			sRealSize.x = sRealSize.x * 1024 / vScreenRect.x;
 			sRealSize.y = sRealSize.y * 768 / vScreenRect.y;
 
