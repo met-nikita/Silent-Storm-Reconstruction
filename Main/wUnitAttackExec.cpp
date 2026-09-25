@@ -1178,7 +1178,14 @@ void CExecShoot::Scream()
 			if ( IsValid( pWeapon->GetDBWeapon() ) && 
 				pWeapon->GetDBWeapon()->pAnimWeaponType->type == NDb::WT_MACHINE_GUN )
 			{
-					pUS->GetWorld()->MakeSound( pUS->GetPosition().GetCP(), NDb::GetSound( 4060 ) );
+				// Retail v1.2 0x7a4836: use the voice donor, falling back to the
+				// unit's own persona only when there is no donor (not no sound).
+				NDb::CRPGPers *pPers = pUS->GetUnitRPG()->GetRPGUnit()->GetAckHolder();
+				if ( !pPers )
+					pPers = pUS->GetUnitRPG()->GetRPGPers();
+				NDb::CSound *pSound = pPers->pLongBurstSnd;
+				if ( pSound )
+					pUS->GetWorld()->MakeSound( pUS->GetPosition().GetCP(), pSound );
 			}
 		}
 	}

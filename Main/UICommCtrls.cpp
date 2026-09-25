@@ -28,12 +28,9 @@ const int
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // retail @0x319d10: chains CText::CText() and -- unlike the SWindowInfo ctor -- does NOT write
 // nSize/nCursor/eMode/bCursorVisible/sFlashTime; the saveload factory uses this ctor and the wire
-// (operator& @0x31b2d0) restores tags 2-9 over it. The off-wire dev render nodes must exist after
-// a bare deserialize too, so they are created here as well (Draw re-syncs their values every frame).
+// (operator& @0x31b2d0) restores tags 2-9 over it.
 CEdit::CEdit()
 {
-	pSize = new NGScene::CCTPoint;
-	pTextString = new NGScene::CCWString;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // retail @0x316f40: chains CText::CText(sInfo), then nSize=255, nCursor=0, eMode=NORMAL,
@@ -41,11 +38,6 @@ CEdit::CEdit()
 CEdit::CEdit( const SWindowInfo &sInfo ):
 	CText( sInfo ), nSize( 255 ), nCursor( 0 ), eMode( NORMAL ), bCursorVisible( false ), sFlashTime( 0 )
 {
-	pSize = new NGScene::CCTPoint;
-	pTextString = new NGScene::CCWString;
-
-	pSize->Set( GetSize() );
-	pTextString->Set( wsText );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CEdit::EMode CEdit::GetMode() const
@@ -229,10 +221,10 @@ void CEdit::Draw( const STime &sTime, NGScene::I2DGameView *pView )
 {
 	wstring wsTemp( wsFormat + wsText );
 
-	if ( GetSize() != pSize->GetValue() )
-		pSize->Set( GetSize() );
-	if ( wsTemp != pTextString->GetValue() )
-		pTextString->Set( wsTemp );
+	// Retail v1.2 0x7150c0: share CText's screen-scaled markup layout.
+	// The old standalone renderer wrapped screen-sized glyphs at virtual width.
+	if ( wsTemp != CText::GetText() )
+		CText::SetText( wsTemp, true );
 
 	if ( GetTickCount() - sFlashTime > 500 )
 	{
@@ -249,35 +241,31 @@ void CEdit::Draw( const STime &sTime, NGScene::I2DGameView *pView )
 
 	VirtualToScreen( &sPosition, &sWindow );
 
-	if ( !pText ) pText = pView->CreateText( pTextString, pSize );
-
-	pText.Refresh();
-	pView->CreateDynamicRects( pText, sPosition, sWindow );
+	list<SRect> chars;
+	GetIML()->Render( &chars, SPoint( 0, 0 ), SRect( 0, 0, 0, 0 ) );
 
 	if ( bCursorVisible )
 	{
 		CRectLayout sLayout;
-		const NGScene::SText &sText = pText->GetValue();
-		if ( nCursor < sText.charsSet.size() )
+		if ( nCursor < chars.size() )
 		{
-			const CTRect<int> &sRect = sText.charsSet[nCursor].sRect;
-			sLayout.AddRect( sRect.x1, sRect.y1, 2, sRect.Height(), CRectLayout::STextureCoord( CTRect<float>( 0, 0, 2, sRect.Height() ) ) );
+			list<SRect>::const_iterator iChar = chars.begin();
+			advance( iChar, nCursor );
+			const SRect &sRect = *iChar;
+			sLayout.AddRect( sRect.x1, sRect.y1, 2, sRect.Height(), CRectLayout::STextureCoord( CTRect<float>( 0, 0, 0, 0 ) ) );
 		}
 		else
 		{
 			CTRect<int> sRect( 0, 0, 0, 24 );
-			if ( !sText.charsSet.empty() )
-				sRect = sText.charsSet.back().sRect;
+			if ( !chars.empty() )
+				sRect = chars.back();
 
-			sLayout.AddRect( sRect.x2, sRect.y1, 2, sRect.Height(), CRectLayout::STextureCoord( CTRect<float>( 0, 0, 2, sRect.Height() ) ) );
+			sLayout.AddRect( sRect.x2, sRect.y1, 2, sRect.Height(), CRectLayout::STextureCoord( CTRect<float>( 0, 0, 0, 0 ) ) );
 		}
 		pView->CreateDynamicRects( (NDb::CTexture*)0, sLayout, sPosition, sWindow );
 	}
 
-	// Deliberate post-rebase divergence: retail Draw @0x314bd0 pushes wsFormat+wsText into the
-	// CText base and ends with CText::Draw; dev paints through its own render nodes above, so it
-	// chains straight to CWindow::Draw (calling CText::Draw here would double-draw the text).
-	CWindow::Draw( sTime, pView );
+	CText::Draw( sTime, pView );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CPushButton

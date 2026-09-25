@@ -51,9 +51,8 @@ const int
 // CEdit -- retail NUI::CEdit (UICommCtrls.obj, saveload id 0xB0241960, PDB sizeof 228): derives
 // from NUI::CText (NOT CWindow -- the Jan03 CWindow base with bActiveState/sTexRect was dropped in
 // retail). operator& @0x31b2d0: 1=CText base, 2=nSize, 3=nCursor, 4=eMode, 5=bCursorVisible (1B),
-// 6=sFlashTime, 7=wsText (string chunk), 8=wsFormat (string chunk), 9=sCursorInfo. The dev render
-// nodes (pSize/pTextString/pText) do not exist in retail and stay OFF-WIRE (rebuildable draw
-// caches; retail renders through the CText base IML instead).
+// 6=sFlashTime, 7=wsText (string chunk), 8=wsFormat (string chunk), 9=sCursorInfo.
+// Text and cursor geometry both use the CText base IML, as in retail.
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CEdit: public CText
 {
@@ -79,13 +78,6 @@ private:
 	SCursorInfo sCursorInfo;
 public:
 	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CText*)this); f.Add(2,&nSize); f.Add(3,&nCursor); f.Add(4,&eMode); f.Add(5,&bCursorVisible); f.Add(6,&sFlashTime); f.Add(7,&wsText); f.Add(8,&wsFormat); f.Add(9,&sCursorInfo); return 0; }
-
-private:
-	// Off-wire draw caches (dev render infra; absent from retail CEdit and from retail saves --
-	// both ctors create pSize/pTextString, Draw re-syncs them and lazily creates pText).
-	CObj<NGScene::CCTPoint> pSize;
-	CObj<NGScene::CCWString> pTextString;
-	CDGPtr< CFuncBase<NGScene::SText> > pText;
 
 public:
 	CEdit();
