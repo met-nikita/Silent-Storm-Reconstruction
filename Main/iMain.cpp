@@ -329,7 +329,7 @@ void CICSave::Exec()
 		for ( int nTemp = 0; nTemp < activeMods.size(); nTemp++ )
 			sFile.WriteString( activeMods[nTemp].szDirectory );
 
-		CStructureSaver sSaver( sFile, CStructureSaver::WRITE );
+		CStructureSaver sSaver( sFile, CStructureSaver::WRITE_COMPRESSED );
 		sSaver.Add( 2, &interfaces );
 		SerializeShared( &sSaver );
 	}
@@ -341,7 +341,7 @@ void CICSave::Exec()
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CICSaveFile -- retail @0x1f6a80: write the whole interface stack into temp\<name> as a raw
-// headerless compressed stream (dev: uncompressed WRITE; the reader is symmetric).
+// headerless compressed stream.
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CICSaveFile::Exec()
 {
@@ -361,7 +361,7 @@ void CICSaveFile::Exec()
 		CFileStream sFile;
 		sFile.OpenWrite( szPath.c_str() );
 
-		CStructureSaver sSaver( sFile, CStructureSaver::WRITE );
+		CStructureSaver sSaver( sFile, CStructureSaver::WRITE_COMPRESSED );
 		sSaver.Add( 2, &interfaces );
 		SerializeShared( &sSaver );
 	}

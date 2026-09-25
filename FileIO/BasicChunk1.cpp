@@ -116,8 +116,17 @@ static bool ReadShortChunkSave( CDataStream &file, chunk_id &dwID, CMemoryStream
 	return true;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-static bool WriteShortChunkSave( CDataStream &file, chunk_id dwID, CMemoryStream &chunk )
+static bool WriteShortChunkSave( CDataStream &file, chunk_id dwID, CMemoryStream &chunk, bool bPacked = false )
 {
+	// Retail v1.2 0x8119d0: each payload has its own compressor/dictionary.
+	if ( bPacked )
+	{
+		CMemoryStream packed;
+		CNetCompressor compressor;
+		compressor.Pack( chunk, packed );
+		packed.Seek( 0 );
+		return WriteShortChunkSave( file, dwID, packed );
+	}
 	DWORD dwLeng;
 	file.Write( &dwID, sizeof( dwID ) );
 	dwLeng = chunk.GetSize();
@@ -567,7 +576,7 @@ void CStructureSaver::Start( bool bRead )
 		// retail pack marker (top-level chunk id 3, "A3\0"): its presence means the three payload
 		// chunks (0 = object table, 2 = per-object data, 1 = main data) are CNetCompressor-packed.
 		// Retail Start @0x3f2730 derives the flag exactly like this and hands it to every payload
-		// GetShortChunkSave @0x3f1d80; retail-written (v1) saves always pack, dev-written ones don't.
+		// GetShortChunkSave @0x3f1d80; plain WRITE streams remain readable without the marker.
 		bool bPacked = false;
 		{
 			CMemoryStream packMarker;
@@ -656,13 +665,12 @@ void CStructureSaver::Finish()
 	if ( !IsReading() )
 	{
 		// Retail Finish (v1.2 0x812a53..0x812a85): version is a separate, unpacked chunk.
-		// Payloads remain unpacked here, so no compression marker (chunk 3) is emitted.
 		CMemoryStream version;
 		version.Write( &nVersion, sizeof(nVersion) );
 		WriteShortChunkSave( res, 4, version );
 		// save standard data
 		AlignDataFileSize();
-		WriteShortChunkSave( res, 1, data );
+		WriteShortChunkSave( res, 1, data, bPackResult );
 		// store referenced objects
 		data.Clear();
 		chunks.back().Clear();
@@ -689,9 +697,15 @@ void CStructureSaver::Finish()
 			FinishChunk();
 		}
 		// save data into resulting file
-		WriteShortChunkSave( res, 0, obj );
+		WriteShortChunkSave( res, 0, obj, bPackResult );
 		AlignDataFileSize();
-		WriteShortChunkSave( res, 2, data );
+		WriteShortChunkSave( res, 2, data, bPackResult );
+		if ( bPackResult )
+		{
+			CMemoryStream marker;
+			marker.Write( "A3", 3 );
+			WriteShortChunkSave( res, 3, marker );
+		}
 	}
 	obj.Clear();
 	data.Clear();

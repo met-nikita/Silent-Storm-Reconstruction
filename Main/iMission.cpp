@@ -2751,7 +2751,7 @@ void CMission::SaveWorld( const string &szFile )
 		CFileStream sFile;
 		sFile.OpenWrite( szPath.c_str() );
 
-		CStructureSaver sSaver( sFile, CStructureSaver::WRITE );
+		CStructureSaver sSaver( sFile, CStructureSaver::WRITE_COMPRESSED );
 		sSaver.Add( 2, &pWorld );
 		SerializeShared( &sSaver );
 	}
