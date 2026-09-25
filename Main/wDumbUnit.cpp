@@ -513,10 +513,12 @@ void CDumbUnitServer::Hide( bool bHide, bool bThrowEvent )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CDumbUnitServer::EnableHide()
 {
-	// retail @0x34ed00: re-arm hiding on the false->true transition (the world UINeedUpdate UI dirty-bit is a
-	// cosmetic no-op absent from this build, so it is elided).
+	// Retail v1.2 0x74f050: refresh command availability only on the re-arm edge.
 	if ( !bCanHide )
+	{
 		bCanHide = true;
+		pWorld->UINeedUpdate();
+	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CDumbUnitServer::FallAsIfDead( const CVec3 &ptDir, bool bDropItemsFromBackPack, bool bPlayDeathAnim )

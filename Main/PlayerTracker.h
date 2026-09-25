@@ -63,6 +63,7 @@ public:
 	void RemoveUnit( IUnitTracker *pUnit );
 
 	bool IsPlayerLoser();
+	bool IsAIPlayer() const;
 	bool IsPlayerWinner();
 	bool IsUnitVisible( NWorld::CUnit *pUnit ) const;
 

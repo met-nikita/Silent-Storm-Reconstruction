@@ -332,6 +332,7 @@ public:
 	bool bAttackAllowed = true;         // retail @CWorld+421, save chunk 0x2e -- ctor seeds true (@0x36a4b0);
 	                                    // CreateRandom @0x36d0b0 sets !mapInfo.bNoAttack (variant NoAttack=1 in
 	                                    // base zones); read ONLY via IsAttackAllowed @0x376da0 (IWorld vtbl+0xc8)
+	bool bUINeedUpdate = false;         // retail save tag 47; fresh-world ctor arms it
 	int nTurnID;
 	STime prevTurnTime;
 	CObj< NRPG::CGlobalDiplomacy > pDiplomacy;
@@ -373,9 +374,6 @@ public:
 	// the layout has exactly three consecutive bools there -- bFirstSegment (+0x1a4), bAttackAllowed
 	// (+0x1a5), bUINeedUpdate (+0x1a6) -- between pHeightLayers (+0x1a0) and allSoundStuff (+0x1a8).
 	//
-	// Retail tags this fork still does not model are graceful-SKIPPED (the chunk format is tag-addressed
-	// + length-prefixed, so an un-requested tag is simply left unread):
-	//   47 = bool bUINeedUpdate (retail +0x1a6) -- retail's UI-refresh latch; no dev counterpart.
 	// Old dev saves no longer load -- retail-save load is the acceptance test.
 	struct SWaypointsChunk		// retail CWaypointsHolder @0x374e60 (tag 2): the named-waypoint hash
 	{
@@ -418,7 +416,8 @@ public:
 		f.Add(44,&pHeightLayers);						// retail +0x1a0 CObj<IHeightLayers> (@0x376f00 GetHeightLayers)
 		f.Add(45,&bFirstSegment);						// retail +0x1a4
 		f.Add(46,&bAttackAllowed);						// retail +0x1a5 (IsAttackAllowed @0x376da0)
-		f.Add(48,&allSoundStuff);						// tag 47 skipped (unmodeled -- see above)
+		f.Add(47,&bUINeedUpdate);
+		f.Add(48,&allSoundStuff);
 		f.Add(49,(CWeatherTracker*)this);
 		f.Add(50,&pExplosionMaster);
 		f.Add(51,&bFreezeStart);						// retail 0x33 (+0x1b8)
@@ -555,6 +554,8 @@ public:
 	virtual bool IsLinkedZone() const;								// retail @0x361c80
 	virtual void RemoveCarriedCorpses();							// retail @0x365900
 	virtual bool IsAttackAllowed() const { return bAttackAllowed; }	// retail @0x376da0 (mov al,[this+0x1a5])
+	virtual bool IsUINeedUpdate();
+	virtual void UINeedUpdate() { bUINeedUpdate = true; }
 	// retail @0x3770c0: plain vector copy-out of the live heard-marker weak refs
 	virtual void GetAllSoundStuff( vector< CPtr<IVisObj> > *pRes ) { *pRes = allSoundStuff; }
 	virtual IPlayer* AddPlayer( const wstring &wsName, NRPG::CGlobalPlayer *pGlobalPlayer, 

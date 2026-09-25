@@ -446,6 +446,7 @@ CWorld::CWorld( NRPG::CGlobalGame *_pGlobalGame ):
 	registerOnNewPlayerFastTurnOrTime( this, &CWorld::OnNewPlayerFastTurnOrTime ),
 	CDebrisController(), pGlobalGame( _pGlobalGame ), nTurnID( 0 ), bLeanAndMean( false )
 { 
+	bUINeedUpdate = true;
 	tPrev = 0; 
 	tHiddenDelta = N_TEST_HIDDEN_DELTA;
 	pTime = new CCTime( N_TEST_HIDDEN_DELTA ); 
@@ -462,6 +463,14 @@ CWorld::CWorld( NRPG::CGlobalGame *_pGlobalGame ):
 	// Only THIS ctor creates it -- the default ctor (@0x36a120) leaves pPocket null so the saveload
 	// path can install the one carried by save tag 42.
 	pPocket = new CPocket;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+bool CWorld::IsUINeedUpdate()
+{
+	// Retail v1.2 0x761780: each pending request is consumed exactly once.
+	bool bUpdate = bUINeedUpdate;
+	bUINeedUpdate = false;
+	return bUpdate;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // NWorld::CWorld::GetDefaultLight @0x3620a0 -- pDefaultLight holds the ambient-light TEMPLATE record,

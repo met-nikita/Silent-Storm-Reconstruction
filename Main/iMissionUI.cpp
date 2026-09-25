@@ -1701,7 +1701,8 @@ void CMissionUI::UpdateEnemies()
 			continue;
 		}
 
-		if ( pEnemy->IsUnconscious() || pMission->GetWorld()->GetDiplomacyState( pPlayer, pEnemy->GetPlayer() ) != NDb::DS_ENEMY )
+		if ( NGlobal::GetVar( "ui_showicons" ).GetFloat() == 0 || pEnemy->IsUnconscious() ||
+			pMission->GetWorld()->GetDiplomacyState( pPlayer, pEnemy->GetPlayer() ) != NDb::DS_ENEMY )
 			continue;
 		bool bVisible = false;
 		for ( int n = 0; n < unitsSet.size(); ++n )
@@ -1760,6 +1761,11 @@ void CMissionUI::UpdateEnemies()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CMissionUI::UpdateClues()
 {
+	if ( NGlobal::GetVar( "ui_showicons" ).GetFloat() == 0 )
+	{
+		clueIconsList.clear();
+		return;
+	}
 	// retail CMissionUI::UpdateAudibleSounds @0x214530: rebuild the sound ("ear")
 	// markers over the heard-not-seen set. The set is derived from the SAME GetSounds feed as the
 	// heard-silhouette render and the TraceCursor heard pick, so an eared unit is exactly the one
@@ -1853,8 +1859,12 @@ void CMissionUI::UpdateClues()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CMissionUI::UpdateTraps()
 {
-	// retail CMissionUI::UpdateTrappedObjects @0x214990 (there gated on the bShowIcons global; this
-	// fork's overlay-icon passes are ungated, matching UpdateEnemies/UpdateClues): one CTrapIcon per
+	if ( NGlobal::GetVar( "ui_showicons" ).GetFloat() == 0 )
+	{
+		trapIconsList.clear();
+		return;
+	}
+	// Retail CMissionUI::UpdateTrappedObjects @0x214990: one CTrapIcon per
 	// entry of the ACTIVE player's GetTrappedObjectsList (@0x387330: live + IMine + IsMineSet -- own
 	// armed traps and spotted enemy mines), keyed-reuse by the trapped object (retail
 	// UpdateHash<CObjectBase,CTrapIcon> @0x2173b0), anchored at the trap position z+0.6

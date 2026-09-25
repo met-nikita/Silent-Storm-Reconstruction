@@ -117,6 +117,7 @@ public:
 	CMissionUI( const SWindowInfo &sInfo, NGame::IMission *pMission );
 
 	bool IsValidCommand( NWorld::CUICmd *pCmd );
+	virtual bool IsReady() const { return true; }
 	NGame::CUICmdExec* CreateExecutor( NWorld::CUICmd *pCmd );
 
 	bool ProcessEvent( const NInput::SEvent &sEvent );

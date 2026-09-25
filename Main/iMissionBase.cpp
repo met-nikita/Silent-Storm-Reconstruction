@@ -161,18 +161,15 @@ void CMissionBase::StopAction()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CMissionBase::IsReady() const
 {
-	// retail CMissionBase::IsReady @0x1a1e60: NOT ready while a sequence runs -> stops TraceCursor/
-	// UpdateState so units cannot be hover-highlighted / selected during a sequence. Cover BOTH the
-	// client sequence (nSequence, via CUICmdBeginSequence) AND a world-level / interrupt sequence
-	// (CWorld::IsSequence) -- a cutscene that raises only the world predicate would otherwise leave
-	// hover live.
-	if ( IsSequence() || pWorld->IsSequence() )
+	// Retail v1.2 0x5a2a20: client sequence, AI player, turn/action, then top desktop.
+	if ( IsSequence() || pActivePlayer->IsAIPlayer() )
 		return false;
 
 	if ( !IsRealTime() && ( IsActionExecuted() || ( pWorld->GetCurrentPlayer() != pActivePlayer->GetPlayer() ) ) )
 		return false;
 
-	return true;
+	NUI::CDesktopWindow *pDesktop = GetDesktop();
+	return !IsValid( pDesktop ) || pDesktop->IsReady();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // retail CMissionBase::IsActionExecuted @0x1a3e30

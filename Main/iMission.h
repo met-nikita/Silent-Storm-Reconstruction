@@ -260,6 +260,7 @@ public:
 	virtual void RemoveUnit( IUnitTracker *pUnit ) = 0;
 
 	virtual bool IsPlayerLoser() = 0;
+	virtual bool IsAIPlayer() const = 0;
 	virtual bool IsPlayerWinner() = 0;
 	virtual bool IsUnitVisible( NWorld::CUnit *pUnit ) const = 0;
 

@@ -87,6 +87,8 @@ public:
 	virtual void ShowDesktop() {}
 	virtual void HideDesktop() {}
 	virtual void UpdateDesktop( const STime &sTime ) {}
+	// Retail desktop vtable +0x4c: overlays reject interactive mission commands.
+	virtual bool IsReady() const { return false; }
 
 	virtual void PlayAck( NWorld::CAckEvent *pEvent );
 	virtual bool IsValidCommand( NWorld::CUICmd *pCmd ) { return true; }

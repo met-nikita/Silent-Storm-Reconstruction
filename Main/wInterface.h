@@ -721,6 +721,9 @@ public:
 	// Default no-op here (same tail-append rationale as InformCorpseStop); CWorld delegates to its existing
 	// CTBSWorld predicate. Consumed by CDumbUnitServer::Segment's track-sequence ORIGINAL-BUG branch.
 	virtual bool IsSequence() const { return false; }
+	// Retail UI dirty latch: read-and-clear, not an unconditional refresh each frame.
+	virtual bool IsUINeedUpdate() { return false; }
+	virtual void UINeedUpdate() {}
 	// Zone re-entry predicates + prep (tail-appended; retail slots differ). CMission::Terminate
 	// @0x1fbc30 saves the zone world for re-entry when IsBase() (retail vtbl+0x1dc @0x376e20:
 	// the current zone IS the scenario "base") or IsLinkedZone() (vtbl+0x1e0 @0x361c80: the
