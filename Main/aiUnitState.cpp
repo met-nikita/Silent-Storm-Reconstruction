@@ -32,23 +32,21 @@ static void RemoveFrom( vector< CPtr<IAIUnit> > *pv, IAIUnit *p )
 		if ( (*i).GetPtr() == p ) { pv->erase( i ); return; }
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// @0x004b05c0: the shared "nearest live unit by CP distance" scan. The release factors FindNearestAlly
-// (@0x004b0810) and FindNearestPossibleEnemy (@0x004b08d0) through this free fn (each calls it with its
-// list, then keeps its own pAlly/pPossibleEnemy + selfModified bookkeeping); the dev keeps those two
-// callers inlined, so this is added as the behaviour-neutral parity surface. Sentinel 65535 (no unit on a
-// tactical map is that far). Skips null/dead candidates (the release's IsDead bit-0x80 test == !IsAlive()).
+// Retail v1.2 0x4b0a00: shared nearest-contact scan, using live world positions.
+// The bit-0x80 test is CObjectBase validity, NOT the unit's health/death state.
+// Contact-removal events own membership; do not silently filter valid corpses here.
 IAIUnit *FindNearestUnit( IAIUnit *pSelf, vector< CPtr<IAIUnit> > &units )
 {
 	if ( !IsValid( pSelf ) )
 		return 0;
 	IAIUnit *pBest = 0;
 	float fBest = 65535.0f;
-	CVec3 me = pSelf->GetPosition().GetCP();
+	CVec3 me = pSelf->GetUnitServer()->GetPosition().GetCP();
 	for ( vector< CPtr<IAIUnit> >::iterator i = units.begin(); i != units.end(); ++i )
 	{
-		if ( !IsAlive( *i ) )
+		if ( !IsValid( *i ) )
 			continue;
-		float d = fabs( (*i)->GetPosition().GetCP() - me );
+		float d = fabs( (*i)->GetUnitServer()->GetPosition().GetCP() - me );
 		if ( d < fBest ) { fBest = d; pBest = (*i).GetPtr(); }
 	}
 	return pBest;
@@ -218,18 +216,7 @@ void SAIUnitState::FindMostDangerousEnemy()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void SAIUnitState::FindNearestPossibleEnemy()   // @0x004b08d0
 {
-	CPtr<IAIUnit> pBest = 0;
-	float fBest = float( 0xFFF );
-	if ( IsValid( pUnit ) )
-	{
-		CVec3 me = pUnit->GetPosition().GetCP();
-		for ( vector< CPtr<IAIUnit> >::iterator i = possibleEnemies.data.units.begin(); i != possibleEnemies.data.units.end(); ++i )
-			if ( IsAlive( *i ) )
-			{
-				float d = fabs( (*i)->GetPosition().GetCP() - me );
-				if ( d < fBest ) { fBest = d; pBest = *i; }
-			}
-	}
+	CPtr<IAIUnit> pBest = FindNearestUnit( pUnit, possibleEnemies.data.units );
 	// retail @0x4b08d0: a CHANGED winner marks the state modified, exactly as FindMostDangerousEnemy /
 	// FindNearestAlly do -- this is what re-fires the reaction (the HUNT rung reads pPossibleEnemy) when a
 	// suspect appears, resolves, or is superseded. The dev predecessor silently updated the pointer.
@@ -240,18 +227,7 @@ void SAIUnitState::FindNearestPossibleEnemy()   // @0x004b08d0
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void SAIUnitState::FindNearestAlly()   // @0x004b0810
 {
-	CPtr<IAIUnit> pBest = 0;
-	float fBest = float( 0xFFF );
-	if ( IsValid( pUnit ) )
-	{
-		CVec3 me = pUnit->GetPosition().GetCP();
-		for ( vector< CPtr<IAIUnit> >::iterator i = allies.data.units.begin(); i != allies.data.units.end(); ++i )
-			if ( IsAlive( *i ) )
-			{
-				float d = fabs( (*i)->GetPosition().GetCP() - me );
-				if ( d < fBest ) { fBest = d; pBest = *i; }
-			}
-	}
+	CPtr<IAIUnit> pBest = FindNearestUnit( pUnit, allies.data.units );
 	if ( pAlly.GetPtr() != pBest.GetPtr() )
 		selfModified.SetModified();
 	pAlly = pBest;
