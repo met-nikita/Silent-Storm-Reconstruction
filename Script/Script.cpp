@@ -128,11 +128,15 @@ bool Script::CheckArgs( const char *szArgList, string sFuncName, vector<SLuaPara
 	{
 		char cTypeID = *pCurChar;
 		string szDefaultValue = "";
+		bool bHasDefaultValue = false;
 		bool isOK = true;
 		//
 		++pCurChar;
 		if ( *pCurChar == '[' )
 		{
+			// Retail tracks the brackets, not the string length: s[] is an
+			// optional empty string (used by GetGlobalGameVar on first visits).
+			bHasDefaultValue = true;
 			for ( ++pCurChar; *pCurChar != ']' && *pCurChar != char( 0 ); ++pCurChar )
 				szDefaultValue += *pCurChar;
 			if ( *pCurChar != char( 0 ) )
@@ -219,7 +223,7 @@ bool Script::CheckArgs( const char *szArgList, string sFuncName, vector<SLuaPara
 				return false;
 			}
 		}
-		else if ( szDefaultValue != "" )
+		else if ( bHasDefaultValue )
 		{
 			// default values
 			switch( cTypeID )

@@ -10,6 +10,12 @@
 #include "iGlobalMap.h"
 #include "iCluesMenu.h"
 #include "iMission.h"
+#include "wInterface.h"
+#include "wUICommands.h"
+#include "RWGame.h"
+#include "PlayerTracker.h"
+#include "iGameStates.h"
+#include "iShowHint.h"
 #include "iInGameMenu.h"
 #include "Interface.h"
 #include "iGlobalMapUI.h"
@@ -59,6 +65,7 @@ private:
 
 protected:
 	void RenderFrame( const STime &sTime );
+	void ProcessWorldCommands();
 
 public:
 	CGlobalMap();
@@ -91,19 +98,41 @@ void CGlobalMap::Initialize( NRPG::CGlobalGame *_pGame, bool _bShowMode )
 	pGlobalMap = NDb::GetGlobalMap( pGlobalGame->nGlobalMapID );
 	pGlobalInfo = shareGlobalInfo.Get( pGlobalGame->nGlobalMapID );
 
+	// Retail CGlobalMap::Initialize: the 2D map still owns a world and players
+	// so its database script can Sleep, show hints and receive UI completion events.
+	pWorld = NWorld::CreateWorld( pGlobalGame );
+	pWorld->CreateDefault();
+	playersSet.resize( pGlobalGame->players.size() );
+	for ( int nPlayer = 0; nPlayer < pGlobalGame->players.size(); ++nPlayer )
+	{
+		WCHAR wsName[32];
+		swprintf( wsName, L"Player %d", nPlayer );
+		playersSet[nPlayer] = new CPlayerTracker( this, pGlobalGame->players[nPlayer], wsName );
+	}
+	pActivePlayer = playersSet.front();
+	CommandState( new CStateEmpty );
+	pScene = NGScene::CreateNewView();
+	pSoundScene = NSound::CreateSoundScene( NDb::GetTMusic( 15 ), 0, pWorld->GetAimTime() );
+	pRender = NRender::CreateRenderGame( pWorld, pScene, pSoundScene );
+	pCamera = CreateCamera( CAMERA_PC );
+	ICamera::SCameraLimits limits;
+	limits.bMovie = true;
+	pCamera->SetLimits( limits );
+	pCamera->SetLock( true );
+
 #ifdef _MAPEDIT
 	pCursor = NUI::ICursor::CreateEditorCursor();
 #else
 	pCursor = NUI::ICursor::Create( true );
 #endif
 
-	pInterface = new NUI::CInterface( pCursor );
-	// This dev 2D map has no world clock; share the interface's clock-backed sound scene.
-	pSoundScene = pInterface->GetSound();
+	pInterface = new NUI::CInterface( pCursor, pSoundScene );
 
 	pGlobalMapUI = new NUI::CGlobalMapUI( NUI::SWindowInfo( pInterface, NUI::SPoint( 0, 0 ), NUI::SPoint( 1024, 768 ), "globalmapUI" ), this );
 	NUI::LoadTemplate( pGlobalMapUI, NDb::GetUIContainer( 175 ) );
 	pGlobalMapUI->ShowWindow( NUI::SWTYPE_SHOW );
+	pWorld->RunPostInitScript( pGlobalMap->pScript );
+	sMinFrameTime = 5;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CGlobalMap::IsGlobalMapShowMode() const
@@ -123,6 +152,7 @@ CPtrFuncBase<CGlobalInfo>* CGlobalMap::GetGlobalInfo() const
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CGlobalMap::OnGetFocus()
 {
+	CMissionBase::OnGetFocus();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CGlobalMap::ProcessEvent( const NInput::SEvent &sEvent )
@@ -164,14 +194,47 @@ bool CGlobalMap::ProcessEvent( const NInput::SEvent &sEvent )
 	return false;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+void CGlobalMap::ProcessWorldCommands()
+{
+	while ( true )
+	{
+		CPtr<NWorld::CUICmd> pCmd = pWorld->GetUICommand();
+		if ( !IsValid( pCmd ) )
+			return;
+		if ( ExecWorldBeginZoneCommand( pCmd ) || ExecWorldSoundCommand( pCmd ) )
+			continue;
+		if ( CDynamicCast<NWorld::CUICmdShowHint> pHint = pCmd )
+		{
+			if ( NGlobal::GetVar( "ui_showhints" ).GetFloat() == 1.0f || bTutorialMode )
+				NMainLoop::Command( new CICShowHint( this, pHint->GetID(), pHint->pHint, pGlobalGame ) );
+			else
+				DoEvent( new NWorld::CCmdInterfaceEvent( pHint->GetID() ) );
+		}
+	}
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 void CGlobalMap::Step()
 {
+	if ( GetTime() - sFPSLimitLastTime < sMinFrameTime )
+		return;
+	sFPSLimitLastTime = GetTime();
+	sTimeCounter.Advance( !bPause, GetTime() );
+	sUITimeCounter.Advance( true, GetTime() );
+	EraseInvalidRefs( &soundsList );
 	if ( CanRender() )
 	{
+		pRender->UpdateViewWorld( !bPause, GetGameTime(), pActivePlayer->GetPlayer(), bCheatVisibility );
+		ProcessWorldCommands();
+		if ( NMainLoop::HaveInterfaceCommand() )
+			return;
+		for ( int nPlayer = 0; nPlayer < playersSet.size(); ++nPlayer )
+			playersSet[nPlayer]->Update( IsRealTime() );
 		pInterface->UpdateCursor();
-		pInterface->Step( GetTime() );
-		RenderFrame( GetTime() );
+		pInterface->Step( GetUITime() );
+		RenderFrame( GetUITime() );
 	}
+	else
+		pRender->ResetTiming();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CGlobalMap::RenderFrame( const STime &sTime )
