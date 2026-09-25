@@ -76,7 +76,7 @@ class CExitMenuInterface: public NMainLoop::IInterfaceBase
 {
 	OBJECT_BASIC_METHODS(CExitMenuInterface);
 private:
-	NInput::CBind bindClose, bindSaveGame, bindExitGame;
+	NInput::CBind bindClose, bindSaveGame, bindExitGame, bindConfirm;
 
 	ZDATA
 	CObj<NUI::ICursor> pCursor;
@@ -99,7 +99,7 @@ public:
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CExitMenuInterface::CExitMenuInterface():
-	bindClose( "cancel" ), bindSaveGame( "save" ), bindExitGame( "exitgame" )
+	bindClose( "cancel" ), bindSaveGame( "save" ), bindExitGame( "exitgame" ), bindConfirm( "confirm" )
 {
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -157,7 +157,7 @@ bool CExitMenuInterface::ProcessEvent( const NInput::SEvent &sEvent )
 		NMainLoop::Command( new NGame::CICSaveLoadMenu( SAVE, pScreenShot->GetTexture(), bAllowSave ) );   // retail @0x1d1310 forwards the screen's own gate
 		return true;
 	}
-	else if ( bindExitGame.ProcessEvent( sEvent ) )
+	else if ( bindConfirm.ProcessEvent( sEvent ) || bindExitGame.ProcessEvent( sEvent ) )
 	{
 		NMainLoop::Command( 0 );
 		return true;

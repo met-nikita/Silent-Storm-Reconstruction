@@ -262,6 +262,7 @@ void CICLoad::Exec()
 #endif
 
 	pSaveManager->LoadSlot( szName );
+	csGame << NUI::GetDBString( 20260 ) << endl; // retail v1.2 0x5f6af3
 	SaveLoadDiag( "LOAD-SLOT-DONE (interfaces restored; entering main loop)\n" );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -336,8 +337,11 @@ void CICSave::Exec()
 #ifndef _DEBUG
 	catch(...)
 	{
+		return;
 	}
 #endif
+	// Emit only after serialization and file cleanup succeed, including silent saves.
+	csGame << NUI::GetDBString( 20259 ) << endl; // retail v1.2 0x5f6f8d
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CICSaveFile -- retail @0x1f6a80: write the whole interface stack into temp\<name> as a raw
