@@ -91,11 +91,19 @@ void CRecountColourerJob::DoJob()
 		++nCurrentLayer;
 	}
 	int nL = pLayer->nLayer;
-	CMapColourer *pC = pGroup->pNet->GetColourer(nL);
+	CPtr<CMapColourer> pC = pGroup->pNet->GetColourer(nL);
+	if ( !IsValid(pC) )
+		return;
 	DebugTrace( "Recolour job: layer %d in group, ", nCurrentLayer-1 );
 	if ( !bAllColoured )
 	{
+		// Retail v1.2 0x488e2a..0x488e69: rebuild scenery connectivity without
+		// temporary unit locks, then restore them. Otherwise the standing unit's
+		// tile is cached as isolated and subsequent searches cannot leave it.
+		list<CObjectBase*> empty;
+		pGroup->pNet->LockSelected( empty );
 		pC->RecalcColouring( pGroup->pNet, nL );
+		pGroup->pNet->UnlockSelected();
 		DebugTrace("Recolour job half-complete\n" );
 	}
 	else
