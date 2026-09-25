@@ -277,6 +277,9 @@ int CInventory::GetActiveSlot() const
 int CInventory::GetPlaceBySubType( NDb::EItemSubType subType ) const
 {
 	NDb::CRPGUniform *pDBUniform = GetUniform();
+	// Retail v1.2 0x69d487: NPCs without a uniform have no belt placement.
+	if ( !pDBUniform )
+		return -1;
 	for ( int i = 0; i < NDb::N_ITEM_PLACES; ++i )
 	{
 		// Retail GetPlaceBySubType compares the first (preferred) subtype only.

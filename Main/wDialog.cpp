@@ -164,6 +164,10 @@ void PlayDialogAsAcks( CWorld *pWorld, int nDialogID )
 	vector< CObj<NWorld::CUnit> > units;
 	MakeDialogData( pWorld, nDialogID, &phrases, &units );
 	phrases.resize( min( NDb::N_ACKINFO_MAX_COUNT, phrases.size() ) );
+	// Retail v1.2 0x74e017..0x74e02a: scripted dialogue takes precedence
+	// over ordinary acknowledgements, including the kill bark it can follow.
+	for ( int i = 0; i < phrases.size(); ++i )
+		phrases[i]->nPriority = 0xffff;
 	pWorld->AddUICommand( new NWorld::CUICmdPlayAck( phrases ) );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////

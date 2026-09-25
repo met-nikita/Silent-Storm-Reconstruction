@@ -99,9 +99,9 @@ private:
 	// branches with bBackStab.
 	void ModifyUnawareCritical( CAttackPortion &a, bool bApply ) const;
 
-	virtual int GetHealedVP() const { return pRPGUnit->nHealedVP; }
+	virtual int GetHealedVP() const { return Max( 0, pRPGUnit->nHealedVP ); }
 	virtual int GetTotalVP() const { return pRPGUnit->Skills( NDb::ST_VP ) + GetHealedVP(); }
-	void SetHealedVP( int n ) { pRPGUnit->nHealedVP = n; }
+	void SetHealedVP( int n ) { pRPGUnit->nHealedVP = Max( 0, n ); }
 	virtual int GetLastActionTimes() const { return nLastActionTimes; }
 	virtual int GetMoveInLastTurn() const { return nMoveInLastTurn; }
 	virtual void AddMoveInLastTurn( int n ) { nMoveInLastTurn += n; }
@@ -967,19 +967,18 @@ bool CUnitMission::CreateAttack( vector<CAttackPortion> *pRes, bool bSpendAmmo,
 	return bRet;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// retail CUnitMission::ModifyUnawareCritical @0x2bea70: perk 74 "Unaware critical difficulty" --
-// on a backstab, the crit chance scales by (Param1+1) capped at 100, and the crit difficulty by
-// that same capped chance value.
+// Retail v1.2 0x6bec20: Param1 scales chance, Param2 scales difficulty.
+// Both float-to-int conversions truncate; the capped chance is not a multiplier.
 void CUnitMission::ModifyUnawareCritical( CAttackPortion &a, bool bApply ) const
 {
 	if ( !bApply )
 		return;
-	float fBonus = 0;
-	if ( !HasPerk( N_PERK_UNAWARE_CRITICAL, &fBonus ) )
+	float fBonus = 0, fDifficulty = 0;
+	if ( !HasPerk( N_PERK_UNAWARE_CRITICAL, &fBonus, &fDifficulty ) )
 		return;
 	const float fCapped = Min( 100.0f, ( fBonus + 1.0f ) * a.nCrtical );
-	a.nCrtical = Round( fCapped );
-	a.nCrticalDifficulty = Round( a.nCrticalDifficulty * fCapped );
+	a.nCrtical = int( fCapped );
+	a.nCrticalDifficulty = int( a.nCrticalDifficulty * fDifficulty );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 NDb::CRPGArmor* CUnitMission::GetRPGArmor() const 
@@ -1139,11 +1138,14 @@ CReceivedDmg CUnitMission::ProcessAttack( NWorld::IWorld *pWorld, int nUserID, C
 		fDmgModifier += fCriticalDmgModifier;
 		csRPG << CC_GREY << "\tHL=" << GetHLName( (NAI::EHitLocation)nUserID );
 		csRPG << CC_GREY << " \tDmgModifier=" << fDmgModifier;
-		int nDamage = fDmgModifier * nDmg;
-		int ndBVP = nDamage * (float)GetHealedVP() / GetTotalVP();
-		ASSERT( ndBVP >= 0 );
+		int nDamage = Max( 0.f, fDmgModifier * nDmg );
+		// Retail v1.2 0x6c4310..0x6c4368 clamps the converted healed share
+		// to zero. A death critical can already have reduced total VP to zero:
+		// retail's x87 conversion then yields INT_MIN, which that clamp discards.
+		// Handle the zero divisor explicitly instead of relying on a NaN cast.
+		int ndBVP = GetTotalVP() != 0 ? Max( 0, int( nDamage * (float)GetHealedVP() / GetTotalVP() ) ) : 0;
 		SetHealedVP( GetHealedVP() - ndBVP );
-		pRPGUnit->Skills(NDb::ST_VP) -= nDamage - ndBVP;
+		pRPGUnit->Skills(NDb::ST_VP).Modify( ndBVP - nDamage );
 		// Acks
 		if ( bAlive )
 		{
@@ -1161,8 +1163,13 @@ CReceivedDmg CUnitMission::ProcessAttack( NWorld::IWorld *pWorld, int nUserID, C
 		if ( !IsDead() )
 		{
 			int nProbability = pAttack->nUnconsciousProbability;
-			int nCheck = random.Get( 0, 100 );
-			if ( pRPGUnit->Skills(NDb::ST_VP) <= 0 || nCheck <= nProbability )
+			int nCheck = random.Get( 1, 100 );
+			// Retail v1.2 0x6c4501..0x6c45ba: scale the knockout chance by
+			// remaining total health after damage; above half health it is zero.
+			float fHealth = float( GetTotalVP() ) / pRPGUnit->Skills(NDb::ST_VP).GetMaxValue();
+			float fKnockout = Max( 0.f, Min( 1.f, ( 0.5f - fHealth ) * 2.500000238418579f ) );
+			nProbability = Float2Int( fKnockout * nProbability );
+			if ( GetTotalVP() <= 0 || nCheck <= nProbability || pAttack->atkType == AT_CLICK_OF_DEATH )
 			{
 				bUnconscious = true;
 				csRPG << " \t" << CC_YELLOW << GetName() << CC_WHITE << " made unconscious" << endl;

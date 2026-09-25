@@ -483,11 +483,14 @@ void CDumbUnitServer::DropItems( bool bDropHands, bool bDropCap, bool bDropBackP
 				SRand rnd;
 				item.pModel = item.pItem->GetDBItem()->pModel->CreateModel( &rnd );
 				GetBonePos( &item.ptCenter, &item.q, pszBoneName );
-				pRPG->GetInventory()->Take( item.pItem );
 				CVec3 vInitial( random.GetFloat( -0.3f, 0.3f ), random.GetFloat( -0.3f, 0.3f ), 2 );
 				LaunchItem( pWorld, item, vInitial, true, (CObjectBase*)this, nFloor );   // retail @0x750688
 			}
 		}
+		// Retail v1.2 0x750a13..0x750a54 empties the backpack only AFTER
+		// launching every item. Erasing during the indexed loop skips entries.
+		while ( !sItems.empty() )
+			pRPG->GetInventory()->Take( sItems.front().pItem );
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
