@@ -33,10 +33,11 @@
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 namespace NAI
 {
-// IsWorkingCannon @0x51f20: not occupied, not broken, and its weapon item has ammo.
+// IsWorkingCannon @0x51f20: not broken and its weapon item has ammo.
+// Occupancy is a docking-only gate; a mounted gunner must still be able to fire.
 static bool HG_IsWorkingCannon( NWorld::CCannon *pC )
 {
-	return !pC->IsOccupied() && !pC->IsBroken() && IsValid( pC->GetItem() ) && pC->GetItem()->HasAmmo();
+	return !pC->IsBroken() && IsValid( pC->GetItem() ) && pC->GetItem()->HasAmmo();
 }
 // CannonCanHit (GetDamageableUnits core @0x525b0): the enemy's AI-map aim point fed to CanAttackWithCannon.
 // UCR_OK -> 1 (damageable), UCR_NEED_RELOAD -> 2 (abort the whole scan), else 0.
@@ -122,7 +123,7 @@ static bool HG_CanReachCannon( IAIUnit *pU, const SPlaceWithAP &place, NWorld::C
 	int nUseAP = pRPG->GetActionAP( (NAI::EPose)pU->GetUnitPosition().GetPose(), NRPG::AC_APPROACH_CANNON );
 	return nPathAP + nUseAP <= place.nUnitAP;
 }
-// CanUseCannon @0x51fa0: live, unoccupied, working cannon within 10m of `place`; no live enemy within
+// CanUseCannon @0x51fa0: live, working cannon within 10m of `place`; no live enemy within
 // 5m of the gun, no suspect within 3m; and the unit can reach it with enough AP. `pfDist` returns the
 // place->gun distance for the dock ranking.
 static bool HG_CanUseCannon( IAIUnit *pU, const SPlaceWithAP &place, NWorld::CCannon *pC, float *pfDist )
@@ -169,7 +170,7 @@ void CAIDockWithHGAction::GetInfoInner( const SPlaceWithAP &place, SInfo *pInfo 
 	for ( int i = 0; i < (int)cannons.size(); ++i )
 	{
 		NWorld::CCannon *pC = cannons[i];
-		if ( !IsValid( pC ) )
+		if ( !IsValid( pC ) || pC->IsOccupied() )
 			continue;
 		float fDist = 0.0f;
 		if ( !HG_CanUseCannon( pU, place, pC, &fDist ) )

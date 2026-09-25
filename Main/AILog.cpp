@@ -136,7 +136,9 @@ void CAILogUseCannon::GetCommands( list< CPtr<NWorld::CCommand> > *Commands )
 {
 	if ( !IsValid( pAIUnit ) || !IsValid( pCannon ) )
 		return;
-	CDynamicCast<NWorld::IObject> pObject( pCannon.GetPtr() );
+	// Retail 0x460549: adjust CCannon to its virtual CObjectBase before the
+	// cross-cast. CCannon is incomplete here; the raw-pointer overload cannot.
+	CDynamicCast<NWorld::IObject> pObject( pCannon );
 	if ( !pObject )
 		return;
 	Commands->push_back( new NWorld::CCmdSetCommand( pAIUnit->GetUnitServer(), new NWorld::CCmdWishPose( NAI::RUN ) ) );
@@ -148,7 +150,7 @@ void CAILogExitCannon::GetCommands( list< CPtr<NWorld::CCommand> > *Commands )
 {
 	if ( !IsValid( pAIUnit ) || !IsValid( pCannon ) )
 		return;
-	CDynamicCast<NWorld::IObject> pObject( pCannon.GetPtr() );
+	CDynamicCast<NWorld::IObject> pObject( pCannon );
 	if ( !pObject )
 		return;
 	Commands->push_back( new NWorld::CCmdSetCommand( pAIUnit->GetUnitServer(), new NWorld::CCmdExitCannon( pObject ) ) );
