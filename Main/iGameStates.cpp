@@ -1520,10 +1520,27 @@ void CStateDragItem::Terminate()
 	pModel = 0;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+NWorld::CUnit* CStateDragItem::GetSourceUnit()
+{
+	NWorld::SItem sInfo;
+	if ( !GetMission()->GetActivePlayer()->GetPlayer()->GetInHandItem( &sInfo ) )
+		return 0;
+	if ( IsValid( sInfo.pUnit ) )
+		return sInfo.pUnit;
+
+	// Retail v1.2 0x5db440: ownerless items use the first selected tracker,
+	// falling back to the mission's units only when the selection is empty.
+	vector< CPtr<IUnitTracker> > units;
+	GetMission()->GetSelectedUnits( &units );
+	if ( units.empty() )
+		GetMission()->GetUnits( &units );
+	return units.empty() ? 0 : units[0]->GetUnit();
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 // retail CStateDragItem::GetTargetCmd(bool bAllowSlot) @0x1dc960: build the "drop the in-hand item
 // onto whatever is under the cursor" move command. Decoded flow:
 //   (1) GetActivePlayer()->GetPlayer()->GetInHandItem(&src) -- nothing in hand -> null;
-//   (2) srcUnit = GetSourceUnit() (@0x1daa20: the in-hand item's live owner) -- dead/null -> null;
+//   (2) srcUnit = GetSourceUnit() (owner, or first selected/available unit);
 //   (3) target = GetStateTarget();
 //       dyncast CUnit    -> same player as active? {UNIT_ANYPLACE, unit} : null;
 //       dyncast CSlotInfo (ONLY when bAllowSlot; the slot leg is published by the CSlot
@@ -1540,7 +1557,8 @@ NWorld::CCmd* CStateDragItem::GetTargetCmd( bool bAllowSlot )
 	NWorld::SItem sInfo;
 	if ( !GetMission()->GetActivePlayer()->GetPlayer()->GetInHandItem( &sInfo ) )
 		return 0;
-	if ( !IsValid( sInfo.pUnit ) )		// retail: the drag's source unit must be live (@0x1daa20)
+	CPtr<NWorld::CUnit> pSourceUnit = GetSourceUnit();
+	if ( !IsValid( pSourceUnit ) )
 		return 0;
 
 	CObjectBase* pTargetObject = GetMission()->GetStateTarget();
@@ -1574,7 +1592,7 @@ NWorld::CCmd* CStateDragItem::GetTargetCmd( bool bAllowSlot )
 			case NUI::CSlotInfo::STORAGE:
 				sTarget.eType = NWorld::SItem::STORAGE;
 				sTarget.sPosition = CTPoint<int>( -1, -1 );
-				sTarget.pPlayer = sInfo.pUnit->GetPlayer();		// retail: the store of the dragging unit's player
+				sTarget.pPlayer = pSourceUnit->GetPlayer();
 				break;
 			case NUI::CSlotInfo::BACKPACK:
 				sTarget.eType = NWorld::SItem::BACKPACK;
@@ -1589,11 +1607,11 @@ NWorld::CCmd* CStateDragItem::GetTargetCmd( bool bAllowSlot )
 		else
 		{
 			sTarget.eType = NWorld::SItem::GROUND;
-			sTarget.pUnit = sInfo.pUnit;
+			sTarget.pUnit = pSourceUnit;
 		}
 	}
 
-	return new NWorld::CCmdMoveInventoryItem( NWorld::SItem( sInfo.pUnit, NWorld::SItem::HAND ), sTarget );
+	return new NWorld::CCmdMoveInventoryItem( NWorld::SItem( pSourceUnit, NWorld::SItem::HAND ), sTarget );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // retail CStateDragItem::UpdateCursor @0x1dccf0: probe the drop command, then cache the cursor --
@@ -1653,11 +1671,7 @@ bool CStateDragItem::OnLButtonDown( int nX, int nY )
 	if ( !IsValid( pCmd ) )
 		return false;
 
-	NWorld::SItem sInfo;
-	if ( !GetMission()->GetActivePlayer()->GetPlayer()->GetInHandItem( &sInfo ) )
-		return false;
-
-	GetMission()->Command( sInfo.pUnit, pCmd );
+	GetMission()->Command( GetSourceUnit(), pCmd );
 	return true;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////

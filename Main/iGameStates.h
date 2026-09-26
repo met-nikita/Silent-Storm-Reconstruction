@@ -330,6 +330,7 @@ protected:
 	// @0x5dcd11), OnLButtonDown commits with false (a click on a slot falls through to the slot
 	// window's own handler).
 	NWorld::CCmd* GetTargetCmd( bool bAllowSlot );
+	NWorld::CUnit* GetSourceUnit();
 	void UpdateCursor();			// retail @0x1dccf0
 
 public:
