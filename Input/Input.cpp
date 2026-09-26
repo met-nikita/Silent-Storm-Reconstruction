@@ -252,6 +252,7 @@ typedef vector<SInputDevice> CDevicesList;
 ///
 static unordered_map<string, int> nameIDs;
 static unordered_map<DWORD, SKey> actionIDs;
+static unordered_map<int, string> idNames;
 ///
 static int nCounter[4] = { 0, 0, 0, 0 };
 static HWND hWindow = 0;
@@ -687,6 +688,16 @@ bool GetKeyForMessage( const SMessage &mMsg, int *pnVirtualKey )
 	return false;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+bool IsDInputDiscardableKey( const SMessage &sMessage )
+{
+	// Retail v1.2 0x82cee0: keyboard edges other than Escape are
+	// offered to UI controls; Escape must remain available to cancel bindings.
+	if ( sMessage.cType != CT_KEY || actionIDs.find( sMessage.nAction ) == actionIDs.end() )
+		return false;
+	const SKey &sKey = actionIDs[sMessage.nAction];
+	return sKey.nDevType == DI8DEVTYPE_KEYBOARD && idNames[sKey.nAction] != "ESC";
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 int GetControlID( const string &sCommand )
 {
 	if ( nameIDs.find( sCommand ) == nameIDs.end() )
@@ -948,6 +959,7 @@ void AddDeviceKeys( int nID, int nDevType )
 			sActionKey.nAction = nAction;
 			sActionKey.nDevType = nDevType;
 			nameIDs[kiKeyInfoList[nTemp].pszName] = nAction;
+			idNames[nAction] = kiKeyInfoList[nTemp].pszName;
 		}
 		nTemp++;
 	}
@@ -1085,6 +1097,7 @@ BOOL CALLBACK EnumDeviceObjectsCallback( const DIDEVICEOBJECTINSTANCE* lpdidObje
 	sKey.nDevType = GET_DIDEVICE_TYPE( diObjectFormat.dwType );
 
 	nameIDs[szControlName] = sKey.nAction;
+	idNames[sKey.nAction] = szControlName;
 	actionIDs[ INPUT_KEYID( psDeviceEnum->nID, diObjectFormat.dwOfs ) ] = sKey;
 
 	DebugTrace("INPUT:\tNew control found! Add new control %s\n", szControlName.c_str() );
@@ -1098,6 +1111,7 @@ BOOL CALLBACK EnumDeviceObjectsCallback( const DIDEVICEOBJECTINSTANCE* lpdidObje
 		sKey.nAction = INPUT_KEYIDEX( psDeviceEnum->nID, diObjectFormat.dwOfs, 1 );
 		sKey.ePOVAxis = PA_X;
 		nameIDs[szControlName + "_X"] = sKey.nAction;
+		idNames[sKey.nAction] = szControlName + "_X";
 		actionIDs[ INPUT_KEYIDEX( psDeviceEnum->nID, diObjectFormat.dwOfs, 1 ) ] = sKey;
 
 		DebugTrace("INPUT:\tNew control found! Add new control %s\n", ( szControlName + "_X" ).c_str() );
@@ -1105,6 +1119,7 @@ BOOL CALLBACK EnumDeviceObjectsCallback( const DIDEVICEOBJECTINSTANCE* lpdidObje
 		sKey.nAction = INPUT_KEYIDEX( psDeviceEnum->nID, diObjectFormat.dwOfs, 2 );
 		sKey.ePOVAxis = PA_Y;
 		nameIDs[szControlName + "_Y"] = sKey.nAction;
+		idNames[sKey.nAction] = szControlName + "_Y";
 		actionIDs[ INPUT_KEYIDEX( psDeviceEnum->nID, diObjectFormat.dwOfs, 2 ) ] = sKey;
 
 		DebugTrace("INPUT:\tNew control found! Add new control %s\n", ( szControlName + "_Y" ).c_str() );

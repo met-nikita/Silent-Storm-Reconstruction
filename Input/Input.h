@@ -50,6 +50,7 @@ namespace NInput
 	void AddWinMessage( EControlType cType, int nParam );
 	bool GetCharForKey( int nVirtualKey, WCHAR *pwcChar );
 	bool GetKeyForMessage( const SMessage &mMsg, int *pnVirtualKey );
+	bool IsDInputDiscardableKey( const SMessage &sMessage );
 		
 	int GetControlID( const string &sCommand );
 	void GetControlInfo( int nAction, EControlType *pcType, float *pfGranularity );

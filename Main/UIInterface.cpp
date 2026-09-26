@@ -536,8 +536,14 @@ bool CInterface::ProcessEvent( const NInput::SEvent &eEvent )
 			bRet |= ProcessMessage( SEvent( EVENT_SCROLL, sPoint.x, sPoint.y, fWhole * -0.01f ) );
 		}
 	}
-	if ( NInput::GetKeyForMessage( eEvent.mMessage, &nVirtualKey ) )
+	if ( NInput::IsDInputDiscardableKey( eEvent.mMessage ) )
+	{
+		// Retail v1.2 0x71c909..0x71c968 also dispatches releases as key 0.
+		// Do not let an edit control swallow Escape before its cancel binding.
+		nVirtualKey = 0;
+		NInput::GetKeyForMessage( eEvent.mMessage, &nVirtualKey );
 		bRet |= ProcessMessage( SEvent( EVENT_CHAR, nVirtualKey ) );
+	}
 	// Raw Windows message-derived keys (auto-repeating via the OS WM_KEYDOWN/WM_CHAR stream).
 	// CT_WIN_CHAR carries a translated wide char, CT_WIN_KEY a virtual-key code.
 	// (CInterface::ProcessEvent @0x31c090 steps 9-10 -> EVENT_WINCHAR / EVENT_WINKEY.)
