@@ -151,7 +151,7 @@ public:
 	virtual void GetVisibilityArea( vector<SVisibilitySpot> *pRes, const NWorld::CUnit *pObserver ) = 0;
 	// nPoses - bit mask, 1-lay, 2-croach, 4-stand
 	virtual void GetVisibleFromArea( vector<SVisibilitySpot> *pRes, const NWorld::CUnit *pTarget, CVec3 &vNear, float fRadius, int nPoses = 7 ) = 0;
-	virtual int GetCoverForAIUnit( CVec3 ptFrom, NWorld::CUnit *pIgnore, 
+	virtual float GetCoverForAIUnit( CVec3 ptFrom, NWorld::CUnit *pIgnore,
 		NWorld::CUnit *pTarget, const NRPG::CAttackPortion &AttackPortion, NAI::EHitLocation HitLocation ) = 0;
 
 	virtual CVec3 GetIllumination( const vector<CVec3> &unit ) = 0;

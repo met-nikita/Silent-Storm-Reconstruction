@@ -28,6 +28,7 @@ namespace NAI
 {
 struct SAIState;
 class CAIInventory;
+class CAIFireArmsWeapon;
 class IAILogRecord;
 class	IAICriterionData;
 class IAIControl;
@@ -75,7 +76,7 @@ public:
 	virtual bool IsMovedThisTurn() = 0;
 	virtual bool IsDead() = 0;
 	virtual int GetRemainAP() = 0;
-	virtual int GetToHit( IAIUnit *pTarget, const NAI::SUnitPosition &pos, NAI::EHitLocation hl = NAI::HL_ANY ) = 0;
+	virtual int GetToHit( IAIUnit *pTarget, const NAI::SUnitPosition &pos, NAI::EHitLocation hl = NAI::HL_ANY, CAIFireArmsWeapon *pWeapon = 0 ) = 0;
 	virtual bool IsPerformingAction() = 0;
 	virtual void OnTurnStarted() = 0;
 	virtual void GetLastSeenEnemy( SPosition *Position, IAIUnit **ppAIUnit ) = 0;
@@ -83,7 +84,7 @@ public:
 	virtual CAIInventory* GetAIInventory() = 0;
 	virtual int GetHurtHP() = 0;
 	virtual void SetHurtHP( int _nHurtHP ) = 0;
-	virtual int GetCoverForFixedUnit( const NAI::SUnitPosition &pos,
+	virtual float GetCoverForFixedUnit( const NAI::SUnitPosition &pos,
 		NWorld::CUnitServer *pTarget, NRPG::CWeaponItem *pWeaponItem, NAI::EHitLocation HitLocation ) = 0;
 	virtual bool HasInactivePose() = 0;
 	virtual void AssignControl( IAIControl *pAIControl ) = 0;

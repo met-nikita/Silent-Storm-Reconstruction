@@ -119,7 +119,7 @@ public:
 	virtual float GetMaxUnitSightDistance( NRPG::CUnit *pRPGUnit );   // retail @0x298520 (vtbl+0x38)
 	virtual void GetVisibilityArea( vector<SVisibilitySpot> *pRes, const NWorld::CUnit *pObserver );
 	virtual void GetVisibleFromArea( vector<SVisibilitySpot> *pRes, const NWorld::CUnit *pTarget, CVec3 &vNear, float fRadius, int nPoses );
-	virtual int GetCoverForAIUnit( CVec3 ptFrom, NWorld::CUnit *pIgnore, 
+	virtual float GetCoverForAIUnit( CVec3 ptFrom, NWorld::CUnit *pIgnore,
 		NWorld::CUnit *pTarget, const NRPG::CAttackPortion &AttackPortion, NAI::EHitLocation HitLocation );
 
 	virtual CVec3 GetIllumination( const vector<CVec3> &unit ) { return CVec3(1,1,1); }
@@ -317,10 +317,10 @@ static void AddGridToCovers( CCoverInfo *pRes, const NAI::CFastRenderer &res, co
 #endif
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-int CGame::GetCoverForAIUnit( CVec3 ptFrom, NWorld::CUnit *pIgnore, 
+float CGame::GetCoverForAIUnit( CVec3 ptFrom, NWorld::CUnit *pIgnore,
 	NWorld::CUnit *pTarget, const NRPG::CAttackPortion &AttackPortion, NAI::EHitLocation HitLocation )
 {
-	int nHitCover = 0;
+	float fHitCover = 0;
 	CObj<NRPG::CCoverInfo> pCover = CalcCovers( ptFrom, 
 		AttackPortion, pIgnore, pTarget, HitLocation, 1.f, true );
 	//
@@ -331,10 +331,12 @@ int CGame::GetCoverForAIUnit( CVec3 ptFrom, NWorld::CUnit *pIgnore,
 	float fAverageAPA = ( pCover->fSummAPA / float(nPenetrateCount) ) / AttackPortion.nK;
 	if ( !pCover->hitRays.empty() )
 	{
-		nHitCover = (100 * nPenetrateCount) / pCover->hitRays.size();
-		nHitCover = int( nHitCover * fAverageAPA );
+		// Retail 0x693f20 returns float, including NaN for an entirely blocked
+		// nonempty ray set. The caller, not this query, chooses integer conversion.
+		fHitCover = (100.f * nPenetrateCount) / pCover->hitRays.size();
+		fHitCover *= fAverageAPA;
 	}
-	return nHitCover;
+	return fHitCover;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // nTargetUserID == -1 means without hit location targeting

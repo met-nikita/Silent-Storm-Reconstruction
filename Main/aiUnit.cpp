@@ -170,7 +170,7 @@ public:
 	virtual void Synchronize();
 	virtual bool IsDead() { return skills[1].nValue <= 0; }
 	virtual int GetRemainAP() { return Max( 0, skills[0].nMaxValue - skills[0].nValue ); }
-	virtual int GetToHit( IAIUnit *pTarget, const NAI::SUnitPosition &pos, NAI::EHitLocation hl = NAI::HL_ANY );
+	virtual int GetToHit( IAIUnit *pTarget, const NAI::SUnitPosition &pos, NAI::EHitLocation hl = NAI::HL_ANY, CAIFireArmsWeapon *pWeapon = 0 );
 	virtual void SetPose( int pose );
 	virtual bool IsPerformingAction() { return pUnitServer->IsPerformingAction(); }
 	virtual bool IsUsingCannon() { return ( pCannon != 0 ); }
@@ -184,7 +184,7 @@ public:
 	virtual int GetTurnStartHP() { return nTurnStartHP; }
 	virtual int GetHurtHP() { return nHurtHP; }
 	virtual void SetHurtHP( int _nHurtHP ) { nHurtHP = _nHurtHP; }
-	virtual int GetCoverForFixedUnit( const NAI::SUnitPosition &pos,
+	virtual float GetCoverForFixedUnit( const NAI::SUnitPosition &pos,
 		NWorld::CUnitServer *pTarget, NRPG::CWeaponItem *pWeaponItem, NAI::EHitLocation HitLocation );
 	virtual bool HasInactivePose();
 	virtual void AssignControl( IAIControl *pAIControl );
@@ -646,7 +646,7 @@ void CAIUnit::ContinueRoute()
 	SetCurrentLogicInner( 0 );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-int CAIUnit::GetCoverForFixedUnit( const NAI::SUnitPosition &pos, 
+float CAIUnit::GetCoverForFixedUnit( const NAI::SUnitPosition &pos,
 	NWorld::CUnitServer *pTarget, NRPG::CWeaponItem *pWeaponItem, NAI::EHitLocation HitLocation )
 {
 	ASSERT( IsValid( pTarget ) );
@@ -747,14 +747,17 @@ void CAIUnit::SpendAP( int _nAP )
 	SetAP( Max( 0, skills[0].nValue - _nAP ), skills[0].nMaxValue );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-int CAIUnit::GetToHit( IAIUnit *pTarget, const NAI::SUnitPosition &pos, NAI::EHitLocation hl )
+int CAIUnit::GetToHit( IAIUnit *pTarget, const NAI::SUnitPosition &pos, NAI::EHitLocation hl, CAIFireArmsWeapon *pWeapon )
 {
-	int nToHit = 100;
-	CPtr<CAIFireArmsWeapon> pWeapon = pTarget->GetAIInventory()->GetCurrentFireArms();
-	if ( IsValid( pWeapon ) )
+	// Retail v1.2 0x4ad8e0 uses the supplied weapon, falling back to OUR inventory.
+	if ( !IsValid( pTarget ) )
+		return 0;
+	if ( !IsValid( pWeapon ) )
+		pWeapon = GetAIInventory()->GetCurrentFireArms();
+	if ( IsValid( pWeapon ) && IsValid( GetUnitServer() ) )
 	{
-		nToHit = GetCoverForFixedUnit( GetUnitPosition(), pTarget->GetUnitServer(), pWeapon->GetItem(), hl );
-		CPtr<NRPG::CAIUnitToHitCalcer> pCalcer = new NRPG::CAIUnitToHitCalcer( this, pos, pTarget, nToHit, hl, 0, pWeapon->GetItem(), 0 );
+		float fCover = GetCoverForFixedUnit( GetUnitPosition(), pTarget->GetUnitServer(), pWeapon->GetItem(), hl );
+		CPtr<NRPG::CAIUnitToHitCalcer> pCalcer = new NRPG::CAIUnitToHitCalcer( this, pos, pTarget, fCover, hl, 0, pWeapon->GetItem(), 0 );
 		return pCalcer->GetToHit();
 	}
 	return 0;

@@ -21,13 +21,8 @@
 #include "aiActions.h"
 //
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// The snipe state machine's per-turn actions: bank AP into the snipe pool (CollectAP), fire once the pool is
-// full (Shot), abort when the enemy gets too close (Cancel). The fourth action, CAIBeginSnipeAction (the entry
-// that decides to start sniping), stays deferred in aiActions.cpp -- its GetInfoInner inlines a snipe kill-zone
-// scan the decode itself left opaque (see the note there). These three never activate until Begin lands (they
-// all gate on CUnitServer::IsSniping), but they are complete + faithful reconstructions of the matched-release
-// decode (oracle: decomp/src/s2_aisnipeaction.h: CanSnipe @0x4a4280, GetInfoInner @0x4a4490/@0x4a4650/
-// @0x4a4720, Do @0x4a4c00/@0x4a4c90/@0x4a4df0). Every decode hook resolves to a real in-tree call.
+// Snipe actions: Begin, bank AP (CollectAP), fire (Shot), and abort when the enemy
+// gets too close (Cancel). Begin's weapon and escape scan match v1.2 0x4a4a90.
 //
 // One documented dev<->release divergence: the release reads the snipe AP pool + the unit's current AP from
 // the RPG skill block; the dev-native CUnitStateSniping caches the pool as nBaseAP (set at snipe start). The
@@ -71,17 +66,12 @@ static IAIUnit *SnipeGetAIUnit( NWorld::CUnitServer *pServer )
 // CAIBeginSnipeAction::GetInfoInner @0x4a4810: decide to start sniping. Not already sniping; the best snipe
 // weapon must exist + be live; CanSnipe; the to-hit against the state's enemy at HL_ANY must be positive (aim
 // HL_HEAD when that also connects); and the KILL-ZONE SCAN must confirm the sniper can still SEE every place
-// the target could flee to next turn (otherwise the target would just step out of view). The inline scan was
+// the target could reach within four AP (otherwise the target would just step out of view). The inline scan was
 // hand-disassembled (the decode left it a hook): pWorld->GetGame()->CheckPositionVisibility from the sniper
 // to each place NAI::GetNearestPlaces floods around the target.
 //
-// Two documented dev<->release elisions (build-validation scope): (1) the release GetToHit takes the chosen
-// snipe weapon; the dev 3-arg GetToHit uses the unit's current weapon. (2) the release passes explicit
-// sight-distance (IGame::GetUnitSightDistance) + FOV (CUnit::GetSightFOV) to a 4-arg CheckPositionVisibility;
-// the dev CheckPositionVisibility is 2-arg (observer, target) and applies sight range/FOV internally, so the
-// range/FOV computation is dropped. The enemy-flood budget (obscured in the decomp -- built from the enemy's
-// move-table machinery) is taken as the enemy's full AP (GetMaxAP) at RUN pose -- "everywhere the target
-// could run this turn".
+// Use the chosen snipe weapon, even when another weapon is currently held. Cover
+// remains floating point through GetToHit, as in retail's direct snipe probe.
 void CAIBeginSnipeAction::GetInfoInner( const SPlaceWithAP &, SInfo *pInfo ) const
 {
 	pInfo->bCanDo = false;
@@ -108,9 +98,9 @@ void CAIBeginSnipeAction::GetInfoInner( const SPlaceWithAP &, SInfo *pInfo ) con
 	// to-hit gate: must connect at HL_ANY; aim the head when that also connects.
 	SUnitPosition selfPos = pU->GetUnitPosition();
 	pInfo->hitLocation = HL_ANY;
-	if ( pU->GetToHit( pEnemy, selfPos, HL_ANY ) <= 0 )
+	if ( pU->GetToHit( pEnemy, selfPos, HL_ANY, pInfo->pWeapon ) <= 0 )
 		return;
-	if ( pU->GetToHit( pEnemy, selfPos, HL_HEAD ) > 0 )
+	if ( pU->GetToHit( pEnemy, selfPos, HL_HEAD, pInfo->pWeapon ) > 0 )
 		pInfo->hitLocation = HL_HEAD;
 	// kill-zone scan: the sniper must still SEE every place the target could flee to next turn.
 	NWorld::CWorld *pWorld = pUS->GetWorld();
@@ -126,7 +116,8 @@ void CAIBeginSnipeAction::GetInfoInner( const SPlaceWithAP &, SInfo *pInfo ) con
 	float fRange = pGame->GetUnitSightDistance( pRPG );
 	float fFOV = IsValid( pRPG ) ? pRPG->GetSightFOV() : FP_2PI;
 	vector<SPathPlace> places;
-	GetNearestPlaces( pEnemy->GetUnitServer(), pEnemy->GetPosition().p, pEnemy->GetMaxAP(), NAI::RUN, &places );
+	// Retail v1.2 0x4a4cdb: RUN, four AP, not the target's full turn budget.
+	GetNearestPlaces( pEnemy->GetUnitServer(), pEnemy->GetPosition().p, 4, NAI::RUN, &places );
 	for ( vector<SPathPlace>::const_iterator i = places.begin(); i != places.end(); ++i )
 		if ( !pGame->CheckPositionVisibility( selfPos, SPosition( *i, pNet ), fRange, fFOV ) )
 			return;                                      // a place the target could reach unseen -> cannot snipe
