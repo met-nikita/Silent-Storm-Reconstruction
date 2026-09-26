@@ -1218,6 +1218,15 @@ bool CMissionUI::ProcessMessage( const SEvent &sEvent )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CMissionUI::Update( const STime &sTime, NGScene::I2DGameView *pView )
 {
+	// Retail 0x611d60: acknowledge a new human hotseat player before advancing.
+	vector< CPtr<NGame::IPlayerTracker> > players;
+	pMission->GetPlayers( &players );
+	if ( !pMission->IsSetupMode() && players.size() > 1 &&
+		!pMission->GetActivePlayer()->IsAIPlayer() && pLastActivePlayer != pMission->GetActivePlayer() )
+	{
+		pPlayerSwitchUI->Show();
+		pLastActivePlayer = pMission->GetActivePlayer();
+	}
 	if ( pMission->CountSelected() != 1 )
 		pMission->SetPanelState( NGame::PANEL_STORE | NGame::PANEL_PERKS | NGame::PANEL_INVENTORY | NGame::PANEL_CHARACTER | NGame::PANEL_MEDALS | NGame::PANEL_BIOGRAPHY, false );
 	if ( pMission->GetPanelState( NGame::PANEL_STORE | NGame::PANEL_INVENTORY ) == NGame::PANEL_STORE )

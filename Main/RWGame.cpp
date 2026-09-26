@@ -555,7 +555,8 @@ void CSetRender::AddHead( NDb::CComplexHead *pHead, CFuncBase<SFBTransform> *pPo
 	// retail: the editor preview head plays the ambient facial idles too (CHeadTransformInfo ctor
 	// @0x2606e0 arms bPlayIdle; the dev morph rides CHeadAnimator, whose idle machine keys on
 	// eIdleType) -- without this the AdvFaceGen head sits frozen between slider drags.
-	pAnimator->SetIdleType( NLSHead::IDLE_NORMAL );
+	if ( IsValid( pTransformInfo ) && pTransformInfo->IsPlayIdle() )
+		pAnimator->SetIdleType( NLSHead::IDLE_NORMAL );
 
 	bool bHasCap = false;
 	// pFaceTexture is the caller's PERSISTENT live texture-preview node (CFakeRPGUnit owns one across re-Visits,
@@ -657,7 +658,7 @@ class CFakeRPGUnit: public NWorld::IVisObj
 	CObj<NLSHead::CHeadTextureTransformer> pHeadTextureTransformer;
 public:
 	CFakeRPGUnit() {}
-	CFakeRPGUnit( NGScene::IGameView *pView, CSyncSrc<NWorld::IVisObj> *pSrc, NRPG::CUnit *_pUnit, CFuncBase<STime>* _pTime );
+	CFakeRPGUnit( NGScene::IGameView *pView, CSyncSrc<NWorld::IVisObj> *pSrc, NRPG::CUnit *_pUnit, CFuncBase<STime>* _pTime, bool bPlayIdleEmotions );
 
 	float GetLSHeadParam( const char *szName );
 	void SetLSHeadParam( const char *szName, float fValue );
@@ -667,7 +668,7 @@ public:
 	void Update( float fAngle );
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CFakeRPGUnit::CFakeRPGUnit( NGScene::IGameView *_pView, CSyncSrc<NWorld::IVisObj> *pSrc, NRPG::CUnit *_pUnit, CFuncBase<STime>* _pTime ):
+CFakeRPGUnit::CFakeRPGUnit( NGScene::IGameView *_pView, CSyncSrc<NWorld::IVisObj> *pSrc, NRPG::CUnit *_pUnit, CFuncBase<STime>* _pTime, bool bPlayIdleEmotions ):
 	pView( _pView ), pModel( _pUnit->pModel ), pUnit( _pUnit ), pTime( _pTime ), fAngle( 0 )
 {
 	int nAnimFlagsClassSex = NDb::CAnimation::IN_REALTIME;
@@ -681,7 +682,10 @@ CFakeRPGUnit::CFakeRPGUnit( NGScene::IGameView *_pView, CSyncSrc<NWorld::IVisObj
 
 	// build the live head-morph state so the advanced FaceGen sliders have something to drive
 	if ( IsValid( pUnit->GetHead() ) )
+	{
 		pHeadTransformInfo = new NLSHead::CHeadTransformInfo( pUnit->GetHead(), pTime );
+		pHeadTransformInfo->SetPlayIdle( bPlayIdleEmotions );
+	}
 
 	bindGlobal.Link( pSrc, this );
 	Update( 0 );
@@ -1015,7 +1019,7 @@ class CShowRPGUnit: public IShowUnit, public SCreateSyncSrc
 	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(SCreateSyncSrc*)this); f.Add(2,&r); f.Add(3,&pUnit); return 0; }
 public:
 	CShowRPGUnit() {}
-	CShowRPGUnit( NGScene::IGameView *pView, NRPG::CUnit *_pUnit, CFuncBase<STime>* _pTime, NLSHead::CHeadsController *pHdController );
+	CShowRPGUnit( NGScene::IGameView *pView, NRPG::CUnit *_pUnit, CFuncBase<STime>* _pTime, NLSHead::CHeadsController *pHdController, bool bPlayIdleEmotions );
 	void Update( float fAngle );
 	void SetSequence( NDb::CSequence *pSequence, NDb::CSequence *pExpression = 0 );
 	void SetLSHeadParam( const char *szName, float fValue );
@@ -1023,12 +1027,12 @@ public:
 	NLSHead::CHeadInfo* CreateLSHeadInfo();
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CShowRPGUnit::CShowRPGUnit( NGScene::IGameView *pView, NRPG::CUnit *_pUnit, CFuncBase<STime>* _pTime, NLSHead::CHeadsController *pHdController ):
+CShowRPGUnit::CShowRPGUnit( NGScene::IGameView *pView, NRPG::CUnit *_pUnit, CFuncBase<STime>* _pTime, NLSHead::CHeadsController *pHdController, bool bPlayIdleEmotions ):
 	r( pShow, pView )
 {
 	r.SetTimer( _pTime, _pTime );
 	r.SetHeadsController( pHdController );
-	pUnit = new CFakeRPGUnit( pView, pShow, _pUnit, _pTime );
+	pUnit = new CFakeRPGUnit( pView, pShow, _pUnit, _pTime, bPlayIdleEmotions );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CShowRPGUnit::Update( float fAngle )
@@ -1060,7 +1064,7 @@ NLSHead::CHeadInfo* CShowRPGUnit::CreateLSHeadInfo()
 	return IsValid( pUnit ) ? pUnit->CreateLSHeadInfo() : 0;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-IShowUnit* CreateShowUnit( NGScene::IGameView *pView, NRPG::CUnit *pUnit, CFuncBase<STime>* pTime, IRenderGame *pRenderGame )
+IShowUnit* CreateShowUnit( NGScene::IGameView *pView, NRPG::CUnit *pUnit, CFuncBase<STime>* pTime, IRenderGame *pRenderGame, bool bPlayIdleEmotions )
 {
 	CPtr<NLSHead::CHeadsController> pController;
 	if ( IsValid( pRenderGame ) )
@@ -1074,7 +1078,7 @@ IShowUnit* CreateShowUnit( NGScene::IGameView *pView, NRPG::CUnit *pUnit, CFuncB
 	else
 		pController = new NLSHead::CHeadsController;
 
-	return new CShowRPGUnit( pView, pUnit, pTime, pController );
+	return new CShowRPGUnit( pView, pUnit, pTime, pController, bPlayIdleEmotions );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CShowWorldUnit

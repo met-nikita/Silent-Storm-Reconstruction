@@ -50,7 +50,7 @@ const int
 float CalcFlashCoeff( float fCoeff, float fTargetCoeff, const STime &sTime, const STime &sFlashTime, const STime &sMorphTime = N_STANDART_MORPHTIME );
 // The per-voice greeting-ack preview sound for a merc (defined in iAdvFaceGen.cpp). Shared so BOTH the basic
 // (iFaceGen) and advanced (iAdvFaceGen) face editors can play the chosen voice on a voice-button click.
-// Mirrors retail NUI::GetPersAck @0x2452c0 via the dev-native FindVoicePersId/CDBAck-condition-102 derivation.
+// Retail NUI::GetPersAck @0x2452c0 resolves the ack holder and condition record 102.
 NDb::CSound* GetPersVoiceAck( NRPG::CUnit *pMerc );
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CLineBar
@@ -458,7 +458,7 @@ public:
 	CUnitView() {}
 	CUnitView( const SWindowInfo &sInfo, NRender::IRenderGame *pRender = 0, float fScale = 1.0f );
 
-	void SetUnit( NRPG::CUnit *pUnit, ECameraType eType = CAMERA_PORTRAIT );
+	void SetUnit( NRPG::CUnit *pUnit, ECameraType eType = CAMERA_PORTRAIT, bool bPlayIdleEmotions = true );
 	void SetUnit( NWorld::CUnit *pUnit, ECameraType eType = CAMERA_PORTRAIT );
 	// release @0x1c03d0: SetUnit(unit, camera, b1, b2, b3) with b1=bItems, b2=bShowCap, b3=bPlayIdle -- the
 	// @0x1c043c..3e push order feeds CreateShowUnit's three bools as (b1, b3, b2) = (bItems, bPlayIdle, bShowCap).

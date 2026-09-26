@@ -294,6 +294,7 @@ public:
 	float GetMMTension( const string &name );
 	void SetMMTension( const string &name, float value );
 	void SetPlayIdle( bool b ) { bPlayIdle = b; }
+	bool IsPlayIdle() const { return bPlayIdle; }
 	const unordered_map<string, float>& GetMMTensions() const { return mmTensions; }
 	NDb::CComplexHead* GetComplexHead() const { return pComplexHead; }
 	// The morphed GDP output animator (value.pAnimator after Generate()), or 0 for a non-transformable head.

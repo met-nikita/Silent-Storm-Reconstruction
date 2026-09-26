@@ -72,7 +72,7 @@ CUnitPortraitView::CUnitPortraitView( const SWindowInfo &sInfo, NRPG::CUnit *pMe
 	pImage = new CImageDraw( SRect( 0, 0, GetSize().x, GetSize().y ), NDb::GetUITexture( 535 ) );
 
 	if ( IsValid( pMerc ) )
-		SetUnit( pMerc );
+		SetUnit( pMerc, CAMERA_PORTRAIT, false ); // retail 0x64456b: static recruitment face
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CUnitPortraitView::Draw( const STime &sTime, NGScene::I2DGameView *pView )

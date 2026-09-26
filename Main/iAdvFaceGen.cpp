@@ -239,7 +239,7 @@ NDb::CSound* GetPersVoiceAck( NRPG::CUnit *pMerc )
 		NDb::CDBAck *rec = it.Get();
 		if ( !rec || !IsValid( rec->pAckSequence ) )
 			continue;
-		if ( rec->nConditionID != 102 )          // retail: pCondition->nID == 0x66
+		if ( !IsValid( rec->pCondition ) || rec->pCondition->GetRecordID() != 102 )
 			continue;
 		if ( rec->nRPGPersID != persId )
 			continue;

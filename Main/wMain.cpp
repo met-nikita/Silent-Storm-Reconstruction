@@ -65,6 +65,8 @@
 #include "..\Misc\set.h"
 #include "aiRoute.h"
 #include "aiReaction.h"			// NAI::CreateUnitReaction -- the map-deploy reaction install (AI-convergence Stage 2)
+#include "aiReactions.h"
+#include "aiUnit.h"
 #include "aiNearestPosition.h"	// NAI::GetNearestPosition -- FetchDeployPoint's free-cell snap (retail LookWhereToMoveUnit analog)
 #include "rpgCheatConstants.h"
 #include "wUnitCommands.h"
@@ -2054,6 +2056,9 @@ IPlayer* CWorld::AddPlayer( const wstring &wsName, NRPG::CGlobalPlayer *pGlobalP
 	CPlayer *pRes = new CPlayer( wsName, pGlobalGame, pGlobalPlayer, 0 );
 	csSystem << "User player was created" << endl; // DEBUG
 	RegisterPlayer( pRes );
+	// Retail AddPlayer 0x76e160: only AI hotseat slots replace the UI commander.
+	if ( pGlobalPlayer->bAIPlayer )
+		_pCommander = new NAI::CAICommander( this, pRes );
 	pRes->SetCommander( _pCommander );
 
 	if ( nRootLayersGroup < 0 )
@@ -2165,6 +2170,17 @@ IPlayer* CWorld::AddPlayer( const wstring &wsName, NRPG::CGlobalPlayer *pGlobalP
 			continue;
 		//
 		pUS->GetUnitRPG()->GetRPGUnit()->CalcDeathVP( GetGlobalGame()->pDifficulty->fDeathCoeff );
+		// Retail AddPlayer: recruited AI mercs need the same reaction/route
+		// initialization as map-deployed enemies, not just an AI commander.
+		if ( pGlobalPlayer->bAIPlayer )
+		{
+			CPtr<NAI::IAIUnit> pAIUnit = NAI::GetAIUnit( pUS );
+			if ( IsValid( pAIUnit ) )
+			{
+				NAI::SetUnitRoaming( pUS, pUS->GetPosition().pos.p, 25, NAI::AIM_AI );
+				pAIUnit->SetReaction( NAI::CreateAINormalReaction( pAIUnit ) );
+			}
+		}
 	}
 	//
 	InitPlayerCorpseCarrying( pRes );	

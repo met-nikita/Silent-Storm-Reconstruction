@@ -573,13 +573,13 @@ void CUnitView::RecalcCamera()
 	MakeMatrix( &sCamera, fPitch, fYaw, 0, vCP );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CUnitView::SetUnit( NRPG::CUnit *pUnit, ECameraType eType )
+void CUnitView::SetUnit( NRPG::CUnit *pUnit, ECameraType eType, bool bPlayIdleEmotions )
 {
 	pInventoryUnit = 0;
 	if ( !IsValid( pUnit ) )
 		return;
 
-	pInventoryUnit = NRender::CreateShowUnit( p3DView, pUnit, sTimer.GetTime(), pRenderGame );
+	pInventoryUnit = NRender::CreateShowUnit( p3DView, pUnit, sTimer.GetTime(), pRenderGame, bPlayIdleEmotions );
 
 	NDb::SCameraParams sCameraParams;
 	switch( eType )
