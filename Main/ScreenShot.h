@@ -42,7 +42,7 @@ public:
 
 	void Get( CArray2D<NGfx::SPixel8888> *pScreenShot );
 	void Set( const CArray2D<NGfx::SPixel8888> &sScreenShot );
-	void Generate();
+	void Generate( bool bCorrectGamma = false );
 	void GetSize( CTPoint<int> *pSize );
 	void SetMode( EMode eMode, const CVec4 &vColor );
 };

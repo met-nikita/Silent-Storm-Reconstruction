@@ -30,9 +30,9 @@ void CScreenshotTexture::Set( const CArray2D<NGfx::SPixel8888> &_sScreenShot )
 	sScreenShot = _sScreenShot;
 }
 ///////////////////////////////////////////////////////////////////////////////////////////////////
-void CScreenshotTexture::Generate()
+void CScreenshotTexture::Generate( bool bCorrectGamma )
 {
-	NGfx::MakeScreenShot( &sScreenShot, false );
+	NGfx::MakeScreenShot( &sScreenShot, bCorrectGamma );
 }
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 void CScreenshotTexture::GetSize( CTPoint<int> *pSize )

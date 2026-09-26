@@ -131,7 +131,8 @@ void CShowMedalInterface::Initialize( NDb::CSide *_pSide, const wstring &_wsName
 	wsName = _wsName;
 	pMedal = _pMedal;
 
-	pCursor    = NUI::ICursor::Create( false, CVec2( -1, -1 ) );
+	// Retail 0x63bd83 passes true in CL; the decompiler mislabels it false.
+	pCursor    = NUI::ICursor::Create( true, CVec2( -1, -1 ) );
 	pInterface = new NUI::CInterface( pCursor );
 
 	pScreenShot = new NUI::CScreenShot( NUI::SWindowInfo( pInterface, NUI::SPoint( 0, 0 ), NUI::SPoint( 1024, 768 ), "clues", NUI::STYLE_ENABLED | NUI::STYLE_VISIBLE | NUI::STYLE_BOTTOMMOST ) );
