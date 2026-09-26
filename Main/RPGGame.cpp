@@ -226,16 +226,9 @@ static void AddGridToCovers( CCoverInfo *pRes, const NAI::CFastRenderer &res, co
 				continue;
 			}
 
-			// retail NRPG::CanHitTarget @0x290b70, inlined: the walk is penetrate-by-DEFAULT — it breaks
-			// UNCONDITIONALLY once fEnter reaches the target range (`if (!(fEnter < fMaxRange)) break;`
-			// — tiles too; CalcCoversForTile's fDistance pullback keeps the target tile's own ground
-			// surface past fTestDistance so it can never count as its own cover), and only an explicit
-			// block clears the penetrate: CanDealDmg-false cover, an ALLY of the shooter in the line,
-			// or armour-piercing exhaustion. The previous dev walk (a) gated hulls on TS_UNITS where
-			// retail tests 0x200 == TS_COVER, so terrain/wall nodes were skipped before the tile-
-			// penetrate branch could run — every bare-ground ray ended not-penetrating -> GetHitCover's
-			// -1 blocked sentinel -> 0% for all ground aiming; and (b) required an in-loop condition to
-			// MARK tile penetration instead of retail's default-open shape.
+			// Retail v1.2 CanHitTarget 0x6908e0: reaching the range limit succeeds
+			// only for a tile. A unit target must actually be reached by the ray.
+			// CalcCoversForTile pulls the distance back before the tile's ground.
 			// Retail 1.2 @0x693795..0x693898: a different body part is a blocked
 			// hit ray, NOT a loose ray. A rolled miss must not select that flesh hit.
 			if ( pTarget && !bHitTargetPart )
@@ -244,7 +237,8 @@ static void AddGridToCovers( CCoverInfo *pRes, const NAI::CFastRenderer &res, co
 				continue;
 			}
 			float fTempPiercing = _fArmorPiercingAbility;
-			float fTestDistance = fDistance / fRayProjection;
+			// Retail AddGridToCovers 0x693680 projects the range only for tiles.
+			float fTestDistance = pTarget ? fDistance : fDistance / fRayProjection;
 			bool bBlocked = false, bTargetReached = false;
 			vector<const CObjectBase*> ignore;
 			ignore.push_back( pIgnore );
@@ -301,7 +295,7 @@ static void AddGridToCovers( CCoverInfo *pRes, const NAI::CFastRenderer &res, co
 					break;
 				}
 			}
-			if ( bTargetReached || !bBlocked )		// retail: CanHitTarget true && bCanHit
+			if ( bTargetReached || ( !pTarget && !bBlocked ) )
 			{
 				pRes->fSummAPA += fTempPiercing;
 				ray.isPenetrate = true;
@@ -363,6 +357,10 @@ CCoverInfo* CGame::CalcCovers( const CVec3 &src, const CAttackPortion &attack, N
 	CVec3 vTargetDir = ptTarget - ptFrom;
 	float fXYDistance = fabs( vTargetDir.x, vTargetDir.y );
 	float fDistance = fabs( vTargetDir ) + 1; // +1 to make sure whole target is considered
+	// Retail GetCoverForAIUnit 0x693f20 passes a 30-world-unit ray limit.
+	// Seeing an elevated target farther away does not make it shootable.
+	if ( bAIMode )
+		fDistance = Min( fDistance, float(N_WEAPONTRAIL_MAXDISTANCE) );
 	Normalize( &vTargetDir );
 
 	float fSquareLimit = fXYDistance * FP_TAN_PI8;
@@ -372,7 +370,9 @@ CCoverInfo* CGame::CalcCovers( const CVec3 &src, const CAttackPortion &attack, N
 	NAI::CFastRenderer &res = pRes->grids[0], &resLow = pRes->grids[1];
 	res.InitProjective( src, ptTarget, viewSquare, N_HALF_GRID );
 	// AttackObjectRanged v1.2 0x6b6620 requests 0x8210: hit geometry, cover and muzzle blockers.
-	pAIMap->TraceGrid( &res, NWorld::TS_FRAGMENTED | NWorld::TS_COVER | NWorld::TS_WEAPON_BLOCKER, NAI::IAIMap::STH_SORT_INTERVALS );
+	const int nTraceFlags = NWorld::TS_COVER | NWorld::TS_WEAPON_BLOCKER |
+		( bAIMode ? 0 : NWorld::TS_FRAGMENTED ); // retail AI probe: 0x8200
+	pAIMap->TraceGrid( &res, nTraceFlags, NAI::IAIMap::STH_SORT_INTERVALS );
 	AddGridToCovers( pRes, res, vTargetDir, pIgnore->GetAttackIgnore(), CastToObjectBase(pDest), nTargetUserID, fDistance, attack, fMinClearDistance, 0 );
 	// add low res grid
 	if ( !bAIMode )

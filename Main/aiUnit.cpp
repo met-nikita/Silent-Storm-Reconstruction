@@ -662,9 +662,10 @@ int CAIUnit::GetCoverForFixedUnit( const NAI::SUnitPosition &pos,
 	ASSERT( !atts.empty() );
 	if ( !atts.empty() )
 	{
-		CVec3 ptEye = pos.GetEyePosition();
+		// Retail v1.2 GetCover 0x4ae4d0 probes from the weapon origin, not the eyes.
+		CVec3 ptOrigin = GetUnitServer()->GetAttackOrigin( pos, false );
 		CPtr<NRPG::IGame> pGame = GetUnitServer()->GetWorld()->GetGame();
-		return pGame->GetCoverForAIUnit( ptEye, GetUnitServer(), pTarget, atts.front(), HitLocation );
+		return pGame->GetCoverForAIUnit( ptOrigin, GetUnitServer(), pTarget, atts.front(), HitLocation );
 	}
 	return 0;
 }
