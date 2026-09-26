@@ -108,6 +108,7 @@ public:
 	// are gone; the base's pGlobalGame/pCursor/pInterface/pSoundScene are the real storage.
 	// Only these two slots are genuinely CChapterMap's (vtbl+0x14c / +0x150):
 	NDb::CChapterMap* GetChapterMap() const;
+	bool CanReenterZone() const { return bV12WorldCmdFlag; }
 	CPtrFuncBase<CChapterInfo>* GetChapterInfo() const;
 
 	bool ProcessEvent( const NInput::SEvent &sEvent );

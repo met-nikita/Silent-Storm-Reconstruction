@@ -462,6 +462,8 @@ public:
 	// `(**(code **)(*(int *)this->pChapter + 0x150))()` on a member the PDB types CPtr<NGame::IMission>.
 	// (The CChapterMap ctor @0x1a6a60 vftable store `mov dword ptr [esi], 0x8b9adc` confirms the VA.)
 	virtual NDb::CChapterMap* GetChapterMap() const = 0;
+	// v1.2 chapter vtbl+0x150: EnableFeature("reenter") permits completed zones.
+	virtual bool CanReenterZone() const { return false; }
 	virtual CPtrFuncBase<CChapterInfo>* GetChapterInfo() const = 0;
 	// Retail CGlobalMap uses the same common mission interface. The three following slots are
 	// +0x150/+0x154/+0x158 in the RussianGold CGlobalMap vtable (CChapterMap/base leave them as
