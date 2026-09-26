@@ -671,18 +671,19 @@ int CCamera::ShowTwoPlaces( const CVec3 &ptA, const CVec3 &ptB, int nFloor, floa
 	float fBase = atan2f( ptB.y - ptA.y, ptB.x - ptA.x ) + 0.5235988f;   // + PI/6
 	float fOpp  = fBase + FP_PI;
 	float fPrimary = fBase, fSecondary = fOpp;
-	if ( AngleDiff( sDesiredPlacement.fYaw, fBase ) >= AngleDiff( sDesiredPlacement.fYaw, fOpp ) )
+	if ( AngleDiff( sDesiredPlacement.fYaw, fOpp ) < AngleDiff( sDesiredPlacement.fYaw, fBase ) )
 	{
 		fPrimary = fOpp;
 		fSecondary = fBase;
 	}
 	const float rods[3] = { 15.0f, fRodIn, ( fRodIn + 40.0f ) * 0.5f };
 	int r;
+	// v1.2 0x4cf1e1: preserve the current viewing angle before trying alternatives.
+	for ( int i = 0; i < 3; i++ ) { r = TryShowPlaces( ptA, ptB, nFloor, rods[i], sDesiredPlacement.fYaw ); if ( r ) return r; }
 	for ( int i = 0; i < 3; i++ ) { r = TryShowPlaces( ptA, ptB, nFloor, rods[i], fPrimary );   if ( r ) return r; }
-	for ( int i = 0; i < 3; i++ ) { r = TryShowPlaces( ptA, ptB, nFloor, rods[i], fOpp );        if ( r ) return r; }
-	r = TryShowPlaces( ptA, ptB, nFloor, 40.0f, fPrimary ); if ( r ) return r;
+	r = TryShowPlaces( ptA, ptB, nFloor, 40.0f, sDesiredPlacement.fYaw ); if ( r ) return r;
 	for ( int i = 0; i < 3; i++ ) { r = TryShowPlaces( ptA, ptB, nFloor, rods[i], fSecondary );  if ( r ) return r; }
-	return TryShowPlaces( ptA, ptB, nFloor, 40.0f, fOpp );
+	return TryShowPlaces( ptA, ptB, nFloor, 40.0f, fPrimary );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // SlowCameraAcceleration @0xd03c0: one-shot "settled" reset -- fires only once the live ease has caught the
@@ -723,13 +724,13 @@ void CCamera::ShowPlacesFromBestPoint( const CVec3 &ptA, const CVec3 &ptB, int n
 		pFollowUnit = 0;                                                     // (2) release follow
 
 	// retail @0xcf1c0 slo-mo roll: window = nSloMoTimes/3 + 2 (a repeat-offender tax -- the more
-	// slo-mos fired, the rarer they get), shrunk by fDivisor>1 (round-to-nearest); fires only on
+	// slo-mos fired, the rarer they get), shrunk by fDivisor>1 (truncate); fires only on
 	// roll==0 AND the cheat_slomo console var; 4000ms lease, expiry in CCamera::Update.
 	if ( IsValid( pWorld ) && IsValid( pWorld->GetGlobalGame() ) )
 	{
 		int nWindow = pWorld->GetGlobalGame()->nSloMoTimes / 3 + 2;
 		if ( fDivisor > 1.0f )
-			nWindow = (int)( (float)nWindow / fDivisor + 0.5f );
+			nWindow = (int)( (float)nWindow / fDivisor ); // v1.2 0x4cf349..0x4cf369
 		if ( nSloMoRatio > 1 && rndSloMo.Get( nWindow ) == 0 && bCheatSloMo )
 		{
 			if ( sloMo.nSloMo < 2 )
@@ -753,7 +754,8 @@ void CCamera::ShowPlacesFromBestPoint( const CVec3 &ptA, const CVec3 &ptB, int n
 		}
 		const float fBaseYaw = sDesiredPlacement.fYaw;
 		SRand rnd;
-		const float fRod = ( !bForceRod && rnd.Get( 3 ) != 1 ) ? 12.0f : fRodIn;
+		const bool bRandomCloseRod = rnd.Get( 3 ) != 1; // retail rolls even when forced
+		const float fRod = ( !bForceRod && bRandomCloseRod ) ? 12.0f : fRodIn;
 		const float kPi4 = 0.7853982f, kPi3 = 1.0471976f, kPi2 = 1.5707964f;
 		bool bAllZero =
 			TryShowPlaces( ptA, ptA, nFloor, fRod,   fBaseYaw )        == 0 &&
