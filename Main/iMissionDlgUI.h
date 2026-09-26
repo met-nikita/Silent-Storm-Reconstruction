@@ -36,7 +36,6 @@ class CMissionDlgUI: public CDesktopWindow
 private:
 	NInput::CBind bindCancel, bindNext, bindPrev;
 	////
-	CObj<NSound::ISound2D> pSound;
 
 	enum EStage
 	{
@@ -54,6 +53,7 @@ private:
 	CPtr<CDesktopWindow> pTransition;
 	////
 	int nPanelsStateSave;
+	int nID = -1;	// DialogPlay wait id, retail nNotifyID (save tag 5)
 	////
 	STime sStageTime;
 	EStage eStage;
@@ -72,13 +72,16 @@ private:
 	CObj<CHoverButton> pNext;
 	CObj<CHoverButton> pExit;
 	vector<CObj<CAnimUnitView> > unitViewsSet;
-	int nID = -1;	// DialogPlay wait id (AddUICommandWithID); EndDialog posts CCmdInterfaceEvent(nID) so WaitForUI unblocks
+	CObj<NSound::ISound2D> pSound;
 	// retail CMissionDlgUI pSequenceHolder (s2_types.h:27225): the view whose head currently plays a
 	// lipsync sequence -- cleared before a NEW phrase's sequence starts and on skip/close, so a
 	// skipped voiceline stops lipsyncing (SetStage @0x2059c0). Continuation pages (null pSequence)
 	// deliberately do NOT clear it: the same speaker keeps talking across subtitle pages.
 	CPtr<CAnimUnitView> pSequenceHolder;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CDesktopWindow*)this); f.Add(2,&pMission); f.Add(3,&pTransition); f.Add(4,&nPanelsStateSave); f.Add(5,&sStageTime); f.Add(6,&eStage); f.Add(7,&nStage); f.Add(8,&parsedPhrasesSet); f.Add(9,&unitsSet); f.Add(10,&phrasesSet); f.Add(11,&pTopBackground); f.Add(12,&pBottomBackground); f.Add(13,&szDialogCode); f.Add(14,&pDialog); f.Add(15,&pBack); f.Add(16,&pNext); f.Add(17,&pExit); f.Add(18,&unitViewsSet); f.Add(19,&nID); f.Add(20,&pSequenceHolder); return 0; }
+	int nDialogHeight = 0;	// template height, independent of the current page's fitted box
+	// Retail v1.2 0x608ea0: notification ID precedes stage state; sound,
+	// sequence holder and original dialog height are tags 20, 21 and 22.
+	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CDesktopWindow*)this); f.Add(2,&pMission); f.Add(3,&pTransition); f.Add(4,&nPanelsStateSave); f.Add(5,&nID); f.Add(6,&sStageTime); f.Add(7,&eStage); f.Add(8,&nStage); f.Add(9,&parsedPhrasesSet); f.Add(10,&unitsSet); f.Add(11,&phrasesSet); f.Add(12,&pTopBackground); f.Add(13,&pBottomBackground); f.Add(14,&szDialogCode); f.Add(15,&pDialog); f.Add(16,&pBack); f.Add(17,&pNext); f.Add(18,&pExit); f.Add(19,&unitViewsSet); f.Add(20,&pSound); f.Add(21,&pSequenceHolder); f.Add(22,&nDialogHeight); return 0; }
 
 protected:
 	void SetStage( int nStage );

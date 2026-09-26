@@ -288,6 +288,7 @@ bool CMissionDlgUI::ProcessMessage( const SEvent &sEvent )
 			unitViewsSet[3] = new CAnimUnitView( sEvent.pLoader->GetControl( "unitview4" ), pMission->GetRenderGame(), N_DISPLACE_DISTANCE, NDb::GetDBCamera( N_UNITCAMERA_RIGHT ) );
 
 			pDialog = new CText( sEvent.pLoader->GetControl( "dialogtext" ) );
+			nDialogHeight = pDialog->GetSize().y;
 			break;
 		}
 	case EVENT_TEMPLATELOADCOMPLETE:
@@ -317,6 +318,11 @@ void CMissionDlgUI::SetStage( int _nStage )
 	const SAckEvent &sEvent = parsedPhrasesSet[nStage];
 
 	pDialog->SetText( GetDBString( 11209 ) + sEvent.wsText );
+	// Retail v1.2 0x60622f..0x606266: fit this page without changing
+	// the template height retained for pagination.
+	SPoint sRealSize;
+	pDialog->GetRealSize( &sRealSize );
+	pDialog->SetSize( SPoint( pDialog->GetSize().x, sRealSize.y ) );
 
 	for ( int nTemp = 0; nTemp < Min( unitViewsSet.size(), unitsSet.size() ); nTemp++ )
 	{
@@ -383,7 +389,7 @@ void CMissionDlgUI::UpdatePhrases( NGScene::I2DGameView *pView )
 		NDb::CRPGPers *pPers = pRPGUnit->GetPers();
 		if ( pPers && pPers->bIsFemale && IsValid( pEvent->pAckInfo->pFemaleText ) )
 			pText = pEvent->pAckInfo->pFemaleText;
-		wstring wsText = GetDBString( 11209 ) + GetDBString( pText );
+		wstring wsText = GetDBString( pText );
 		// retail UpdatePhrases @0x206d60 (the bVar9 gate): the sound/lipsync/expression attach to the
 		// FIRST page of each phrase only; continuation pages carry nulls so SetStage neither restarts
 		// the voiceline nor re-triggers the head on "Next".
@@ -392,6 +398,9 @@ void CMissionDlgUI::UpdatePhrases( NGScene::I2DGameView *pView )
 		do
 		{
 			CVec2 vScreenRect = pView->GetViewportSize();
+			// Each continuation has lost the preceding page's formatting tags.
+			// Retail v1.2 0x607653 reapplies the dialogue prefix every iteration.
+			wsText = GetDBString( 11209 ) + wsText;
 			pML->SetText( wsText, 0 );
 			// Retail v1.2 0x6076d4..0x607707: IML wraps in screen pixels,
 			// not the dialog's virtual 1024x768 coordinates (truncate here).
@@ -401,7 +410,7 @@ void CMissionDlgUI::UpdatePhrases( NGScene::I2DGameView *pView )
 			sRealSize.x = sRealSize.x * 1024 / vScreenRect.x;
 			sRealSize.y = sRealSize.y * 768 / vScreenRect.y;
 
-			if ( sRealSize.y > pDialog->GetSize().y )
+			if ( sRealSize.y > nDialogHeight )
 			{
 				list<SRect> rects;
 				pML->Render( &rects, SPoint( 0, 0 ), SRect( 0, 0, 0, 0 ) );
@@ -409,8 +418,9 @@ void CMissionDlgUI::UpdatePhrases( NGScene::I2DGameView *pView )
 				int nCutChar = 0;
 				for ( list<SRect>::const_iterator iRect = rects.begin(); iRect != rects.end(); iRect++ )
 				{
-					float fY = iRect->y2 * 768 / vScreenRect.y;
-					if ( iRect->y2 > pDialog->GetSize().y )
+					// Retail compares the rendered rectangle directly (0x6077d4),
+					// unlike the virtual-height conversion for the overflow test.
+					if ( iRect->y2 > nDialogHeight )
 						break;
 
 					nCutChar++;
