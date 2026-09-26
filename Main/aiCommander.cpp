@@ -779,6 +779,15 @@ IAIUnit *CAICommander::GetAIUnit( NWorld::CUnitServer *pUnit )
 	return 0;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+bool CAICommander::GetPointOfInterest( NWorld::CUnitServer *pUnit, CVec3 *pOut )
+{
+	// Retail 0x434170: consult the unit's active logic, including scripted movement logic.
+	IAIUnit *pAIUnit = GetAIUnit( pUnit );
+	if ( !IsValid( pAIUnit ) || !pAIUnit->GetLogic() )
+		return false;
+	return pAIUnit->GetLogic()->GetPointOfInterest( pOut );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CAICommander::HasVisibleEnemies()
 {
 	list< CPtr<NWorld::CUnit> > visibleUnits;

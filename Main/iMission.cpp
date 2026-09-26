@@ -335,8 +335,11 @@ bool CMission::Initialize( int _nTemplateID, int _nVariantID, NScenario::CScenar
 
 	// The cinematic camera (base pCamera, tag 18). Retail Initialize does NOT copy the tracker's
 	// deploy pose into it -- the deploy view IS the active player's own camera (seeded in the
-	// CPlayerTracker ctor @0x287d70); the cinematic camera only gets a pose when a script drives it.
+	// CPlayerTracker ctor @0x287d70). InternalStep parks the idle cinematic camera on that pose.
 	SetCameraParams( CAMERA_PC, fFOV, defaultCameraLimits );
+	// v1.2 0x60183a: the cinematic camera stays scroll-locked between action executors.
+	// Their temporary locks must not let normal camera limits pull it back between shots.
+	pCamera->SetLock( true );
 	// Retail Initialize also stamps the cinematic camera, not only player cameras.
 	pCamera->SetCutFloorRange( nMinCutFloor, nMaxCutFloor );
 

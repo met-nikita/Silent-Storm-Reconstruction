@@ -211,6 +211,7 @@ public:
 	virtual void OnUnitDied( CUnitServer *pUnit ) {}
 	virtual void Segment() {}
 	virtual void OnUnitAdded( CUnitServer *pUnit ) {}
+	virtual bool GetPointOfInterest( CUnitServer *pUnit, CVec3 *pOut ) { return false; }
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class IItem : virtual public CObjectBase
@@ -349,6 +350,7 @@ public:
 	// (CDumbUnitServer::corpseHLpos, refreshed in Segment @0x350960). Consumed by the corpse-sighting
 	// probe CGame::IsCorpseVisible @0x298da0. Default 0 for non-corpse-capable impls.
 	virtual const vector<CVec3>* GetCorpseHLs() const { return 0; }
+	virtual bool GetPointOfInterest( CVec3 *pOut ) { return false; }
 	virtual NDb::CModel* GetModel() const = 0;
 	virtual void GetVisible( vector<CPtr<CUnit> > *pTarget ) const = 0;
 	virtual void GetInfo( NRPG::SUnitInfo *pInfo ) const = 0;

@@ -205,6 +205,7 @@ public:
 	SAIState *GetAIState() { return &state; }
 	const vector< CObj<IAIUnit> > &GetUnitsList() const { return units; }
 	IAIUnit *GetAIUnit( NWorld::CUnitServer *pUnit );
+	virtual bool GetPointOfInterest( NWorld::CUnitServer *pUnit, CVec3 *pOut );
 	bool IsAITurn() { return bAITurn; }
 	bool HasVisibleEnemies();
 	void Synchronize();

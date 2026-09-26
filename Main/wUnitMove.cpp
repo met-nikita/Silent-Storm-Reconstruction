@@ -511,14 +511,7 @@ void CExecMove::DoCommand()
 	// fetch command
 	CObj<CCommand> pCmd = commandsQueue.front(), pHoldCmd(pCurCmd);
 	commandsQueue.pop_front();
-	// GLUE FIX (camera followed every walking enemy): the Jan03 per-move-STEP CUICmdUnit post drove
-	// the follow-camera executor once per fetched move command, so a multi-tile walk re-pinned the
-	// camera to the unit for the whole move. CUICmdUnit's ONLY consumer is that follow exec
-	// (NGame::CreateExecutor). Retail replaced this with a priority-arbitrated, self-terminating,
-	// eased CUICmdUnitCamera posted once per move (CExecMove::ProcessMoveCommand @0x3b83a0) -- NOT a
-	// per-step hard follow. The genuine "fly to an event" posts survive (unit spotted @wMain.cpp:817,
-	// unconscious @wUnitServer.cpp:172); dropping the per-step spam stops the walker glue.
-	//pUS->GetWorld()->AddUICommand( new CUICmdUnit( pUS ) );
+	// Retail posts its arbitrated movement framing only after TestNextGameMove succeeds below.
 	// process it
 	CDynamicCast<CCmdMove> pMove(pCmd);
 	if (pMove)
@@ -564,6 +557,8 @@ void CExecMove::DoCommand()
 			}
 			else
 			{
+				// v1.2 ProcessMoveCommand 0x7b8a1f..0x7b8a70, before the animation/next-tile lock.
+				pUS->GetWorld()->AddUICommand( new CUICmdUnitCamera( pUS, PR_UNIT_ACTION, false, 1.0f, 0 ) );
 				animator.Move( prevPos, pPrevMove->pos, pNextMove->pos, pPrevMove->bInterGrid );
 				// lock next tile on the way
 				pUS->LockNextPlace( pNextMove->pos );

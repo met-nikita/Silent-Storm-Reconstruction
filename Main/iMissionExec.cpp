@@ -168,56 +168,66 @@ bool CUICmdUnitCameraExec::Update( const STime &sTime )
 	if ( !IsValid( pShooter ) && !IsValid( pTarget ) )
 		return true;
 	NWorld::CUnit *pPrimary = IsValid( pTarget ) ? pTarget : pShooter;
+	NWorld::CUnit *pVisible = pPrimary;
 	const int nPri = GetPriority();
 
-	// release @0x24eae0 gating (the turn-based branch reuses the CUICmdFollowCameraExec-verified checks):
-	if ( !pMission->IsRealTime() )
+	// v1.2 0x64e7b7: this is the active tracker's IsAIPlayer, NOT IsRealTime.
+	if ( !pMission->GetActivePlayer()->IsAIPlayer() )
 	{
-		if ( !IsVisibleByActivePlayer( pShooter, pMission ) && !IsVisibleByActivePlayer( pPrimary, pMission ) )
-			return true;                                    // frame only an action the active player can see
+		if ( IsVisibleByActivePlayer( pShooter, pMission ) )
+			pVisible = pShooter;
+		else if ( !IsVisibleByActivePlayer( pPrimary, pMission ) )
+			return true;
 		if ( nPri < NWorld::PR_UNIT_IS_DEAD )
 		{
 			if ( !pMission->IsActionExecuted() || pMission->IsReady() )
 				return true;
-			if ( pMission->GetWorld()->GetCurrentPlayer() == pMission->GetActivePlayer()->GetPlayer() )
-				return true;                                // only the OTHER player's action
 			// release @0x24ebb8 (`mov esi,4` @0x24eb96): NEVER auto-show over a camera the user has
 			// taken. The selector only returns the cinematic camera while the user is hands-off, so
 			// GetCamera() != GetEnemyTurnCamera() IS "the user is driving". Deaths are exempt.
 			if ( pMission->GetCamera() != pMission->GetEnemyTurnCamera() )
 				return true;
-			if ( nPri == NWorld::PR_UNIT_ACTION && ( !IsValid( pShooter ) || !pShooter->IsPerformingAction() ) )
-				return true;
-			// (release @0x24eae0 also gates PR_UNIT_ACTION on mission[vtbl+0x134]->GetPlayer() != active player
-			//  -- an extra "not the shooter's own player" check; omitted pending that accessor's identification.)
 		}
+		if ( nPri == NWorld::PR_UNIT_ACTION &&
+			( !IsValid( pShooter ) || !pShooter->IsPerformingAction() ||
+			  pMission->GetWorld()->GetCurrentPlayer() == pMission->GetActivePlayer()->GetPlayer() ) )
+			return true;
 	}
-	else
-	{
-		if ( !IsVisibleByActivePlayer( pShooter, pMission ) )
-			return true;                                    // real-time: only require the shooter visible
-	}
+	else if ( IsVisibleByActivePlayer( pShooter, pMission ) )
+		pVisible = pShooter;
 
 	if ( bDone )
 		return 4000 < sTime - tStart;                       // ~4 s dwell then finish
 	tStart = sTime;
 	bDone = true;
 
-	// framing: two-point best-point (CCamera::ShowPlacesFromBestPoint). dist = Max(unit bbox + 0.5, 12) -- for
-	// any unit the 12 floor dominates (bbox radius << 12), so pass 12 (retail Max clamps identically here).
-	CVec3 ptShooter( 0, 0, 0 ), ptFocus( 0, 0, 0 );
-	( IsValid( pShooter ) ? pShooter : pPrimary )->GetRealPosition( &ptShooter );
-	pPrimary->GetRealPosition( &ptFocus );
-	int nFloor = ( nPri >= NWorld::PR_UNIT_IS_DEAD ) ? pMission->GetCutFloor()
+	// v1.2 0x64e8df..0x64e9b5: primary first; AI interest (when targetless) or visible unit second.
+	CVec3 ptPrimary, ptInterest;
+	pPrimary->GetRealPosition( &ptPrimary );
+	ptPrimary.z += 0.5f;
+	bool bHasInterest = !IsValid( pTarget ) && pPrimary->GetPointOfInterest( &ptInterest );
+	if ( !bHasInterest )
+		pVisible->GetRealPosition( &ptInterest );
+	ptInterest.z += 0.5f;
+	ICamera::SCameraPos playerPos;
+	pMission->GetActivePlayer()->GetCamera()->GetPlacement( &playerPos );
+	const float fRod = Max( playerPos.fRod, 12.0f );
+	ICamera *pCamera = pMission->GetEnemyTurnCamera();
+	if ( !IsValid( pCamera ) )
+		return true;
+	int nFloor = ( nPri >= NWorld::PR_UNIT_IS_DEAD ) ? pCamera->GetCutFloor()
 	                                                 : pPrimary->GetPosition().pos.GetFloor();
 	int nSloMo = ( nPri >= NWorld::PR_UNIT_IS_DEAD && pCmd->bUseSloMo ) ? 3 : 1;
-	ICamera *pCamera = pMission->GetCamera();
 	if ( IsValid( pCamera ) )
 	{
-		pCamera->ShowPlacesFromBestPoint( ptShooter, ptFocus, nFloor, 12.0f, nSloMo,
-			pCmd->fSloMoIncrProbability, false, false );
-		if ( nPri >= NWorld::PR_UNIT_IS_DEAD && IsValid( pShooter ) )
-			pCamera->FollowUnit( pShooter );                // release: FollowUnit(shooter) for a death
+		if ( nPri != NWorld::PR_OUR_UNIT_IS_HIT || pCamera->GetSloMoRatio() < 2 )
+			pCamera->ShowPlacesFromBestPoint( ptPrimary, ptInterest, nFloor, fRod, nSloMo,
+				pCmd->fSloMoIncrProbability, false, false, bHasInterest );
+		if ( nPri == NWorld::PR_UNIT_ACTION && pVisible->GetPosition().pos.GetFloor() > nFloor )
+			pCamera->ShowPlacesFromBestPoint( ptPrimary, ptInterest, pVisible->GetPosition().pos.GetFloor(),
+				fRod, nSloMo, pCmd->fSloMoIncrProbability, false, false, bHasInterest );
+		if ( nPri >= NWorld::PR_UNIT_IS_DEAD )
+			pCamera->FollowUnit( pShooter ); // v1.2 0x64eac3 uses the original command unit, not pVisible.
 	}
 	return false;                                           // keep alive for the dwell
 }

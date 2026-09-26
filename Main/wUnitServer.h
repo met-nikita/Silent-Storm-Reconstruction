@@ -224,6 +224,7 @@ public:
 	virtual bool IsEmptyPK() const { return bIsPK; }
 	virtual void OnTBSEvent( ETBSEvent event );
 	virtual bool IsPerformingAction() const;
+	virtual bool GetPointOfInterest( CVec3 *pOut );
 	// implement CUnit	
 	virtual bool IsUnitVisible( const CUnit *pUnit ) const;
 	virtual bool IsUnitAudible( const CUnit *pUnit ) const;

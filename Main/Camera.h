@@ -184,8 +184,9 @@ public:
 	// best-visible camera pose (ShowPlacesFromBestPoint @0xcf1c0, ICamera vtbl+0x5c), and latch a follow
 	// target (FollowUnit @0xd0520). Default no-op so the menu / first-person / maya cameras need not override.
 	virtual void ShowPlacesFromBestPoint( const CVec3 &ptA, const CVec3 &ptB, int nFloor, float fRodIn,
-		int nSloMoRatio, float fDivisor, bool bKeepFollow, bool bForceRod ) {}
+		int nSloMoRatio, float fDivisor, bool bKeepFollow, bool bForceRod, bool bPointOfInterest = false ) {}
 	virtual void FollowUnit( CObjectBase *pUnit ) {}
+	virtual void AddFOVEffect( const CVec3 &ptAnchor, float fYaw, const STime &sDuration, int nDivisor ) {}
 	// retail ICamera vtbl+0x7c (CBaseCamera::AddEarthQuake @0xce5d0): queue a grenade-blast screen
 	// shake of the given amplitude (the point is accepted but unused by the base impl). Default no-op
 	// so menu / first-person / maya cameras need not override.
