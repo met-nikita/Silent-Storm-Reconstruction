@@ -99,6 +99,12 @@ CTeamMarker::CTeamMarker( const SWindowInfo &sInfo ):
 	pZoneFlash = new CImageDraw( SRect( 0, 0, GetSize().x, GetSize().y ), NDb::GetUITexture( 531 ) );
 	pNormal = new CImageDraw( SRect( 0, 0, GetSize().x, GetSize().y ), NDb::GetUITexture( 524 ) );
 	pNormalFlash = new CImageDraw( SRect( 0, 0, GetSize().x, GetSize().y ), NDb::GetUITexture( 526 ) );
+
+	// Retail v1.2 0x5ac456..0x5ac573: Draw updates this tooltip after load,
+	// so the marker must create and retain the object serialized in tag 11.
+	pToolTip = new CToolTip( SWindowInfo( GetInterface(), SPoint( 0, 0 ), SPoint( 0, 0 ), "tooltip", STYLE_ENABLED | STYLE_TOPMOST ) );
+	SetToolTip( pToolTip );
+	pToolTip->SetText( GetDBString( 11124 ) );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CTeamMarker::SetMode( EMode _eMode )
