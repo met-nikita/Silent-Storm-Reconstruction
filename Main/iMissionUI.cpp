@@ -1201,10 +1201,10 @@ bool CMissionUI::ProcessMessage( const SEvent &sEvent )
 			{
 				SCursorInfo sStateCursor = pState->GetCursorInfo();
 				if ( sStateCursor.pCursor != GetInterface()->GetCursorInfo().pCursor )
-				{
 					sStateCursor.wsText = L"";
-					GetInterface()->SetCursorInfo( sStateCursor );
-				}
+				// Retail v1.2 0x6161cb..0x6161fe: only the caption clear is
+				// conditional. Always override child-window cursor requests.
+				GetInterface()->SetCursorInfo( sStateCursor );
 			}
 			break;
 		}
