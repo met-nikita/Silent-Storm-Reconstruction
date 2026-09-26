@@ -247,6 +247,9 @@ CUnit::CUnit( NDb::CRPGPers *_pPers, NDb::CComplexHead *_pHead, bool _bHero, NDb
 
 	if ( IsValid( pPers->pName ) )
 		wsName = pPers->pName->szStr;
+	// Retail v1.2 0x6bcc75: the long display name is separate from the nickname.
+	if ( IsValid( pPers->pLongName ) )
+		wsFullName = pPers->pLongName->szStr;
 
 	// pPers->pClass can be NULL -- e.g. the 887/888 "Male"/"Female" gender-preview personas that the
 	// CharGen screen previews before a class is chosen. Retail CUnit::CUnit (@0x2bc980) guards the

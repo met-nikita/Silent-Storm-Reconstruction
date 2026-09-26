@@ -3,7 +3,7 @@
 #include "G2DView.h"
 #include "wInterface.h"
 #include "RPGUnitInfo.h"
-#include "RPGUnit.h"        // NRPG::CUnit complete type (GetRPGUnit()->GetName() for the fullname header)
+#include "RPGUnit.h"
 #include "RPGPerk.h"
 #include "..\DBFormat\DataRPG.h"
 #include "..\DBFormat\DataFormat.h"
@@ -21,6 +21,23 @@ namespace NUI
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // release @0x1b0810: the character panel carries 12 wound icons ("critical_0".."critical_11")
 const int N_NUM_CRITICALS_ICONS = 12;
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// Retail v1.2 0x5b0810: both text and arrow reflect changes since the panel's baseline.
+static void UpdateCharacterSkillUI( NGame::IUnitTracker *pUnit, CText *pText, CImage *pIcon,
+	CProgressBar *pBar, NDb::ESkillType skill )
+{
+	const int nChange = pUnit->GetSkillChanges( skill );
+	const int nStyle = nChange > 0 ? 0x4F15 : nChange < 0 ? 0x4F16 : 0x4B7C;
+	if ( IsValid( pIcon ) )
+	{
+		pIcon->SetStyle( STYLE_VISIBLE, nChange != 0 );
+		if ( nChange != 0 )
+			pIcon->SetImage( NDb::GetUITexture( nChange > 0 ? 950 : 951 ) );
+	}
+	NRPG::IUnitMissionInfo *pInfo = pUnit->GetUnit()->GetRPG();
+	pBar->SetValue( pInfo->GetSkillProgress( skill ) );
+	pText->SetText( GetDBString( nStyle ) + NStr::Format( L"<center>%d", pInfo->GetSkillMaxValue( skill ) ) );
+}
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CCharacterPanel::CCharacterPanel( const SWindowInfo &sInfo, NGame::IMission *_pMission ):
 	CWindow( sInfo ), pMission( _pMission )
@@ -204,73 +221,29 @@ void CCharacterPanel::Update( const STime &sTime, NGScene::I2DGameView *pView )
 
 	CPtr<NRPG::IUnitMissionInfo> pUnitInfo = pUnit->GetUnit()->GetRPG();
 
-	WCHAR wsText[256];
-
-	// release UpdateStats @0x1aff20 step (1): the full-name header above the level bar
-	// (control "fullname", tag-4 member). Format follows the panel's own Courier/center style.
+	// Retail v1.2 0x5b09a0: localized normal style and the full name, without centering.
 	NRPG::CUnit *pRPGUnit = pUnitInfo->GetRPGUnit();
-	if ( IsValid( pRPGUnit ) )
-	{
-		swprintf( wsText, L"<font face=Courier size=16pt><center>%s", pRPGUnit->GetName().c_str() );
-		pFullName->SetText( wsText );
-	}
-
-	swprintf( wsText, L"<font face=Courier size=16pt><center>%d", pUnitInfo->GetSkillMaxValue( NDb::ST_LEVEL ) );
-	pLevel->SetText( wsText );
-	pLevelBar->SetValue( pUnitInfo->GetSkillProgress( NDb::ST_LEVEL ) );
+	pFullName->SetText( GetDBString( 0x4B7C ) + pRPGUnit->wsFullName );
 	if ( pUnitInfo->GetRPGPers()->pClass )
 		pClass->SetImage( pUnitInfo->GetRPGPers()->pClass->pIcon );
 
-	swprintf( wsText, L"<font face=Courier size=16pt><center>%d", pUnitInfo->GetSkillMaxValue( NDb::ST_STR ) );
-	pStrength->SetText( wsText );
-	pStrengthBar->SetValue( pUnitInfo->GetSkillProgress( NDb::ST_STR ) );
-	swprintf( wsText, L"<font face=Courier size=16pt><center>%d", pUnitInfo->GetSkillMaxValue( NDb::ST_DEX ) );
-	pDexterity->SetText( wsText );
-	pDexterityBar->SetValue( pUnitInfo->GetSkillProgress( NDb::ST_DEX ) );
-	swprintf( wsText, L"<font face=Courier size=16pt><center>%d", pUnitInfo->GetSkillMaxValue( NDb::ST_INT ) );
-	pIntelligence->SetText( wsText );
-	pIntelligenceBar->SetValue( pUnitInfo->GetSkillProgress( NDb::ST_INT ) );
-
-	swprintf( wsText, L"<font face=Courier size=16pt><center>%d", pUnitInfo->GetSkillMaxValue( NDb::ST_IC ) );
-	pEvasion->SetText( wsText );
-	pEvasionBar->SetValue( pUnitInfo->GetSkillProgress( NDb::ST_IC ) );
-	swprintf( wsText, L"<font face=Courier size=16pt><center>%d", pUnitInfo->GetSkillMaxValue( NDb::ST_AP ) );
-	pActionPoints->SetText( wsText );
-	pActionPointsBar->SetValue( pUnitInfo->GetSkillProgress( NDb::ST_AP ) );
-	swprintf( wsText, L"<font face=Courier size=16pt><center>%d", pUnitInfo->GetSkillMaxValue( NDb::ST_VP ) );
-	pVitalityPoints->SetText( wsText );
-	pVitalityPointsBar->SetValue( pUnitInfo->GetSkillProgress( NDb::ST_VP ) );
-
-	swprintf( wsText, L"<font face=Courier size=16pt><center>%d", pUnitInfo->GetSkillMaxValue( NDb::ST_STEALTH ) );
-	pHide->SetText( wsText );
-	pHideBar->SetValue( pUnitInfo->GetSkillProgress( NDb::ST_STEALTH ) );
-	swprintf( wsText, L"<font face=Courier size=16pt><center>%d", pUnitInfo->GetSkillMaxValue( NDb::ST_SPOT ) );
-	pSpot->SetText( wsText );
-	pSpotBar->SetValue( pUnitInfo->GetSkillProgress( NDb::ST_SPOT ) );
-	swprintf( wsText, L"<font face=Courier size=16pt><center>%d", pUnitInfo->GetSkillMaxValue( NDb::ST_BURST ) );
-	pBurst->SetText( wsText );
-	pBurstBar->SetValue( pUnitInfo->GetSkillProgress( NDb::ST_BURST ) );
-	swprintf( wsText, L"<font face=Courier size=16pt><center>%d", pUnitInfo->GetSkillMaxValue( NDb::ST_MELEE ) );
-	pMelee->SetText( wsText );
-	pMeleeBar->SetValue( pUnitInfo->GetSkillProgress( NDb::ST_MELEE ) );
-	swprintf( wsText, L"<font face=Courier size=16pt><center>%d", pUnitInfo->GetSkillMaxValue( NDb::ST_SNIPE ) );
-	pSnipe->SetText( wsText );
-	pSnipeBar->SetValue( pUnitInfo->GetSkillProgress( NDb::ST_SNIPE ) );
-	swprintf( wsText, L"<font face=Courier size=16pt><center>%d", pUnitInfo->GetSkillMaxValue( NDb::ST_MEDICINE ) );
-	pMedicine->SetText( wsText );
-	pMedicineBar->SetValue( pUnitInfo->GetSkillProgress( NDb::ST_MEDICINE ) );
-	swprintf( wsText, L"<font face=Courier size=16pt><center>%d", pUnitInfo->GetSkillMaxValue( NDb::ST_SHOOTING ) );
-	pShooting->SetText( wsText );
-	pShootingBar->SetValue( pUnitInfo->GetSkillProgress( NDb::ST_SHOOTING ) );
-	swprintf( wsText, L"<font face=Courier size=16pt><center>%d", pUnitInfo->GetSkillMaxValue( NDb::ST_THROWING ) );
-	pThrowing->SetText( wsText );
-	pThrowingBar->SetValue( pUnitInfo->GetSkillProgress( NDb::ST_THROWING ) );
-	swprintf( wsText, L"<font face=Courier size=16pt><center>%d", pUnitInfo->GetSkillMaxValue( NDb::ST_INTERRUPT ) );
-	pInterrupt->SetText( wsText );
-	pInterruptBar->SetValue( pUnitInfo->GetSkillProgress( NDb::ST_INTERRUPT ) );
-	swprintf( wsText, L"<font face=Courier size=16pt><center>%d", pUnitInfo->GetSkillMaxValue( NDb::ST_ENGINEERING ) );
-	pEngineering->SetText( wsText );
-	pEngineeringBar->SetValue( pUnitInfo->GetSkillProgress( NDb::ST_ENGINEERING ) );
+	UpdateCharacterSkillUI( pUnit, pLevel, 0, pLevelBar, NDb::ST_LEVEL );
+	UpdateCharacterSkillUI( pUnit, pStrength, pStrengthIcon, pStrengthBar, NDb::ST_STR );
+	UpdateCharacterSkillUI( pUnit, pDexterity, pDexterityIcon, pDexterityBar, NDb::ST_DEX );
+	UpdateCharacterSkillUI( pUnit, pIntelligence, pIntelligenceIcon, pIntelligenceBar, NDb::ST_INT );
+	UpdateCharacterSkillUI( pUnit, pEvasion, pEvasionIcon, pEvasionBar, NDb::ST_IC );
+	UpdateCharacterSkillUI( pUnit, pActionPoints, pActionPointsIcon, pActionPointsBar, NDb::ST_AP );
+	UpdateCharacterSkillUI( pUnit, pVitalityPoints, pVitalityPointsIcon, pVitalityPointsBar, NDb::ST_VP );
+	UpdateCharacterSkillUI( pUnit, pHide, pHideIcon, pHideBar, NDb::ST_STEALTH );
+	UpdateCharacterSkillUI( pUnit, pSpot, pSpotIcon, pSpotBar, NDb::ST_SPOT );
+	UpdateCharacterSkillUI( pUnit, pBurst, pBurstIcon, pBurstBar, NDb::ST_BURST );
+	UpdateCharacterSkillUI( pUnit, pMelee, pMeleeIcon, pMeleeBar, NDb::ST_MELEE );
+	UpdateCharacterSkillUI( pUnit, pSnipe, pSnipeIcon, pSnipeBar, NDb::ST_SNIPE );
+	UpdateCharacterSkillUI( pUnit, pMedicine, pMedicineIcon, pMedicineBar, NDb::ST_MEDICINE );
+	UpdateCharacterSkillUI( pUnit, pShooting, pShootingIcon, pShootingBar, NDb::ST_SHOOTING );
+	UpdateCharacterSkillUI( pUnit, pThrowing, pThrowingIcon, pThrowingBar, NDb::ST_THROWING );
+	UpdateCharacterSkillUI( pUnit, pInterrupt, pInterruptIcon, pInterruptBar, NDb::ST_INTERRUPT );
+	UpdateCharacterSkillUI( pUnit, pEngineering, pEngineeringIcon, pEngineeringBar, NDb::ST_ENGINEERING );
 
 	// release @0x1b0420: refresh the wound/critical icon column every visible frame
 	UpdateCriticalIcons( pUnit, criticalIconsSet );

@@ -296,73 +296,41 @@ bool CUnitCharacterPanel::ProcessMessage( const SEvent &sEvent )
 	return CWindow::ProcessMessage( sEvent );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// Retail v1.2 UpdateSkillUI (v1.1 0x644a10): recruitment stats share the sheet's text style.
+static void UpdateRecruitSkillUI( NRPG::CUnit *pUnit, CText *pText, CProgressBar *pBar, NDb::ESkillType skill )
+{
+	pBar->SetValue( pUnit->Skills( skill ).GetProgress() );
+	pText->SetText( GetDBString( 0x4F22 ) + NStr::Format( L"<center>%d", (int)pUnit->Skills( skill ) ) );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 void CUnitCharacterPanel::Generate()
 {
 	if ( !IsValid( pMerc ) )
 		return;
 
-	WCHAR wsText[256];
 	NRPG::CUnit *pUnit = pMerc;
-
-	swprintf( wsText, L"<font face=Courier size=16pt><center>%s", pUnit->GetName().c_str() );
-	pName->SetText( wsText );
-
-	swprintf( wsText, L"<font face=Courier size=16pt><center>%d", (int)pUnit->Skills( NDb::ST_LEVEL ) );
-	pLevel->SetText( wsText );
-	pLevelBar->SetValue( pUnit->Skills( NDb::ST_LEVEL ).GetProgress() );
+	// Retail v1.2 0x644840: the recruitment sheet uses its own localized gray style.
+	pName->SetText( GetDBString( 0x4F22 ) + pUnit->GetName() );
 	if ( pUnit->GetPers()->pClass )
 		pClass->SetImage( pUnit->GetPers()->pClass->pIcon );
 
-	swprintf( wsText, L"<font face=Courier size=16pt><center>%d", (int)pUnit->Skills( NDb::ST_STR ) );
-	pStrength->SetText( wsText );
-	pStrengthBar->SetValue( pUnit->Skills( NDb::ST_STR ).GetProgress() );
-	swprintf( wsText, L"<font face=Courier size=16pt><center>%d", (int)pUnit->Skills( NDb::ST_DEX ) );
-	pDexterity->SetText( wsText );
-	pDexterityBar->SetValue( pUnit->Skills( NDb::ST_DEX ).GetProgress() );
-	swprintf( wsText, L"<font face=Courier size=16pt><center>%d", (int)pUnit->Skills( NDb::ST_INT ) );
-	pIntelligence->SetText( wsText );
-	pIntelligenceBar->SetValue( pUnit->Skills( NDb::ST_INT ).GetProgress() );
-
-	swprintf( wsText, L"<font face=Courier size=16pt><center>%d", (int)pUnit->Skills( NDb::ST_IC ) );
-	pEvasion->SetText( wsText );
-	pEvasionBar->SetValue( pUnit->Skills( NDb::ST_IC ).GetProgress() );
-	swprintf( wsText, L"<font face=Courier size=16pt><center>%d", (int)pUnit->Skills( NDb::ST_AP ) );
-	pActionPoints->SetText( wsText );
-	pActionPointsBar->SetValue( pUnit->Skills( NDb::ST_AP ).GetProgress() );
-	swprintf( wsText, L"<font face=Courier size=16pt><center>%d", (int)pUnit->Skills( NDb::ST_VP ) );
-	pVitalityPoints->SetText( wsText );
-	pVitalityPointsBar->SetValue( pUnit->Skills( NDb::ST_VP ).GetProgress() );
-
-	swprintf( wsText, L"<font face=Courier size=16pt><center>%d", (int)pUnit->Skills( NDb::ST_STEALTH ) );
-	pHide->SetText( wsText );
-	pHideBar->SetValue( pUnit->Skills( NDb::ST_STEALTH ).GetProgress() );
-	swprintf( wsText, L"<font face=Courier size=16pt><center>%d", (int)pUnit->Skills( NDb::ST_SPOT ) );
-	pSpot->SetText( wsText );
-	pSpotBar->SetValue( pUnit->Skills( NDb::ST_SPOT ).GetProgress() );
-	swprintf( wsText, L"<font face=Courier size=16pt><center>%d", (int)pUnit->Skills( NDb::ST_BURST ) );
-	pBurst->SetText( wsText );
-	pBurstBar->SetValue( pUnit->Skills( NDb::ST_BURST ).GetProgress() );
-	swprintf( wsText, L"<font face=Courier size=16pt><center>%d", (int)pUnit->Skills( NDb::ST_MELEE ) );
-	pMelee->SetText( wsText );
-	pMeleeBar->SetValue( pUnit->Skills( NDb::ST_MELEE ).GetProgress() );
-	swprintf( wsText, L"<font face=Courier size=16pt><center>%d", (int)pUnit->Skills( NDb::ST_SNIPE ) );
-	pSnipe->SetText( wsText );
-	pSnipeBar->SetValue( pUnit->Skills( NDb::ST_SNIPE ).GetProgress() );
-	swprintf( wsText, L"<font face=Courier size=16pt><center>%d", (int)pUnit->Skills( NDb::ST_MEDICINE ) );
-	pMedicine->SetText( wsText );
-	pMedicineBar->SetValue( pUnit->Skills( NDb::ST_MEDICINE ).GetProgress() );
-	swprintf( wsText, L"<font face=Courier size=16pt><center>%d", (int)pUnit->Skills( NDb::ST_SHOOTING ) );
-	pShooting->SetText( wsText );
-	pShootingBar->SetValue( pUnit->Skills( NDb::ST_SHOOTING ).GetProgress() );
-	swprintf( wsText, L"<font face=Courier size=16pt><center>%d", (int)pUnit->Skills( NDb::ST_THROWING ) );
-	pThrowing->SetText( wsText );
-	pThrowingBar->SetValue( pUnit->Skills( NDb::ST_THROWING ).GetProgress() );
-	swprintf( wsText, L"<font face=Courier size=16pt><center>%d", (int)pUnit->Skills( NDb::ST_INTERRUPT ) );
-	pInterrupt->SetText( wsText );
-	pInterruptBar->SetValue( pUnit->Skills( NDb::ST_INTERRUPT ).GetProgress() );
-	swprintf( wsText, L"<font face=Courier size=16pt><center>%d", (int)pUnit->Skills( NDb::ST_ENGINEERING ) );
-	pEngineering->SetText( wsText );
-	pEngineeringBar->SetValue( pUnit->Skills( NDb::ST_ENGINEERING ).GetProgress() );
+	UpdateRecruitSkillUI( pUnit, pLevel, pLevelBar, NDb::ST_LEVEL );
+	UpdateRecruitSkillUI( pUnit, pStrength, pStrengthBar, NDb::ST_STR );
+	UpdateRecruitSkillUI( pUnit, pDexterity, pDexterityBar, NDb::ST_DEX );
+	UpdateRecruitSkillUI( pUnit, pIntelligence, pIntelligenceBar, NDb::ST_INT );
+	UpdateRecruitSkillUI( pUnit, pEvasion, pEvasionBar, NDb::ST_IC );
+	UpdateRecruitSkillUI( pUnit, pActionPoints, pActionPointsBar, NDb::ST_AP );
+	UpdateRecruitSkillUI( pUnit, pVitalityPoints, pVitalityPointsBar, NDb::ST_VP );
+	UpdateRecruitSkillUI( pUnit, pHide, pHideBar, NDb::ST_STEALTH );
+	UpdateRecruitSkillUI( pUnit, pSpot, pSpotBar, NDb::ST_SPOT );
+	UpdateRecruitSkillUI( pUnit, pBurst, pBurstBar, NDb::ST_BURST );
+	UpdateRecruitSkillUI( pUnit, pMelee, pMeleeBar, NDb::ST_MELEE );
+	UpdateRecruitSkillUI( pUnit, pSnipe, pSnipeBar, NDb::ST_SNIPE );
+	UpdateRecruitSkillUI( pUnit, pMedicine, pMedicineBar, NDb::ST_MEDICINE );
+	UpdateRecruitSkillUI( pUnit, pShooting, pShootingBar, NDb::ST_SHOOTING );
+	UpdateRecruitSkillUI( pUnit, pThrowing, pThrowingBar, NDb::ST_THROWING );
+	UpdateRecruitSkillUI( pUnit, pInterrupt, pInterruptBar, NDb::ST_INTERRUPT );
+	UpdateRecruitSkillUI( pUnit, pEngineering, pEngineeringBar, NDb::ST_ENGINEERING );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CUnitInventoryPanel
