@@ -1443,6 +1443,7 @@ public:
 	CComboBoxList( const SWindowInfo &sInfo );
 
 	void SetOwner( CWindow *pOwner );
+	void Update( const STime &sTime, NGScene::I2DGameView *pView );
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CComboBoxList::CComboBoxList( const SWindowInfo &sInfo ):
@@ -1460,12 +1461,29 @@ void CComboBoxList::OnAction()
 	SendMessage( pOwner, SEvent( EVENT_NOTIFY, GetWindowID() ) );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+void CComboBoxList::Update( const STime &sTime, NGScene::I2DGameView *pView )
+{
+	// Retail v1.2 0x718010: item templates can be wider than the closed combo.
+	list<CPtr<CWindow> > items;
+	GetItemsList( &items );
+	int nWidth = 0;
+	for ( list<CPtr<CWindow> >::const_iterator i = items.begin(); i != items.end(); ++i )
+		nWidth = max( nWidth, (*i)->GetSize().x );
+	SetSize( SPoint( nWidth, GetSize().y ) );
+	CListView::Update( sTime, pView );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 // CComboBox
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CComboBox::CComboBox( const SWindowInfo &sInfo ):
 	CWindow( sInfo ), statesSet( STATE_LAST )
 {
-	CPtr<CComboBoxList> pComboBoxList = new CComboBoxList( SWindowInfo( GetParent(), SPoint( GetPosition().x, GetPosition().y + GetSize().y ), SPoint( GetSize().x, 0 ), "list", STYLE_ENABLED | STYLE_TOPMOST ) );
+	// Retail v1.2 0x717740: attach the popup to the interface, outside the
+	// owning row's clip rectangle, and position it in interface coordinates.
+	SPoint sPosition;
+	SRect sWindow;
+	ClientToScreen( &sPosition, &sWindow );
+	CPtr<CComboBoxList> pComboBoxList = new CComboBoxList( SWindowInfo( GetInterface(), SPoint( sPosition.x, sPosition.y + GetSize().y ), SPoint( GetSize().x, 0 ), "list", STYLE_ENABLED | STYLE_TOPMOST ) );
 	pComboBoxList->SetOwner( this );
 	pList = pComboBoxList;
 }
