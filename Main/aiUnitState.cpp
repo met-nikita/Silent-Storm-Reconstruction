@@ -52,7 +52,10 @@ IAIUnit *FindNearestUnit( IAIUnit *pSelf, vector< CPtr<IAIUnit> > &units )
 	return pBest;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-SAIUnitState::SAIUnitState(): bHelpCalled( false ), bScared( false ) {}
+SAIUnitState::SAIUnitState(): bHelpCalled( false ), bScared( false )
+{
+	selfModified.data = false;
+}
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void SAIUnitState::Notify( IAIEvent *pEvent )
 {
@@ -110,11 +113,18 @@ void SAIUnitState::AddKnownCorpse( IAIUnit *p ) { if ( IsValid( p ) && !IsKnownC
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void SAIUnitState::Reset()
 {
-	enemies.data.units.clear();         enemies.SetModified();
-	possibleEnemies.data.units.clear(); possibleEnemies.SetModified();
-	allies.data.units.clear();          allies.SetModified();
-	pEnemy = 0; pPossibleEnemy = 0; pAlly = 0;
-	bScared = false; bHelpCalled = false;
+	// Retail v1.2 0x4b09f0: consume the value, not the wrapper's dirty flag.
+	selfModified.data = false;
+	if ( selfModified.nLock < 1 )
+		selfModified.bModified = true;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void SAIUnitState::Modified()
+{
+	// Retail v1.2 0x4b09d0: a lock suppresses dirty tracking, not the value write.
+	if ( selfModified.nLock < 1 )
+		selfModified.bModified = true;
+	selfModified.data = true;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // Retail SAIUnitState::PrepareEnemies @0x004b17a0.  At the start of a turn, promote every
@@ -210,7 +220,7 @@ void SAIUnitState::FindMostDangerousEnemy()
 		}
 	}
 	if ( pEnemy.GetPtr() != pBest.GetPtr() )
-		selfModified.SetModified();
+		Modified();
 	pEnemy = pBest;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -221,7 +231,7 @@ void SAIUnitState::FindNearestPossibleEnemy()   // @0x004b08d0
 	// FindNearestAlly do -- this is what re-fires the reaction (the HUNT rung reads pPossibleEnemy) when a
 	// suspect appears, resolves, or is superseded. The dev predecessor silently updated the pointer.
 	if ( pPossibleEnemy.GetPtr() != pBest.GetPtr() )
-		selfModified.SetModified();
+		Modified();
 	pPossibleEnemy = pBest;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -229,7 +239,7 @@ void SAIUnitState::FindNearestAlly()   // @0x004b0810
 {
 	CPtr<IAIUnit> pBest = FindNearestUnit( pUnit, allies.data.units );
 	if ( pAlly.GetPtr() != pBest.GetPtr() )
-		selfModified.SetModified();
+		Modified();
 	pAlly = pBest;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -262,7 +272,7 @@ void SAIUnitState::CheckScared()
 				return;   // an ally is close -> hold
 	}
 	bScared = true;
-	selfModified.SetModified();
+	Modified();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 }

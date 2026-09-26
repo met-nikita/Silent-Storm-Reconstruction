@@ -277,14 +277,13 @@ public:
 	{
 		SetLogic( 0 );
 		pReaction = _pReaction;
-		state.selfModified.SetModified();
+		state.Modified();
 		++nNonFreezeCounter;
 	}
 	virtual SAIUnitState* GetAIUnitState() { return &state; }
 	// AI-convergence Stage 2 reaction pump (see aiUnit.h). GetReactionForUpdate @0xad260: only hand the
-	// reaction to the commander when the threat state changed, CLEARING the dirty flag (retail state.Reset()
-	// -- here ClearModified, NOT the full list wipe: the poll-based lists must survive for the reaction that
-	// fires this same segment to read pEnemy).
+	// reaction to the commander when the threat state changed, consuming the boolean
+	// payload with state.Reset(). Contact lists and their dirty flags survive.
 	virtual CAIReaction* GetReactionForUpdate()
 	{
 		if ( !IsValid( pUnitServer ) || !pUnitServer->CanFight() || !IsUnderAIControl() )
@@ -302,12 +301,12 @@ public:
 		if ( GetRouteLogic() == pL )
 		{
 			SetRouteLogic( 0 );
-			state.selfModified.SetModified();
+			state.Modified();
 			return;
 		}
 		if ( pLogic.GetPtr() == pL )
 			SetLogic( 0 );
-		state.selfModified.SetModified();
+		state.Modified();
 	}
 	// CancelCommand @0xad820 (vtbl 0x28): cancel the unit's current world command (the reaction is about to
 	// re-decide). Dev analog of CAIUnit::DeactivateCurrentControl's CCmdCancel; the exit-cannon tail is elided.
@@ -617,7 +616,7 @@ void CAIUnit::OnSequenceFinished()
 		GetUnitServer()->Do( new NWorld::CCmdCancel( GetUnitServer() ) );
 	if ( !controls.empty() && !controls.back()->IsActive() )
 		controls.back()->Activate();
-	state.selfModified.SetModified();   // retail tail: SAIUnitState::Modified()
+	state.Modified();   // retail tail: SAIUnitState::Modified()
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // retail CAIUnit::ContinueRoute @0xadf20; v1.2 @0x4ae1b0. A scripted route is installed in the

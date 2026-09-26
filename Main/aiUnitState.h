@@ -69,6 +69,7 @@ struct SAIUnitState
 	SAIUnitState();
 	void SetUnit( IAIUnit *_pUnit ) { pUnit = _pUnit; }
 	void Notify( IAIEvent *pEvent );
+	void Modified();
 	//
 	void AddEnemy( IAIUnit *p );           void RemoveEnemy( IAIUnit *p );
 	void AddPossibleEnemy( IAIUnit *p );   void RemovePossibleEnemy( IAIUnit *p );
@@ -81,10 +82,10 @@ struct SAIUnitState
 	void Reset();
 	// AI-convergence Stage 2: the commander's reaction pump reads this dirty flag. IsModified @0xb0550
 	// reports "the derived threat changed since last processed"; the commander's GetReactionForUpdate
-	// consumes it (ClearModified) when it enqueues the unit's reaction. selfModified is SET by
+	// consumes it (Reset) when it enqueues the unit's reaction. selfModified.data is SET by
 	// FindMostDangerousEnemy/FindNearestAlly (a pEnemy/pAlly change) and OnSequenceFinished.
-	bool IsModified() const { return selfModified.bModified; }   // @0xb0550 (dev: the dirty flag)
-	void ClearModified() { selfModified.bModified = false; selfModified.data = false; }
+	bool IsModified() const { return selfModified.data; }   // retail v1.2 0x4b0990
+	void ClearModified() { Reset(); }
 	const vector< CPtr<IAIUnit> >& GetKnownEnemies() const { return enemies.data.units; }
 private:
 	void FindMostDangerousEnemy();         // @0x004b0b10  -> pEnemy
