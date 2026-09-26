@@ -265,15 +265,8 @@ void CICBeginGame::Exec()
 		nScenarioID = pGlobalMap->pScenario->GetRecordID();
 
 	ResetStack(); // just the way to unregister "scenario" command
-	CPtr<NRPG::CGlobalGame> pGame = NRPG::CreateGlobalGame( nScenarioID );
+	CPtr<NRPG::CGlobalGame> pGame = NRPG::CreateGlobalGame( nScenarioID, pDifficulty );
 	pGame->players = playersSet;
-
-	// Apply the chosen difficulty (release: CreateGlobalGame(id, pDifficulty) stores it on the global
-	// game; here CreateGlobalGame defaults pDifficulty, so override it with the menu's choice when set).
-	// CGlobalGame::pDifficulty is read downstream by the to-hit/AI subsystems, so the selection now
-	// actually takes effect in-game.
-	if ( IsValid( pDifficulty ) )
-		pGame->pDifficulty = pDifficulty;
 
 	pGame->bGlobalMapSet = true;
 	pGame->nGlobalMapID = nTemplateID;

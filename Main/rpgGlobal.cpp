@@ -206,13 +206,13 @@ void CGlobalPlayer::AddMerc( CUnit *pMerc )
 	deployData.unitsDeployData[ pMerc ] = SUnitDeployData();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CGlobalGame* CreateGlobalGame( int nScenarioID, int nDifficultyID )
+CGlobalGame* CreateGlobalGame( int nScenarioID, NDb::CDBDifficulty *pDifficulty )
 {
 	CGlobalGame *pGame = new CGlobalGame();
-	//pGame->pDifficulty = NDb::GetDBDifficulty( nDifficultyID );
-	pGame->pDifficulty = NDb::GetDBDifficulty( 2 );
 	pGame->pScenarioTracker = NScenario::CreateScenarioTracker( nScenarioID );
-	//pGame->pScenarioTracker = NScenario::CreateScenarioTracker( 1 );
+	// Retail v1.2 0x69a0b7..0x69a0dd: retain the supplied DB record,
+	// or use DB 1 when no valid difficulty was supplied (including tutorial).
+	pGame->pDifficulty = IsValid( pDifficulty ) ? pDifficulty : NDb::GetDBDifficulty( 1 );
 	return pGame;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////

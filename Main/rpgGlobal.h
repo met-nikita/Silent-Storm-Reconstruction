@@ -192,7 +192,7 @@ public:
 	}
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-NRPG::CGlobalGame* CreateGlobalGame( int nScenarioID = -1, int nDifficultyID = 1 );
+NRPG::CGlobalGame* CreateGlobalGame( int nScenarioID = -1, NDb::CDBDifficulty *pDifficulty = 0 );
 NRPG::CGlobalPlayer* CreateGlobalPlayer();
 NRPG::CGlobalPlayer* CreateGlobalPlayer( NDb::CSide* pSide );
 NRPG::CGlobalPlayer* CreateGlobalPlayer( const vector<int> &personages );
