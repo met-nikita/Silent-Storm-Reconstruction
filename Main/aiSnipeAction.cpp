@@ -116,11 +116,19 @@ void CAIBeginSnipeAction::GetInfoInner( const SPlaceWithAP &, SInfo *pInfo ) con
 	float fRange = pGame->GetUnitSightDistance( pRPG );
 	float fFOV = IsValid( pRPG ) ? pRPG->GetSightFOV() : FP_2PI;
 	vector<SPathPlace> places;
+	const SUnitPosition &enemyPos = pEnemy->GetUnitServer()->GetPosition();
+	// Retail v1.2 0x4a4c66/0x4a4d23: test each escape place facing from the
+	// sniper toward the target, rather than retaining the flood's direction bits.
+	EDirection direction = pNet->GetClosestDir( selfPos.pos.p, enemyPos.pos.p );
 	// Retail v1.2 0x4a4cdb: RUN, four AP, not the target's full turn budget.
-	GetNearestPlaces( pEnemy->GetUnitServer(), pEnemy->GetPosition().p, 4, NAI::RUN, &places );
+	GetNearestPlaces( pEnemy->GetUnitServer(), enemyPos.pos.p, 4, NAI::RUN, &places );
 	for ( vector<SPathPlace>::const_iterator i = places.begin(); i != places.end(); ++i )
-		if ( !pGame->CheckPositionVisibility( selfPos, SPosition( *i, pNet ), fRange, fFOV ) )
+	{
+		SPosition targetPos( *i, pNet );
+		targetPos.p.SetDirection( direction );
+		if ( !pGame->CheckPositionVisibility( selfPos, targetPos, fRange, fFOV ) )
 			return;                                      // a place the target could reach unseen -> cannot snipe
+	}
 	pInfo->pTarget = pEnemy;
 	pInfo->bCanDo = true;
 }

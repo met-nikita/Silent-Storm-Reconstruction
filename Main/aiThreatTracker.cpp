@@ -334,8 +334,8 @@ void CAIEventTrackerImpl::OnStartGame( const CEventOnStartGame & )
 // that can no longer fight, is not already a known corpse, is NOT an enemy (enemy corpses ignored),
 // and passes the geometric IsCorpseVisible @0x298da0 probe (range/FOV-gated rays at the body's
 // corpseHLpos points -- NOT the TBS visible-list, which excludes corpses) raises CAICorpseEvent.
-// NOTE: in retail the event only records the corpse (SAIUnitState::knownCorpses); the killer ->
-// possibleEnemy arm is inert because CUnitServer::pKiller is never written (byte-scan proven).
+// The event records the corpse and promotes its recorded killer to a possible enemy.
+// Live v1.2 visibilitybug capture: this is how the distant guard learns about the hero.
 void CAIEventTrackerImpl::CheckForVisibleCorpses()
 {
 	CUnitServer *pUS = pUnit;

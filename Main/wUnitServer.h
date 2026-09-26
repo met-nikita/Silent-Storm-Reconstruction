@@ -187,7 +187,7 @@ public:
 	// clue-carrying corpses. BOTH ARE SERIALIZED by retail (operator& @0x3c6e80: nClueCount tag 24,
 	// tDeathTime tag 35 -- the earlier "non-serialized parity surface" note was decomp-disproven,
 	// W3 serialization convergence 2026-07-13). Retail seeds nClueCount=1 from the ctor's trailing
-	// bool (@0x3c3cc0); nothing writes tDeathTime yet (the corpse-timestamp writer is still unported).
+	// bool (@0x3c3cc0); ProcessAttack records tDeathTime on the first incapacitating hit.
 	unsigned long tDeathTime = 0;	// retail +0x228 (tag 35): tick the unit became a corpse
 	int nClueCount = 0;				// retail +0x1e4 (tag 24): number of quest clues carried
 	// retail CUnitServer::SetHandItem @0x387b30 (wPlayer.obj): copy the SItem into sHandItem, then

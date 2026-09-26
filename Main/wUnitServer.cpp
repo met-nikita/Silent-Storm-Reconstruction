@@ -1575,6 +1575,9 @@ int CUnitServer::ProcessAttack( NWorld::IWorld *pWorld, int nUserID, NRPG::CAtta
 	if ( bIsPKWhichIsWeared )
 		return 0;
 	bool isDead = GetUnitRPG()->IsDead();
+	bool isUnconscious = IsUnconscious();
+	CUnitServer *pAttacker = IsValid( pAttack->pAttacker ) ?
+		GetWorld()->GetUnitServer( pAttack->pAttacker ) : 0;
 	int nRet = CDumbUnitServer::ProcessAttack( pWorld, nUserID, pAttack, vDir, pArmor );
 	if ( !IsValid( this ) )
 		return nRet;
@@ -1626,6 +1629,13 @@ int CUnitServer::ProcessAttack( NWorld::IWorld *pWorld, int nUserID, NRPG::CAtta
 			for ( list< CPtr<CUnitServer> >::iterator i = units.begin(); i != units.end(); ++i )
 				(*i)->GetUnitRPG()->GetRPGUnit()->AddXP(fXP);
 		}
+	}
+	// Retail v1.2 0x7c3e69: remember who first incapacitated a conscious unit.
+	// Further hits on an unconscious/dead body must not replace its killer/time.
+	if ( !isDead && !isUnconscious && ( GetUnitRPG()->IsDead() || IsUnconscious() ) )
+	{
+		pKiller = pAttacker;
+		tDeathTime = GetWorld()->GetTime()->GetValue();
 	}
 	return nRet;
 }

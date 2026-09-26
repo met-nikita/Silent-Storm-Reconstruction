@@ -89,10 +89,9 @@ void CAILostAllyEvent::Modify( SAIUnitState *pState )
 }
 
 // @0x3c470: a NEW corpse goes on record; then retail reads the corpse server's pKiller (+0x1f8) and
-// promotes THE KILLER to possibleEnemy. ⚠ pKiller is never written anywhere in retail (byte-scan
-// proven: only ctor-null + the serializer), so the promotion arm is retail-inert -- a noticed corpse
-// only lands in knownCorpses. The dev predecessor promoted the CORPSE itself (more aggressive than
-// retail) -- removed.
+// promotes THE KILLER to possibleEnemy, not the corpse itself. ProcessAttack records the attacker
+// on the first death/unconscious transition (v1.2 0x7c3e9c). Its adjusted CDumbUnitServer this-pointer
+// addresses pKiller as +0x1f0, which an earlier scan for the full-object +0x1f8 missed.
 void CAICorpseEvent::Modify( SAIUnitState *pState )
 {
 	IAIUnit *p = pCorpse.GetPtr();
