@@ -1177,10 +1177,11 @@ bool CMissionUI::ProcessMessage( const SEvent &sEvent )
 			pCharacter->AddImageState( CHoverButton::STATE_DISABLED, NDb::GetUITexture( 428 ) );
 			pCharacter->SetCursorInfo( GetInterface()->GetDefaultCursorInfo() );
 
-			// retail @0x214d40 TEMPLATELOAD: the auto player-switch banner from the "playerswitch"
-			// control (its nested container brings the "text"/"ok" children -- CPlayerSwitchUI builds
-			// them in its own TEMPLATELOAD arm). Serialized as CMissionUI tag 25.
-			pPlayerSwitchUI = new CPlayerSwitchUI( sEvent.pLoader->GetControl( "playerswitch" ), pMission );
+			// Retail v1.2 0x615829..0x6158bc: a separate, initially hidden root-level dialog.
+			// The mission template has no "playerswitch" child; container 453 supplies its layout.
+			pPlayerSwitchUI = new CPlayerSwitchUI( SWindowInfo( GetInterface(), SPoint( 0, 0 ),
+				SPoint( 0, 0 ), "playerswitch", STYLE_ENABLED | STYLE_TOPMOST ), pMission );
+			LoadTemplate( pPlayerSwitchUI, NDb::GetUIContainer( 453 ) );
 			break;
 		}
 	case EVENT_TEMPLATELOADCOMPLETE:

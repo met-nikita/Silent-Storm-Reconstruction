@@ -1890,12 +1890,12 @@ void CUnitServer::ProcessCriticalsAndRegenerations()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 NDb::EDiplomacyState CUnitServer::GetDiplomacyState( CUnitServer *pTarget ) const
 {
-	if ( !pTarget->GetPlayer() )
-	{
-		ASSERT( pTarget->IsEmptyPK() );
+	// Retail v1.2 0x7bfaf0 -> 0x762180 -> 0x7621d0: resolve unit/player identity
+	// before consulting scenario diplomacy. Different hotseat players share scenario ID 0.
+	if ( !IsValid( pTarget ) || !pTarget->GetPlayer() )
 		return NDb::DS_NEUTRAL;
-	}
-	return GetUnitRPG()->GetDiplomacy().GetDiplomacyState( pTarget->GetPlayer()->GetScenarioPlayerID() );
+	return GetWorld()->GetDiplomacyState( static_cast<CUnit*>( const_cast<CUnitServer*>( this ) ),
+		pTarget->GetPlayer() );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CUnitServer::SetPlayer( CPlayer *_pPlayer )
