@@ -182,7 +182,7 @@ private:
 	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CStateBase*)this); f.Add(2,&bForced); f.Add(3,&bAnchorSet); f.Add(4,&vAnchor); f.Add(5,&sCursorInfo); return 0; }
 
 protected:
-	void DoMove( bool bInstant );
+	void DoMove( bool bInstant, bool bRun = false );
 	void UpdateCursor();
 
 public:

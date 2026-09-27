@@ -563,7 +563,11 @@ void CLightmapTracker::RenderPointLightShadowed(
 
 	if ( NGfx::GetHardwareLevel() >= NGfx::HL_GFORCE3 )
 	{
-		if ( bFast )
+		// Retail v1.2 0x52d114: the fast update still uses bump mapping when
+		// the quality preset requests it on every cached-light update.
+		const bool bUseBump = NGlobal::GetVar( "gfx_cl_use_bump", 1 ).GetFloat() != 0 &&
+			( !bFast || NGlobal::GetVar( "gfx_cl_use_bump_always", 1 ).GetFloat() != 0 );
+		if ( !bUseBump )
 		{
 			pTarget->pRC->SetColorWrite( NGfx::COLORWRITE_COLOR );
 			RenderLight( pTarget, lightInfo, RO_CL_PNT_LIGHT_SHADOWED, pDepth, (float)nDepthBias, DPM_EQUAL|ABM_ADD );

@@ -25,9 +25,9 @@ const int
 // Guarded against a missing control (our 32MB game.db may not ship every retail checkbox).
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // WIDESCREEN: combo item id packs both dimensions -- Sentinels @0x4eba9f ((w&0xfff)<<12)|(h&0xfff).
-static int EncodeVideoModeID( int nW, int nH )
+static int EncodeVideoModeID( int nW, int nH, int nBpp = 32 )
 {
-	return ( ( nW & 0xfff ) << 12 ) | ( nH & 0xfff );
+	return ( ( nW & 0xfff ) << 12 ) | ( nH & 0xfff ) | ( nBpp == 16 ? 0x1000000 : 0 );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 static void UpdateConfig( CCheckButton *pButton, const string &szVar )
@@ -335,13 +335,13 @@ bool CEmptyOptionsUI::ProcessMessage( const SEvent &sEvent )
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // Resolution <-> config glue (retail @0x220d30/@0x220e30).  Retail's id is width|(gfx_16bit_mode
-// <<16); dev uses the widescreen WxH-packed id and the "WxH" string var (16-bit modes not plumbed).
+// <<16); dev retains widescreen WxH packing and uses bit 24 for the 16-bit flag.
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 static int GetCurrentResolution()
 {
 	int nModeX = 1024, nModeY = 768;
 	NGScene::GetConfiguredVideoMode( &nModeX, &nModeY );
-	return EncodeVideoModeID( nModeX, nModeY );
+	return EncodeVideoModeID( nModeX, nModeY, NGfx::Is16BitMode() ? 16 : 32 );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 static void SetCurrentResolution( int nMode )
@@ -349,6 +349,7 @@ static void SetCurrentResolution( int nMode )
 	WCHAR wsMode[64];
 	swprintf( wsMode, L"%dx%d", ( nMode >> 12 ) & 0xfff, nMode & 0xfff );
 	NGlobal::SetVar( "gfx_resolution", wstring( wsMode ) );
+	NGlobal::SetVar( "gfx_16bit_mode", ( nMode & 0x1000000 ) != 0 ? 1 : 0 );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // The shared 4-preset item block every quality combo gets (retail inlines it per combo,
@@ -467,7 +468,7 @@ bool CVideoOptionsUI::ProcessMessage( const SEvent &sEvent )
 				NGlobal::ResetVar( "gfx_gamma" );
 				NGlobal::ResetVar( "ui_hwcursor" );
 				NGlobal::ResetVar( "gfx_particles" );
-				// retail @0x62560d also runs NGScene::AutoDetectVideoConfig() -- deferred (GAutoDetect.h)
+				NGScene::AutoDetectVideoConfig();
 				UpdateFromConfig();
 				bChanged = true;   // retail recreates unconditionally on default
 			}
@@ -540,9 +541,16 @@ bool CVideoOptionsUI::ProcessMessage( const SEvent &sEvent )
 			pResolution = new CComplexComboBox( sEvent.pLoader->GetControl( "resolution" ) );
 			list<NGfx::SVideoMode> modesList;
 			NGfx::GetModesList( &modesList );
-			// retail @0x626c03 keeps w>=800 AND aspect==4:3, plus an 800..1024 16-bit list
-			// ("<right>%dx%dx16", id w|0x10000). WIDESCREEN port: every aspect stays (Sentinels'
-			// builder @0x4eba70 has no aspect check either); dev has no 16-bit plumbing.
+			// Keep the widescreen extension for 32-bit modes; retail's extra 16-bit list
+			// contains only 800..1024 4:3 modes. Windowed mode must match the desktop format.
+			if ( NGlobal::GetVar( "gfx_fullscreen", 1 ).GetInt() != 0 )
+			{
+				list<NGfx::SVideoMode> modes16;
+				NGfx::GetModesList( &modes16, 16 );
+				for ( list<NGfx::SVideoMode>::iterator i = modes16.begin(); i != modes16.end(); ++i )
+					if ( i->nXSize >= 800 && i->nXSize <= 1024 && i->nXSize * 3 == i->nYSize * 4 )
+						modesList.push_back( *i );
+			}
 			for( list<NGfx::SVideoMode>::iterator iTemp = modesList.begin(); iTemp != modesList.end(); )
 			{
 				if ( iTemp->nXSize < 800 )
@@ -560,8 +568,8 @@ bool CVideoOptionsUI::ProcessMessage( const SEvent &sEvent )
 					nTemplate = 173;
 
 				WCHAR wsBuffer[1024];
-				swprintf( wsBuffer, L"<right>%dx%dx32", iTemp->nXSize, iTemp->nYSize );
-				pResolution->AddItem( EncodeVideoModeID( iTemp->nXSize, iTemp->nYSize ), NUI::CComplexComboBox::SInfo( wsBuffer ), nTemplate );
+				swprintf( wsBuffer, L"<right>%dx%dx%d", iTemp->nXSize, iTemp->nYSize, iTemp->nBpp );
+				pResolution->AddItem( EncodeVideoModeID( iTemp->nXSize, iTemp->nYSize, iTemp->nBpp ), NUI::CComplexComboBox::SInfo( wsBuffer ), nTemplate );
 			}
 
 			// retail's control naming: the "fsaa_level" row is the LIGHTING QUALITY combo
@@ -1381,9 +1389,8 @@ using namespace NGame;
 REGISTER_SAVELOAD_CLASS( 0xB081515A, COptionsInterface );
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // Register the gameplay + controls option vars with their retail defaults so the screens open with the
-// right state and the "Default" button restores sensible values.  In the release these are owned by
-// scattered consumer subsystems (iMainInit/wMainInit/iMissionUIInit/...) that are absent or unwired in
-// this tree; here they carry no handler -- they persist to config and drive the Options UI only.
+// right state and the "Default" button restores sensible values. These are polled by their gameplay
+// and input consumers; they need no change handler here.
 // cheat_blood is already registered (wDumbUnit.cpp) with its real BloodHandler, so it is NOT re-listed.
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 START_REGISTER(iOptionsMenu)

@@ -225,7 +225,7 @@ public:
 	// retail @0x32b670 returns EUnitCommandResult from a click-time CanDo (FindPath preview) --
 	// the SOLE source of the user-visible "Path not found" on an unreachable move click; a
 	// rejected command is never queued.
-	virtual NWorld::EUnitCommandResult SetTargetPosition( const NAI::SPosition &sPos, bool bInstantly = false ) = 0;
+	virtual NWorld::EUnitCommandResult SetTargetPosition( const NAI::SPosition &sPos, bool bInstantly = false, bool bRun = false ) = 0;
 	virtual NAI::SPosition GetTargetPosition() const = 0;
 
 	virtual bool IsPathComplete() const = 0;

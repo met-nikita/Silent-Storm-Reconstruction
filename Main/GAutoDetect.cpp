@@ -1,5 +1,7 @@
 #include "StdAfx.h"
 #include "GAutoDetect.h"
+#include "Gfx.h"
+#include "GfxBuffers.h"
 #include "..\MiscDll\Commands.h"   // NGlobal::GetVar / SetVar / CValue
 #include "..\Misc\HPTimer.h"       // NHPTimer::GetClockRate
 #include <math.h>                  // fabs -- v1.2 @0xf69b0 epsilon preset match
@@ -168,6 +170,69 @@ EConfigValue GetTextureMode()                     { return FindCfgMode( textureC
 // SetFSAAMode @0xf6bf0 / GetFSAAMode @0xf6be0
 void SetFSAAMode( EConfigValue mode )             { ApplyCfgValues( fsaaConfig, mode, CV_CUSTOM ); }
 EConfigValue GetFSAAMode()                        { return FindCfgMode( fsaaConfig, CV_CUSTOM ); }
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void AutoDetectVideoConfig()
+{
+	const NGfx::SVideoConfigInfo info = NGfx::GetVideoConfigInfo();
+	// v1.2 0x9542a8: card, hardware level (-1 = any), lighting, speed, texture, 16-bit mode.
+	static const int config[][6] = {
+		{1,-1,0,3,1,1}, {2,-1,0,3,1,1}, {4,-1,0,2,1,0}, {5,-1,0,2,2,0},
+		{7,-1,3,0,2,0}, {3,-1,0,3,0,1}, {6,-1,0,2,1,1}, {8,-1,0,3,1,1},
+		{9,-1,0,3,1,1}, {10,-1,0,3,2,0}, {11,-1,3,1,2,0}, {12,-1,3,0,2,0},
+		{0,4,3,1,2,0}, {0,3,0,2,2,0}, {0,2,0,2,2,0}, {0,1,0,3,1,1}, {0,0,0,3,1,1}
+	};
+	int nSpeed = 3, nTexture = 1, nLighting = 0, n16Bit = 1;
+	for ( int i = 0; i < ARRAY_SIZE(config); ++i )
+		if ( ( config[i][0] == 0 || config[i][0] == info.nCard ) &&
+			( config[i][1] == -1 || config[i][1] == info.nHardwareLevel ) )
+		{
+			nLighting = config[i][2]; nSpeed = config[i][3]; nTexture = config[i][4]; n16Bit = config[i][5];
+			break;
+		}
+	if ( !NGfx::CanStreamGeometry() )
+		nSpeed = 3;
+	NGlobal::SetVar( "gfx_16bit_mode", n16Bit );
+	bool bLowRAM = IsLowRAM();
+	NGlobal::SetVar( "gfx_low_ram", bLowRAM ? 1 : 0 );
+	int nResolution = info.nDesktopWidth < 1024 ? 800 : 1024;
+	if ( bLowRAM )
+	{
+		nSpeed = 3; nTexture = 1;
+	}
+	else
+	{
+		if ( info.fVideoMemoryMB < 32 )
+		{
+			nSpeed = 3; nTexture = 1;
+			if ( info.fVideoMemoryMB < 16 )
+				nResolution = 800;
+		}
+		else if ( info.fVideoMemoryMB < 64 )
+			nTexture = 1;
+		else if ( info.fVideoMemoryMB < 128 )
+			nTexture = 2;
+		else if ( info.fVideoMemoryMB + info.fSharedMemoryMB > 160 )
+			nTexture = 3;
+		if ( info.nHardwareLevel >= 4 )
+		{
+			if ( info.fVideoMemoryMB > 80 && info.nDesktopWidth > 1024 && info.nDesktopWidth < 1600 )
+				nResolution = info.nDesktopWidth;
+			NGlobal::SetVar( "gfx_anisotropic_filter", 2 );
+		}
+	}
+	NGlobal::SetVar( "gfx_resolution", nResolution );
+	SetSpeedMode( (EConfigValue)nSpeed );
+	SetTextureMode( (EConfigValue)nTexture );
+	SetLightingQualityMode( (EConfigValue)nLighting );
+	// Retail intentionally leaves the smoothness / FSAA preset unchanged.
+}
+static void CommandGfxAutodetect( const string &, const vector<wstring> &, void * )
+{
+	AutoDetectVideoConfig();
+}
+START_REGISTER(GAutoDetect)
+	REGISTER_CMD( "gfx_autodetect", CommandGfxAutodetect )
+FINISH_REGISTER
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////

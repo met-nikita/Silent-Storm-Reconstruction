@@ -86,7 +86,7 @@ public:
 	CUnitTracker() {}
 	CUnitTracker( IMission *pMission, NWorld::CUnit *pUnit );
 
-	NWorld::EUnitCommandResult SetTargetPosition( const NAI::SPosition &sPos, bool bInstantly = false );   // retail @0x32b670
+	NWorld::EUnitCommandResult SetTargetPosition( const NAI::SPosition &sPos, bool bInstantly = false, bool bRun = false );
 	NAI::SPosition GetTargetPosition() const;
 
 	bool IsPathComplete() const;

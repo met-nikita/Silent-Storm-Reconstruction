@@ -157,6 +157,7 @@ bool Is3DActive();
 void SetWireframe( bool bWire );
 void Clear( NGfx::CRenderContext *pRC, const CVec3 &vColor );
 void ClearScreen( const CVec3 &vColor );
+void ClearScreenZBuffer();
 enum ERegisterCopyMode
 {
 	RCM_COPY,
@@ -175,7 +176,6 @@ CFuncBase<vector<NGfx::SCompactTransformer> >* MakeMMXAnimation( CFuncBase<vecto
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 #endif
-
 
 
 

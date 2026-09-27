@@ -1878,13 +1878,19 @@ void CGScene::GetPartsList( const SDecalMappingInfo &_info, const CObjectBaseSet
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+static bool bUseDecals = true;
 CDecalTarget* CGScene::CreateDecalTarget( const vector<CObjectBase*> &targets, const SDecalMappingInfo &_info )
 {
+	// Retail v1.2 0x559ff0: disabling decals suppresses new decal targets.
+	if ( !bUseDecals )
+		return 0;
 	return pDecalsManager->CreateDecalTarget( targets, _info );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CObjectBase* CGScene::AddDecal( NGScene::CDecalTarget *pTarget, IMaterial *pMaterial )
 {
+	if ( !IsValid(pTarget) )
+		return 0;
 	return pDecalsManager->CreateDecal( pTarget, pMaterial );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -2201,6 +2207,16 @@ void Clear( NGfx::CRenderContext *pRC, const CVec3 &vColor )
 		pRC->ClearBuffers( clearColor.color );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+static bool bBlockBuffering = false;  // gfx_block_buffering
+void ClearScreenZBuffer()
+{
+	// Retail v1.2 0x5599f0: the input-latency option synchronizes before drawing.
+	if ( bBlockBuffering )
+		NGfx::DXFinish();
+	NGfx::CRenderContext rc;
+	rc.ClearZBuffer();
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 void ClearScreen( const CVec3 &vColor )
 {
 	NGfx::CRenderContext rc;
@@ -2315,8 +2331,6 @@ static void VarSwitchLinearCache( const string &szID, const NGlobal::CValue &sVa
 // gfx_hw_hsr / gfx_decals / gfx_block_buffering bound through VarBoolHandler (0x99e2f3 / 0x97901b /
 // 0x99e2f4).
 static bool bUseHWHSR = false;        // gfx_hw_hsr @0x99e2f3
-static bool bUseDecals = true;        // gfx_decals @0x97901b (default 1.0)
-static bool bBlockBuffering = false;  // gfx_block_buffering @0x99e2f4
 START_REGISTER(GSceneInternal)
 	REGISTER_VAR( "gfx_showcache_2d", VarSwitchTexCache, 0.0f, false )
 	REGISTER_VAR( "gfx_showcache_transp", VarSwitchTranspCache, 0.0f, false )

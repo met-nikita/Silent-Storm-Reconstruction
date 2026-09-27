@@ -18,6 +18,7 @@
 #include "UnitTracker.h"
 #include "iGameStates.h"	// GetSelectionColor (v1.2 selection palette)
 #include "..\Misc\StrProc.h"
+#include "..\MiscDll\Commands.h"
 #include "..\DBFormat\DataMap.h"
 #include "..\DBFormat\DataFormat.h"
 #include "..\DBFormat\DataGeometry.h"
@@ -84,13 +85,19 @@ void CUnitTracker::SyncAllSkills()
 // CanDo -- for a CCmdPath that is the synchronous FindPath preview (wUnitServer.cpp:550) whose
 // UCR_PATH_NOT_FOUND is the click-time "Path not found" -- and submit ONLY on UCR_OK /
 // UCR_NOT_ENOUGH_AP (real-time: AP accrues). A rejected command is never queued and sTarget is
-// left untouched. The Jan03 IsRealTime()/bInstantly split survives only as Command's submit
-// flavor (retail forces it off for CCmdContinue @0x72b797). NOTE CanDo destroys a zero-ref
-// command, hence the CPtr holder. (Retail's extra bStandUp leg -- WALK-pose cancel + wish-pose,
-// v1.2 PK/corpse guards -- is a separate unported parity item.)
-NWorld::EUnitCommandResult CUnitTracker::SetTargetPosition( const NAI::SPosition &sPos, bool bInstantly )
+// left untouched. Retail forces instant submission off for CCmdContinue. CanDo destroys
+// a zero-ref command, hence the CPtr holder.
+NWorld::EUnitCommandResult CUnitTracker::SetTargetPosition( const NAI::SPosition &sPos, bool bInstantly, bool bRun )
 {
 	CObj<NAI::CPath> pCurrentPath( pUnit->GetCurrentPath() );
+	// Retail v1.2 0x72bb54: a realtime double click switches walking to running,
+	// except in a panzerklein or while carrying a body. Discard the old path first.
+	if ( bRun && pUnit->GetPose() == NAI::WALK && !IsValid( pUnit->GetWearingDBPK() ) && !pUnit->IsCarryingCorpse() )
+	{
+		pMission->Command( new NWorld::CCmdCancel( pUnit ) );
+		pMission->Command( pUnit, new NWorld::CCmdWishPose( NAI::RUN ) );
+		pCurrentPath = 0;
+	}
 	const bool bContinue = IsValid( pCurrentPath ) && IsSamePlace( sTarget.p, sPos.p );
 
 	CPtr<NWorld::CCmd> pCmd;
@@ -103,7 +110,7 @@ NWorld::EUnitCommandResult CUnitTracker::SetTargetPosition( const NAI::SPosition
 	if ( eResult != NWorld::UCR_OK && eResult != NWorld::UCR_NOT_ENOUGH_AP )
 		return eResult;
 
-	const bool bSubmitInstantly = !bContinue && ( pMission->IsRealTime() || bInstantly );
+	const bool bSubmitInstantly = !bContinue && bInstantly;
 	pMission->Command( pUnit, pCmd, bSubmitInstantly );
 	sTarget = sPos;
 	return NWorld::UCR_OK;
@@ -419,7 +426,9 @@ void CUnitTracker::Update()
 
 	// retail CUnitTracker::Update @0x32d520 HIDEs the path/selection while a scripted sequence runs (mission
 	// vtbl+0x44 IsSequence) -- so the script-assigned move path of your character is not shown during a sequence.
-	if ( pMission->IsSequence() || pMission->IsInterfaceHidden() || ( !IsSelected() && !IsHilighted() ) || !pMission->IsRealTime() && ( pUnit->GetPlayer() != pMission->GetActivePlayer()->GetPlayer() ) )
+	if ( pMission->IsSequence() || pMission->IsInterfaceHidden() || !pMission->IsReady() ||
+		( !IsSelected() && !IsHilighted() ) ||
+		( pMission->IsRealTime() && NGlobal::GetVar( "game_pathinrealtime", 1 ).GetInt() == 0 ) )
 	{
 		HidePath();
 		HideSelection();

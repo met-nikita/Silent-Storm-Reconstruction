@@ -42,8 +42,10 @@ static NWin32Helper::com_ptr<IDirect3DSurface9> pScreenColor, pScreenDepth, pReg
 static CDepthHash sharedZBuffers;
 static CMObj<CTexture> pRegisters[N_MAX_REGISTERS];
 static CTPoint<int> ptRegisterBufferSize, ptScreenSize;
+static float fRegisterResolution = 1.0f;   // gfx_register_resolution
 //static bool bUseSeparateZBuffer;
 static bool bLastUsedAddressMode[8], bPointAddress[8];
+static int nAppliedAnisotropy[8];
 static NWin32Helper::com_ptr<IDirect3DPixelShader9> pixelShaders[200];
 static NWin32Helper::com_ptr<IDirect3DVertexShader9> vertexShaders[200];
 static NWin32Helper::com_ptr<IDirect3DVertexDeclaration9> vertexDeclarations[200];
@@ -570,7 +572,7 @@ static void SetTextureWrap( int nStage, bool bWrap )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 static void SetTexturePointFilter( int n, bool bPoint )
 {
-	if ( bPointAddress[n] == bPoint )
+	if ( bPointAddress[n] == bPoint && ( bPoint || nAppliedAnisotropy[n] == nUseAnisotropy ) )
 		return;
 	bPointAddress[n] = bPoint;
 	if ( bPoint )
@@ -598,6 +600,7 @@ static void SetTexturePointFilter( int n, bool bPoint )
 			pDevice->SetSamplerState( n, D3DSAMP_MIPFILTER, D3DTEXF_LINEAR );//D3DTEXF_POINT );
 		}
 	}
+	nAppliedAnisotropy[n] = nUseAnisotropy;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 static NWin32Helper::com_ptr<IDirect3DSurface9> pCurrentRTTB, pCurrentRTZB;
@@ -1149,10 +1152,15 @@ bool InitZBuffer( D3DFORMAT format )
 			nXSize = nXRSize;
 			nYSize = nYRSize;
 #else
-			nXSize = nXRSize;
-			nYSize = Float2Int( nYRSize * (564.0f / 768.0f ) );
+			// Retail v1.2 0x51cf2f: smoothness scales the off-screen buffers by
+			// sqrt(area multiplier), independently of back-buffer multisampling.
+			float fScale = sqrt( Max( fRegisterResolution, 0.0f ) );
+			nXSize = Float2Int( nXRSize * fScale );
+			nYSize = Float2Int( nYRSize * fScale * (564.0f / 768.0f ) );
 #endif
 		}
+		nXSize = Clamp( nXSize, 1, int( devCaps.MaxTextureWidth ) );
+		nYSize = Clamp( nYSize, 1, int( devCaps.MaxTextureHeight ) );
 		ptRegisterBufferSize = CTPoint<int>( nXSize, nYSize );
 		hr = pDevice->CreateDepthStencilSurface( nXSize, nYSize, format, D3DMULTISAMPLE_NONE, 0,
 			FALSE, pRegisterDepth.GetAddr(), 0 );
@@ -1223,6 +1231,7 @@ static void InitTextureStage( int n )
 	pDevice->SetSamplerState( n, D3DSAMP_MIPMAPLODBIAS, *(DWORD*)&fMipBias );
 	bLastUsedAddressMode[n] = false;
 	bPointAddress[n] = false;
+	nAppliedAnisotropy[n] = nUseAnisotropy;
 	pDevice->SetSamplerState( n, D3DSAMP_ADDRESSU, D3DTADDRESS_CLAMP );
 	pDevice->SetSamplerState( n, D3DSAMP_ADDRESSV, D3DTADDRESS_CLAMP );
 }
@@ -1385,7 +1394,6 @@ void DoneRender()
 // retail GfxRenderInit @0x11e0f0: two vars bound to module globals (nMaxLag @0x99c1fc,
 // fRegisterResolution @0x955408)
 static int nMaxLag = 0;                    // gfx_maxlag
-static float fRegisterResolution = 1.0f;   // gfx_register_resolution
 START_REGISTER(GfxRender)
 	REGISTER_VAR_EX( "gfx_maxlag", NGlobal::VarIntHandler, &nMaxLag, 0.0f, true )
 	REGISTER_VAR_EX( "gfx_register_resolution", NGlobal::VarFloatHandler, &fRegisterResolution, 1.0f, true )

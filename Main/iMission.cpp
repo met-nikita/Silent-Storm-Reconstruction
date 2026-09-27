@@ -1217,7 +1217,7 @@ void CMission::Step()
 		if ( !bHideInterface )
 			nFlags |= N_RENDERMODE_2D;
 
-		NGScene::ClearScreen( CVec3( 0, 0, 0 ) );	// release ClearScreenZBuffer() @0x5a3d26 (absent) -> black clear
+		NGScene::ClearScreenZBuffer();
 		RenderFrame( nFlags, bAdvance, GetCamera() );
 	}
 	else

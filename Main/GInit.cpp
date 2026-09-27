@@ -67,6 +67,8 @@ bool SetModeFromConfig( bool bRecreate )
 #endif
 
 	NGfx::SRenderTargetsInfo rtInfo;
+	// Windowed D3D9 uses the desktop's 32-bit format; 16-bit modes are fullscreen only.
+	int nBpp = fullScreen == NGfx::FULL_SCREEN && NGlobal::GetVar( "gfx_16bit_mode", 0 ).GetInt() != 0 ? 16 : 32;
 	nDepthTexResolution = Float2Int( NGlobal::GetVar( "gfx_depth_tex_resolution", 512 ).GetFloat() );
 	nCLSkyTextures = Float2Int( NGlobal::GetVar( "gfx_cl_sky_textures", 0 ).GetFloat() );
 	nCLSkyTextures = Max( 0, nCLSkyTextures );
@@ -77,7 +79,7 @@ bool SetModeFromConfig( bool bRecreate )
 	// select feature set
 	NGfx::EHardwareLevel hl = NGfx::GetHardwareLevel();
 	sValue = NGlobal::GetVar( "gfx_fastest", 0 );
-	if ( sValue.GetFloat() != 0 || hl == NGfx::HL_TNL_DEVICE )
+	if ( sValue.GetFloat() != 0 || hl == NGfx::HL_TNL_DEVICE || nBpp == 16 )
 	{
 		bCanCacheLighting = false;
 		bCanRenderShadows = false;
@@ -117,7 +119,7 @@ bool SetModeFromConfig( bool bRecreate )
 		rtInfo.AddCube( 256, 1 );
 	}
 
-	bool bRes = NGfx::SetMode( NGfx::SVideoMode( nModeX, nModeY, 32, fullScreen ), rtInfo );
+	bool bRes = NGfx::SetMode( NGfx::SVideoMode( nModeX, nModeY, nBpp, fullScreen ), rtInfo );
 	if ( !bRes )
 	{
 		// in case of failure try to create device limited to fastest mode
@@ -126,7 +128,7 @@ bool SetModeFromConfig( bool bRecreate )
 		bCanCalcAmbient = false;
 		nCLSkyTextures = 0;
 		rtInfo.Clear();
-		bRes = NGfx::SetMode( NGfx::SVideoMode( nModeX, nModeY, 32, fullScreen ), rtInfo );
+		bRes = NGfx::SetMode( NGfx::SVideoMode( nModeX, nModeY, nBpp, fullScreen ), rtInfo );
 	}
 	return bRes;
 }
@@ -141,8 +143,7 @@ void CommandGfxRecreate( const string &szID, const vector<wstring> &paramsSet, v
 	SetModeFromConfig( true );    // retail @0x12a260
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// gfx_16bit_mode backing flag, retail @0x99cf93 (Is16BitMode @0x10cde0 returns it; this tree's
-// render path is still always 32-bit -- the flag only feeds the saved config / options packing).
+// gfx_16bit_mode backing flag, retail @0x99cf93.
 static bool bUse16BitMode = false;
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // retail GInitInit @0x12a320: 2 cmds + 9 vars; Jan03's gfx_refreshlimit was DROPPED in retail and

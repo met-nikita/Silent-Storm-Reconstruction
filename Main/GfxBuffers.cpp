@@ -1174,6 +1174,17 @@ static CCMCache cmCache;
 static CTextureCache textureCache, transparentCache;
 typedef unordered_map<SGeometryType, CObj<CGeometryBuffer>,SGeometryTypeHash > CGeometryCacheHash;
 static CGeometryCacheHash geometries;
+// Retail v1.2 0x50f620: a blocking lock/unlock of a used vertex buffer
+// drains queued GPU work. Deliberately no DISCARD/NOOVERWRITE flags here.
+void DXFinish()
+{
+	if ( geometries.empty() )
+		return;
+	IDirect3DVertexBuffer9 *pBuffer = geometries.begin()->second->GetBuffer()->obj;
+	void *pData = 0;
+	if ( SUCCEEDED( pBuffer->Lock( 0, 0, &pData, 0 ) ) )
+		pBuffer->Unlock();
+}
 static CDynamicTrisIndices32 dynamicTris32;
 static CDynamicTrisIndices16 dynamicTris16;
 static NWin32Helper::com_ptr<IDirect3DVertexBuffer9> pCurrentVB;

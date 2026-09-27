@@ -1,5 +1,7 @@
 #include "StdAfx.h"
 #include <D3D9.h>
+#include <dxgi.h>
+#include "GfxRender.h"
 #include "..\Misc\HPTimer.h"
 #include "..\Misc\2DArray.h"
 #include "..\MiscDll\Commands.h"
@@ -25,8 +27,7 @@ SRenderStats renderStats;
 bool bHardwareVP, bHardwarePixelShaders, bHardwarePixelShaders14;
 bool bTnLDevice = false;
 // Render-config flag: when set, dynamic 2D textures (e.g. the Bink movie surface) use a
-// 16-bit SPixel1555 surface instead of 32-bit SPixel8888.  This tree's render path is
-// always 32-bit, so it defaults false (matches release Gfx.obj @0x10ce10).
+// 16-bit surface instead of 32-bit SPixel8888. Latched when graphics objects are rebuilt.
 bool b16BitTexturesNow = false;
 bool Is16BitTextures() { return b16BitTexturesNow; }   // @0x10ce10: return b16BitTexturesNow;
 static bool bForbidPS = false, bForceSWVP = false, bGammaIsSet = false;
@@ -48,9 +49,67 @@ SRenderTargetsInfo rtInfo;
 static HWND hWnd;
 static vector<SVideoModeInfo> videoModes;
 HWND GetHWND() { return hWnd; }
-// retail Is16BitMode @0x10cde0 returns bUse16BitMode; this tree has no 16-bit mode plumbing --
-// report from the live mode (always 32-bit today).
 bool Is16BitMode() { return videoMode.nBpp == 16; }
+////////////////////////////////////////////////////////////////////////////////////////////////////
+SVideoConfigInfo GetVideoConfigInfo()
+{
+	SVideoConfigInfo info = { 0, (int)GetHardwareLevel(), 1024, 0, 0 };
+	if ( !bTnLDevice && !bForbidPS && ( devCaps.PixelShaderVersion & 0xffff ) >= 0x200 )
+		info.nHardwareLevel = 4;
+	D3DDISPLAYMODE desktop;
+	if ( SUCCEEDED( pD3D->GetAdapterDisplayMode( D3DADAPTER_DEFAULT, &desktop ) ) )
+		info.nDesktopWidth = desktop.Width;
+	D3DADAPTER_IDENTIFIER9 adapter;
+	if ( FAILED( pD3D->GetAdapterIdentifier( D3DADAPTER_DEFAULT, 0, &adapter ) ) )
+		return info;
+	// Retail v1.2 videoCardsArray, 0x955420 (vendor, device, mask, card index).
+	static const DWORD cards[][4] = {
+		{0x10de,0x100,0xff0,1}, {0x10de,0x110,0xff0,3}, {0x10de,0x1a0,0xff0,3},
+		{0x10de,0x150,0xff0,2}, {0x10de,0x170,0xff0,6}, {0x10de,0x200,0xff0,4},
+		{0x10de,0x250,0xff0,5}, {0x10de,0x280,0xff0,5}, {0x10de,0x300,0xff0,7},
+		{0x1002,0x5159,0xffff,8}, {0x1002,0x5144,0xffff,8}, {0x1002,0x5157,0xffff,8},
+		{0x1002,0x4900,0xff00,9}, {0x1002,0x514c,0xffff,10},
+		{0x1002,0x4100,0xff00,11}, {0x1002,0x4e00,0xff00,12}
+	};
+	for ( int i = 0; i < ARRAY_SIZE(cards); ++i )
+		if ( adapter.VendorId == cards[i][0] && ( adapter.DeviceId & cards[i][2] ) == ( cards[i][1] & cards[i][2] ) )
+		{
+			info.nCard = cards[i][3];
+			break;
+		}
+	// Do not reproduce retail's allocate-until-failure VRAM probe or its signed overflow.
+	// Query the same adapter without allocating GPU memory; retain D3D9 fallback on older Windows.
+	if ( pDevice )
+		info.fVideoMemoryMB = pDevice->GetAvailableTextureMem() / 1048576.0f;
+	HMODULE hDXGI = LoadLibraryW( L"dxgi.dll" );
+	if ( hDXGI )
+	{
+		typedef HRESULT (WINAPI *TCreateFactory)( REFIID, void** );
+		TCreateFactory createFactory = (TCreateFactory)GetProcAddress( hDXGI, "CreateDXGIFactory" );
+		IDXGIFactory *pFactory = 0;
+		if ( createFactory && SUCCEEDED( createFactory( __uuidof(IDXGIFactory), (void**)&pFactory ) ) )
+		{
+			IDXGIAdapter *pAdapter;
+			for ( UINT i = 0; pFactory->EnumAdapters( i, &pAdapter ) == S_OK; ++i )
+			{
+				DXGI_ADAPTER_DESC desc;
+				bool bMatch = SUCCEEDED( pAdapter->GetDesc( &desc ) ) && desc.VendorId == adapter.VendorId && desc.DeviceId == adapter.DeviceId;
+				pAdapter->Release();
+				if ( bMatch )
+				{
+					info.fVideoMemoryMB = ( (double)desc.DedicatedVideoMemory + desc.DedicatedSystemMemory ) / 1048576.0;
+					info.fSharedMemoryMB = (double)desc.SharedSystemMemory / 1048576.0;
+					if ( info.fVideoMemoryMB == 0 )
+						info.fVideoMemoryMB = info.fSharedMemoryMB;
+					break;
+				}
+			}
+			pFactory->Release();
+		}
+		FreeLibrary( hDXGI );
+	}
+	return info;
+}
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // forward declarations
 static D3DFORMAT GetZBufferFormat( D3DFORMAT rTarget );
@@ -68,7 +127,9 @@ static void DestroyManagedDXObjects()
 static HRESULT InitDXObjects()
 {
 	// init itself
-	InitZBuffer( GetZBufferFormat( pp.BackBufferFormat ) );
+	b16BitTexturesNow = b16BitTextures; // retail v1.2 0x50d08e
+	if ( !InitZBuffer( GetZBufferFormat( pp.BackBufferFormat ) ) )
+		return D3DERR_OUTOFVIDEOMEMORY;
 	InitBuffers();
 	return InitRender();
 }
@@ -131,6 +192,10 @@ static HRESULT ResetDevice()
 		DestroyLostableDXObjects();
 		hr = pDevice->Reset( &pp );
 	}
+	// Let SetModeFromConfig fall back after a rejected mode, without querying
+	// a null device (CreateDevice failure) or a lost device (Reset failure).
+	if ( FAILED(hr) )
+		return hr;
 	{
 		D3DDEVINFO_VCACHE vcache;
 		Zero( vcache );
@@ -305,6 +370,25 @@ void CheckBackBufferSize()
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// Retail v1.2 0x50cc50: the smoothness setting selects a NONMASKABLE quality
+// level, not a D3DMULTISAMPLE_N_SAMPLES enum. Both color and depth must support it.
+static void FillFSAA( D3DPRESENT_PARAMETERS *pPresent )
+{
+	if ( nFSAA <= 0 )
+		return;
+	DWORD nColorLevels = 0, nDepthLevels = 0;
+	if ( FAILED( pD3D->CheckDeviceMultiSampleType( D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL,
+		pPresent->BackBufferFormat, pPresent->Windowed, D3DMULTISAMPLE_NONMASKABLE, &nColorLevels ) ) ||
+		FAILED( pD3D->CheckDeviceMultiSampleType( D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL,
+		pPresent->AutoDepthStencilFormat, pPresent->Windowed, D3DMULTISAMPLE_NONMASKABLE, &nDepthLevels ) ) )
+		return;
+	DWORD nLevels = Min( Min( nColorLevels, nDepthLevels ), DWORD( nFSAA ) );
+	if ( nLevels == 0 )
+		return;
+	pPresent->MultiSampleType = D3DMULTISAMPLE_NONMASKABLE;
+	pPresent->MultiSampleQuality = nLevels - 1;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 static bool FillPresent( const SVideoMode &m )
 {
 	HRESULT hr;
@@ -361,6 +445,7 @@ static bool FillPresent( const SVideoMode &m )
 		//pp.EnableAutoDepthStencil =	FALSE;
 
 		pp.FullScreen_RefreshRateInHz = best.RefreshRate;
+		FillFSAA( &pp );
 		return true;
 	}
 	//
@@ -385,6 +470,7 @@ static bool FillPresent( const SVideoMode &m )
 	pp.EnableAutoDepthStencil =	TRUE;
 	pp.AutoDepthStencilFormat = GetZBufferFormat( pp.BackBufferFormat, pp.BackBufferFormat );
 	//pp.EnableAutoDepthStencil =	FALSE;
+	FillFSAA( &pp );
 	return true;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -583,23 +669,26 @@ void Flip()
 // test cooperative level
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 static D3DGAMMARAMP keptGamma;
+static float fLastGamma = -1;
 void SetGamma( bool bGamma )
 {
 	if ( !pDevice )
 		return;
-	if ( bGammaIsSet == bGamma )
+	float fGamma = NGlobal::GetVar( "gfx_gamma", 1 ).GetFloat();
+	// Retail v1.2 0x50ce58 also compares the last applied gamma value.
+	if ( bGammaIsSet == bGamma && fLastGamma == fGamma )
 		return;
 	// set gamma
 	D3DGAMMARAMP gamma;
 	if ( bGamma )
 	{
-		pDevice->GetGammaRamp( 0, &keptGamma );
+		if ( !bGammaIsSet )
+			pDevice->GetGammaRamp( 0, &keptGamma );
 		for ( int k = 0; k < 256; ++k )
 		{
 			float f = k / 256.0f;
 			//if ( f < 0.0031308f ) f = f * 12.92f; else 	f = 1.055f * exp( log( f ) / 2.4f ) - 0.055f;
 			//if ( f < 0.026175f ) f = f * 4; else 	f = 1.1466f * exp( log( f ) / 2.4f ) - 0.1466f;
-			float fGamma = NGlobal::GetVar( "gfx_gamma", 1 ).GetFloat();
 			f = exp( log( f ) / fGamma );
 			WORD wRes = Float2Int( f * 65535 );
 			nGammaCorrection[k] = wRes >> 8;
@@ -645,6 +734,7 @@ void SetGamma( bool bGamma )
 	}
 	pDevice->SetGammaRamp( 0, D3DSGR_NO_CALIBRATION, &gamma );
 	bGammaIsSet = bGamma;
+	fLastGamma = fGamma;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool Is3DActive()

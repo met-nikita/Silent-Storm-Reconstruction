@@ -22,14 +22,8 @@
 // The Get*/Set* wrappers bind those to the four module preset tables; SetSpeedMode
 // additionally derives gfx_hsr (hidden-surface-removal level) from RAM + CPU clock.
 //
-// Functional reconstruction of Game.exe decomp (NOT byte-exact).  The three
-// remaining GAutoDetect.obj functions (AutoDetectVideoConfig / CommandGfxAutodetect /
-// GAutoDetectInit) are deferred: they reach absent cross-compiland NGfx internals
-// (NGfx::GetVideoCard + videoCardsArray, and NGfx::GetSystemInfo whose real D3D
-// video-memory probe is an unreconstructed empty stub).
-// !! KNOWN RETAIL BUG -- DO NOT PORT AS-IS: retail's video-memory probe stores the size
-// in a SIGNED int; on modern GPUs (>= 2GB VRAM) it wraps negative and auto-detect forces
-// features off.  Any future GetSystemInfo/AutoDetectVideoConfig port must keep it unsigned.
+// AutoDetectVideoConfig uses the retail v1.2 card/preset table and thresholds.
+// The hardware query avoids retail's allocate-until-failure probe and signed VRAM overflow.
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 namespace NGScene
 {
@@ -55,6 +49,7 @@ struct SCfgValue
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool IsLowRAM();                                                        // @0xf68e0 -- <= 256 MB physical RAM
+void AutoDetectVideoConfig();                                           // v1.2 0x4f6d80
 EConfigValue FindCfgMode( SCfgValue **modes, int count );              // @0xf69b0 -- which preset is live?
 void ApplyCfgValues( SCfgValue **modes, EConfigValue mode, int count ); // @0xf6900 -- push a preset into the vars
 ////
