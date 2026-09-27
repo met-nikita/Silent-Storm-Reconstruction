@@ -727,6 +727,16 @@ int GetAttackerToHit( const NWorld::CUnit *pAttacker, NWorld::CUnit *pTarget, in
 int CGame::GetCompositeToHit( NWorld::CUnit *pAttacker, 
 	NWorld::CUnit *pTarget, NAI::EHitLocation eHL, bool bFirstTurn )
 {
+	// Retail v1.2 0x6b5f4f/0x6b5fa2: test current-pose reach to the hull center,
+	// independently of the called shot. -1 keeps the AP preview but omits ToHit.
+	if ( NRPG::GetToHitType( pAttacker ) == NRPG::TH_MELEE )
+	{
+		CVec3 ptTarget;
+		pAIMap->GetUnitHLPos( &ptTarget, pAIMap->GetHull( pTarget ), NAI::HL_ANY );
+		CDynamicCast<NWorld::CUnitServer> pUS( pAttacker );
+		if ( !NWorld::CanMeleeAttack( pUS, pAttacker->GetPosition(), ptTarget ) )
+			return -1;
+	}
 	vector<NRPG::CAttackPortion> attack;
 	CDynamicCast<NRPG::IUnitMission> pRealAttacker( pAttacker->GetRPG() );
 	ASSERT( pRealAttacker );

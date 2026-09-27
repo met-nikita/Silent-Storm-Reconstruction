@@ -857,6 +857,14 @@ NUI::SCursorInfo CStateAttack::GetCursorInfo() const
 NWorld::CCmd* CStateAttack::GetTargetCmd()
 {
 	CObjectBase* pTargetObject = GetMission()->GetStateTarget();
+	// Retail v1.2 0x5da8b0: none of the selected attackers may be the target.
+	vector< CPtr<NGame::IUnitTracker> > unitsSet;
+	GetMission()->GetSelectedUnits( &unitsSet );
+	for ( int i = 0; i < unitsSet.size(); ++i )
+	{
+		if ( static_cast<CObjectBase*>( unitsSet[i]->GetUnit() ) == pTargetObject )
+			return 0;
+	}
 	if ( IsValid( pTargetObject ) )
 	{
 		// retail @0x1d9e20: a heard-noise marker is attacked as a TILE at the noise position
