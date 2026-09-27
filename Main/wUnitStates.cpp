@@ -251,6 +251,7 @@ void CUnitStateSniping::Segment()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CCommandExecute* CUnitStateSniping::CreateExecutor( CCmd *pCmd, EUnitCommandResult *pResult ) 
 {
+	CObj<CCmd> pHold = pCmd;
 	if ( IsCriticalsFailCommand( pCmd, pResult ) )
 		return 0;
 
@@ -261,13 +262,21 @@ CCommandExecute* CUnitStateSniping::CreateExecutor( CCmd *pCmd, EUnitCommandResu
 	else {
 		CDynamicCast<CCmdSnipeAttack> pSnipeAttack(pCmd);
 		if (pSnipeAttack)
-			return NWorld::CreateExecutor(pUS, new CCmdShootObject(pTarget, 0), pResult);
+			return NWorld::CreateExecutor(pUS, new CCmdShootObject(pTarget, 0, hitLocation), pResult);
 		else {
 			CDynamicCast<CCmdShootObject> pShootObject(pCmd);
 			if (pShootObject)
 			{
-				if (IsValid(pShootObject->pTarget) && (dynamic_cast<CUnitServer*>(pShootObject->pTarget.GetPtr()) == pTarget))
-					return NWorld::CreateExecutor(pUS, pShootObject, pResult);
+				// Retail v1.2 0x7c8be2..0x7c8c96: a targetless action-bar probe
+				// means the held snipe target, not an unavailable attack. Resolve
+				// HL_ANY to the stored aim point and keep prepare/extra-AP flags.
+				if ( !IsValid( pShootObject->pTarget ) || pShootObject->pTarget.GetPtr() == static_cast<CObjectBase*>(pTarget.GetPtr()) )
+				{
+					NAI::EHitLocation eHL = pShootObject->eHL == NAI::HL_ANY ? hitLocation : pShootObject->eHL;
+					CPtr<CCmdShootObject> pShoot = new CCmdShootObject( pTarget, pShootObject->nExtraAttackAP, eHL );
+					pShoot->bOnlyPrepareToShoot = pShootObject->bOnlyPrepareToShoot;
+					return NWorld::CreateExecutor( pUS, pShoot, pResult );
+				}
 			}
 		}
 	}
