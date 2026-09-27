@@ -150,7 +150,7 @@ public:
 	virtual void DoRegenerations( NWorld::IWorld *pWorld, int *pnBleed ) = 0;
 	virtual void SetHiding( bool _bHiding ) = 0;
 	virtual void HealVP( const SFirstAid &fa ) = 0;
-	virtual void HealCriticals( int nDC ) = 0;
+	virtual void HealCriticals( int nDC, bool bStopBleeding = true ) = 0;
 	virtual bool HasPerk( int nPerkID, 
 		float *pParam1 = 0, float *pParam2 = 0, float *pParam3 = 0 ) const = 0;
 	virtual int GetGrenadeTrapDC( NDb::CRPGGrenade *pGrenade ) = 0;

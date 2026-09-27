@@ -14,7 +14,7 @@ namespace NRPG
 	OBJECT_NOCOPY_METHODS( a ); \
 	~a() { RemoveModifiers(); }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// модификация статов в зависимости от VP
+// РјРѕРґРёС„РёРєР°С†РёСЏ СЃС‚Р°С‚РѕРІ РІ Р·Р°РІРёСЃРёРјРѕСЃС‚Рё РѕС‚ VP
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CVPCritical: public CCritical
 {
@@ -24,7 +24,7 @@ public:
 	CVPCritical( const SCritical &crit ): CCritical( crit ) {}
 
 	virtual bool SetModifiers( CUnit *pRPGUnit, IUnitMission *pRPGMission );
-	virtual bool CanBeSuspended() { return true; }
+	virtual bool CanBeSuspended() { return false; }
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CAPCritical: public CCritical
@@ -49,7 +49,7 @@ public:
 	virtual bool CanBeSuspended() { return true; }
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// необратимый
+// РЅРµРѕР±СЂР°С‚РёРјС‹Р№
 class CDeathCritical: public CCritical
 {
 	CRITICAL_METHODS(CDeathCritical);
