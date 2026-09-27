@@ -69,8 +69,7 @@ protected:
 	// release +0x34: the scroll-lock COUNT (CBaseCamera::Lock @0xcffa0; script CameraLock). <= 0 = free.
 	int nLockCount;
 	// release +0x38: the retail tactical cut floor (GetCutFloor @0xcff90 / SetCutFloor @0xd0050).
-	// The dev relocated the LIVE cut floor to the render scene (ICameraCutFloor accessor); this
-	// member is the retail save slot, mirrored by CCamera's CutFloorSet writes (see note there).
+	// Authoritative per-camera floor, published to the scene by the mission step.
 	int nCutFloor;
 	float fMinClipDistance;			// release +0x3C
 	float fMaxClipDistance;			// release +0x40
@@ -473,18 +472,16 @@ private:
 	// the render cut-floor accessor. Runtime-only (re-installed on every mission init / snapshot
 	// restore). The dev terrain-height stand-in that used to sit beside it is gone: the terrain legs
 	// now sample pWorld->GetHeightLayers() the way retail does.
-	CPtr<ICameraCutFloor>  pCutFloorSource;             // the render cut-floor accessor (see ICameraCutFloor)
 	//
-	int  CutFloorGet() const { return IsValid( pCutFloorSource ) ? pCutFloorSource->GetCutFloor() : 0; }
+	int  CutFloorGet() const { return GetCutFloor(); }
 	// Retail framing calls the virtual SetCutFloor (v1.2 0x4cf12d).
-	// Keep the render-scene bridge, but publish only a floor accepted by the camera.
+	// The mission publishes the selected camera's floor after Update; framing
+	// must not read or change a different camera's currently rendered floor.
 	void CutFloorSet( int nF )
 	{
 		if ( nLockNoUpdate >= 1 )
 			return;
 		SetCutFloor( nF );
-		if ( IsValid( pCutFloorSource ) )
-			pCutFloorSource->SetCutFloor( GetCutFloor() );
 	}
 	bool CanSeeOneRay( const CVec3 &target ) const;                             // release @0xceb20
 	bool CanSeeNow( const CVec3 &target );                                      // release @0xcecd0
@@ -523,7 +520,6 @@ public:
 	void Update( const STime &sTime );
 	virtual void SetWorld( NWorld::IWorld *_pWorld ) { pWorld = _pWorld; }
 	virtual void SetView( NGScene::IGameView *_pView ) { pView = _pView; }
-	virtual void SetCutFloorSource( ICameraCutFloor *pSource ) { pCutFloorSource = pSource; }
 	virtual void ShowPlacesFromBestPoint( const CVec3 &ptA, const CVec3 &ptB, int nFloor, float fRodIn,
 		int nSloMoRatio, float fDivisor, bool bKeepFollow, bool bForceRod, bool bPointOfInterest = false );
 	virtual void FollowUnit( CObjectBase *pUnit );                             // release @0xd0520

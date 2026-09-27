@@ -1290,24 +1290,24 @@ bool CLevelSwitchBar::ProcessMessage( const SEvent &sEvent )
 	case EVENT_NOTIFY:
 		{
 			// retail: up/down step the cut floor; level_N maps slot->floor as rangeMin + (N-1).
-			// Clamping is fully delegated to the scene's SetCutFloor (@0xd0050 range clamp).
+			// The selected camera owns clamping/freeze, like retail @0xd0050.
 			int nRangeMin = 0, nRangeMax = 0;
-			pMission->GetScene()->GetCutFloorRange( &nRangeMin, &nRangeMax );
+			pMission->GetCamera()->GetCutFloorRange( &nRangeMin, &nRangeMax );
 			if ( sEvent.szID.compare( "up" ) == 0 )
 			{
-				pMission->GetScene()->SetCutFloor( pMission->GetScene()->GetCutFloor() + 1 );
+				pMission->SetCutFloor( pMission->GetCutFloor() + 1 );
 				return true;
 			}
 			if ( sEvent.szID.compare( "down" ) == 0 )
 			{
-				pMission->GetScene()->SetCutFloor( pMission->GetScene()->GetCutFloor() - 1 );
+				pMission->SetCutFloor( pMission->GetCutFloor() - 1 );
 				return true;
 			}
 			for ( int nBtn = 0; nBtn < N_MAXLEVELS_COUNT; ++nBtn )
 			{
 				if ( sEvent.szID.compare( NStr::Format( "level_%d", nBtn + 1 ) ) == 0 )
 				{
-					pMission->GetScene()->SetCutFloor( nRangeMin + nBtn );
+					pMission->SetCutFloor( nRangeMin + nBtn );
 					return true;
 				}
 			}
@@ -1349,9 +1349,9 @@ void CLevelSwitchBar::Draw( const STime &sTime, NGScene::I2DGameView *pView )
 	// retail Draw @0x254420: floor_i = rangeMin + i; basement (floor_i < 0) picks the basement
 	// texture pair; floors above the current cut render "hidden". With the base's [0,1] range this
 	// gives 2 live slots + 6 hidden slots -- the "refitted" bar look.
-	int nCut = pMission->GetScene()->GetCutFloor();
+	int nCut = pMission->GetCutFloor();
 	int nRangeMin = 0, nRangeMax = 0;
-	pMission->GetScene()->GetCutFloorRange( &nRangeMin, &nRangeMax );
+	pMission->GetCamera()->GetCutFloorRange( &nRangeMin, &nRangeMax );
 
 	for ( int nTemp = 0; nTemp < buttonsSet.size(); nTemp++ )
 	{

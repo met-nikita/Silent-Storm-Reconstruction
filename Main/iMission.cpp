@@ -370,37 +370,6 @@ bool CMission::Initialize( int _nTemplateID, int _nVariantID, NScenario::CScenar
 
 	pWorld->RunPostInit( pPostInfo );
 
-	// retail zone-entry focus floor: the deploy camera-focus path (CUICmdUnitCameraExec::Update
-	// @0x24eae0 -> CCamera::ShowPlacesFromBestPoint @0xcf1c0 tail) sets the camera cut floor to the
-	// focused party unit's floor BEFORE the zone script's CameraLock() freeze drains below. Dev has
-	// no ShowPlaces* family, so seed the scene cut floor from the party here. Without it a zone with
-	// an unset floor range (Min==Max==0 skips the strict `<` install above, e.g. the Axis base,
-	// variant 5376 Min0/Max0) freezes the fresh-scene default N_MAX_FLOOR = "locked under the ceiling".
-	// NOTE (why the first attempt did nothing): the party MUST be read from the WORLD player
-	// (IPlayer::GetUnits) -- the UI trackers' CPlayerTracker::unitsSet is filled only by
-	// CPlayerTracker::Update() from CMission::Step (first live frame), so a tracker read here is
-	// always EMPTY and the seed silently never fires. The hero is preferred (retail focuses the
-	// party lead); dead units are skipped like CPlayerTracker::Update does.
-	{
-		NWorld::IPlayer::CUnitSet partySet;
-		pActivePlayer->GetPlayer()->GetUnits( &partySet );
-		NWorld::CUnit *pSeedUnit = 0;
-		for ( int nTemp = 0; nTemp < partySet.size(); nTemp++ )
-		{
-			if ( !IsValid( partySet[nTemp] ) || partySet[nTemp]->IsDead() )
-				continue;
-			if ( pSeedUnit == 0 )
-				pSeedUnit = partySet[nTemp].GetPtr();
-			if ( partySet[nTemp]->GetRPG()->IsHero() )
-			{
-				pSeedUnit = partySet[nTemp].GetPtr();
-				break;
-			}
-		}
-		if ( pSeedUnit )
-			GetScene()->SetCutFloor( pSeedUnit->GetPosition().pos.GetFloor() );
-	}
-
 	// retail @0x200690 (asm 0x601655): BEFORE the InternalStep drain below, Initialize primes the render
 	// with ONE pRender->UpdateViewWorld -- proven from disassembly: this->[0x48] is the CreateRenderGame
 	// result (pRender), and the call is pRender->vtbl+0x24 (UpdateViewWorld) right before call 0x5a29f0
@@ -436,19 +405,58 @@ bool CMission::Initialize( int _nTemplateID, int _nVariantID, NScenario::CScenar
 	// deploy-camera SEED being degenerate for script-deployed zones (PlayerTracker/GetDeploySpot),
 	// which is fixed at the seed -- NOT by pumping extra hidden segments here (a prior dev-invented
 	// pump loop was reverted: retail runs no extra warm-up simulation at Initialize).
+	// The base-step subset must also select the current hotseat player before
+	// choosing a camera. With all-AI teams the first acting player need not be
+	// playersSet.front(); otherwise GetCamera selects the unseeded enemy camera.
+	if ( ( playersSet.size() > 1 ) && !IsPlayerTurn() )
+	{
+		pActivePlayer->Deactivate();
+		for ( vector< CObj<IPlayerTracker> >::iterator iPlayer = playersSet.begin(); iPlayer != playersSet.end(); iPlayer++ )
+		{
+			if ( (*iPlayer)->GetPlayer() == pWorld->GetCurrentPlayer() )
+				pActivePlayer = (*iPlayer);
+		}
+		pActivePlayer->Activate();
+	}
 	ExecWorldCommands();
 	if ( IsValid( pCmdExec ) && pCmdExec->Update( GetGameTime() ) )
 	{
 		pCmdExec->Finished();
 		pCmdExec = 0;
 	}
+	// Retail ProcessWorldCommands (0x5a24a0) also advances the locator after
+	// draining commands. RunPostInit can already have queued the first AI's
+	// movement focus. A pending locator suppresses the idle-camera copy below,
+	// so leaving it unstepped renders the constructor's corner on the first frame.
+	if ( IsValid( pExecLocator ) )
+	{
+		if ( pExecLocator->Update( GetGameTime() ) )
+		{
+			pExecLocator->Finished();
+			pExecLocator = 0;
+		}
+	}
 	// through the SELECTOR (@0x1a1ee0), like the InternalStep it mirrors: during the opening
 	// sequence that is the cinematic camera, else the active player's deploy camera.
 	ICamera *pInitCamera = GetCamera();
 	pInitCamera->Update( GetTime() );
+	// Retail base InternalStep: publish the selected camera's floor every step.
+	GetScene()->SetCutFloor( pInitCamera->GetCutFloor() );
 	vCameraCP = pInitCamera->GetCP();
 	sCameraPos = pInitCamera->GetPos();
 	pInitCamera->GetTransform( &sTransform, GetScene()->GetScreenRect() );
+
+	// Initialize substitutes the base InternalStep with the command/camera subset
+	// above. Include its idle-camera handoff too (retail 0x5a2bd4): autoplay sets
+	// nSequence immediately after Initialize, selecting this cinematic camera.
+	// Do not overwrite a scripted camera or a pending auto-focus locator.
+	if ( pInitCamera != pCamera && !IsValid( pExecLocator ) )
+	{
+		ICamera::SCameraPos sPos;
+		pInitCamera->GetPlacement( &sPos );
+		pCamera->SetPlacement( sPos );
+		pCamera->SetCutFloor( pInitCamera->GetCutFloor() );
+	}
 
 	// retail @0x60167d: render ONE hidden frame -- RenderFrame(0xb = 2D|3D|bit8-NOFLIP,
 	// !IsGamePaused() [vtbl+0x58], GetCamera(), true). Nothing presents (bit 8 skips the Flip; the
@@ -925,30 +933,15 @@ void CMission::GetCameraParams( ECameraType *pType, float *pFOV, ICamera::SCamer
 	*pLimits = cameraLimits;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// release keeps the tactical cut floor on the camera; this dev build owns it on the render scene, so the
-// camera reaches it through this accessor (installed like the height source) for the two-point framing.
-class CMissionCameraCutFloor: public ICameraCutFloor
-{
-	OBJECT_BASIC_METHODS(CMissionCameraCutFloor);
-	CPtr<NGame::IMission> pMission;
-public:
-	CMissionCameraCutFloor() {}
-	CMissionCameraCutFloor( NGame::IMission *_pMission ): pMission( _pMission ) {}
-	virtual int  GetCutFloor() const { return IsValid( pMission ) ? pMission->GetCutFloor() : 0; }
-	virtual void SetCutFloor( int nFloor ) { if ( IsValid( pMission ) ) pMission->SetCutFloor( nFloor ); }
-};
-////////////////////////////////////////////////////////////////////////////////////////////////////
 // The dev runtime-only camera handles: the world/view/UI handles (retail threads pWorld/pView/pUI
 // through the camera factory ctor args @0xcf8e0 -- the dev factory keeps its 2-arg signature, so every
-// camera-creation/restore path installs them here instead) and the render cut-floor accessor (the
-// documented dev relocation of the live floor onto the scene). The terrain height source that used to
+// camera-creation/restore path installs them here instead). The terrain height source that used to
 // lead this list is gone -- the camera samples pWorld->GetHeightLayers() directly, as retail does.
 static void InstallCameraRuntimeHandles( ICamera *pCam, IMission *pMission )
 {
 	pCam->SetWorld( pMission->GetWorld() );
 	pCam->SetView( pMission->GetScene() );
 	pCam->SetUI( pMission->GetInterface() );
-	pCam->SetCutFloorSource( new CMissionCameraCutFloor( pMission ) );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // retail CMissionBase::CreateCamera @0x1a2390 (mission vtbl+0xb4) -- the camera FACTORY: create the
@@ -1038,6 +1031,7 @@ void CMission::OnSnapshotRestored()
 	{
 		pRestoredCamera->GetCutFloorRange( &nMinCutFloor, &nMaxCutFloor );
 		GetScene()->SetCutFloorRange( nMinCutFloor, nMaxCutFloor );
+		GetScene()->SetCutFloor( pRestoredCamera->GetCutFloor() );
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1046,12 +1040,12 @@ void CMission::OnSnapshotRestored()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 int CMission::GetCutFloor()
 {
-	return GetScene()->GetCutFloor();
+	return GetCamera()->GetCutFloor();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CMission::SetCutFloor( int nFloor )
 {
-	GetScene()->SetCutFloor( nFloor );
+	GetCamera()->SetCutFloor( nFloor );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 const CVec3& CMission::GetCameraCP() const
@@ -1321,7 +1315,9 @@ void CMission::GameStep()
 	}
 
 	pState->Step();
-
+	// Retail CMission::GameStep owns combat/ambient selection. Autoplay replaces
+	// GameStep and must not inherit this gameplay music policy from InternalStep.
+	UpdateSound();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CMission::InternalStep()
@@ -1379,6 +1375,7 @@ void CMission::InternalStep()
 	// the frame transform below is dev bookkeeping recomputed from the same selected camera.
 	ICamera *pFrameCamera = GetCamera();
 	pFrameCamera->Update( GetTime() );
+	GetScene()->SetCutFloor( pFrameCamera->GetCutFloor() );
 
 	vCameraCP = pFrameCamera->GetCP();
 	sCameraPos = pFrameCamera->GetPos();
@@ -1396,8 +1393,6 @@ void CMission::InternalStep()
 
 	pInterface->UpdateCursor();
 	GameStep();
-
-	UpdateSound();
 
 	// retail base InternalStep @0x5a2b2f-@0x5a2b6e: the interface steps at most every 100ms on the
 	// UI counter, or immediately when the mission reports IsUpdated (vtbl+0x80); ONLY those frames
@@ -1578,11 +1573,11 @@ bool CMission::ProcessEvent( const NInput::SEvent &sEvent )
 		pScene->SetNextFogMode();
 	// retail clamps the cut floor to the template variant's [MinCutFloor, MaxCutFloor) range
 	// (CBaseCamera::SetCutFloor @0xd0050 against the range CMission::Initialize @0x200690 installs);
-	// dev keeps floors on the scene, so the same clamp is applied here.
+	// the selected camera owns the floor, clamp and freeze state.
 	else if ( bindAddFloor.ProcessEvent( sEvent ) )
-		pScene->SetCutFloor( Min( pScene->GetCutFloor() + 1, nMaxCutFloor ) );
+		SetCutFloor( GetCutFloor() + 1 );
 	else if ( bindSubFloor.ProcessEvent( sEvent ) )
-		pScene->SetCutFloor( Max( pScene->GetCutFloor() - 1, nMinCutFloor ) );
+		SetCutFloor( GetCutFloor() - 1 );
 	else if ( bindShowParticles.ProcessEvent( sEvent ) )
 		pScene->SetParticleShow( !pScene->GetParticleShow() );
 	else if ( bindShowAI.ProcessEvent( sEvent ) )
@@ -2407,7 +2402,7 @@ void CMission::ExecWorldCommands()
 		// routing was ONE SLOT OFF). FreezeCamera is a bare refcount, NO pose pin: CCamera::Update
 		// bails before the movement/approach tail while frozen (SetPlacement stays ungated, so the
 		// HQ per-room CameraSet still lands and HOLDS), and retail's SetCutFloor no-ops while frozen
-		// -- mirrored onto the scene: THAT is the base's one-floor lock (EBase OnEnterZone calls
+		// -- THAT is the base's one-floor lock (EBase OnEnterZone calls
 		// CameraLock() once and never unlocks; EFirst doesn't, so its two floors switch freely).
 		else if ( CDynamicCast<NWorld::CUICmdLockCamera>( pCmd ) )
 		{
@@ -2426,7 +2421,6 @@ void CMission::ExecWorldCommands()
 			// lock than for the unlock.
 			if ( bTutorialMode )
 				pActivePlayer->GetCamera()->FreezeCamera( bLock );
-			pScene->SetCutFloorLock( bLock );
 		}
 		// retail CMissionBase::ExecWorldCommand @0x5a15e4: CameraSetClipping(near, far) queues a
 		// CUICmdSetCameraClipDistance; dispatch it to the currently selected camera. This used to fall
@@ -2729,7 +2723,7 @@ void CMission::ExecWorldCommands()
 						else {
 							CDynamicCast<NWorld::CUICmdSetFloor> pFloor(pCmd);
 							if (pFloor)
-								pScene->SetCutFloor(pFloor->nFloor);
+								SetCutFloor(pFloor->nFloor);
 							else {
 								CDynamicCast<NWorld::CUICmdShowClue> pClue(pCmd);
 								if (pClue)
