@@ -171,9 +171,11 @@ void CLoseMenuInterface::Initialize( int nStringID, NGScene::CScreenshotTexture 
 	pInterface = new NUI::CInterface( pCursor );
 
 	pScreenShot = new NUI::CScreenShot( NUI::SWindowInfo( pInterface, NUI::SPoint( 0, 0 ), NUI::SPoint( 1024, 768 ), "clues", NUI::STYLE_ENABLED | NUI::STYLE_VISIBLE | NUI::STYLE_BOTTOMMOST ) );
+	// Retail v1.2 0x5f45cb: apply the lose tint before adopting even a supplied
+	// screenshot (multiplayer). V_SCREENSHOT_MUL_LOOSE_COLOR is at 0x97c75c.
+	pScreenShot->SetMode( NUI::CScreenShot::BLACKANDWHITE, CVec4( 1.0f, 0.677f, 0.877f, 1.0f ) );
 	if ( !IsValid( pScreenShotTexture ) )
 	{
-		pScreenShot->SetMode( NUI::CScreenShot::BLACKANDWHITE, CVec4( 0.5f, 0.5f, 0.5f, 1 ) );
 		pScreenShot->Generate();
 	}
 	else
