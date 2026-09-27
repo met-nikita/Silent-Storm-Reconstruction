@@ -364,6 +364,15 @@ CUnit::CUnit( NDb::CRPGPers *_pPers, NDb::CComplexHead *_pHead, bool _bHero, NDb
 
 	for ( int i = 0; i < NDb::ST_STR; ++i )
 		skills[i] = new CDynamicSkill( baseValues.skills.skills[i], GetSkillBaseStatValue( NDb::ESkillType(i) ) );
+	// Retail v1.2 InitSkills 0x6bc8a8: only VP/AP retain an expendable current value.
+	for ( int i = 0; i < NDb::SKILL_TYPE_NUMBERS; ++i )
+	{
+		if ( i != NDb::ST_VP && i != NDb::ST_AP )
+		{
+			Skills(i).FreezeToMax( true );
+			Skills(i).Update();
+		}
+	}
 	if ( pClass )
 	{
 		for ( int i = NDb::ST_MELEE; i < NDb::ST_STR; ++i )
@@ -662,7 +671,8 @@ void CUnit::SetXPLevel( int nLevel )
 	if ( !pClass )
 		return;
 	int nOldLevel = Skills( NDb::ST_LEVEL );
-	float fXP = GetXPForSkill( NDb::ST_LEVEL, nLevel );
+	// Retail v1.2 0x6bc0d7 stores the total, not just the per-skill XP components.
+	fXP = GetXPForSkill( NDb::ST_LEVEL, nLevel );
 	for ( int i = NDb::ST_MELEE; i < NDb::SKILL_TYPE_NUMBERS; ++i )
 	{
 		Skills(i).SetXPPart( GetSkillCap( NDb::ESkillType( i ), fXP ) );
