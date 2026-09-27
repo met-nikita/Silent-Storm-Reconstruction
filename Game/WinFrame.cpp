@@ -1,5 +1,6 @@
 #include "StdAfx.h"
 #include "WinFrame.h"
+#include "resource.h"
 #include "..\Misc\StrProc.h"
 #include "..\Misc\HPTimer.h"
 #include "..\Misc\Win32Helper.h"
@@ -167,7 +168,7 @@ static bool CreateWin( LPCSTR pszApp, LPCSTR pszWnd, unsigned dwWidth, unsigned 
   // create and register class style
         // Register the windows class
   WNDCLASS wndClass = { 0, WndProc, 0, 0, hInstance,
-                        0,//LoadIcon( hInstance, MAKEINTRESOURCE(IDI_MAIN_ICON) ),
+                        LoadIcon( hInstance, MAKEINTRESOURCE(IDI_ICON9) ), // retail v1.2 0x409c9b: resource 101
                         0,//LoadCursor( NULL, IDC_ARROW ), 
                         (HBRUSH)GetStockObject(NULL_BRUSH), // NULL_BRUSH // WHITE_BRUSH
                         NULL, pszWnd };

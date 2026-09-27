@@ -13,6 +13,7 @@
 #include "..\Misc\HPTimer.h"       // NHPTimer::UpdateHPTimerFrequency -- the per-frame TSC recalibration
 #include "..\Main\iSaveManager.h" // CRAP, to start from mission
 #include "..\Main\Sound.h"
+#include "..\Main\SplashScreen.h"
 #include "..\Main\WinInputConv.h" // Win32->NInput bridge: replays WM_KEYDOWN/WM_CHAR (OS auto-repeat)
 #include "..\FileIO\BasicChunk1.h"  // [HARNESS] g_bSaveLoadDiag / SaveLoadDiag
 #include "..\MiscDll\LogStream.h"   // [HARNESS] g_bHarnessLog (console-log tee)
@@ -130,6 +131,8 @@ int APIENTRY WinMain( HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdL
 #else
 	srand( GetTickCount() );
 #endif // _DEBUG
+	// Retail v1.2 0x409f1a: show the logo while loading game.db, before the game window.
+	NSplash::ShowSplashScreen( ".\\res\\s2.bmp", true );
 	NGScene::AddResourceDir( ".\\res" );
 	NGScene::RunResourceLoadingThread();
   // load game database
@@ -141,6 +144,7 @@ int APIENTRY WinMain( HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdL
 	}
 	catch (...)
 	{
+		NSplash::HideSplashScreen();
 		ASSERT( 0 ); // game.db not found
 		MessageBox( 0, "File game.db not found", "Error", MB_OK );
 		return 0;
@@ -155,7 +159,12 @@ int APIENTRY WinMain( HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdL
 
 	// init subsystems
 	if ( !NWinFrame::InitApplication( hInstance, "Silent Storm", "Silent Storm" ) )
+	{
+		NSplash::HideSplashScreen();
 		return 0;
+	}
+	// Retail v1.2 0x409fd8: hand over to the render window before initializing D3D.
+	NSplash::HideSplashScreen();
 	if ( !NGfx::Init3D( NWinFrame::GetWnd() ) )
 	{
 		ASSERT(0); // DX8 not found

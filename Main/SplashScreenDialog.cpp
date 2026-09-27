@@ -4,7 +4,7 @@
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // SplashScreenDialog -- direct port of the release module .\release\SplashScreenDialog.obj.
 // Every function is a faithful reconstruction of the Game.exe decompilation; the original's
-// harmless quirks are reproduced and flagged (Draw leaks its memory DC, Destroy unregisters
+// harmless quirks are reproduced and flagged (Destroy unregisters
 // the class unconditionally, Create checks IsWindow twice, WM_PAINT returns 0 even with no
 // update region, WM_ENTERIDLE is swallowed/returns TRUE).
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -98,8 +98,8 @@ bool CSplashScreen::SBitmap::Draw( HDC *pHDC )
 		BitBlt( *pHDC, 0, 0, bitmapInfo.bmWidth, bitmapInfo.bmHeight, hMemDC, 0, 0, SRCCOPY );
 		SelectObject( hMemDC, hOld );
 		SelectPalette( *pHDC, hOldPal, FALSE );
-		// ORIGINAL BUG (confirmed @0x4087e0): hMemDC is intentionally NOT DeleteDC'd here --
-		// a one-DC GDI leak per paint, reproduced faithfully.
+		// Preserve retail painting without retaining its per-paint GDI DC leak.
+		DeleteDC( hMemDC );
 		return true;
 	}
 	return false;
@@ -161,6 +161,9 @@ void CSplashScreen::Destroy()
 	// Quirk (confirmed @0x408b20): UnregisterClassA is called unconditionally, even if no class
 	// was ever registered.
 	UnregisterClassA( szWndClassName.c_str(), GetModuleHandleA( NULL ) );
+	// The startup logo is no longer needed after the game window takes over.
+	if ( bitmap.hBitmap != NULL ) { DeleteObject( bitmap.hBitmap ); bitmap.hBitmap = NULL; }
+	if ( bitmap.hPalette != NULL ) { DeleteObject( bitmap.hPalette ); bitmap.hPalette = NULL; }
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // NSplash::CSplashScreen::IsWindow  @0x408960
