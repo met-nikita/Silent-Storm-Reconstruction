@@ -6,6 +6,10 @@
 #include "aiRouteLogic.h"    // NAI::CreateAILookRoundLogic / MoveToPositionLogic / LookToPositionLogic / RoamingLogic
 #include "aiRouteMisc.h"     // NAI::GetFearPosition / GetSafePosition (the run-away / hidden place searches)
 #include "wUnitServer.h"     // NWorld::CUnitServer
+#include "aiEvent.h"
+#include "RPGUnitMission.h"
+#include "RPGUnit.h"
+#include "..\DBFormat\DataRPG.h"
 //
 #include "aiFearReaction.h"
 //
@@ -17,11 +21,7 @@
 // unit's known-enemy set, and the installed behaviours are the same CreateAI*Logic route factories the
 // Guard/Retreat reactions use.
 //
-// ELIDED (build-validation scope, exactly as CAIGuardReaction / CAIRetreatReaction):
-//  * the early pU->SetRoute(NULL) route-clear (release IAIUnit vtbl+0x5c). IAIUnit declares no SetRoute slot
-//    and SetLogic replaces the unit's logic in place, so the landed reactions drop it consistently.
-//  * the suspected-enemy AddEvent(CreateAILostPossibleEnemyEvent) + the glance look-AP refund. The
-//    event layer is now active, so this omitted cleanup is a tracked follow-up divergence.
+// Contact consumption and live AP reservation follow retail v1.2 0x43d650.
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 namespace NAI
 {
@@ -41,9 +41,7 @@ void CAIFearReaction::Update()
 	IAIUnit *pU = GetUnit();
 	if ( !IsValid( pU ) )
 		return;
-	// retail SetRoute(NULL) RESTORED (release IAIUnit vtbl+0x5c @0xadb90 -- possible now that the route
-	// slot exists): the panicking unit abandons its route for good.
-	pU->SetRouteLogic( 0 );
+	// Retail v1.2 0x43d650 does not clear the route here (unlike Guard/Retreat).
 	// the per-unit threat state (populated by the commander each think).
 	SAIUnitState *us = GetAIUnitState();   // plain struct ptr -- not a CObjectBase, so no IsValid()
 	if ( us == 0 )
@@ -79,11 +77,15 @@ void CAIFearReaction::Update()
 	{
 		if ( IsValid( pPossible->GetUnitServer() ) )
 		{
-			SPathPlace p = pPossible->GetUnitPosition().pos.p;
+			SPathPlace p = pPossible->GetUnitServer()->GetPosition().pos.p;
 			SetLogic( CreateAILookToPositionLogic( pU, p ) );
-			us->RemovePossibleEnemy( pPossible );   // RE-ENABLED (retail raised CreateAILostPossibleEnemyEvent here) --
-			// consume the suspect once we glance at its place, so the now-preserved possibleEnemies stay bounded
-			// (one glance per suspect, then forget). The release's look-AP refund is still omitted.
+			us->Notify( CreateAILostPossibleEnemyEvent( pPossible ) );
+			// 0x43d7dd..0x43d837: leave only the rotation cost in the live RPG AP.
+			// This is SpendAP, not a refund or a write to the planner's AP copy.
+			NRPG::IUnitMission *pRPG = pU->GetUnitMission();
+			int nAP = pU->GetRPGUnit()->Skills( NDb::ST_AP );
+			int nLookAP = pRPG->GetActionAP( pU->GetUnitPosition().GetPose(), NRPG::AC_ROTATE );
+			pRPG->SpendAP( nAP - nLookAP );
 		}
 		return;
 	}

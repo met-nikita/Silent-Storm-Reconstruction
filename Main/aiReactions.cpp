@@ -268,13 +268,10 @@ void CAIRetreatReaction::Update()
 			// only a suspected contact: glance toward its place from where we are.
 			if ( IsValid( pPossible->GetUnitServer() ) )
 			{
-				SPathPlace p = pPossible->GetUnitPosition().pos.p;
+				SPathPlace p = pPossible->GetUnitServer()->GetPosition().pos.p;
 				if ( SetLogic( CreateAILookToPositionLogic( u, p ) ) )
 				{
-					us->RemovePossibleEnemy( pPossible );   // RE-ENABLED (retail raised CreateAILostPossibleEnemyEvent here):
-						// consume the suspect once we glance at its place, so a retreating unit resumes its fall-back instead of
-						// freezing to stare at a hidden shooter forever (the now-preserved possibleEnemies must be consumed by
-						// every suspect-acting reaction -- Guard/Fear/Retreat -- to stay bounded).
+					us->Notify( CreateAILostPossibleEnemyEvent( pPossible ) );
 				}
 			}
 		}

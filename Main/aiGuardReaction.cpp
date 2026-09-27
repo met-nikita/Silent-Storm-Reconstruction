@@ -51,14 +51,8 @@ CAIGuardReaction::CAIGuardReaction( IAIUnit *pUnit, NDb::CAnimation *pGuardAnima
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // @0x510e0 -- the per-think stand-and-watch dance (the 10 steps map 1:1 to the oracle).
 //
-// ELIDED (build-validation scope):
-//  * the early pU->SetRoute(NULL) (release IAIUnit vtbl+0x5c == NAI::CAIUnit::SetRoute @0x4adb90, which cancels
-//    + clears the unit's current route logic so it re-decides). The dev unit has a single CObj<IAILogic> pLogic
-//    that SetLogic replaces in place (aiUnit.cpp:162); the landed CAINormalReaction/CAIDefenceReaction omit any
-//    such clear and IAIUnit declares no SetRoute slot, so it is dropped consistently.
-//  * the two AI-event raises -- AddEvent(CreateAILostPossibleEnemyEvent(possible)) (chase branch) and
-//    AddEvent(CreateAILostAllyEvent(ally)) (ally branch). The event layer is now active, so both omitted
-//    cleanups are tracked follow-up divergences.
+// Route reset and both contact-consumption events are active. The events go
+// through Notify so membership changes obey retail's collection-lock bracket.
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CAIGuardReaction::Update()
 {
@@ -119,10 +113,7 @@ void CAIGuardReaction::Update()
 		if ( IsValid( pLogic ) )
 		{
 			SetLogic( pLogic );
-			pState->RemovePossibleEnemy( pPossible );   // RE-ENABLED (retail raised CreateAILostPossibleEnemyEvent here):
-			// consume the suspect once we commit to investigating its position. This bounds the now-preserved
-			// possibleEnemies (aiUnitState.cpp Populate no longer wipes them) -- each suspect triggers ONE investigation
-			// then is dropped, so a shot-from-concealment is checked once and not chased forever.
+			pState->Notify( CreateAILostPossibleEnemyEvent( pPossible ) );
 			bHandled = true;
 		}
 	}
@@ -143,9 +134,7 @@ void CAIGuardReaction::Update()
 				// Consume the help call (retail AddEvent(CreateAILostAllyEvent) -- oracle
 				// s2_aiguardreaction.h:182): Modify == RemoveAlly + clear pAlly, so each call
 				// triggers ONE glance instead of being stared at forever.
-				CObj<IAIEvent> e = CreateAILostAllyEvent( pAlly );
-				if ( IsValid( e ) )
-					e->Modify( pState );
+				pState->Notify( CreateAILostAllyEvent( pAlly ) );
 			}
 		}
 		else if ( bWasCombat )
