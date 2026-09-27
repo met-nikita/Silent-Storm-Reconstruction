@@ -949,7 +949,11 @@ void CLightmapTracker::CatchUp( NGfx::CRenderContext *_pRC, IRender *_pRender, C
 	const bool bHistoryValid = bReuseLight && pPreviousCLTracker == this &&
 		pHistoryDepth == NGfx::GetRegisterTexture( N_CL_DEPTH_REGISTER ) &&
 		pHistoryLight == NGfx::GetRegisterTexture( N_CL_TARGET_REGISTER );
-	const bool bKeepPrevious = bHistoryValid && !bHasNewLightmaps && !bLightStateUpdated && !(_gs != groupSelect);
+	// Retail CatchUp (v1.2 0x52fb72) reprojects even when static geometry or
+	// illumination requests a refresh. A bullet impact/muzzle flash must restart
+	// refinement, not replace every unchanged surface with the coarse sky pass.
+	// The depth test rejects newly exposed surfaces; point RGB is rebuilt below.
+	const bool bKeepPrevious = bHistoryValid && !(_gs != groupSelect);
 	if ( pPreviousCLTracker != this || (bReuseLight && !bHistoryValid) || bLightStateUpdated )
 		bHasNewLightmaps = true;
 	bLightStateUpdated = false;
