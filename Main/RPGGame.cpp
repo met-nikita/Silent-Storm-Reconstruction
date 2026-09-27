@@ -93,7 +93,7 @@ public:
 	CGame( NAI::IAIMap *_pAIMap, NAI::IPathNetwork *_pNet, const STerrainInfo &terrainInfo ):
 		pAIMap(_pAIMap), pNet(_pNet) { if ( _pAIMap ) pVision = CreateVisionTracker( _pAIMap, terrainInfo ); }
 	virtual CCoverInfo* CalcCovers( const CVec3 &src, const CAttackPortion &attack, 
-		NWorld::CUnit *pIgnore, NWorld::CUnit *pDest, int nTargetUserID, float fMinClearDistance, bool bAIMode = false );
+		NWorld::CUnit *pIgnore, CObjectBase *pDest, int nTargetUserID, float fMinClearDistance, bool bAIMode = false );
 	virtual CCoverInfo* CalcCoversForTile( const CVec3 &src, const CAttackPortion &attack, NWorld::CUnit *pIgnore,
 		const CVec3 &ptTarget, float fMinClearDistance );
 	virtual void ProcessMeleeAttackPortion( const CAttackPortion &a, const CRay &ray, const vector<IAttackable*> &ignores );
@@ -341,7 +341,7 @@ float CGame::GetCoverForAIUnit( CVec3 ptFrom, NWorld::CUnit *pIgnore,
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // nTargetUserID == -1 means without hit location targeting
 CCoverInfo* CGame::CalcCovers( const CVec3 &src, const CAttackPortion &attack, NWorld::CUnit *pIgnore,
-	NWorld::CUnit *pDest, int nTargetUserID, float fMinClearDistance, bool bAIMode )
+	CObjectBase *pDest, int nTargetUserID, float fMinClearDistance, bool bAIMode )
 {
 	const float F_VIEW_BOUND = 2.f;			// grid diameter
 	const int N_LOW_HALF_GRID = 5;

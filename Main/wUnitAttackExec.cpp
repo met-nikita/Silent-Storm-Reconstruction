@@ -1441,7 +1441,7 @@ EUnitCommandResult CExecShootTile::CanDoIt( const NAI::SUnitPosition &from, bool
 	return UCR_OK;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CExecShootTile::SelectRay() // false, when it is the last shot
+void CExecShoot::SelectPointRay()
 {
 	// retail SelectRay builds a SINGLE `attack` portion into the member (was the vector Attack); NO CheckBurst
 	// here (that moved to the OnBulletGo/Segment pipeline). cover+to-hit+peek inlined from the retail solver
@@ -1469,6 +1469,81 @@ void CExecShootTile::SelectRay() // false, when it is the last shot
 		bMissed &= bTmpMissed;
 		nToHit = max( nToHit, nTmpToHit );
 	}
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+CExecShootObject::CExecShootObject( CUnitServer *_pUS, CObjectBase *_pTarget, int nExtraAP ):
+	CExecShoot( _pUS, nExtraAP ), pTarget( _pTarget )
+{
+	ptAnimTarget = pUS->GetPosition().GetCP();
+	if ( IsValid( pTarget ) )
+	{
+		NAI::IAIMap *pMap = pUS->GetWorld()->GetAIMap();
+		pMap->GetUnitHLPos( &ptAnimTarget, pMap->GetHull( pTarget ), -1 );
+	}
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+EUnitCommandResult CExecShootObject::CanDoIt( const NAI::SUnitPosition &from, bool bIgnoreTarget ) const
+{
+	bIgnoreTarget = bIgnoreTarget || !IsValid( pTarget );
+	EUnitCommandResult result = CExecShoot::CanDoIt( from, bIgnoreTarget );
+	if ( result != UCR_OK )
+		return result;
+	if ( bIgnoreTarget )
+		return UCR_NO_TARGET;
+	vector<NRPG::CAttackPortion> portions;
+	pUS->GetUnitRPG()->CreateAttack( &portions, false );
+	if ( portions.empty() )
+		return UCR_GENERAL_FAILURE;
+	CObj<NRPG::CCoverInfo> pCover = pUS->GetWorld()->GetGame()->CalcCovers(
+		pUS->GetAttackOrigin( from ), portions[0], pUS, pTarget, -1, pUS->GetMinClearDistance() );
+	return NRPG::CanShoot( pCover ) ? UCR_OK : UCR_GENERAL_FAILURE;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CExecShootObject::SelectRay()
+{
+	CWorld *pWorld = pUS->GetWorld();
+	CVec3 ptTarget;
+	if ( !IsValid( pTarget ) || !pWorld->GetAIMap()->GetUnitHLPos(
+		&ptTarget, pWorld->GetAIMap()->GetHull( pTarget ), -1 ) )
+	{
+		// Retail AttackObjectRanged falls back to the remembered point after destruction.
+		SelectPointRay();
+		return;
+	}
+	vector<NRPG::CAttackPortion> portions;
+	CreateAttack( &portions, 0, true, nBulletGone == 0 );
+	if ( portions.empty() )
+		return;
+	attack = portions[0];
+	CObj<NRPG::CCoverInfo> pCover = pWorld->GetGame()->CalcCovers(
+		pUS->GetAttackOrigin( pUS->GetPosition(), (nBulletGone & 1) != 0 ),
+		attack, pUS, pTarget, -1, pUS->GetMinClearDistance() );
+	int nTmpToHit;
+	// AttackObjectRanged uses tile accuracy for non-units, but object hull cover.
+	float fHit = NRPG::CheckTileToHit( pUS, ptTarget, GetExtraAP(), NAI::THL_LOWER,
+		pCover, pWorld->IsFirstTurn(), &nTmpToHit, nBulletGone );
+	rayInfo = NRPG::SAttackRayInfo( attack, VNULL3, VNULL3, pUS, pUS->GetPosition(),
+		nBulletGone, GetExtraAP(), false, pUS->GetMinClearDistance(), 30.0f, pTarget.GetPtr() );
+	rayInfo.pIgnore = const_cast<CObjectBase*>( pUS->GetAttackIgnore() );
+	NRPG::PrepareAttackRay( pWorld->GetAIMap(), pCover, &rayInfo, fHit );
+	bMissed &= !rayInfo.bTargetIsHit;
+	nToHit = max( nToHit, nTmpToHit );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CExecShootObject::CheckShotResult()
+{
+	csRPG << CC_WHITE << "}\n";
+	CWorld *pWorld = pUS->GetWorld();
+	if ( !bMissed )
+	{
+		if ( nToHit > 30 )
+			pWorld->GetGlobalAck()->OnTargetHit( pUS );
+		else
+			pWorld->GetGlobalAck()->OnHardTargetHit( pUS );
+	}
+	else if ( nToHit > 60 )
+		pWorld->GetGlobalAck()->OnTargetMissed( pUS );
+	pUS->CancelSnipe();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CExecShootUnit
@@ -3612,6 +3687,7 @@ void CExecNotHeroWantsToTalk::Run()
 using namespace NWorld;
 REGISTER_SAVELOAD_CLASS( 0x50133145, CExecNotHeroWantsToTalk )
 REGISTER_SAVELOAD_CLASS( 0x00122173, CExecShootTile )
+REGISTER_SAVELOAD_CLASS( 0x01142170, CExecShootObject )
 REGISTER_SAVELOAD_CLASS( 0x00122175, CExecCannon )
 REGISTER_SAVELOAD_CLASS( 0x00222190, CExecThrowGrenade )
 REGISTER_SAVELOAD_CLASS( 0x00422170, CExecShootUnit )

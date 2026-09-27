@@ -131,6 +131,7 @@ protected:
 	void OnBulletGo();                           // @0x3a26f0 -- a bullet departs: fire it, then continue/stop the burst
 	void CreateFlash( bool bFirstBullet );       // @0x3a4240 -- muzzle flash (dev CreateFlash is arg-less; bFirstBullet unused)
 	void CheckUnhide();                          // @0x3a40d0 -- unsilenced shots reveal a concealed shooter
+	void SelectPointRay();
 
 public:
 	CExecShoot() {}
@@ -166,7 +167,21 @@ public:
 	CExecShootTile( CUnitServer *_pUS, const CVec3 &_ptTarget );
 
 	virtual EUnitCommandResult CanDoIt( const NAI::SUnitPosition &from, bool bIgnoreTarget = false ) const;
+	virtual void SelectRay() { SelectPointRay(); }
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// Object shots retain the target hull (retail v1.2 0x7a51c0), unlike tile shots.
+class CExecShootObject: public CExecShoot
+{
+	OBJECT_BASIC_METHODS(CExecShootObject);
+	CPtr<CObjectBase> pTarget;
+public:
+	int operator&( CStructureSaver &f ) { f.Add(1,(CExecShoot*)this); f.Add(2,&pTarget); return 0; }
+	CExecShootObject() {}
+	CExecShootObject( CUnitServer *pUS, CObjectBase *pTarget, int nExtraAP );
+	virtual EUnitCommandResult CanDoIt( const NAI::SUnitPosition &from, bool bIgnoreTarget = false ) const;
 	virtual void SelectRay();
+	virtual void CheckShotResult();
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CExecShootUnit

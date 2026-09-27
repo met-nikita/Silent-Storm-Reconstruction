@@ -674,8 +674,14 @@ CCommandExecute* CreateActionExecutor( CUnitServer *pUS, CCmd *pCmd, EUnitComman
 					}
 				}
 
-				/// CRAP #1: some weapon types attack a tile
-				/// CRAP #2: attacking an object = attacking the tile under the object
+				if ( IsValid( pAttackObject->pTarget ) && (eType == AT_SHOOT || eType == AT_CANNON) )
+				{
+					CExecShootObject *pShot = new CExecShootObject( pUS, pAttackObject->pTarget, pAttackObject->nExtraAttackAP );
+					if ( eType == AT_CANNON )
+						return CreateSimpleActionOrReload( pUS, pAttackObject.GetPtr(), pShot, pError );
+					return CreateActionQueueOrReload( pUS, pAttackObject.GetPtr(), pShot, pError );
+				}
+				// Explosives and other point-target actions still use a tile executor.
 				if (!IsValid(pAttackObject->pTarget))
 				{
 					EActionType eType = GetActionType(pUS);
