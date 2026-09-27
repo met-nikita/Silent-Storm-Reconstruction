@@ -7,13 +7,15 @@
 #include "aiState.h"       // SAIState
 #include "aiPlayer.h"      // IAIPlayer::GetUnits / IsContain
 #include "wUnitServer.h"   // CanFight
+#include "wMain.h"
+#include "RPGUnit.h"
 #include "..\DBFormat\DataRPG.h"  // NDb::EShootMode -- BEFORE aiInventory.h (its NDB:: fwd-decl typo)
 #include "..\DBFormat\DataMap.h"  // NDb::DS_ENEMY
 #include "aiInventory.h"   // CAIInventory::GetBestFireArms (the FindMostDangerousEnemy to-hit metric)
 //
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // SAIUnitState - per-unit threat tracker. See aiUnitState.h for the fidelity/scope notes (event-driven
-// maintenance + the position cache + the morale-skill half of CheckScared are simplified).
+// maintenance + the position cache are partially reconstructed).
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 namespace NAI
 {
@@ -243,36 +245,55 @@ void SAIUnitState::FindNearestAlly()   // @0x004b0810
 	pAlly = pBest;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// @0x004b0ea0: scared when there is an enemy but no support. The release also factors a morale/skill
-// check (CDynamicSkill < 0.5*max); here it is the "outnumbered + no ally within 9 units" half.
+// Retail v1.2 0x4b12e0: wounded below half VP OR facing more than two enemies,
+// without a fight-capable non-enemy within nine units. Panzerkleins do not scare.
 void SAIUnitState::CheckScared()
 {
 	if ( bScared || bHelpCalled )
 		return;
-	if ( !IsAlive( pEnemy ) || !IsValid( pUnit ) )
+	if ( !IsValid( pEnemy ) || !IsValid( pUnit ) || !IsValid( pUnit->GetUnitServer() ) )
 		return;
-	const int   N_SCARE_ENEMIES = 8;
+	if ( IsValid( pUnit->GetUnitServer()->GetWearingDBPK() ) )
+		return;
+	NRPG::CUnit *pRPG = pUnit->GetRPGUnit();
+	if ( !IsValid( pRPG ) )
+		return;
+	const NRPG::CDynamicSkill &vp = pRPG->Skills( NDb::ST_VP );
+	const bool bWounded = int( vp ) < 0.5 * vp.GetMaxValue();
 	const float F_ALLY_NEAR = 9.0f;
-	if ( (int)enemies.data.units.size() <= N_SCARE_ENEMIES )
+	// Retail compares the vector's BYTE span to 8, i.e. more than TWO pointers.
+	if ( !bWounded && enemies.data.units.size() <= 2 )
 		return;
 	CVec3 me = pUnit->GetPosition().GetCP();
-	// Retail @0xb0ea0 queries the WORLD roster for teammates in range (SAIState::GetUnitsAtRange(cp, 9.0,
-	// exclude self)) -- NOT s.allies (which is the event-only help-caller list). Walk the unit's own team.
+	// GetUnitsAtRange(..., true, self) enumerates fight-capable WORLD units,
+	// including non-enemy players, not just the owning commander's team roster.
 	SAIState *pSt = pUnit->GetAIState();
-	IAIPlayer *pAllyPlayer = IsValid( pSt ) ? pSt->GetAllyAIPlayer() : 0;
-	IAIPlayer *pEnemyPlayer = IsValid( pSt ) ? pSt->GetEnemyAIPlayer() : 0;
-	const bool bUnitInAlly = IsValid( pAllyPlayer ) && pAllyPlayer->IsContain( pUnit );
-	IAIPlayer *pMine = bUnitInAlly ? pAllyPlayer : pEnemyPlayer;
-	if ( IsValid( pMine ) )
+	NWorld::CWorld *pWorld = pSt ? pSt->GetWorld() : 0;
+	if ( IsValid( pWorld ) )
 	{
-		vector< CPtr<IAIUnit> > *pTeam = pMine->GetUnits();
-		for ( vector< CPtr<IAIUnit> >::iterator i = pTeam->begin(); i != pTeam->end(); ++i )
-			if ( (*i).GetPtr() != pUnit.GetPtr() && IsAlive( *i )
-				&& fabs( (*i)->GetPosition().GetCP() - me ) < F_ALLY_NEAR )
-				return;   // an ally is close -> hold
+		list< CPtr<NWorld::CUnitServer> > units;
+		pWorld->GetAllUnits( &units );
+		for ( list< CPtr<NWorld::CUnitServer> >::iterator i = units.begin(); i != units.end(); ++i )
+		{
+			if ( !IsValid( *i ) || !(*i)->CanFight()
+				|| pWorld->GetDiplomacyState( pSt->pPlayer, (*i)->GetPlayer() ) == NDb::DS_ENEMY )
+				continue;
+			IAIUnit *pOther = GetAIUnit( *i );
+			if ( IsValid( pOther ) && pOther != pUnit.GetPtr()
+				&& fabs( pOther->GetPosition().GetCP() - me ) < F_ALLY_NEAR )
+				return;
+		}
 	}
 	bScared = true;
 	Modified();
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+vector< CPtr<IAIUnit> > SAIUnitState::GetKnownEnemies() const
+{
+	// Retail v1.2 0x4b1df0 inserts possible enemies at the beginning, then known enemies.
+	vector< CPtr<IAIUnit> > result = possibleEnemies.data.units;
+	result.insert( result.end(), enemies.data.units.begin(), enemies.data.units.end() );
+	return result;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 }

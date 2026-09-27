@@ -86,7 +86,7 @@ struct SAIUnitState
 	// FindMostDangerousEnemy/FindNearestAlly (a pEnemy/pAlly change) and OnSequenceFinished.
 	bool IsModified() const { return selfModified.data; }   // retail v1.2 0x4b0990
 	void ClearModified() { Reset(); }
-	const vector< CPtr<IAIUnit> >& GetKnownEnemies() const { return enemies.data.units; }
+	vector< CPtr<IAIUnit> > GetKnownEnemies() const;
 private:
 	void FindMostDangerousEnemy();         // @0x004b0b10  -> pEnemy
 	void FindNearestPossibleEnemy();       // @0x004b08d0  -> pPossibleEnemy
