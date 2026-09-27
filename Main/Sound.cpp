@@ -493,24 +493,8 @@ void CSoundScene::Draw( CTransformStack *pTS )
 				__int64 nStartMs = now - tStartMusic;
 				StartMusic( pTrack, nStartMs > 0 ? (int)nStartMs : 0 );
 			}
-			else if ( IsValid( theCurrentMusic ) && IsValid( theCurrentMusic->pStream )
-				&& NFMSound::IsPlaying( theCurrentMusic->pStream ) )
-			{
-				// dev keep: this scene has NO track of its own (the chapter/global map scenes are
-				// created without music pools) but a foreign stream survived the switch --
-				// wind it down instead of letting it loop forever (the "menu music leaks into the
-				// chapter map" / "combat stuck after campaign start" bugs). FadeOut no-ops while a
-				// fade is already running, so repeating it per frame is harmless.
-				// CROSS-SCENE FADE = the DEFAULT 4s, NOT the record's own nFadeOut: the retail
-				// combat records carry FadeOut=20000ms -- that 20s relax is the IN-SCENE
-				// combat->calm transition (CMission::UpdateSound's MT_AMBIENT edge).
-				// NOTE (2026-07-05): the campaign bases are NOT in this recordless branch -- the
-				// retail Steam game.db gives them ambient POOLS (variant 5246 -> MusicTemplates 124
-				// = ambient07, 5376 -> 93 = ambient02/09; the earlier "NULL music" reading came
-				// from the lagging SQL mirror). Their StartMusic path closes a surviving foreign
-				// stream through SwitchStream instead.
-				NFMSound::FadeOut( theCurrentMusic->pStream, N_MUSIC_FADE_SEC );
-			}
+			// Retail v1.2 0x705c3f returns when no track was selected. A UI
+			// sound scene (e.g. a hint) must not fade another scene's music.
 		}
 	}
 }
