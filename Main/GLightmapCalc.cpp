@@ -428,7 +428,10 @@ static void InitLightInfo( SLightInfo *pRes, const CVec3 &_vCenter, float fRadiu
 	lightInfo.bNeedSet = true;
 	lightInfo.vLightColor = CVec4( _vColor, 0 );
 	lightInfo.vLightPos = CVec4( _vCenter, 0 );
-	NGfx::InitRadius( &lightInfo.vRadius, fRadius );
+	// Retail v1.2 0x52b279: cached lights use inverse-square distance
+	// attenuation, not the legacy projected-circle light's radius constants.
+	const float fInvRadius = 1 / fRadius;
+	lightInfo.vRadius = CVec4( fRadius, 1, fInvRadius, 36 * fInvRadius * fInvRadius );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CLightmapTracker::RenderCubeMapDepth(

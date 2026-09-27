@@ -497,6 +497,51 @@ proc PointCubeMapDepth
 	mad oD0.xyz, vDir, c16.yyy, c16.xxx
 	mov oT0.xyz, vDir
 
+; Retail cached-light shaders use radial attenuation and per-pixel directions.
+; Kept separate from the older projected light shaders used by dynamic lights.
+proc CLPointDiffuse
+	m4x4 oPos, v0, c10
+	locals lightDir
+	add lightDir.xyz, v0, -c15
+	mov oT0.xyz, -lightDir
+	dp3 lightDir.w, lightDir, lightDir
+	mad lightDir.w, lightDir.w, c21.w, c21.y
+	rcp lightDir.w, lightDir.w
+	mul oD0, c14, lightDir.w
+	mad oT1, v1, c3.x, c3.y
+
+proc CLPointBump
+	m4x4 oPos, v0, c10
+	locals normal, texU, texV, lightDir, color, facing, localLightDir
+	CalcVectors normal, texU, texV
+	add lightDir.xyz, v0, -c15
+	dp3 lightDir.w, lightDir, lightDir
+	mad lightDir.w, lightDir.w, c21.w, c21.y
+	rcp lightDir.w, lightDir.w
+	mul color, c14, lightDir.w
+	dp3 facing.x, normal, -lightDir
+	sge facing.x, facing.x, c0.x
+	mul oD0, color, facing.x
+	dp3 localLightDir.x, texU, lightDir
+	dp3 localLightDir.y, texV, lightDir
+	dp3 localLightDir.z, normal, lightDir
+	Normalize3 localLightDir
+	mov oT0.xyz, -localLightDir
+	mul oT1.xy, v3, c6.x
+
+proc CLPointDiffuseShadowed
+	m4x4 oPos, v0, c10
+	locals lightDir
+	add lightDir, v0, -c15
+	mad oD1.xyz, lightDir, c16.y, c16.x
+	mov oT0.xyz, lightDir
+	mov oT1.xyz, lightDir
+	dp3 lightDir.w, lightDir, lightDir
+	mad lightDir.w, lightDir.w, c21.w, c21.y
+	rcp lightDir.w, lightDir.w
+	mul oD0, c14, lightDir.w
+	mad oT2, v1, c3.x, c3.y
+
 proc CLPointLight
 	m4x4 oPos, v0, c10
 	locals normal, texU, texV
@@ -2470,6 +2515,37 @@ D3DRS_ALPHAFUNC D3DCMP_LESSEQUAL
 1 D3DTSS_ALPHAOP D3DTOP_SUBTRACT
 1 D3DTSS_ALPHAARG1 D3DTA_CURRENT
 1 D3DTSS_ALPHAARG2 D3DTA_TEXTURE
+
+[PS] CLPointDiffuse
+ps.1.1
+tex t0
+tex t1
+dp3 r0, t0_bx2, t1_bx2
+mul r0, r0, v0
+[RS]
+D3DRS_ALPHATESTENABLE FALSE
+
+[PS] CLPointBump
+ps.1.1
+tex t0
+tex t1
+dp3_sat r0, t0_bx2, t1_bx2
+mul r0, r0, v0
+[RS]
+D3DRS_ALPHATESTENABLE FALSE
+
+[PS] CLPointDiffuseShadowed
+ps.1.1
+tex t0
+tex t1
+tex t2
+dp3_sat r0, t0_bx2, v1_bx2
+dp3 r0.xyz, t0_bx2, -t2_bx2
+mul r0.xyz, r0, v0
++sub r0.w, r0, t1
+[RS]
+D3DRS_ALPHATESTENABLE TRUE
+D3DRS_ALPHAFUNC D3DCMP_LESSEQUAL
 
 [PS] CLPointLightShadowed
 ps.1.1

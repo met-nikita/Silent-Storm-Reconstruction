@@ -798,9 +798,21 @@ static void ExecOps( NGfx::CRenderContext *pRC, const vector<CRenderCmdList::SOp
 
 			// cached light
 		case RO_CL_PNT_LIGHT:
-			pRC->SetPixelShader( psDiffuseProjectedTexture );
-			pRC->SetVertexShader( vsCLPointLight );
-			pRC->SetTexture( 0, GetLightCircle() );
+			if ( NGfx::GetHardwareLevel() >= NGfx::HL_GFORCE3 )
+			{
+				// Retail v1.2 0x54d7bf: evaluate the light/normal dot product
+				// per pixel, without projecting a light circle onto each polygon.
+				pRC->SetPixelShader( psCLPointDiffuse );
+				pRC->SetVertexShader( vsCLPointDiffuse );
+				pRC->SetTexture( 0, GetNormalizeTexture() );
+				pRC->SetTexture( 1, GetNormalizeTexture() );
+			}
+			else
+			{
+				pRC->SetPixelShader( psDiffuseProjectedTexture );
+				pRC->SetVertexShader( vsCLPointLight );
+				pRC->SetTexture( 0, GetLightCircle() );
+			}
 			triListType = TLT_GEOM;
 			break;
 		case RO_CL_PNT_DEPTH_CHECK:
@@ -813,21 +825,20 @@ static void ExecOps( NGfx::CRenderContext *pRC, const vector<CRenderCmdList::SOp
 			triListType = TLT_GEOM;
 			break;
 		case RO_CL_PNT_LIGHT_SHADOWED:
-			pRC->SetPixelShader( psCLPointLightShadowed );
+			pRC->SetPixelShader( psCLPointDiffuseShadowed );
 			pRC->SetAlphaRef( Float2Int( op.p2.f ) );
-			pRC->SetVertexShader( vsCLPointLightShadowed );
+			pRC->SetVertexShader( vsCLPointDiffuseShadowed );
 			pRC->SetVSConst( 16, CVec4( 0.5f, 1 / ( lightInfo.vRadius.x + 4 ), 0, 0 ) );
-			pRC->SetTexture( 0, GetLightCircle() );
-			pRC->SetTexture( 1, GetNormalizeTexture() );
-			pRC->SetTexture( 2, op.p1.pCubeTex );
+			pRC->SetTexture( 0, GetNormalizeTexture() );
+			pRC->SetTexture( 1, op.p1.pCubeTex );
+			pRC->SetTexture( 2, GetNormalizeTexture() );
 			triListType = TLT_GEOM;
 			break;
 		case RO_CL_PNT_LIGHT_BUMP:
-			pRC->SetPixelShader( psPrecisePointBump );
-			pRC->SetVertexShader( vsPrecisePointBump );
-			pRC->SetTexture( 0, GetLightFalloff() );
-			pRC->SetTexture( 1, GetNormalizeTexture() );
-			pRC->SetTexture( 2, op.p1.pTex );
+			pRC->SetPixelShader( psCLPointBump );
+			pRC->SetVertexShader( vsCLPointBump );
+			pRC->SetTexture( 0, GetNormalizeTexture() );
+			pRC->SetTexture( 1, op.p1.pTex );
 			triListType = TLT_GEOM;
 			break;
 		case RO_CL_SKY_DIR_CHECK:
