@@ -127,14 +127,26 @@ static D3DVERTEXELEMENT9 dwVecFull[] =
 	D3DVSD_REG(5, D3DVSDT_D3DCOLOR),
 	D3DVSD_END()
 };*/
-SGeomFormatInfo geometryFormatInfo[6] =
+// Same shader semantics as dwVecFull, with floating-point screen-quad UVs.
+static D3DVERTEXELEMENT9 dwVecRect[] =
+{
+	{0,  0, D3DDECLTYPE_FLOAT3,   D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_POSITION, 0},
+	{0, 12, D3DDECLTYPE_D3DCOLOR, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_NORMAL, 0},
+	{0, 16, D3DDECLTYPE_FLOAT2,   D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 0},
+	{0, 24, D3DDECLTYPE_SHORT2,   D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 1},
+	{0, 28, D3DDECLTYPE_D3DCOLOR, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TANGENT, 0},
+	{0, 32, D3DDECLTYPE_D3DCOLOR, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TANGENT, 1},
+	D3DDECL_END()
+};
+SGeomFormatInfo geometryFormatInfo[7] =
 {
 	{ 0, 0, dwVecFull, 0 },//SGeomVec::ID, sizeof(SGeomVec), dwVec },
 	{ 0, 0, dwVecFull, 0 },//{ SGeomVecT1::ID, sizeof(SGeomVecT1), dwVecT },
 	{ SGeomVecT1C1::ID, sizeof(SGeomVecT1C1), dwVecTC, D3DFVF_XYZ|D3DFVF_DIFFUSE|D3DFVF_TEX1 },
 	{ 0, 0, dwVecFull, 0 },//{ SGeomVecT2C1::ID, sizeof(SGeomVecT2C1), dwVecT2C },
 	{ SGeomVecNT1::ID, sizeof(SGeomVecNT1), dwVecNT,  D3DFVF_XYZ|D3DFVF_NORMAL|D3DFVF_TEX1 },
-	{ SGeomVecFull::ID, sizeof(SGeomVecFull), dwVecFull, 0 }
+	{ SGeomVecFull::ID, sizeof(SGeomVecFull), dwVecFull, 0 },
+	{ SGeomVecRect::ID, sizeof(SGeomVecRect), dwVecRect, 0 }
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 static void ApplyRenderState( D3DRENDERSTATETYPE state, DWORD dwVal )

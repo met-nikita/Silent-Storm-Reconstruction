@@ -1305,9 +1305,13 @@ void InitBuffers()
 		{
 			AddGeometryCache<SGeomVecFull>( 500000, STATIC, TBU_STATIC );
 			AddGeometryCache<SGeomVecFull>( 100000, DYNAMIC, TBU_DYNAMIC );
+			AddGeometryCache<SGeomVecRect>( 100000, DYNAMIC, TBU_DYNAMIC );
 		}
 		else
+		{
 			AddGeometryCache<SGeomVecFull>( 500000, STATIC, TBU_STATIC );
+			AddGeometryCache<SGeomVecRect>( 100000, STATIC, TBU_STATIC );
+		}
 	}
 	else
 	{
@@ -1337,8 +1341,8 @@ static ILinearBuffer* MakeGeometry( int nFormatID, int nSize, EBufferUsage usage
 {
 	if ( !bHardwareVP )
 		usage = STATIC;
-	ASSERT( !bTnLDevice || nFormatID != SGeomVecFull::ID );
-	ASSERT( bTnLDevice || nFormatID == SGeomVecFull::ID );
+	ASSERT( !bTnLDevice || ( nFormatID != SGeomVecFull::ID && nFormatID != SGeomVecRect::ID ) );
+	ASSERT( bTnLDevice || nFormatID == SGeomVecFull::ID || nFormatID == SGeomVecRect::ID );
 	CGeometryCacheHash::iterator i = geometries.find( SGeometryType(usage, nFormatID) );
 	ASSERT( i != geometries.end() );
 	return i->second->Alloc( nSize );

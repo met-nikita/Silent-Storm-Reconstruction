@@ -34,7 +34,7 @@ struct SGeomFormatInfo
 	D3DVERTEXELEMENT9 *pdwVSD;
 	DWORD dwFVF;
 };
-externA5 SGeomFormatInfo geometryFormatInfo[6];
+externA5 SGeomFormatInfo geometryFormatInfo[7];
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 inline int GetGeomFormatSize( int nFormatID )
 {

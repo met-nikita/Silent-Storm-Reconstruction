@@ -49,7 +49,7 @@ void MakeQuadTriList( int nRects, STriangleList *pRes )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // C2DQuadsRenderer
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-typedef SGeomVecFull SRectVertex;
+typedef SGeomVecRect SRectVertex;
 struct SFakeCPPInitOrder
 {
 	CObj<CGeometry> pGeom;
@@ -129,7 +129,6 @@ void C2DQuadsRenderer::SetupRC( const CVec2 &vSize )
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-const int N_UV_PER_TEXEL_STEPS = 8;
 S2DRectInfoLock* C2DQuadsRenderer::GetRectInfoLock( CTexture *pContainer, const STexturePlaceInfo &region )
 {
 	if ( pContainer != pPrevContainer || ( pLock && pLock->IsFull() ) )
@@ -138,25 +137,23 @@ S2DRectInfoLock* C2DQuadsRenderer::GetRectInfoLock( CTexture *pContainer, const 
 	{
 		if ( IsTnLDevice() )
 		{
-			fUVMult = 1;
 			pLock = new SRealRectInfoLock<SGeomVecT1C1>();
 		}
 		else
 		{
-			fUVMult = 1.0f / N_UV_PER_TEXEL_STEPS;
 			pLock = new SRealRectInfoLock<SRectVertex>();
 		}
 		pPrevContainer = pContainer;
 	}
 	if ( NGfx::IsNVidiaNP2Bug() && !region.IsHolderAPow2Texture() )
 	{
-		fScaleU = fUVMult;
-		fScaleV = fUVMult;
+		fScaleU = 1;
+		fScaleV = 1;
 	}
 	else
 	{
-		fScaleU = fUVMult / Max( 1, region.size.x );
-		fScaleV = fUVMult / Max( 1, region.size.y );
+		fScaleU = 1.0f / Max( 1, region.size.x );
+		fScaleV = 1.0f / Max( 1, region.size.y );
 	}
 	return pLock;
 }
@@ -167,9 +164,8 @@ static void FillVertex( SRectVertex *pRes, float x, float y, float u, float v, D
 	pRes->pos.y = y;
 	pRes->pos.z = fZ;
 	pRes->normal.dw = 0;
-	pRes->tex.nU = Float2Int( u * N_UV_PER_TEXEL_STEPS );
-	pRes->tex.nV = Float2Int( v * N_UV_PER_TEXEL_STEPS );
-	//CalcTexCoords( &pRes->tex, u, v );
+	pRes->tex.x = u;
+	pRes->tex.y = v;
 	pRes->texLM.dw = 0;
 	pRes->texU.dw = dwColor;
 	pRes->texV.dw = 0;
@@ -389,8 +385,8 @@ public:
 	{
 		pRC->SetPixelShader( psShadowBlur );//psTexture );//
 		pRC->SetVertexShader( vsShadowBlur );
-		float fOffsetX = fBlurShift * N_UV_PER_TEXEL_STEPS * fScaleU;
-		float fOffsetY = fBlurShift * N_UV_PER_TEXEL_STEPS * fScaleV;
+		float fOffsetX = fBlurShift * fScaleU;
+		float fOffsetY = fBlurShift * fScaleV;
 		pRC->SetVSConst( 16, CVec4( fScaleU, fScaleV, 0, 0 ) );
 		pRC->SetVSConst( 17, CVec4( 0, fOffsetY, 0, 0 ) );
 		pRC->SetVSConst( 18, CVec4(  fOffsetX, -fOffsetY, 0, 0 ) );

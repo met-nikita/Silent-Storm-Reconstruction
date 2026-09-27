@@ -108,6 +108,18 @@ struct SGeomVecFull
 	SShortTextureUV tex, texLM;
 	SCompactVector texU, texV;
 };
+// Transient screen quads keep texel coordinates as floats. The world format
+// above must retain its packed UVs; using it for screen copies wrapped at 4096
+// texels after the old 8x fixed-point conversion (notably with supersampling).
+struct SGeomVecRect
+{
+	enum { ID = 6 };
+	CVec3 pos;
+	SCompactVector normal;
+	CVec2 tex;
+	SShortTextureUV texLM;
+	SCompactVector texU, texV;
+};
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // linear buffer locks
 ////////////////////////////////////////////////////////////////////////////////////////////////////

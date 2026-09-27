@@ -53,7 +53,7 @@ private:
 	NGfx::CRenderContext rc;
 	CPtr<CTexture> pPrevContainer;
 	S2DRectInfoLock *pLock;
-	float fUVMult, fScaleU, fScaleV;
+	float fScaleU, fScaleV;
 	CObj<I2DEffect> pUserEffect;
 
 	C2DQuadsRenderer( const C2DQuadsRenderer &a ) { ASSERT(0); }
