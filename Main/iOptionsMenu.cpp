@@ -368,7 +368,8 @@ static void AddQualityItems( CComplexComboBox *pCombo, bool bAscending )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CVideoOptionsUI -- retail shape (ProcessMessage @0x2254d0, UpdateFromConfig @0x220f60, operator&
 // @0x22bee0): six IMMEDIATE-apply combos + gamma scroll + 2 checkboxes; no apply button.
-// NOTE the control names are retail's own: "smoothness" = FSAA, "fsaa_level" = lighting quality.
+// Retail's legacy template names are counterintuitive: "smoothness" = lighting quality,
+// "fsaa_level" = FSAA. Verified v1.2 stores: 0x6265b5 -> +0xb8; 0x6273d9 -> +0xb4.
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CVideoOptionsUI: public CEmptyOptionsUI
 {
@@ -520,8 +521,8 @@ bool CVideoOptionsUI::ProcessMessage( const SEvent &sEvent )
 			pQuality = new CComplexComboBox( sEvent.pLoader->GetControl( "quality" ) );
 			AddQualityItems( pQuality, true );
 
-			pFSAALevel = new CComplexComboBox( sEvent.pLoader->GetControl( "smoothness" ) );
-			AddQualityItems( pFSAALevel, false );
+			pLightingQuality = new CComplexComboBox( sEvent.pLoader->GetControl( "smoothness" ) );
+			AddQualityItems( pLightingQuality, false );
 
 			pTextureQuality = new CComplexComboBox( sEvent.pLoader->GetControl( "texture_quality" ) );
 			AddQualityItems( pTextureQuality, false );
@@ -572,9 +573,8 @@ bool CVideoOptionsUI::ProcessMessage( const SEvent &sEvent )
 				pResolution->AddItem( EncodeVideoModeID( iTemp->nXSize, iTemp->nYSize, iTemp->nBpp ), NUI::CComplexComboBox::SInfo( wsBuffer ), nTemplate );
 			}
 
-			// retail's control naming: the "fsaa_level" row is the LIGHTING QUALITY combo
-			pLightingQuality = new CComplexComboBox( sEvent.pLoader->GetControl( "fsaa_level" ) );
-			AddQualityItems( pLightingQuality, false );
+			pFSAALevel = new CComplexComboBox( sEvent.pLoader->GetControl( "fsaa_level" ) );
+			AddQualityItems( pFSAALevel, false );
 
 			break;
 		}
