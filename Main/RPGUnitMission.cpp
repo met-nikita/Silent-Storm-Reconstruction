@@ -90,6 +90,7 @@ private:
 	void ApplyCritical( NDb::CRPGCritical *pCritical, int nDC );
 	void ProcessCriticalsOnNewTurnFor();
 	float GetCriticalDmgModifier( NAI::EHitLocation eHL, int nCriticalProbability, int nCriticalDifficulty );
+	void CheckOverdose();
 	EToHitType GetToHitWeaponType() const;
 	int GetMeleeToHit( const CVec3 &ptAttacker, const NAI::SPosition &posTarget, 
 		IUnitMissionInfo *pTarget, NAI::EHitLocation hl, const vector<int> &accessibleHLs, bool bBackStab ) const;
@@ -196,8 +197,7 @@ public:
 	void SetScenarioPlayerID( int n ) { nScenarioPlayerID = n; }
 	int GetScenarioPlayerID() const { return nScenarioPlayerID; }
 	// retail AddVPBoost @0x2c3400: install a temporary VP modifier (fAdd = 1% of the VP base per
-	// unit of strength) + record its lifetime. (Retail tails into CheckOverdose @0x2c0a50, whose
-	// overdose metric the oracle left unresolved -- deferred with it.)
+	// unit of strength), record its lifetime and check overdose.
 	virtual void AddVPBoost( float fStrength, int nDuration );   // overrides IUnitMission vtbl+0x184
 	//
 	CUnitMission();
@@ -2087,14 +2087,37 @@ void CUnitMission::InitAsPanzerklein( NDb::CPanzerklein *pPK )
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // retail @0x2c3400: a VP drug boost -- fAdd = (VP base) * strength * 1%, installed as a temporary
-// modifier with a recorded lifetime. (Retail tails into CheckOverdose @0x2c0a50; its overdose
-// metric is unresolved in the oracle and deferred with the drug-use wiring.)
+// modifier with a recorded lifetime, followed by the overdose gate.
 void CUnitMission::AddVPBoost( float fStrength, int nDuration )
 {
 	CDynamicSkill &vp = pRPGUnit->Skills( NDb::ST_VP );
 	SSkillModifyInfo info( 1.0f, float( vp.GetTheoreticalMax() ) * fStrength * 0.01f );
 	temporaryModifiers.push_back( new CSkillModifier( &vp, info ) );
 	vpBoostDurations.push_back( nDuration );
+	CheckOverdose();
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CUnitMission::CheckOverdose()
+{
+	if ( vpBoostDurations.empty() )
+		return;
+	// Retail 0x6c0c00 computes sum(1 / duration) without division. Zero duration
+	// also triggers; keep that explicit rather than dividing by zero.
+	double fNumerator = 0, fDenominator = 1;
+	for ( int i = 0; i < vpBoostDurations.size(); ++i )
+	{
+		fNumerator = vpBoostDurations[i] * fNumerator + fDenominator;
+		fDenominator *= vpBoostDurations[i];
+	}
+	if ( fNumerator > fDenominator || fDenominator == 0 )
+	{
+		vpBoostDurations.clear();
+		if ( !IsDead() )
+		{
+			bUnconscious = true;
+			pRPGUnit->Skills( NDb::ST_VP ).SetValue( 0 );
+		}
+	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 static int CalcBleedingDamage( int nVP, int nMaxVP, float fCritical, int nStopped )
@@ -2110,6 +2133,9 @@ static int CalcBleedingDamage( int nVP, int nMaxVP, float fCritical, int nStoppe
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CUnitMission::DoRegenerations( NWorld::IWorld *pWorld, int *pnBleed )
 {
+	for ( int i = 0; i < vpBoostDurations.size(); ++i )
+		--vpBoostDurations[i];
+	CheckOverdose();
 	// Retail v1.2 0x6c49f0: critical lifetimes advance at end of turn / real-time tick,
 	// not when AP is refreshed. Compute whole-number bleeding before PK regeneration.
 	ProcessCriticalsOnNewTurnFor();
