@@ -235,8 +235,10 @@ static bool CheckParabolaIntersect( NAI::CCollider *pCollider, const float fTFly
 	return false;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-static bool FindGrenadeParams( CWorld *pWorld, const NAI::SUnitPosition &pos, const CVec3 &to, float fMaxVel, SGrenadeParams *pRes ) 
+static bool FindGrenadeParams( CUnitServer *pUS, NRPG::IGrenadeItem *pGrenade, const NAI::SUnitPosition &pos, const CVec3 &to, SGrenadeParams *pRes )
 {
+	CWorld *pWorld = pUS->GetWorld();
+	float fMaxVel = NRPG::GetMaxThrowVelocity( pUS->GetUnitRPG(), pGrenade, pWorld->IsFirstTurn() );
 	CVec3 from = pos.GetCenter();
 	
 	vector<CVec3> boundPoints;
@@ -300,7 +302,7 @@ static bool FindGrenadeParams( CWorld *pWorld, const NAI::SUnitPosition &pos, co
 	for ( fTFly = fTFlyMin; fTFly < fTFlyMax + F_GRENADE_DELAY_STEP; fTFly += F_GRENADE_DELAY_STEP )
 	{
 		int nSPSize = startPoints.size();
-		for ( int k = 0; k < nSPSize; ++k )
+		for ( int k = IsValid( pUS->GetWearingDBPK() ) ? 2 : 0; k < nSPSize; ++k )
 		{
 			if ( k > 0 && results[k - 1] )
 				continue;
@@ -308,7 +310,7 @@ static bool FindGrenadeParams( CWorld *pWorld, const NAI::SUnitPosition &pos, co
 			bFound = !CheckParabolaIntersect( &collider, Min(fTFly, fTFlyMax), from, to );
 			if ( bFound ) 
 			{
-				nSide = k;
+				nSide = IsValid( pUS->GetWearingDBPK() ) ? 0 : k;
 				break;
 			}
 		}
@@ -331,15 +333,7 @@ EUnitCommandResult CanUnitThrowGrenade( CUnitServer *pUS, const NAI::SUnitPositi
 {
 	SGrenadeParams sParams;
 
-	CPtr<NRPG::CGrenadeToHitCalcer> pToHitCalcer;
-	int nDistance = fabs( ptTarget - from.GetCP() ) / FP_GRID_STEP;
-	pToHitCalcer = new NRPG::CGrenadeToHitCalcer( pUS, from.GetPose(),
-		nDistance, from.GetCP(), pUS->GetWorld()->IsFirstTurn(), false, CVec3(1,1,1), ptTarget, pGrenade );	// AI evaluates an inventory grenade -> pass it explicitly (it is not the active item)
-/*	float fGrenadeMaxDistance = pToHitCalcer->GetGrenadeMaxDistance();
-
-	if ( nDistance > fGrenadeMaxDistance )
-		return UCR_TARGET_OUT_OF_RANGE;*/
-	if ( !FindGrenadeParams( pUS->GetWorld(), from, ptTarget, pToHitCalcer->GetMaxGrenadeVelocity(), &sParams ) )
+	if ( !FindGrenadeParams( pUS, pGrenade, from, ptTarget, &sParams ) )
 		return UCR_TARGET_OUT_OF_RANGE;
 
 	// Engineer/PK grenades (satchel charges) gate on a required demolition perk + the unit's
@@ -386,12 +380,10 @@ void UnitThrowGrenade( CUnitServer *pUS, NDb::CRPGGrenade *pGrenade, const CVec3
 		nDistance, position.GetCP(), pUS->GetWorld()->IsFirstTurn(), false, CVec3( 1, 1, 1 ), ptTarget, pGrenadeItem.GetPtr() );	// transient script grenade is not equipped/active -> pass it explicitly
 
 	SGrenadeParams grenadeParams;
-	if ( !FindGrenadeParams( pUS->GetWorld(), position, ptTarget, pToHitCalcer->GetMaxGrenadeVelocity(), &grenadeParams ) )
+	if ( !FindGrenadeParams( pUS, pGrenadeItem, position, ptTarget, &grenadeParams ) )
 		return;
 
-	// to-hit scatter + fuse delay -- mirrors CExecThrowGrenade::CheckToHitAndDelay (`random` there is an
-	// executor member, so use a local SRand, the dev's local-rng idiom elsewhere in this file).
-	SRand random;
+	// Retail uses the shared gameplay random generator for both throw paths.
 	int nToHit = pToHitCalcer->GetToHit();
 	int nRandom = random.Get( 100 );
 	if ( nRandom > nToHit )
@@ -403,11 +395,14 @@ void UnitThrowGrenade( CUnitServer *pUS, NDb::CRPGGrenade *pGrenade, const CVec3
 	}
 	grenadeParams.fT = Clamp( grenadeParams.fT, 0.f, float( pGrenade->nMaxDelay ) );
 	grenadeParams.fT = pGrenade->nMaxDelay - grenadeParams.fT;
-	nRandom = random.Get( 100 );
-	if ( nRandom >= 99 || nRandom >= pToHitCalcer->GetSkill() )
+	if ( !pUS->GetUnitRPG()->HasPerk( 0x5a ) )
 	{
-		grenadeParams.fT *= random.GetFloat( 0.5f, 2.f );
-		grenadeParams.fT = Clamp( grenadeParams.fT, 0.f, float( pGrenade->nMaxDelay ) * 0.75f );
+		nRandom = random.Get( 100 );
+		if ( nRandom >= 99 || nRandom >= NRPG::GetGrenadeThrowSkill( pUS->GetUnitRPG() ) )
+		{
+			grenadeParams.fT *= random.GetFloat( 0.5f, 2.f );
+			grenadeParams.fT = Clamp( grenadeParams.fT, 0.f, float( pGrenade->nMaxDelay ) * 0.75f );
+		}
 	}
 
 	// the flying grenade mesh comes from the grenade's item record (null model still explodes)
@@ -1868,16 +1863,12 @@ void CExecMeleeUnit::OnLabel()
 CExecThrowGrenade::CExecThrowGrenade( CUnitServer *_pUS, const CVec3 &_ptTarget ): 
 	CCommandExecute(_pUS), ptTarget(_ptTarget)
 {
-	CDynamicCast<NRPG::IGrenadeItem> pGrenade( pUS->GetUnitRPG()->GetInventory()->GetActive() );
+	pGrenade = CDynamicCast<NRPG::IGrenadeItem>( pUS->GetUnitRPG()->GetInventory()->GetActive() );
 	ASSERT( IsValid(pGrenade) );
-	int nDistance = fabs( ptTarget - pUS->GetPosition().GetCP() ) / FP_GRID_STEP;
-	pToHitCalcer = new NRPG::CGrenadeToHitCalcer( pUS, pUS->GetPosition().GetPose(),
-		nDistance, pUS->GetPosition().GetCP(), pUS->GetWorld()->IsFirstTurn(), false, CVec3(1,1,1), ptTarget );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 EUnitCommandResult CExecThrowGrenade::CanDoIt( const NAI::SUnitPosition &from, bool bIgnoreTarget ) const
 {
-	CDynamicCast<NRPG::IGrenadeItem> pGrenade( pUS->GetUnitRPG()->GetInventory()->GetActive() );
 	if ( !IsValid( pGrenade ) )
 		return UCR_INVALID_COMMAND;
 
@@ -1899,6 +1890,11 @@ int CExecThrowGrenade::GetStartAP() const
 // read through the which-record branch, so an engineer grenade works too.
 void CExecThrowGrenade::CheckToHitAndDelay( NRPG::IGrenadeItem *pGrenade )
 {
+	const NAI::SUnitPosition &position = pUS->GetPosition();
+	int nDistance = fabs( ptTarget - position.GetCP() ) / FP_GRID_STEP;
+	CPtr<NRPG::CGrenadeToHitCalcer> pToHitCalcer = new NRPG::CGrenadeToHitCalcer(
+		pUS, position.GetPose(), nDistance, position.GetCP(),
+		pUS->GetWorld()->IsFirstTurn(), false, CVec3(1,1,1), ptTarget, pGrenade );
 	// check ToHit and find the point where the grenade is actually thrown
 	int nToHit = pToHitCalcer->GetToHit();
 	pToHitCalcer->Log();
@@ -1922,12 +1918,14 @@ void CExecThrowGrenade::CheckToHitAndDelay( NRPG::IGrenadeItem *pGrenade )
 	grenadeParams.fT = Clamp( grenadeParams.fT, 0.f, float(nMaxDelay) );
 	grenadeParams.fT = nMaxDelay - grenadeParams.fT;
 	csRPG << " True delay: " << grenadeParams.fT;
-	nRandom = random.Get(100);
-	if ( nRandom >= 99 || nRandom >= pToHitCalcer->GetSkill() )
+	if ( !pUS->GetUnitRPG()->HasPerk( 0x5a ) )
 	{
-		// change the delay time
-		grenadeParams.fT *= random.GetFloat( 0.5f, 2.f );
-		grenadeParams.fT = Clamp( grenadeParams.fT, 0.f, float(nMaxDelay) * 0.75f );
+		nRandom = random.Get(100);
+		if ( nRandom >= 99 || nRandom >= NRPG::GetGrenadeThrowSkill( pUS->GetUnitRPG() ) )
+		{
+			grenadeParams.fT *= random.GetFloat( 0.5f, 2.f );
+			grenadeParams.fT = Clamp( grenadeParams.fT, 0.f, float(nMaxDelay) * 0.75f );
+		}
 	}
 	csRPG << " Used delay: " << grenadeParams.fT << endl;
 }
@@ -1937,14 +1935,15 @@ void CExecThrowGrenade::ThrowGrenade()
 	NRPG::IUnitMission *pRPG = pUS->GetUnitRPG();
 	NRPG::IInventory *pInventory = pRPG->GetInventory();
 	CUnitServer::SResItem item;
-	CDynamicCast<NRPG::IGrenadeItem> pGrenade( pInventory->GetActive() );
 	if ( !IsValid( pGrenade ) )
 		return;
 
-	FindGrenadeParams( pUS->GetWorld(), pUS->GetPosition(), ptTarget, pToHitCalcer->GetMaxGrenadeVelocity(), &grenadeParams );
+	if ( !FindGrenadeParams( pUS, pGrenade, pUS->GetPosition(), ptTarget, &grenadeParams ) )
+		return;
 	CheckToHitAndDelay( pGrenade );
 
-	pUS->TearOffItem( &item, (NDb::ESlot)pInventory->GetActiveSlot(), !pUS->IsAIUnit() );
+	pUS->TearOffItem( &item, (NDb::ESlot)pInventory->GetActiveSlot(),
+		pUS->IsAIUnit() ? (CObj<NRPG::IInventoryItem>*)0 : &pNextSameItem );
 
 /*	{
 		NDb::EItemSubType subType = pInventory->GetActive()->GetDBItem()->subType;
@@ -1965,7 +1964,7 @@ void CExecThrowGrenade::Run()
 	ASSERT( CanDoIt( pUS->GetPosition() ) == UCR_OK );
 	ASSERT( pUS->CanSpendAP( GetStartAP() ) );
 
-	if ( !FindGrenadeParams( pUS->GetWorld(), pUS->GetPosition(), ptTarget, pToHitCalcer->GetMaxGrenadeVelocity(), &grenadeParams ) )
+	if ( !FindGrenadeParams( pUS, pGrenade, pUS->GetPosition(), ptTarget, &grenadeParams ) )
 	{
 		Failed();
 		return;
@@ -1973,6 +1972,11 @@ void CExecThrowGrenade::Run()
 	CWorld *pWorld = pUS->GetWorld();
 	NRPG::IUnitMission *pRPG = pUS->GetUnitRPG();
 	const NAI::SUnitPosition position = pUS->GetPosition();
+	if ( pUS->IsHiding() )
+	{
+		pUS->Hide( false, false );
+		bUpdateVision = true;
+	}
 	// (Jan03 StartAttack() burst-cursor reset dropped -- the mission cursor is gone in retail)
 	//
 	pUS->DoAction( NRPG::AC_THROW_GRENADE );
@@ -1992,6 +1996,22 @@ bool CExecThrowGrenade::TimeLabelReached()
 	// a grenade is a single throw, not a burst, so nBullet must not be advanced here.
 	ThrowGrenade();
 	return false;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CExecThrowGrenade::AnimationFinished()
+{
+	NRPG::IInventory *pInventory = pUS->GetUnitRPG()->GetInventory();
+	if ( IsValid( pNextSameItem ) )
+	{
+		pInventory->Take( pNextSameItem );
+		pInventory->Equip( (NDb::ESlot)pInventory->GetActiveSlot(), pNextSameItem );
+	}
+	pUS->Update();
+	if ( IsActiveItemToShow( pInventory ) )
+		pUS->animator.SetWeaponAnimation( pUS->GetUnitRPG()->GetWeaponType() );
+	if ( bUpdateVision )
+		pUS->GetWorld()->UpdateVisible( false );
+	Finished();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CExecLaunchRocket

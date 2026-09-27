@@ -27,6 +27,8 @@ class IInventoryItem;
 class IGrenadeItem;
 class IMeleeWeaponItem;
 class IUnitMission;
+float GetGrenadeThrowSkill( IUnitMission *pMission );
+float GetMaxThrowVelocity( IUnitMission *pMission, IGrenadeItem *pItem, bool bFirstRound );
 float GetMaxThrowVelocity( IUnitMission *pMission, IMeleeWeaponItem *pItem, bool bFirstRound );
 float GetMaxTrowDistance( IUnitMission *pMission, IMeleeWeaponItem *pItem, bool bFirstRound );
 ////////////////////////////////////////////////////////////////////////////////////////////////////

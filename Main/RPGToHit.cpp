@@ -162,6 +162,34 @@ NAI::EPose GetBestPose( const NDb::CRPGWeaponType &wt )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // The blade branch of retail GetWeaponSkill (v1.2 0x6c09f4..0x6c0a96,
 // 0x6c0be4). Extra aiming AP and bullet index are zero for a thrown blade.
+float GetGrenadeThrowSkill( IUnitMission *pMission )
+{
+	float fSkill = pMission->GetRPGUnit()->Skills( NDb::ST_THROWING );
+	float fBonus;
+	if ( pMission->HasPerk( 0x5b, &fBonus ) )
+		fSkill += fBonus;
+	return fSkill * GetVPPenalty( pMission->GetRPGUnit()->Skills( NDb::ST_VP ),
+		pMission->GetHealedVP(), pMission->GetRPGUnit()->Skills( NDb::ST_VP ).GetMaxValue() );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+float GetMaxThrowVelocity( IUnitMission *pMission, IGrenadeItem *pItem, bool bFirstRound )
+{
+	// Retail 0x6b7b60 uses the same physics for blades and both grenade kinds.
+	float fStrength = pMission->GetRPGUnit()->Skills( NDb::ST_STR );
+	if ( pMission->GetPanzerklein() )
+		fStrength = pMission->GetPanzerklein()->nGrenadeStrength;
+	fStrength += GetGrenadeThrowSkill( pMission ) * ( 1.f / 18.f );
+	const NDb::SToHitConstants &constants = *pMission->GetToHitConstants();
+	float fPower = constants.fGrenadeBaseCoeff + fStrength * constants.fGrenadeSTRCoeff;
+	float fWeight = GetGrenadeRecItem( pItem )->nWeight;
+	fPower *= pow( double(fWeight), double(0.74f) );
+	float fVelocity = fPower / ( fWeight * 0.001f );
+	float fMultiplier;
+	if ( pMission->HasPerk( 0x58, &fMultiplier ) )
+		fVelocity *= fMultiplier;
+	return fVelocity;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 static float GetKnifeThrowSkill( IUnitMission *pMission, IMeleeWeaponItem *pItem )
 {
 	bool bThrowing = pItem->GetDBMeleeWeapon()->bThrowing;
@@ -648,10 +676,7 @@ CGrenadeToHitCalcer::CGrenadeToHitCalcer( CUnitServer *_pUnitServer, NAI::EPose 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CGrenadeToHitCalcer::Prepare()
 {
-	nSkill = pUnitMission->GetRPGUnit()->Skills( NDb::ST_THROWING );
-	float fVPPenalty = GetVPPenalty( pUnitMission->GetRPGUnit()->Skills( NDb::ST_VP ),
-		pUnitMission->GetHealedVP(), pUnitMission->GetRPGUnit()->Skills(NDb::ST_VP).GetMaxValue() );
-	nSkill *= fVPPenalty;
+	nSkill = GetGrenadeThrowSkill( pUnitMission );
 	// retail @0x2b88d0 reads the weapon type off whichever record the item carries (regular
 	// grenade OR engineer grenade) -- the bare GetDBGrenade() deref crashed on equipping TNT.
 	fMovePenalty = GetGrenadeRecWeaponType( pGrenade )->fMovePenalty;
@@ -695,14 +720,13 @@ float CGrenadeToHitCalcer::GetRelWeight()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 float CGrenadeToHitCalcer::GetMaxGrenadeVelocity()
 {
-	return GetMaxImp() / GetRelWeight();
+	return GetMaxThrowVelocity( pUnitMission, pGrenade, bFirstRound );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 int CGrenadeToHitCalcer::GetGrenadeMaxDistance()
 {
-	float fMaxImp = GetMaxImp();
-	float fRelWeight = GetRelWeight();
-	return int( pow(fMaxImp,2) / ( pUnitMission->GetToHitConstants()->fGravity * pow(fRelWeight,2) ) / FP_GRID_STEP );
+	float fVelocity = GetMaxGrenadeVelocity();
+	return int( ( fVelocity / pUnitMission->GetToHitConstants()->fGravity ) * fVelocity * FP_INV_GRID_STEP );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 float CGrenadeToHitCalcer::GetAllAdd()

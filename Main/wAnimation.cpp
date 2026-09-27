@@ -1852,6 +1852,7 @@ void CUnitAnimator::DeactivateItem( const NAI::SUnitPosition &cmdPos,
 void CUnitAnimator::ThrowGrenade( const NAI::SUnitPosition &cmdPos, const CVec3 &target, int nSide, int nGrenadeSize )
 {
 	Stand( cmdPos );
+	CalculateAnimFlags( true );
 	bActiveItem = false;
 	CPtr<NAnimation::CAnimation> pAnim;
 

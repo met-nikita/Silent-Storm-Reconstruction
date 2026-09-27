@@ -286,7 +286,6 @@ class CExecThrowGrenade: public CCommandExecute
 	ZDATA_(CCommandExecute)
 	CVec3 ptTarget;
 	SGrenadeParams grenadeParams;
-	CPtr<NRPG::CGrenadeToHitCalcer> pToHitCalcer;
 	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CCommandExecute*)this); f.Add(2,&ptTarget); f.Add(3,&grenadeParams); f.Add(4,&pGrenade); f.Add(5,&pNextSameItem); f.Add(6,&bUpdateVision); return 0; }
 	CPtr<NRPG::IGrenadeItem> pGrenade;
 	CObj<NRPG::IInventoryItem> pNextSameItem;
@@ -304,6 +303,7 @@ public:
 	virtual int GetStartAP() const;
 	virtual void Run();
 	virtual bool TimeLabelReached();
+	virtual void AnimationFinished();
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CExecLaunchRocket
