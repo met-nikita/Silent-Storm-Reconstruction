@@ -10,7 +10,8 @@ https://github.com/nival/Silent-Storm
 .pdb файлов версии v1.1 (RussianPatch1) и декомпиляции v1.2.
 
 Текущий статус: игра собирается и запускается на файлах Steam версии,
-но склонна к зависаниям, вылетам и в целом далека от релизной.
+в целом играбельна, присутствуют различной заметности баги и расхождения с
+релизной версией.
 
 <div align="center">
   <table>
@@ -29,6 +30,13 @@ https://github.com/nival/Silent-Storm
 </div>
 
 ---
+
+## Изменения относительно оригинальной игры
+Здесь перечислены самые заметные отличия этого кода от оригинала:
+
+- Поддержка всех разрешений, как в Sentinels (без обрезанных букв)
+- Поддержка Ctrl+V из системного буфера обмена в консоль
+- Исправлен баг с высоким уровнем сглаживания на высоких разрешениях экрана
 
 ## Сборка
 
@@ -50,7 +58,7 @@ cmake --build build --config Release
 ```
 
 Результаты появятся в **`build\Release\`** - `Game.exe` и инструменты (`DataImport`,
-`PkgBuilder`, `FontGen`, `TexConv`, `TexMipStrip`, `ShaderCompiler`).
+`PkgBuilder`, `FontGen`, `TexConv`, `TexMipStrip`, `ShaderCompiler`, `LSConverter`).
 
 Для отладки запустите **`build-debug.bat`** (собирает конфигурацию `RelWithDebInfo`),
 откройте **`build\A5.sln`** в Visual Studio и запустите отладку проекта `Game`.
@@ -60,12 +68,13 @@ CMake попытается подсунуть вашу папку с игрой 
 `E:/SteamLibrary/steamapps/common/Silent Storm`
 
 ### Запуск игры
-Поместите Game.exe в папку с игрой (пример: `E:/SteamLibrary/steamapps/common/Silent Storm`). 
+Поместите Game.exe (можно переименовать, чтобы не заменить оригинал) в папку с игрой
+(пример: `E:/SteamLibrary/steamapps/common/Silent Storm`). 
 Запустите Game.exe.
 
 ### Примечания
 - импортируемые проприетарные библиотеки fmod / Bink / LifeStudio **генерируются во время сборки** из
   зафиксированных таблиц экспорта `.def` в каталоге `third_party/` - оригинальные SDK не требуются.
-- `MapEdit`, `Scintilla`, `OpenDynamix` и `LSConverter` оставлены в репозитории, но **не
+- `MapEdit`, `Scintilla`, `OpenDynamix` оставлены в репозитории, но **не
   собираются** (по тем или иным причинам, с MapEdit там вообще всё сложно); их списки 
   исходников сохранены в `sources.cmake`.

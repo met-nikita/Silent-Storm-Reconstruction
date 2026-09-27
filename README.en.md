@@ -9,8 +9,9 @@ This repository contains ongoing work on the source code, with the ultimate goal
 producing a behaviour-equivalent version of Silent Storm v1.2 by analyzing the
 .pdb files of version v1.1 (RussianPatch1) and decompiling v1.2.
 
-Current status: the game builds and runs using the Steam version's files, but it
-is prone to freezes and crashes, and is generally far from release-ready.
+Current status: the game builds and runs using the Steam version's files.
+Is mostly playable, with some subtle and not-so-subtle bugs and divergences from the
+retail version.
 
 <div align="center">
   <table>
@@ -29,6 +30,13 @@ is prone to freezes and crashes, and is generally far from release-ready.
 </div>
 
 ---
+
+## Changes from retail game
+Most notable differences of this binary compared to retail:
+
+- All resolutions are supported, like in Sentinels (without clipped symbols)
+- Ctrl+V supported in console
+- Bug with high AA settings on high resolutions is fixed
 
 ## Build
 
@@ -50,7 +58,7 @@ cmake --build build --config Release
 ```
 
 The results will appear in **`build\Release\`** - `Game.exe` and the tools
-(`DataImport`, `PkgBuilder`, `FontGen`, `TexConv`, `TexMipStrip`, `ShaderCompiler`).
+(`DataImport`, `PkgBuilder`, `FontGen`, `TexConv`, `TexMipStrip`, `ShaderCompiler`, `LSConverter`).
 
 For debugging, run **`build-debug.bat`** (builds the `RelWithDebInfo` configuration),
 open **`build\A5.sln`** in Visual Studio, and start debugging the `Game` project.
@@ -60,13 +68,14 @@ automatically; if that fails, you'll need to set it manually: right-click the
 `E:/SteamLibrary/steamapps/common/Silent Storm`
 
 ### Running the game
-Place Game.exe into the game folder (example: `E:/SteamLibrary/steamapps/common/Silent Storm`).
+Place Game.exe (can freely rename as to not replace the original) into the game folder
+(example: `E:/SteamLibrary/steamapps/common/Silent Storm`).
 Run Game.exe.
 
 ### Notes
 - The imported proprietary libraries fmod / Bink / LifeStudio are **generated at
   build time** from the committed `.def` export tables in the `third_party/`
   directory - the original SDKs are not required.
-- `MapEdit`, `Scintilla`, `OpenDynamix`, and `LSConverter` are kept in the
+- `MapEdit`, `Scintilla`, `OpenDynamix` are kept in the
   repository but are **not built** (for various reasons - `MapEdit` in particular
   is quite complicated); their source file lists are preserved in `sources.cmake`.
