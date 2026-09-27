@@ -347,6 +347,7 @@ public:
 	CChapterSector( const SWindowInfo &sInfo, const SChapterSector &sSector );
 
 	virtual bool CanEnter() const;
+	virtual bool CanDeploy() const { return true; }
 	virtual bool IsRecommended() const;
 	virtual bool GetDescription( wstring *psText ) const;
 
@@ -430,6 +431,7 @@ public:
 	CZoneSector( const SWindowInfo &sInfo, NGame::IMission *pChapter, const SChapterSector &sSector );
 
 	bool CanEnter() const;
+	bool CanDeploy() const;
 	bool IsRecommended() const;
 	bool GetDescription( wstring *psText ) const;
 
@@ -455,6 +457,14 @@ bool CZoneSector::CanEnter() const
 bool CZoneSector::IsRecommended() const
 {
 	return bRecommended;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+bool CZoneSector::CanDeploy() const
+{
+	// Retail v1.2 0x5a9e70, called separately from CanEnter by marker clicks.
+	CPtr<NRPG::CGlobalGame> pGame = pChapter->GetRPGGame();
+	return !IsValid( pZone ) || pZone->GetDBZone()->bAllowPK ||
+		pGame->players.empty() || !pGame->players[0]->IsAnybodyInPK();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CZoneSector::GetDescription( wstring *psText ) const
@@ -831,6 +841,13 @@ bool CChapterMapUI::ProcessMessage( const SEvent &sEvent )
 
 					if ( sSector.eType == ZONE )
 					{
+						if ( !sectorsSet[nTemp]->CanDeploy() )
+						{
+							// Handled: do not fall back to setting up camp.
+							bHandled = true;
+							csGame << GetDBString( 20995 ) << endl;
+							continue;
+						}
 						vector<string> templParams;
 						CPtr<NScenario::CScenarioZone> pZone = pChapter->GetRPGGame()->pScenarioTracker->GetZoneByDBZone( NDb::GetDBScenarioZone( sSector.nTemplate ) );
 						if ( IsValid( pZone ) )

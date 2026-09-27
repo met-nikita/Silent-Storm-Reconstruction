@@ -15,6 +15,14 @@
 //
 namespace NRPG
 {
+bool CGlobalPlayer::IsAnybodyInPK() const
+{
+	// Retail v1.2 0x699b90: fielded mercs only, excluding dead wearers.
+	for ( int i = 0; i < mercs.size(); ++i )
+		if ( IsValid( mercs[i] ) && !mercs[i]->IsDead() && IsValid( mercs[i]->pPanzerklein ) )
+			return true;
+	return false;
+}
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // retail v1.2 @0x6998d0: use the best living merc's skill plus a difficulty-controlled
 // fraction of the remaining living mercs' average skill.

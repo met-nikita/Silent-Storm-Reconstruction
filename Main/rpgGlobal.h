@@ -117,6 +117,7 @@ public:
 	void TakeMoney( int n ) { nMoney -= n; if ( nMoney < 0 ) nMoney = 0; }
 	//
 	void AddMerc( CUnit *pMerc );
+	bool IsAnybodyInPK() const;
 	//
 	void CaptureUnit( NRPG::CUnit *pCarrier, NRPG::CUnit *pUnit );
 	void RescueUnit( NRPG::CUnit *pCarrier, NRPG::CUnit *pUnit );
