@@ -89,7 +89,8 @@ private:
 	void ApplyCritical( CCritical *p );
 	void ApplyCritical( NDb::CRPGCritical *pCritical, int nDC );
 	void ProcessCriticalsOnNewTurnFor();
-	float GetCriticalDmgModifier( NAI::EHitLocation eHL, int nCriticalProbability, int nCriticalDifficulty );
+	float GetCriticalDmgModifier( NWorld::IWorld *pWorld, NAI::EHitLocation eHL,
+		int nCriticalProbability, int nCriticalDifficulty, bool bForced, IUnitMissionInfo *pAttacker );
 	void CheckOverdose();
 	EToHitType GetToHitWeaponType() const;
 	int GetMeleeToHit( const CVec3 &ptAttacker, const NAI::SPosition &posTarget, 
@@ -1139,7 +1140,8 @@ CReceivedDmg CUnitMission::ProcessAttack( NWorld::IWorld *pWorld, int nUserID, C
 		}
 		// a critical injury may arise inside GetCriticalDmgModifier
 		float fCriticalDmgModifier = 
-			GetCriticalDmgModifier( (NAI::EHitLocation)nUserID, nCriticalProbability, nCriticalDifficulty );
+			GetCriticalDmgModifier( pWorld, (NAI::EHitLocation)nUserID, nCriticalProbability,
+				nCriticalDifficulty, pAttack->bAlwaysHumanCritical, pAttack->pAttacker );
 		fDmgModifier += fCriticalDmgModifier;
 		csRPG << CC_GREY << "\tHL=" << GetHLName( (NAI::EHitLocation)nUserID );
 		csRPG << CC_GREY << " \tDmgModifier=" << fDmgModifier;
@@ -1671,15 +1673,7 @@ void CUnitMission::ApplyCritical( const SCritical &cr )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CUnitMission::ApplyCritical( NDb::CRPGCritical *p, int nDC )
 {
-	// honor the script-set cap (luaSetMaxCriticalSeverity -> CGame::nMaxCriticalSeverity). Retail clamps the
-	// rolled severity here in the combat path via the mission's cached IGame; this is that read-site. (The
-	// script-driven UnitApplyCritical path builds an SCritical directly and is intentionally not clamped.)
-	if ( IsValid( pGame ) )
-	{
-		int nCap = pGame->GetMaxCriticalSeverity();
-		if ( nDC > nCap )
-			nDC = nCap;
-	}
+	// Combat severity is capped before selecting the critical, not after it.
 	int nDuration = -1;
 	if ( p->nMinDuration > 0 )
 		nDuration = p->nMinDuration + random.Get( p->nMaxDuration - p->nMinDuration );
@@ -1788,7 +1782,7 @@ static NDb::CRPGCritical* GetCritical( int nProbability,
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 int CUnitMission::RollCritical( NAI::EHitLocation eHL, int nCriticalDifficulty, NDb::CRPGCritical **pCritical )
 {
-	int nRezDiff = nCriticalDifficulty + random.Get(100);
+	int nRezDiff = nCriticalDifficulty;
 	switch ( eHL )
 	{
 		case NAI::HL_HEAD:
@@ -1809,60 +1803,54 @@ int CUnitMission::RollCritical( NAI::EHitLocation eHL, int nCriticalDifficulty, 
 	return nRezDiff;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-float CUnitMission::GetCriticalDmgModifier( NAI::EHitLocation eHL, 
-	int nCriticalProbability, int nCriticalDifficulty )
+float CUnitMission::GetCriticalDmgModifier( NWorld::IWorld *pWorld, NAI::EHitLocation eHL,
+	int nCriticalProbability, int nCriticalDifficulty, bool bForced, IUnitMissionInfo *pAttacker )
 {
 	if ( nCriticalProbability == 0 )
 		return 0;
-
 	static SRand rand;
-	float fRet = 0;
-
 	if ( !bCBarInitialized )
 	{
 		InitializeCriticals();
 		bCBarInitialized = true;
 	}
+	const int nRoll = rand.Get( 100 );
+	float fCriticalResist = pPanzerklein ? 1.f - pPanzerklein->fCriticalResist : 1.f;
+	float fParam = 0;
+	if ( HasPerk( N_PERK_CRITICAL_RESISTANCE, &fParam ) )
+		fCriticalResist *= 1.f - fParam;
+	if ( HasPerk( N_PERK_REDUCED_CRITICAL_SEVERITY, &fParam ) && fParam != 0 )
+		nCriticalDifficulty = int( nCriticalDifficulty / fParam );
+	if ( IsValid( pGame ) )
+		nCriticalDifficulty = Min( nCriticalDifficulty, pGame->GetMaxCriticalSeverity() );
 
-	int nRand = rand.Get( 100 );
-	float fCriticalResist = 1;
-	if ( pPanzerklein )
-		fCriticalResist = pPanzerklein->fCriticalResist;
-	if ( nRand > nCriticalProbability * fCriticalResist )
-		return fRet;
-	csRPG << "<font size=16pt>";
-	csRPG << "<color=grey>" << "\tcrit prob=" << nCriticalProbability << " (check=" << nRand << ") \tseverity=" << nCriticalDifficulty;
-
+	// Retail v1.2 0x6c3ab9: the difficulty option supplies a level-based
+	// fallback only for an unresisted, otherwise failed probability roll.
+	if ( !bForced && nRoll > nCriticalProbability * fCriticalResist )
+	{
+		if ( !pWorld->GetGlobalGame()->pDifficulty->bAlwaysCritical || fCriticalResist < 1.f )
+			return 0;
+		if ( IsValid( pAttacker ) )
+		{
+			nCriticalDifficulty = 0;
+			for ( int i = 0; i < pAttacker->GetSkillValue( NDb::ST_LEVEL ); ++i )
+				nCriticalDifficulty += random.Get( 1, 5 );
+		}
+	}
 	NDb::CRPGCritical *pCritical = 0;
-	nRand = RollCritical( eHL, nCriticalDifficulty, &pCritical );
+	const int nSeverity = RollCritical( eHL, nCriticalDifficulty, &pCritical );
 	if ( !IsValid( pCritical ) )
 		return 0;
-	//
-	float fDC = (float)nRand / N_MAX_SKILL;
-
+	float fDamage = nSeverity / 300.f;
 	switch ( eHL )
 	{
-		case NAI::HL_HEAD:
-			fRet = 2.5f * fDC;
-			fDC *= 300;
-			break;
-		case NAI::HL_BODY:
-			fRet = 3.0f * fDC;
-			fDC *= 300;
-			break;
-		case NAI::HL_RHAND:
-		case NAI::HL_LHAND:
-			fRet = 1.5f * fDC;
-			fDC *= 200;
-			break;
-		case NAI::HL_RLEG:
-		case NAI::HL_LLEG:
-			fRet = 2.0f * fDC;
-			fDC *= 250;
-			break;
+	case NAI::HL_HEAD: fDamage *= 2.f; break;
+	case NAI::HL_BODY: fDamage *= 1.5f; break;
+	case NAI::HL_RHAND:
+	case NAI::HL_LHAND: fDamage *= 0.5f; break;
 	}
-	ApplyCritical( pCritical, fDC );
-	return fRet * fCriticalResist;
+	ApplyCritical( pCritical, nSeverity );
+	return fDamage * fCriticalResist;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CUnitMission::DumpStats() const

@@ -16,6 +16,8 @@ const int N_PERK_CHEAP_SHOOT_PREPARE = 22;
 const int N_PERK_CHEAP_AIMED_SHOT = 31;
 const int N_PERK_CHEAP_MELEE = 32;
 const int N_PERK_BETTER_CRIT_DIFFICULTY = 44;   // "Better critical difficulty" (Param1=1.25 scales nCrticalDifficulty)
+const int N_PERK_CRITICAL_RESISTANCE = 46;
+const int N_PERK_REDUCED_CRITICAL_SEVERITY = 47;
 // CreateAttack perk gates (retail @0x6c2100; ids + params verified against the retail RPGPerks table)
 const int N_PERK_RANGED_DMG_ADD = 26;           // "+ N Ranged Dmg" (Param1=5, flat add to both damage bounds)
 const int N_PERK_BETTER_CRIT_CHANCE = 36;       // "Better critical chance" (Param1=0.1 -> nCrtical x1.1)
