@@ -222,7 +222,8 @@ void CDumbUnitServer::Visit( IRenderVisitor *p )
 			new NGScene::CExtractTranslation( new NAnimation::CAddBoneFilter( animator.GetSkeletonAnimator(), 0 ) ), 
 			2, NDb::GetTexture(4369), nFloor, 0.3f, 0.3f
 			);
-		p->AddColorPostFilter( CVec4( 0,0,0,1 ) );
+		// Retail v1.2 @0x752b5f: translucent blue-gray, not opaque black.
+		p->AddColorPostFilter( CVec4( 0.0703125f, 0.11015625f, 0.140625f, 0.6f ) );
 	}
 	if ( bEverybodyIsAlien )
 		p->FinishAlienStyle(); // is hidden PK
