@@ -3198,7 +3198,9 @@ void CExecThrowKnife::OnLabel()
 	ThrowKnife();
 	// @0x3ab700 -- retail marks the attack canceled after the throw label fires so CExecAttack::TimeLabelReached
 	// finishes the executor for this one-shot throw (the decomp writes [esi+0x18]=1). Jan03 omitted this.
-	// NOTE: the retail "knife gone / torn-off" feedback sound is deferred.
+	// Retail v1.1 0x7ab710..0x7ab754: ordinary throw sound, suppressed in PKs.
+	if ( !IsValid( pUS->GetWearingDBPK() ) )
+		pUS->GetWorld()->MakeSound( pUS->GetPosition().GetCP(), NDb::GetSound( 0x3285 ) );
 	bAttackCanceled = true;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -3241,7 +3243,17 @@ void CExecThrowKnife::ThrowKnife()
 	}
 	NRPG::PrepareAttackRay( pWorld->GetAIMap(), pCover, &rayInfo, fHit );
 	STime tThrow = pUS->animator.GetTimeLabel1();
-	pUS->TearOffItem( &item, (NDb::ESlot)pInventory->GetActiveSlot(), true );
+	pUS->TearOffItem( &item, (NDb::ESlot)pInventory->GetActiveSlot(), &pNextSameItem );
+	// Retail 0x7a3c50: pin the successor on the executor, then equip it without
+	// starting an ActivateItem animation in the middle of the throw animation.
+	if ( IsValid( pNextSameItem ) )
+	{
+		pInventory->Take( pNextSameItem );
+		pInventory->Equip( (NDb::ESlot)pInventory->GetActiveSlot(), pNextSameItem );
+	}
+	pUS->Update();
+	if ( IsActiveItemToShow( pInventory ) )
+		pUS->animator.SetWeaponAnimation( pRPG->GetWeaponType() );
 	// Retail 0x7aa4e8/0x7aa52d: truncate the range and multiply velocity by 1.5.
 	float fMaxDist = int( NRPG::GetMaxTrowDistance( pRPG, pMelee, false ) );
 	float fSpeed = NRPG::GetMaxThrowVelocity( pRPG, pMelee, false ) * 1.5f;
