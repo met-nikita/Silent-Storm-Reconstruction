@@ -304,9 +304,8 @@ public:
 CEmptyOptionsUI::CEmptyOptionsUI( const SWindowInfo &sInfo, NGame::EOptionsScreen _eScreen ):
 	CWindow( sInfo ), eScreen( _eScreen )
 {
-	// The same "Normal" arrow the rest of the menu UI uses: UICursors row 2 "normal" (UITexture 292);
-	// cf. Interface.cpp / UIInterface.cpp.
-	sCursor = SCursorInfo( NDb::GetUICursor( 2 ) );
+	// Retail v1.2 0x622b57 selects the options pen, not the default menu arrow (2).
+	sCursor = SCursorInfo( NDb::GetUICursor( 1 ) );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CEmptyOptionsUI::ProcessMessage( const SEvent &sEvent )
