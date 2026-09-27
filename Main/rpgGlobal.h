@@ -196,6 +196,7 @@ NRPG::CGlobalGame* CreateGlobalGame( int nScenarioID = -1, NDb::CDBDifficulty *p
 NRPG::CGlobalPlayer* CreateGlobalPlayer();
 NRPG::CGlobalPlayer* CreateGlobalPlayer( NDb::CSide* pSide );
 NRPG::CGlobalPlayer* CreateGlobalPlayer( const vector<int> &personages );
+void AddTeamMngPerses( CGlobalPlayer *pPlayer, bool bHero );
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 } // namespace
 ////////////////////////////////////////////////////////////////////////////////////////////////////

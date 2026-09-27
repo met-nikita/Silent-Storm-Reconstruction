@@ -173,21 +173,6 @@ bool CComplexScroll::ProcessMessage( const SEvent &sEvent )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CComplexComboBox
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-class CComplexComboBox: public CComboBox
-{
-	OBJECT_NOCOPY_METHODS(CComplexComboBox)
-private:
-	ZDATA_(CComboBox)
-	CObj<CHoverButton> pDropDown;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CComboBox*)this); f.Add(2,&pDropDown); return 0; }
-
-public:
-	CComplexComboBox() {}
-	CComplexComboBox( const SWindowInfo &sInfo );
-
-	bool ProcessMessage( const SEvent &sEvent );
-};
-////////////////////////////////////////////////////////////////////////////////////////////////////
 CComplexComboBox::CComplexComboBox( const SWindowInfo &sInfo ):
 	CComboBox( sInfo )
 {

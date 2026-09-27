@@ -234,6 +234,20 @@ public:
 	void Draw( const STime &sTime, NGScene::I2DGameView *pView );
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// Shared by options and hotseat: skinned combo with the template's drop-list button.
+class CComplexComboBox: public CComboBox
+{
+	OBJECT_NOCOPY_METHODS(CComplexComboBox)
+private:
+	ZDATA_(CComboBox)
+	CObj<CHoverButton> pDropDown;
+	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CComboBox*)this); f.Add(2,&pDropDown); return 0; }
+public:
+	CComplexComboBox() {}
+	CComplexComboBox( const SWindowInfo &sInfo );
+	bool ProcessMessage( const SEvent &sEvent );
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
 // CHoverCheckButton -- a CHoverButton with a checked state (release widget, reg 0xB3529130). While
 // checked it forces state 3 (the "selected/down" art); OnAction toggles the check. Used e.g. for the
 // face-gen voice selector. operator& @0x1cbae0 (base + bChecked@+0xcc); Draw @0x1bdff0; OnAction @0x1be010.

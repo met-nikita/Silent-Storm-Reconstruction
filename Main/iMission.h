@@ -412,6 +412,7 @@ public:
 	// retail mission vtbl+0x48 (CMissionBase::IsPlayerTurn @0x1a1910): false only in turn-based play
 	// while the world's current player is NOT the active (human) tracker's player.
 	virtual bool IsPlayerTurn() const = 0;
+	virtual bool IsSetupMode() const { return false; }
 	// retail mission vtbl+0xcc (CMissionBase::GetFollowCameraState @0x1a1790): the "ui_followcamera"
 	// game option (camera follows enemy actions) -- a gate of the GetCamera selector @0x1a1ee0.
 	virtual bool GetFollowCameraState() const = 0;

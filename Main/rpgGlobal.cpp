@@ -251,6 +251,14 @@ CGlobalPlayer* CreateGlobalPlayer( NDb::CSide* pSide )
 		pPlayer->pSide = NDb::GetDBSide( 1 );
 	pPlayer->pStore = new CStore( pPlayer );
 
+	AddTeamMngPerses( pPlayer, false );
+	return pPlayer;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void AddTeamMngPerses( CGlobalPlayer *pPlayer, bool bHero )
+{
+	pPlayer->totalMercs.clear();
+	if ( IsValid( pPlayer->pSide ) )
 	{
 		CDBTable<NDb::CRPGPers> *pPersTable = NDatabase::GetTable<NDb::CRPGPers>();
 		CDBIterator<NDb::CRPGPers> iTempPers( *pPersTable );
@@ -264,14 +272,13 @@ CGlobalPlayer* CreateGlobalPlayer( NDb::CSide* pSide )
 			// gate every civilian/mob persona of the side floods the recruit menu.
 			if ( !pRPGPers->bCanHired )
 				continue;
-			if ( pRPGPers->pSide != pSide )
+			if ( pRPGPers->pSide != pPlayer->pSide )
 				continue;
 
-			pPlayer->totalMercs.push_back( CreateMerc( pRPGPers ) );
+			pPlayer->totalMercs.push_back( CreateMerc( pRPGPers, 0, bHero ) );
 		}
 	}
 
-	return pPlayer;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CGlobalPlayer* CreateGlobalPlayer( const vector<int> &personages )

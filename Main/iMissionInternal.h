@@ -84,6 +84,7 @@ public:
 class CMission: public CMissionBase
 {
 	OBJECT_BASIC_METHODS(CMission)
+	friend class CMultiPlayerInterface;
 private:
 	NInput::CBind bindStartOfTurn, bindEndOfTurn, bindNextEnemy; 
 	NInput::CBind bindSaveMenu, bindLoadMenu, bindQuickSave;

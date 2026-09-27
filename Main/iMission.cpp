@@ -220,12 +220,12 @@ bool CMission::Initialize( int _nTemplateID, int _nVariantID, NScenario::CScenar
 	if ( nVariantID == -1 )
 	{
 		CPtr<NDb::CTemplate> pTemplate = NDb::GetTemplate( nTemplateID );
-		if ( !IsValid( pTemplate ) )
-			return false;
-
-		SRand sRand( sSeed );
-		vector<int> dummyTemp;
-		nVariantID = NDb::GetTemplVariant( pTemplate, dummyTemp, -1, &sRand )->GetRecordID();
+		if ( IsValid( pTemplate ) )
+		{
+			SRand sRand( sSeed );
+			vector<int> dummyTemp;
+			nVariantID = NDb::GetTemplVariant( pTemplate, dummyTemp, -1, &sRand )->GetRecordID();
+		}
 	}
 
 	// Tier-1 discrete loading-bar checkpoints (release drives a smooth 25..100 sweep via the banded
@@ -241,8 +241,12 @@ bool CMission::Initialize( int _nTemplateID, int _nVariantID, NScenario::CScenar
 	if ( !IsValid( pWorld ) )
 	{
 		pWorld = NWorld::CreateWorld( _pGlobalGame );
-		pWorld->CreateRandom( nVariantID, params, true, clues,
-			nMobsLevel, &pPostInfo, sSeed );
+		// Retail Initialize also supports the template-less hotseat setup world.
+		if ( nVariantID == -1 )
+			pWorld->CreateDefault();
+		else
+			pWorld->CreateRandom( nVariantID, params, true, clues,
+				nMobsLevel, &pPostInfo, sSeed );
 	}
 	else
 		pWorld->CreateRestored( pGlobalGame );	// retail @0x36e100: rebind the live global game + refresh buildings
