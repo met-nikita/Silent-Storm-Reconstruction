@@ -71,23 +71,12 @@ void CPlayerTracker::RemoveUnit( IUnitTracker *pUnit )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CPlayerTracker::IsPlayerLoser()
 {
-	bool bAllDead = true;
+	// Retail v1.2 0x6875f0: a hero must itself be able to fight. A conscious
+	// non-hero cannot keep the player alive on behalf of an incapacitated hero.
 	for ( int nTemp = 0; nTemp < unitsSet.size(); nTemp++ )
 	{
-		if ( unitsSet[nTemp]->GetUnit()->IsDead() )
-			continue;
-		if ( unitsSet[nTemp]->GetUnit()->IsUnconscious() )
-			continue;
-
-		bAllDead = false;
-	}
-
-	if ( bAllDead )
-		return true;
-
-	for ( int nTemp = 0; nTemp < unitsSet.size(); nTemp++ )
-	{
-		if ( unitsSet[nTemp]->GetUnit()->GetRPG()->IsHero() )
+		NWorld::CUnit *pUnit = unitsSet[nTemp]->GetUnit();
+		if ( pUnit->GetRPG()->IsHero() && pUnit->CanFight() )
 			return false;
 	}
 

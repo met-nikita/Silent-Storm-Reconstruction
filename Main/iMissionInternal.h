@@ -259,6 +259,7 @@ protected:
 	void TraceCursor();
 	void UnitCollectAP( NWorld::ECollectSnipeAP eAP );
 	bool GetGroupHideState();
+	bool GetGroupStrafeState();
 	void ExecWorldCommands();
 
 	void SaveWorld( const string &szFile );
