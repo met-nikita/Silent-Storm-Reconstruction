@@ -2038,6 +2038,11 @@ void CGScene::Draw( CTransformStack *pTS, CTransformStack *pClipTS, NGfx::CRende
 		if ( renderPath != RP_TNL )
 		{
 			CRenderCmdList finalOps, finalAlienOps, finalPreOps;
+			// Retail v1.2 @0x561a19: stationary fog uses the static lookup path.
+			// Such lights may have a zero switch time (e.g. template 4412);
+			// sending them to RO_FOG_DYNAMIC produces invalid shader coordinates.
+			if ( fogMode == FOG_DYNAMIC && fog.fVapourSpeed == 0 )
+				fogMode = FOG_PERVERTEX;
 			switch ( fogMode )
 			{
 			case FOG_PERVERTEX:
