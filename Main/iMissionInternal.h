@@ -85,6 +85,7 @@ class CMission: public CMissionBase
 {
 	OBJECT_BASIC_METHODS(CMission)
 	friend class CMultiPlayerInterface;
+	friend class CAutoPlayInterface;
 private:
 	NInput::CBind bindStartOfTurn, bindEndOfTurn, bindNextEnemy; 
 	NInput::CBind bindSaveMenu, bindLoadMenu, bindQuickSave;
@@ -270,6 +271,9 @@ protected:
 	void ErasePartUnderCursor();
 	void ShowVisibleFrom();
 
+protected:
+	// Retail's virtual GameStep is separate from the common world/camera/UI pump.
+	virtual void GameStep();
 public:
 	CMission();
 	void InitializeComplete();

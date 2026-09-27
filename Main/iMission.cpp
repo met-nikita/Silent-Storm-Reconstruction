@@ -1223,7 +1223,7 @@ void CMission::Step()
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CMission::InternalStep()
+void CMission::GameStep()
 {
 	// retail CMission::GameStep @0x2017a0 head: track the world current-player; on a change stamp
 	// tLastCurrentPlayerChange with the UI clock (the @0x1fbf10 end-of-turn 2s cooldown reads it).
@@ -1252,6 +1252,60 @@ void CMission::InternalStep()
 		}
 	}
 
+	if ( !bLoseSignalSended && pActivePlayer->IsPlayerLoser() )
+	{
+		// BUG 3 (delayed Lose dialog) -- retail plumbing now ported (W3.3): GameStep @0x2017a0 (single-player
+		// defeat) fires OnPlayerLose wrapped in a CCmdDelayedCallGameOver (nMaxDelay = 4000ms, ctor @0x204b50).
+		// CWorld stashes it (pGameOverCall @+0x1c4) and fires it when the HERO's corpse settles
+		// (CWorld::InformCorpseStop @0x362180, IsHero gate), capped at 4000ms (CWorld::Segment tail @0x36bce0).
+		// The lose UI itself is lua-driven: OnPlayerLose -> ShowLoseDialog(20984/20985) -> CUICmdLoseDialog ->
+		// CICLoseMenu (ExecWorldCommand below) -- retail opens no menu here in single-player.
+		// Param = bScenarioGameOver (1) vs natural defeat (0). Retail skips the delay wrapper only when
+		// bScenarioGameOver is set (scenario failure = immediate game over); the member (retail tag 36,
+		// W4.2) has no dev scenario-failure writer yet, so the delayed path is the one that runs.
+		bLoseSignalSended = true;
+		if ( bScenarioGameOver )
+			DoEvent( new NWorld::CCmdCallScriptFunction( "OnPlayerLose", "i", 1 ) );
+		else
+			DoEvent( new NWorld::CCmdDelayedCallGameOver(
+				new NWorld::CCmdCallScriptFunction( "OnPlayerLose", "i", 0 ), 4000 ) );
+	}
+
+	sTraceResult.bTileSet = false;	// W4.2: was the dev bTraceOk
+	if ( IsReady() )
+	{
+		TraceCursor();
+
+		bUpdated = TrackChanges() || pWorld->IsUINeedUpdate() || bForceUpdateNextFrame;
+		bForceUpdateNextFrame = false;
+
+		if ( bUpdated )
+			UpdateActionsInfo();
+
+		if ( ( pState->GetType() != IState::TEMPORARY ) && ( IsUpdated() || ( pState->GetType() == IState::INSTANT ) ) )
+			UpdateState();
+	}
+	else
+	{
+		bUpdated = TrackChanges();
+		bForceUpdateNextFrame = true;
+
+		for( int nTemp = 0; nTemp < actionsInfoSet.size(); nTemp++ )
+			actionsInfoSet[nTemp].bOk = false;
+
+		// v1.2 0x602443..0x6024f3: busy state bypasses normal hover selection.
+		if ( IsPlayerTurn() )
+			actionsInfoSet[UA_STOP].SetValid();
+		ResetState();
+		CommandState( new CStateWait() );
+	}
+
+	pState->Step();
+
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CMission::InternalStep()
+{
 	// retail CMissionBase::InternalStep @0x1a29f0: on a turn change (hot-seat) just Deactivate ->
 	// swap pActivePlayer -> Activate. NO camera copies -- each tracker OWNS its camera (tag 10) and
 	// the GetCamera selector (@0x1a1ee0) switches with the active player automatically.
@@ -1320,57 +1374,8 @@ void CMission::InternalStep()
 	for ( vector< CObj<IPlayerTracker> >::iterator iPlayer = playersSet.begin(); iPlayer != playersSet.end(); iPlayer++ )
 		(*iPlayer)->Update( (*iPlayer)->GetPlayer() == pWorld->GetCurrentPlayer() );
 
-	if ( !bLoseSignalSended && pActivePlayer->IsPlayerLoser() )
-	{
-		// BUG 3 (delayed Lose dialog) -- retail plumbing now ported (W3.3): GameStep @0x2017a0 (single-player
-		// defeat) fires OnPlayerLose wrapped in a CCmdDelayedCallGameOver (nMaxDelay = 4000ms, ctor @0x204b50).
-		// CWorld stashes it (pGameOverCall @+0x1c4) and fires it when the HERO's corpse settles
-		// (CWorld::InformCorpseStop @0x362180, IsHero gate), capped at 4000ms (CWorld::Segment tail @0x36bce0).
-		// The lose UI itself is lua-driven: OnPlayerLose -> ShowLoseDialog(20984/20985) -> CUICmdLoseDialog ->
-		// CICLoseMenu (ExecWorldCommand below) -- retail opens no menu here in single-player.
-		// Param = bScenarioGameOver (1) vs natural defeat (0). Retail skips the delay wrapper only when
-		// bScenarioGameOver is set (scenario failure = immediate game over); the member (retail tag 36,
-		// W4.2) has no dev scenario-failure writer yet, so the delayed path is the one that runs.
-		bLoseSignalSended = true;
-		if ( bScenarioGameOver )
-			DoEvent( new NWorld::CCmdCallScriptFunction( "OnPlayerLose", "i", 1 ) );
-		else
-			DoEvent( new NWorld::CCmdDelayedCallGameOver(
-				new NWorld::CCmdCallScriptFunction( "OnPlayerLose", "i", 0 ), 4000 ) );
-	}
-
 	pInterface->UpdateCursor();
-
-	sTraceResult.bTileSet = false;	// W4.2: was the dev bTraceOk
-	if ( IsReady() )
-	{
-		TraceCursor();
-
-		bUpdated = TrackChanges() || pWorld->IsUINeedUpdate() || bForceUpdateNextFrame;
-		bForceUpdateNextFrame = false;
-
-		if ( bUpdated )
-			UpdateActionsInfo();
-
-		if ( ( pState->GetType() != IState::TEMPORARY ) && ( IsUpdated() || ( pState->GetType() == IState::INSTANT ) ) )
-			UpdateState();
-	}
-	else
-	{
-		bUpdated = TrackChanges();
-		bForceUpdateNextFrame = true;
-
-		for( int nTemp = 0; nTemp < actionsInfoSet.size(); nTemp++ )
-			actionsInfoSet[nTemp].bOk = false;
-
-		// v1.2 0x602443..0x6024f3: busy state bypasses normal hover selection.
-		if ( IsPlayerTurn() )
-			actionsInfoSet[UA_STOP].SetValid();
-		ResetState();
-		CommandState( new CStateWait() );
-	}
-
-	pState->Step();
+	GameStep();
 
 	UpdateSound();
 
