@@ -1731,26 +1731,27 @@ tex t1
 tex t2
 tex t3
 dp3_sat r0, t1_bx2, c0
-mul r0.rgb, c1, r0
-mad r1, v0, t2.a, t2
+mul r0.xyz, c1, r0
+mad r1, v0, t2.w, t2
 mul_x4 r1, r1, t0
 mul r0, r0, t3
 mul_x4 r0, r0, t0
-add r0.rgb, r0, r1
-+mov r0.a, t0.a
+add r0.xyz, r0, r1
++ add_sat r0.w, t0.w, c4.w
 [PS14]
 ps.1.4
-texld r0, t0.xyz
-texld r1, t1.xyz
-texld r2, t2_dw.xyw
-texld r3, t3_dw.xyw
+texld r0, t0.xyzz
+texld r1, t1.xyzz
+texld r2, t2_dw.xyww
+texld r3, t3_dw.xyww
 dp3_sat r5, r1_bx2, c0
-mul r5.rgb, c1, r5
-mad r1, v0, r2.a, r2
+mul r5.xyz, c1, r5
+mad r1, v0, r2.w, r2
 mul_x4_sat r1, r1, r0
 mul r5, r5, r3
 mul_x4_sat r5, r5, r0
-add r0.rgb, r5, r1
+add r0.xyz, r5, r1
++ add_sat r0.w, r0.w, c4.w
 [RS]
 D3DRS_ALPHATESTENABLE FALSE
 
@@ -1761,31 +1762,33 @@ tex t1
 tex t2
 tex t3
 dp3_sat r0, t0_bx2, v0_bx2
-dp3 r1.rgb, t0_bx2, v1_bx2
-+mul r0.a, r0.a, v1.a
-mad r1.rgb, r1, c2, c1
-mad r1.rgb, r1, t2.a, t2
-mul r1.rgb, r1, t1
-mul r0.rgb, r0.a, c3
-mul r0.rgb, r0, t3
-+mov r0.a, t2.a
-mad_x4 r0.rgb, r0, t1, r1
+dp3 r1.xyz, t0_bx2, v1_bx2
++ mul r0.w, r0.w, v1.w
+mad r1.xyz, r1, c2, c1
++ mul r0.w, r0, t3.z
+mad r1.xyz, r1, t2.w, t2
+mul r1.xyz, r1, t1
+mul r0.xyz, r0.w, c3
+mad_x4 r0.xyz, r0, t1, r1
+mul r0.xyz, r0, c4
++ mad_sat r0.w, t1.w, c4.z, c4.w
 [PS14]
 ps.1.4
-texld r0, t0.xyz
-texld r1, t1.xyz
-texld r2, t2_dw.xyw
-texld r3, t3_dw.xyw
+texld r0, t0.xyzz
+texld r1, t1.xyzz
+texld r2, t2_dw.xyww
+texld r3, t3_dw.xyww
 dp3_sat r4, r0_bx2, v0_bx2
-dp3 r5.rgb, r0_bx2, v1_bx2
-+mul r4.a, r4.a, v1.a
-mad r5.rgb, r5, c2, c1
-mad r5.rgb, r5, r2.a, r2
-mul r5.rgb, r5, r1
-mul r4.rgb, r4.a, c3
-mul r4.rgb, r4, r3
-+mov r0.a, r2.a
-mad_x4 r0.rgb, r4, r1, r5
+dp3 r5.xyz, r0_bx2, v1_bx2
++ mul r4.w, r4, v1
+mad r5.xyz, r5, c2, c1
++ mul r4.w, r4, r3.z
+mad r5.xyz, r5, r2.w, r2
+mul r5.xyz, r5, r1
+mul r4.xyz, r4.w, c3
+mad_x4 r0.xyz, r4, r1, r5
+mul r0.xyz, r0, c4
++ mad_sat r0.w, r1.w, c4.z, c4.w
 [RS]
 D3DRS_ALPHATESTENABLE FALSE
 
@@ -1843,20 +1846,20 @@ tex t0
 tex t1
 tex t2
 dp3_sat r0, t1_bx2, c0
-mul r0.rgb, c1, r0
+mul r0.xyz, c1, r0
 mad r0, r0, t2, v0
-mul_x4 r0.rgb, r0, t0
-+mov r0.a, t0.a
+mul_x4 r0.xyz, r0, t0
++ add_sat r0.w, t0.w, c4.w
 [PS14]
 ps.1.4
-texld r0, t0.xyz
-texld r1, t1.xyz
-texld r2, t2_dw.xyw
+texld r0, t0.xyzz
+texld r1, t1.xyzz
+texld r2, t2_dw.xyww
 dp3_sat r5, r1_bx2, c0
-mul r5.rgb, c1, r5
+mul r5.xyz, c1, r5
 mad r5, r5, r2, v0
-mul_x4 r0.rgb, r5, r0
-+mov r0.a, r0.a
+mul_x4 r0.xyz, r5, r0
++ add_sat r0.w, r0.w, c4.w
 [RS]
 D3DRS_ALPHATESTENABLE FALSE
 
@@ -1869,19 +1872,19 @@ tex t3
 dp3_sat r0, t0_bx2, t1_bx2
 mul r0, r0, v0
 mad r0, r0, t3, v1
-mul_x4 r0.rgb, r0, t2
-+mov r0.a, t2.a
+mul_x4 r0.xyz, r0, t2
++ add_sat r0.w, t2.w, c4.w
 [PS14]
 ps.1.4
-texld r0, t0.xyz
-texld r1, t1.xyz
-texld r2, t2.xyz
-texld r3, t3_dw.xyw
+texld r0, t0.xyzz
+texld r1, t1.xyzz
+texld r2, t2.xyzz
+texld r3, t3_dw.xyww
 dp3_sat r5, r0_bx2, r1_bx2
 mul r5, r5, v0
 mad r5, r5, r3, v1
-mul_x4 r0.rgb, r5, r2
-+mov r0.a, r2.a
+mul_x4 r0.xyz, r5, r2
++ add_sat r0.w, r2.w, c4.w
 [RS]
 D3DRS_ALPHATESTENABLE FALSE
 

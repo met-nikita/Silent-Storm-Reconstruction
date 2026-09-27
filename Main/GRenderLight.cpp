@@ -492,7 +492,6 @@ void CDirectionalLight::RenderAmbientLightmaps( CTransformStack *pTS, NGfx::CRen
 				continue;
 			if ( frag.pLightmap )
 			{
-				NGfx::CTexture *pLM = frag.pLightmap;
 				SOpGenContext op( &lightOps.ops, &frag );
 
 				if ( info.diffuse.type == SMaterialInfo::T_COLOR )
@@ -503,7 +502,7 @@ void CDirectionalLight::RenderAmbientLightmaps( CTransformStack *pTS, NGfx::CRen
 					if ( info.IsDecal() )
 					{
 						ASSERT( !info.bAlphaTest ); // this is ridiculous - depth is not tested at all in this case
-						op.AddOperation( RO_TEXTURE_DECAL, 20, ABM_SMART|info.GetDecalDepthTest(), 1, pLM, pTex );
+						op.AddOperation( RO_TEXTURE_DECAL, 20, ABM_SMART|info.GetDecalDepthTest(), 1, pTex );
 					}
 					else
 					{
@@ -641,9 +640,9 @@ void CDirectionalLight::RenderInSinglePass( CTransformStack *pTS, CTransformStac
 				case SMaterialInfo::DECAL:
 				case SMaterialInfo::EXACT_DECAL:
 					if ( info.pBump )
-						op.AddOperation( RO_DIFFUSE_FULL_LIT_BUMP_TEXTURE_PP, 20, ABM_SMART|info.GetDecalDepthTest(), 0, info.diffuse.pTex, info.pBump, pLightmap );
+						op.AddOperation( RO_DIFFUSE_FULL_LIT_BUMP_TEXTURE_PP_DECAL, 20, ABM_SMART|info.GetDecalDepthTest(), 0, info.diffuse.pTex, info.pBump, 1.0f );
 					else
-						op.AddOperation( RO_DIFFUSE_FULL_LIT_TEXTURE_PP, 20, ABM_SMART|info.GetDecalDepthTest(), 0, info.diffuse.pTex, pLightmap );
+						op.AddOperation( RO_DIFFUSE_FULL_LIT_TEXTURE_PP_DECAL, 20, ABM_SMART|info.GetDecalDepthTest(), 0, info.diffuse.pTex );
 					break;
 				default:
 					break;
@@ -695,9 +694,9 @@ void CDirectionalLight::RenderInSinglePass( CTransformStack *pTS, CTransformStac
 				case SMaterialInfo::DECAL:
 				case SMaterialInfo::EXACT_DECAL:
 					if ( info.pBump )
-						op.AddOperation( RO_DIFFUSE_DYNLM_LIT_BUMP_TEXTURE_PP, 20, ABM_SMART|info.GetDecalDepthTest(), 0, pLM, info.diffuse.pTex, info.pBump );
+						op.AddOperation( RO_DIFFUSE_DYNLM_LIT_BUMP_TEXTURE_PP_DECAL, 20, ABM_SMART|info.GetDecalDepthTest(), 0, pLM, info.diffuse.pTex, info.pBump );
 					else
-						op.AddOperation( RO_DIFFUSE_DYNLM_LIT_TEXTURE_PP, 20, ABM_SMART|info.GetDecalDepthTest(), 0, pLM, info.diffuse.pTex );
+						op.AddOperation( RO_DIFFUSE_DYNLM_LIT_TEXTURE_PP_DECAL, 20, ABM_SMART|info.GetDecalDepthTest(), 0, pLM, info.diffuse.pTex );
 					break;
 				default:
 					break;

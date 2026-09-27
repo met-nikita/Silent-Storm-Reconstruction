@@ -117,7 +117,12 @@ bool SetModeFromConfig( bool bRecreate )
 	}
 	if ( bCanCacheLighting )
 	{
-		rtInfo.AddCube( GetCLCubeResolution(), 100 );
+		// Retail allocates 38 four-channel cubes on shader hardware (152
+		// single-channel cubes otherwise) and halves the configured cache size.
+		// Our cache uses one cube per light: keep the same capacity/resolution
+		// without changing its ownership model or the 256px refinement buffer.
+		nCLCubeResolution /= 2;
+		rtInfo.AddCube( GetCLCubeResolution(), 152 );
 		rtInfo.AddCube( 256, 1 );
 	}
 

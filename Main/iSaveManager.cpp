@@ -71,9 +71,8 @@ void CSaveManager::SetActiveProfile( const string &szProfile )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CSaveManager::SaveSlot( const string &szName )
 {
-	const string szActiveProfile = GetActiveProfile();
-	string szSource( NStr::Format( S_SAVE_SLOTTEMPLATE, szActiveProfile.c_str(), S_SLOT_ACTIVE ) );
-	string szTarget( NStr::Format( S_SAVE_SLOTTEMPLATE, szActiveProfile.c_str(), szName.c_str() ) );
+	string szSource = GetSlotFilePath( S_SLOT_ACTIVE, "" );
+	string szTarget = GetSlotFilePath( szName, "" );
 
 	if ( szSource == szTarget )
 	{
@@ -91,9 +90,8 @@ void CSaveManager::SaveSlot( const string &szName )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CSaveManager::LoadSlot( const string &szName )
 {
-	const string szActiveProfile = GetActiveProfile();
-	string szSource( NStr::Format( S_SAVE_SLOTTEMPLATE, szActiveProfile.c_str(), szName.c_str() ) );
-	string szTarget( NStr::Format( S_SAVE_SLOTTEMPLATE, szActiveProfile.c_str(), S_SLOT_ACTIVE ) );
+	string szSource = GetSlotFilePath( szName, "" );
+	string szTarget = GetSlotFilePath( S_SLOT_ACTIVE, "" );
 
 	if ( szSource == szTarget )
 	{
@@ -111,23 +109,20 @@ void CSaveManager::LoadSlot( const string &szName )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CSaveManager::ClearSlot( const string &szName )
 {
-	const string szActiveProfile = GetActiveProfile();
-	string szSource( NStr::Format( S_SAVE_SLOTTEMPLATE, szActiveProfile.c_str(), szName.c_str() ) );
+	string szSource = GetSlotFilePath( szName, "" );
 	RemoveDir( szSource );
 	CreateDir( szSource );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CSaveManager::DeleteSlot( const string &szName )
 {
-	const string szActiveProfile = GetActiveProfile();
-	string szSource( NStr::Format( S_SAVE_SLOTTEMPLATE, szActiveProfile.c_str(), szName.c_str() ) );
+	string szSource = GetSlotFilePath( szName, "" );
 	RemoveDir( szSource );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CSaveManager::PrepareSlot( const string &szName )
 {
-	const string szActiveProfile = GetActiveProfile();
-	string szSource( NStr::Format( S_SAVE_SLOTTEMPLATE, szActiveProfile.c_str(), szName.c_str() ) );
+	string szSource = GetSlotFilePath( szName, "" );
 	CreateDir( szSource );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -227,6 +222,10 @@ void CSaveManager::GetSlotScreenShot( const string &szName, CArray2D<NGfx::SPixe
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 string CSaveManager::GetSlotFilePath( const string &szName, const string &szFileName ) const
 {
+	// Retail GetTempSlotFilePath (v1.2 0x635e20) uses a game-root working
+	// directory, separate from the profile's named save slots.
+	if ( szName == S_SLOT_ACTIVE )
+		return string( "temp\\" ) + szFileName;
 	// Retail resolves game_profile for each operation, including the first one after startup.
 	const string szActiveProfile = GetActiveProfile();
 	return string( NStr::Format( S_SAVE_SLOTTEMPLATE, szActiveProfile.c_str(), szName.c_str() ) + szFileName );

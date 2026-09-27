@@ -289,6 +289,8 @@ int APIENTRY WinMain( HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdL
 		return 0;
 	}
 	//
+	// Retail prepares its game-root temporary save workspace before interface startup.
+	NMainLoop::GetSaveManager()->PrepareSlot( NMainLoop::S_SLOT_ACTIVE );
 	// Build the loading-screen UI once at boot, BEFORE the first interface command is queued. Mirrors
 	// release NMainLoop::InitInterface @0x1f5800, whose first unconditional statement is InitLoadingScreen()
 	// (iMain.c:699-700), run before the bLoad?CICLoad:CICInterMission build. Builds the three file-scope
@@ -330,6 +332,8 @@ int APIENTRY WinMain( HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdL
 			Sleep( 40 );
 	}
 	//
+	// Retail v1.2 0x40ae17 removes working snapshots on normal exit, not named saves.
+	NMainLoop::GetSaveManager()->DeleteSlot( NMainLoop::S_SLOT_ACTIVE );
 	NGlobal::SaveConfig( ".\\cfg\\config.cfg" );
 	NMainLoop::DoneInterface();
 	NGfx::Done3D();

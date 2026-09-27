@@ -44,7 +44,7 @@ static CMObj<CTexture> pRegisters[N_MAX_REGISTERS];
 static CTPoint<int> ptRegisterBufferSize, ptScreenSize;
 static float fRegisterResolution = 1.0f;   // gfx_register_resolution
 //static bool bUseSeparateZBuffer;
-static bool bLastUsedAddressMode[8], bPointAddress[8];
+static bool bLastUsedAddressMode[8], bPointAddress[8], bCubeFilter[8];
 static int nAppliedAnisotropy[8];
 static NWin32Helper::com_ptr<IDirect3DPixelShader9> pixelShaders[200];
 static NWin32Helper::com_ptr<IDirect3DVertexShader9> vertexShaders[200];
@@ -582,16 +582,26 @@ static void SetTextureWrap( int nStage, bool bWrap )
 	ApplySamplerState( nStage, D3DSAMP_ADDRESSV, bWrap ? D3DTADDRESS_WRAP : D3DTADDRESS_CLAMP );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-static void SetTexturePointFilter( int n, bool bPoint )
+static void SetTexturePointFilter( int n, bool bPoint, bool bCube = false )
 {
-	if ( bPointAddress[n] == bPoint && ( bPoint || nAppliedAnisotropy[n] == nUseAnisotropy ) )
+	if ( bPointAddress[n] == bPoint && bCubeFilter[n] == bCube &&
+		( bPoint || bCube || nAppliedAnisotropy[n] == nUseAnisotropy ) )
 		return;
 	bPointAddress[n] = bPoint;
+	bCubeFilter[n] = bCube;
 	if ( bPoint )
 	{
 		pDevice->SetSamplerState( n, D3DSAMP_MAGFILTER, D3DTEXF_POINT );
 		pDevice->SetSamplerState( n, D3DSAMP_MINFILTER, D3DTEXF_POINT );
 		pDevice->SetSamplerState( n, D3DSAMP_MIPFILTER, D3DTEXF_POINT );//D3DTEXF_POINT );
+	}
+	else if ( bCube )
+	{
+		// Retail v1.2 0x51ba78: cube textures always use FILTER_LINEAR,
+		// independent of the anisotropic setting for ordinary surface textures.
+		pDevice->SetSamplerState( n, D3DSAMP_MAGFILTER, D3DTEXF_LINEAR );
+		pDevice->SetSamplerState( n, D3DSAMP_MINFILTER, D3DTEXF_LINEAR );
+		pDevice->SetSamplerState( n, D3DSAMP_MIPFILTER, D3DTEXF_POINT );
 	}
 	else
 	{
@@ -972,7 +982,7 @@ void CRenderContext::SetTexture( int nStage, CCubeTexture *pTex )
 	ASSERT( pCurrentRenderContext == this );
 	NGfx::SetTexture( nStage, pTex );
 	SetTextureWrap( nStage, true );
-	SetTexturePointFilter( nStage, false );
+	SetTexturePointFilter( nStage, false, true );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CRenderContext::SetLightParams( const CVec3 &vAmbient, const CVec3 &vLight, const CVec3 &vDir )
@@ -1243,6 +1253,7 @@ static void InitTextureStage( int n )
 	pDevice->SetSamplerState( n, D3DSAMP_MIPMAPLODBIAS, *(DWORD*)&fMipBias );
 	bLastUsedAddressMode[n] = false;
 	bPointAddress[n] = false;
+	bCubeFilter[n] = false;
 	nAppliedAnisotropy[n] = nUseAnisotropy;
 	pDevice->SetSamplerState( n, D3DSAMP_ADDRESSU, D3DTADDRESS_CLAMP );
 	pDevice->SetSamplerState( n, D3DSAMP_ADDRESSV, D3DTADDRESS_CLAMP );

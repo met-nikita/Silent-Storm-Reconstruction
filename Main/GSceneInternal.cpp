@@ -1806,7 +1806,7 @@ CObjectBase* CGScene::CreateDecal( CNonePart *pTarget, const vector<CVec3> &srcP
 				if ( GetGeometryObjectInfo( pTarget, &pGeom, &transform, &fgInfo ) )
 				{
 					SDiscretePos trans( new CFBTransform( transform ), CVec3(0,0,0), 0 );
-					CDecalGeometry *pDecal = new CDecalGeometry( pGeom, trans, _info.vCenter, -_info.vNormal, CVec2(f,f), _info.fRotation, CVec2(0.5f, 0.5f), -0.4f, F_DEPTH_WINDOW );
+					CDecalGeometry *pDecal = new CDecalGeometry( pGeom, trans, _info.vCenter, -_info.vNormal, CVec2(f,f), _info.fRotation, 1, CVec2(0.5f, 0.5f), -0.4f, F_DEPTH_WINDOW );
 					return CreateGeometry( pDecal, pMaterial, fg );
 				}
 			}

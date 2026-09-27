@@ -256,12 +256,16 @@ enum ERenderOperation
 	// fast full light ops
 	RO_DIFFUSE_FULL_LIT_TEXTURE_PP,
 	RO_DIFFUSE_FULL_LIT_BUMP_TEXTURE_PP,
+	RO_DIFFUSE_FULL_LIT_TEXTURE_PP_DECAL,
+	RO_DIFFUSE_FULL_LIT_BUMP_TEXTURE_PP_DECAL,
 	RO_PP_SPECULAR_FULL_COLOR_DIR,
 	RO_PP_SPECULAR_FULL_TEXTURE_DIR,
 	RO_FULL_LIT_SOLID_PP,
 	RO_DYNLM_LIT_SOLID_PP,
 	RO_DIFFUSE_DYNLM_LIT_BUMP_TEXTURE_PP,
 	RO_DIFFUSE_DYNLM_LIT_TEXTURE_PP,
+	RO_DIFFUSE_DYNLM_LIT_BUMP_TEXTURE_PP_DECAL,
+	RO_DIFFUSE_DYNLM_LIT_TEXTURE_PP_DECAL,
 	// point light
 	RO_PNT_LIT_SOLID,
 	RO_PNT_LIT_TEXTURE, // copies alpha
@@ -507,7 +511,7 @@ public:
 typedef unordered_map<CPtr<CObjectBase>,CPartFlags,SPtrHash> CFilterPartsHash;
 struct SLightmappedFilter
 {
-	bool operator()( SRenderFragmentInfo *pF ) const { return pF->pLightmap == 0; }
+	bool operator()( SRenderFragmentInfo *pF ) const;
 };
 struct SNonLightmappedFilter
 {
@@ -555,6 +559,7 @@ public:
 		const SDynamicAmbientInfo *pDynamicAmbientInfo;
 		const SSkyDepth3Info *pSkyDepth3;
 		float f;
+		DWORD bits; // Retail sorts operation parameters as unsigned raw words.
 
 		UParameter() : f(0) {}
 		UParameter( const CVec3 *v3 ): pVec3(v3) {}

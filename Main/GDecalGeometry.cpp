@@ -5,7 +5,7 @@
 #include "GCombiner.h"
 namespace NGScene
 {
-const float F_SHIFT = 0.004f;
+const float F_SHIFT = 0.008f;
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 struct SQuadProjection
 {
@@ -91,7 +91,7 @@ public:
 		info.geometry.polys[0] = 0;
 	}
 	~CShadowBuilder() { pRes->Assign( info ); }
-	void Setup( const CVec3 &vOrigin, const CVec3 &vNormal, const CVec2 &vSize, float fRotation, const CVec2 &_vShift );
+	void Setup( const CVec3 &vOrigin, const CVec3 &vNormal, const CVec2 &vSize, float fRotation, const CVec2 &_vShift, int nShift );
 	void AddObject( const CObjectInfo &info, const SDiscretePos &_srcPos );
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -252,19 +252,20 @@ void CShadowBuilder::AddObject( const CObjectInfo &info, const SDiscretePos &_sr
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CShadowBuilder::Setup( const CVec3 &_vOrigin, const CVec3 &_vNormal, const CVec2 &vSize, float fRotation, const CVec2 &_vShift )
+void CShadowBuilder::Setup( const CVec3 &_vOrigin, const CVec3 &_vNormal, const CVec2 &vSize, float fRotation, const CVec2 &_vShift, int nShift )
 {
 	projection.Setup( _vOrigin, _vNormal, vSize, fRotation, _vShift );
-	vShift = projection.vProjectDirection * F_SHIFT;
+	// Retail separates authored spots (0) from impact decals (1).
+	vShift = projection.vProjectDirection * F_SHIFT * ( nShift + 1 );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CDecalGeometry
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CDecalGeometry::CDecalGeometry( CPtrFuncBase<CObjectInfo> *p, const SDiscretePos &_srcPos,
-	const CVec3 &_vOrigin, const CVec3 &_vNormal, const CVec2 &_vSize, float _fR, const CVec2 &_vShift,
+	const CVec3 &_vOrigin, const CVec3 &_vNormal, const CVec2 &_vSize, float _fR, int _nShift, const CVec2 &_vShift,
 	float _fNormalEdge, float _fDepthMargin )
 	: pSource(p), srcPos(_srcPos), vOrigin(_vOrigin), vNormal(_vNormal), vSize(_vSize), fRotation(_fR), vShift(_vShift),
-	fNormalEdge(_fNormalEdge), fDepthMargin(_fDepthMargin)
+	fNormalEdge(_fNormalEdge), fDepthMargin(_fDepthMargin), nShift(_nShift)
 {
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -275,7 +276,7 @@ void CDecalGeometry::Recalc()
 		return;
 	pValue = new CObjectInfo;
 	CShadowBuilder sb( pValue, fNormalEdge, fDepthMargin );
-	sb.Setup( vOrigin, vNormal, vSize, fRotation, vShift );
+	sb.Setup( vOrigin, vNormal, vSize, fRotation, vShift, nShift );
 	sb.AddObject( *pSource->GetValue(), srcPos );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
