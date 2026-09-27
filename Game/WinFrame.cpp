@@ -13,6 +13,8 @@ static HINSTANCE hInstance = 0;                  // instance handle
 static ATOM atomWndClassName = 0;                // atom window class name identification (assigned during registration)
 static volatile bool bExit = false;
 static volatile bool bActive = true;
+static HCURSOR hCursor = 0;
+static bool bCursorShown = true;
 static CCriticalSection msgs;
 static list< SWindowsMsg > msgList;
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -49,7 +51,31 @@ static void SetActive( bool _bActive )
 {
  	bActive = _bActive;        // activation flag 
 	if ( !bActive )
+	{
+		ClipCursor( 0 );
 		ShowWindow( hWnd, SW_MINIMIZE );
+	}
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// Retail v1.2 0x4096b0/0x4096d0: cache the handle and visibility separately.
+// ShowCursor is a counter API, so only call it when the desired state changes.
+void NWinFrame::SetCursor( HCURSOR hNewCursor )
+{
+	if ( hCursor != hNewCursor )
+	{
+		hCursor = hNewCursor;
+		::SetCursor( hCursor );
+	}
+}
+void NWinFrame::ShowCursor( bool bShow )
+{
+	if ( bCursorShown != bShow )
+	{
+		bCursorShown = bShow;
+		::ShowCursor( bShow );
+		if ( bShow )
+			::SetCursor( hCursor );
+	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool NWinFrame::IsExit()
@@ -164,7 +190,7 @@ static bool CreateWin( LPCSTR pszApp, LPCSTR pszWnd, unsigned dwWidth, unsigned 
   ShowWindow( hWnd, SW_SHOW );
   UpdateWindow( hWnd );
   // eliminate cursor once for this widow
-  SetCursor( 0 );
+  ::SetCursor( 0 );
 
   return true;
 }
@@ -193,8 +219,8 @@ static LRESULT CALLBACK WndProc( HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPa
     case WM_EXITSIZEMOVE:
       break;
 		case WM_SETCURSOR:
-			SetCursor( 0 );
-			break;
+			::SetCursor( bCursorShown ? hCursor : 0 );
+			return TRUE;
     case WM_NCHITTEST:
       // Prevent the user from selecting the menu in fullscreen mode
       //if( !m_bWindowed )

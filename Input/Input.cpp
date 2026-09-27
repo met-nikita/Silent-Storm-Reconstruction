@@ -384,7 +384,10 @@ bool SetCoopLevel()
 			hRes = iTempDevice->pdiDevice->SetCooperativeLevel( hWindow, DISCL_NONEXCLUSIVE | DISCL_FOREGROUND );
 		else
 		{
-			if ( GET_DIDEVICE_TYPE( iTempDevice->dwDevType ) == DI8DEVTYPE_KEYBOARD )
+			// Retail v1.2 0x82c3a9: both mouse and keyboard are nonexclusive.
+			// An exclusive mouse suppresses Windows cursor motion/display.
+			if ( GET_DIDEVICE_TYPE( iTempDevice->dwDevType ) == DI8DEVTYPE_KEYBOARD ||
+				GET_DIDEVICE_TYPE( iTempDevice->dwDevType ) == DI8DEVTYPE_MOUSE )
 				hRes = iTempDevice->pdiDevice->SetCooperativeLevel( hWindow, DISCL_NONEXCLUSIVE | DISCL_FOREGROUND );
 			else
 				hRes = iTempDevice->pdiDevice->SetCooperativeLevel( hWindow, DISCL_EXCLUSIVE | DISCL_FOREGROUND );

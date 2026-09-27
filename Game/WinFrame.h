@@ -37,6 +37,8 @@ namespace NWinFrame
 	bool IsExit();
 	void Exit();
 	HWND GetWnd();
+	void SetCursor( HCURSOR hCursor );
+	void ShowCursor( bool bShow );
 	void PumpMessages();
 	bool InitApplication( HINSTANCE hInstance, const char *pszAppName, const char *pszWndName );
 };

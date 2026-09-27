@@ -1251,9 +1251,11 @@ void COptionsInterface::Initialize( EOptionsScreen eScreen, NGScene::CScreenshot
 	pInterface = new NUI::CInterface( pCursor );
 
 	pScreenShot = new NUI::CScreenShot( NUI::SWindowInfo( pInterface, NUI::SPoint( 0, 0 ), NUI::SPoint( 1024, 768 ), "clues", NUI::STYLE_ENABLED | NUI::STYLE_VISIBLE | NUI::STYLE_BOTTOMMOST ) );
+	// Retail v1.2 0x6233b7 sets the treatment before adopting an existing screenshot too.
+	// Otherwise SetTexture applies this new widget's default COLOR mode.
+	pScreenShot->SetMode( NUI::CScreenShot::BLACKANDWHITE, CVec4( 0.677f, 0.877f, 1.0f, 1.0f ) );
 	if ( !IsValid( pScreenShotTexture ) )
 	{
-		pScreenShot->SetMode( NUI::CScreenShot::BLACKANDWHITE, CVec4( 0.5f, 0.5f, 0.5f, 1 ) );
 		pScreenShot->Generate();
 	}
 	else

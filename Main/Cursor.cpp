@@ -3,6 +3,7 @@
 #include "GSceneUtils.h"
 #include "G2DView.h"
 #include "..\Input\Bind.h"
+#include "..\Game\WinFrame.h"
 #include "..\DBFormat\DataFormat.h"
 #include "..\DBFormat\DataInterface.h"
 #include "Interface.h"
@@ -22,6 +23,35 @@ namespace NUI
 const int N_TRANSITION_TIME	= 250;
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 static CVec2 vCursorPos = CVec2( 0, 0 );
+static bool bHWCursor = false;
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// Retail v1.2 CHWCursor::Reload 0x57f950 loads the native .cur/.ani asset,
+// not a hardware copy of the software texture. Handles are transient resources.
+class CNativeCursorCache
+{
+	unordered_map<string, HCURSOR> cursors;
+public:
+	~CNativeCursorCache()
+	{
+		NWinFrame::SetCursor( 0 );
+		for ( unordered_map<string, HCURSOR>::iterator i = cursors.begin(); i != cursors.end(); ++i )
+			DestroyCursor( i->second );
+	}
+	HCURSOR Get( NDb::CUICursor *pCursor )
+	{
+		if ( !IsValid(pCursor) || pCursor->szFileName.empty() )
+			return 0;
+		unordered_map<string, HCURSOR>::iterator i = cursors.find( pCursor->szFileName );
+		if ( i != cursors.end() )
+			return i->second;
+		string path = string(".\\res\\Cursors\\") + pCursor->szFileName;
+		HCURSOR hNative = LoadCursorFromFileA( path.c_str() );
+		if ( hNative )
+			cursors[pCursor->szFileName] = hNative;
+		return hNative;
+	}
+};
+static CNativeCursorCache nativeCursors;
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CCursor
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -30,11 +60,6 @@ class CCursor: public ICursor
 	OBJECT_BASIC_METHODS(CCursor);
 protected:
 	NInput::CBind bindX, bindY;
-	// transient (retail v1.2 deleted the Jan03 mouse-easing members; ctor re-seeds them)
-	float fThreshold1, fThreshold2, fAcceleration;
-	STime sLastUpdateTime;
-	CTimeCounter sTimer;
-	CDGPtr<CCTime> pTimer;
 	// BUG 8: retail draws the cursor ToHit/AP caption through the CML markup engine (IML), NOT the legacy
 	// GText CTextDraw -- so it renders the DB-string markup (Courier, 16pt, colour, 1px outline) like retail.
 	// The shared CTextDraw stays GText (14 other consumers); only the cursor gets its own IML. Transient.
@@ -52,9 +77,6 @@ protected:
 	// 7 pText, 8 pImage, 9 pOldImage}. The old Jan03 table put bShow@2 -> it read retail's
 	// nDisableCount low byte (0) -> cursor permanently hidden after loading a retail save.
 	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&nDisableCount); f.Add(3,&bShow); f.Add(4,&sTransitionTime); f.Add(5,&sInfo); f.Add(6,&sOldInfo); f.Add(7,&pText); f.Add(8,&pImage); f.Add(9,&pOldImage); return 0; }
-
-protected:
-	float AccelerateAxis( float fDelta, const STime &sDelta );
 
 public:
 	CCursor( bool bShow = true );
@@ -75,10 +97,11 @@ public:
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 ICursor* ICursor::Create( bool bShowCursor, CVec2 vBegPos )
 {
+	CCursor *pCursor = new CCursor( bShowCursor );
 	if ( ( vBegPos.x > 0 ) && ( vBegPos.y > 0 ) )
-		vCursorPos = vBegPos;
+		pCursor->SetPos( vBegPos );
 
-	return new CCursor( bShowCursor );
+	return pCursor;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CCursor
@@ -91,17 +114,6 @@ CCursor::CCursor( bool _bShow ):
 	pImage = new CImageDraw();
 	pOldImage = new CImageDraw();
 
-	pTimer = sTimer.GetTime();
-
-	DWORD pdwParams[3];
-	SystemParametersInfo( SPI_GETMOUSE, 0, pdwParams, 0 );
-
-	fThreshold1 = pdwParams[0];
-	fThreshold2 = pdwParams[1];
-	fAcceleration = pdwParams[2];
-
-	if ( fAcceleration == 0 ) /// CRAP: WinME WTF ?
-		fAcceleration = 1;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 const CVec2& CCursor::GetPos() const
@@ -112,6 +124,15 @@ const CVec2& CCursor::GetPos() const
 void CCursor::SetPos( const CVec2 &_vCursorPos )
 {
 	vCursorPos = _vCursorPos;
+	if ( NWinFrame::IsAppActive() )
+	{
+		POINT point = { Float2Int(vCursorPos.x), Float2Int(vCursorPos.y) };
+		if ( ClientToScreen( NGfx::GetHWND(), &point ) )
+		{
+			ClipCursor( 0 );
+			SetCursorPos( point.x, point.y );
+		}
+	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 const SCursorInfo& CCursor::GetCursor() const
@@ -133,42 +154,53 @@ void CCursor::SetCursor( const SCursorInfo &_sInfo )
 		pTextML->SetText( _sInfo.wsText, 0 );   // 0 = process the <font>/<color> tags from the DB strings
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-float CCursor::AccelerateAxis( float fDelta, const STime &sDelta )
-{
-	float fSecondDelta = fabs( fDelta ) * 1000 / sDelta;
-
-	float fInc = fDelta;
-	if ( fSecondDelta > fThreshold1 )
-		fInc *= fAcceleration;
-	if ( fSecondDelta > fThreshold2 )
-		fInc *= 2;
-
-	return fInc;
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
 void CCursor::Update()
 {
-	sTimer.Advance( true, GetTickCount() );
-	pTimer.Refresh();
-	STime sDelta = pTimer->GetValue() - sLastUpdateTime;
-	sLastUpdateTime = pTimer->GetValue();
-	if ( sDelta == 0 )
+	// Retail v1.2 0x4d5eb0 uses OS coordinates in both cursor modes. Keeping a
+	// separate accelerated position would desynchronize native pointing and clicks.
+	if ( !NWinFrame::IsAppActive() )
+	{
+		ClipCursor( 0 );
 		return;
-
-	const CVec2 &vSize = NGfx::GetScreenRect();
-	vCursorPos.x += AccelerateAxis( bindX.GetDelta() * 250.0f, sDelta );
-	vCursorPos.y += AccelerateAxis( bindY.GetDelta() * 250.0f, sDelta );
-
-	vCursorPos.x = Max( vCursorPos.x, 0.0f );
-	vCursorPos.x = Min( vCursorPos.x, vSize.x - 1 ); 
-	vCursorPos.y = Max( vCursorPos.y, 0.0f );
-	vCursorPos.y = Min( vCursorPos.y, vSize.y - 1 );
+	}
+	RECT client;
+	POINT origin = { 0, 0 };
+	HWND hWnd = NGfx::GetHWND();
+	if ( !GetClientRect( hWnd, &client ) || !ClientToScreen( hWnd, &origin ) )
+		return;
+	RECT clip = { origin.x, origin.y, origin.x + client.right, origin.y + client.bottom };
+	if ( bindX.IsActive() )
+	{
+		POINT point;
+		if ( GetCursorPos( &point ) && ScreenToClient( hWnd, &point ) )
+		{
+			vCursorPos.x = Clamp( float(point.x), 0.0f, Max(0.0f, float(client.right - 1)) );
+			vCursorPos.y = Clamp( float(point.y), 0.0f, Max(0.0f, float(client.bottom - 1)) );
+		}
+	}
+	else
+	{
+		// Camera rotate/zoom bindings temporarily freeze the pointing cursor.
+		clip.left = origin.x + Float2Int(vCursorPos.x);
+		clip.top = origin.y + Float2Int(vCursorPos.y);
+		clip.right = clip.left + 1;
+		clip.bottom = clip.top + 1;
+		SetCursorPos( clip.left, clip.top );
+	}
+	ClipCursor( &clip );
+	if ( nDisableCount < 1 )
+	{
+		bindX.GetDelta();
+		bindY.GetDelta();
+	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CCursor::Draw( const STime &sTime, NGScene::I2DGameView *pView )
 {
 	if ( sTransitionTime == 0 )
 		sTransitionTime = sTime;
+	NWinFrame::ShowCursor( bHWCursor && bShow );
+	NWinFrame::SetCursor( bHWCursor ? nativeCursors.Get(sInfo.pCursor) : 0 );
 
 	if ( bShow )
 	{
@@ -190,7 +222,8 @@ void CCursor::Draw( const STime &sTime, NGScene::I2DGameView *pView )
 			pImage->SetWindow( SRect( sPos.x, sPos.y, sPos.x + pTex->nWidth, sPos.y + pTex->nHeight ) );
 			pImage->SetImage( pTex );
 			pImage->SetColor( NGfx::SPixel8888( 0xFF, 0xFF, 0xFF, 0xFF * fCoeff ) );
-			pImage->Draw( 0, sTime, pView );
+			if ( !bHWCursor )
+				pImage->Draw( 0, sTime, pView );
 
 			// BUG 8: draw the caption through the cursor's OWN CML markup engine (retail cursor path), so the
 			// DB-string markup renders as retail does -- Courier, 16pt, the DB colour, and the 1px black
@@ -206,7 +239,7 @@ void CCursor::Draw( const STime &sTime, NGScene::I2DGameView *pView )
 				pTextML->Render( pView, sScrPos, sScrWindow );
 			}
 		}
-		if ( IsValid( sOldInfo.pCursor ) && IsValid( sOldInfo.pCursor->pUITexture ) )
+		if ( !bHWCursor && IsValid( sOldInfo.pCursor ) && IsValid( sOldInfo.pCursor->pUITexture ) )
 		{
 			NDb::CUITexture *pTex = sOldInfo.pCursor->pUITexture;
 			SPoint sPos( vVirtCursorPos.x - float( pTex->nWidth ) * float( sOldInfo.pCursor->nCenterX ), vVirtCursorPos.y - float( pTex->nHeight ) * float( sOldInfo.pCursor->nCenterY ) );
@@ -220,8 +253,11 @@ void CCursor::Draw( const STime &sTime, NGScene::I2DGameView *pView )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CCursor::ProcessEvent( const NInput::SEvent &sEvent )
 {
-	bindX.ProcessEvent( sEvent );
-	bindY.ProcessEvent( sEvent );
+	if ( nDisableCount < 1 )
+	{
+		bindX.ProcessEvent( sEvent );
+		bindY.ProcessEvent( sEvent );
+	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CEditorCursor: public CCursor
@@ -252,8 +288,6 @@ ICursor* ICursor::CreateEditorCursor()
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // retail Cursor.obj registrar: single var, VarBoolHandler -> bHWCursor @0x98db60, default 0, saved
-// (the software cursor path stays the renderer; the flag feeds the options checkbox + saved config)
-static bool bHWCursor = false;
 START_REGISTER(Cursor)
 	REGISTER_VAR_EX( "ui_hwcursor", NGlobal::VarBoolHandler, &bHWCursor, 0, true )
 FINISH_REGISTER
