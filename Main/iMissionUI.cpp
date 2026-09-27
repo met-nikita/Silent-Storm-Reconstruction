@@ -1779,7 +1779,8 @@ void CMissionUI::UpdateClues()
 	// retail CMissionUI::UpdateAudibleSounds @0x214530: rebuild the sound ("ear")
 	// markers over the heard-not-seen set. The set is derived from the SAME GetSounds feed as the
 	// heard-silhouette render and the TraceCursor heard pick, so an eared unit is exactly the one
-	// the cursor can highlight/attack. Placement/projection mirrors UpdateEnemies (eye pos + 0.6).
+	// the cursor can highlight/attack. Retail anchors the ear at marker position + 1.6,
+	// inside the silhouette's head, without the visible-enemy icon's extra clearance.
 	CVec2 vScreenRect = pMission->GetScene()->GetScreenRect();
 	CTransformStack sTS = pMission->GetCameraTransform();
 
@@ -1837,7 +1838,7 @@ void CMissionUI::UpdateClues()
 
 		CVec2 vScreenPos;
 		CVec3 vIconPos( vMarkerPos );
-		vIconPos += CVec3( 0, 0, 2.2f );   // above the silhouette's head (marker stands on the ground)
+		vIconPos += CVec3( 0, 0, 1.6f );   // retail v1.2 CSoundIcon::Draw @0x611113
 		TestRayInFrustrum( vIconPos, &sTS, vScreenRect, &vScreenPos );
 		vScreenPos.x = vScreenPos.x * 1024 / vScreenRect.x;
 		vScreenPos.y = vScreenPos.y * 768 / vScreenRect.y;
