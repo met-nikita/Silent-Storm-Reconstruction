@@ -216,7 +216,7 @@ CVec3 CLightState::GenerateSkyDir( SLightStateCalcSeed *pSeed )
 	CVec3 vSky;
 	int &nSeed = pSeed->nSeed;
 	int nTexs = Max( 1, shadowMapsShare.GetCLSkyTexturesNumber() );
-	int nDirBeta = Min( 6, nTexs * N_DEPTH_CHANNELS_PER_TEX );
+	int nDirBeta = nTexs * N_DEPTH_CHANNELS_PER_TEX;
 	for (;;)
 	{
 		CVec3 vAmbDir;
@@ -773,7 +773,21 @@ void CLightmapTracker::ChooseNewSkyDirection( int nBuffer, int nTarget )
 	skyDirs[ nBuffer * N_DEPTH_CHANNELS_PER_TEX + nTarget ] = lightState.GenerateSkyDir( &ambientLightSeed );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CLightmapTracker::RecalcStep( NGfx::CRenderContext *pRC, CSceneFragments *pScene, CTransformStack *pTS )
+void CLightmapTracker::ChooseNewSkyDirections()
+{
+	for ( int k = 0; k < GetSkyTexturesNum(); ++k )
+		for ( int i = 0; i < N_DEPTH_CHANNELS_PER_TEX; ++i )
+			ChooseNewSkyDirection( k, i );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CLightmapTracker::FinishRecalc()
+{
+	rs.nState = RC_START;
+	rs.bCalcSky = true;
+	rs.bCalcColor = !rs.bCalcColor;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CLightmapTracker::RecalcStep( NGfx::CRenderContext *pRC, CSceneFragments *pScene, CTransformStack *pTS, bool bSoftApply, int nScratchRegister )
 {
 	ASSERT( GetSkyTexturesNum() == 0 || ( nPassesPerCalc % GetSkyTexturesNum() ) == 0 );
 	SLightmapTargetGeom lmTarget( pScene, pRC, pTS, N_CL_TEMP_REGISTER );
@@ -807,10 +821,16 @@ void CLightmapTracker::RecalcStep( NGfx::CRenderContext *pRC, CSceneFragments *p
 				{
 					int nChannel = rs.nStep % ( N_DEPTH_CHANNELS_PER_TEX + 1 );
 					int nBuf = ( rs.nStep / ( N_DEPTH_CHANNELS_PER_TEX + 1 ) ) % GetSkyTexturesNum();
+					if ( nChannel < N_DEPTH_CHANNELS_PER_TEX && rs.nStep < nPreparedSkySteps )
+					{
+						++rs.nStep;
+						RecalcStep( pRC, pScene, pTS, bSoftApply, nScratchRegister );
+						return;
+					}
 					if ( nChannel < N_DEPTH_CHANNELS_PER_TEX )
 					{
-						// pick new channel & new dir
-						ChooseNewSkyDirection( nBuf, nChannel );
+						if ( nChannel == 0 && nBuf == 0 )
+							ChooseNewSkyDirections();
 						RecalcDepthChannel( nBuf, 1 << nChannel, false );
 					}
 					else
@@ -818,6 +838,7 @@ void CLightmapTracker::RecalcStep( NGfx::CRenderContext *pRC, CSceneFragments *p
 					++rs.nStep;
 					if ( rs.nStep == (N_DEPTH_CHANNELS_PER_TEX+1) * nPassesPerCalc )
 					{
+						nPreparedSkySteps = 0;
 						if ( rs.bCalcColor )
 						{
 							rs.nStep = 0;
@@ -866,10 +887,17 @@ void CLightmapTracker::RecalcStep( NGfx::CRenderContext *pRC, CSceneFragments *p
 			// store to lightmap
 			{
 				NGfx::CRenderContext rc( *lmTarget.pRC );
+				rc.SetAlphaCombine( NGfx::COMBINE_NONE );
+				rc.SetDepth( NGfx::DEPTH_NONE );
+				rc.SetStencil( NGfx::STENCIL_NONE );
+				rc.SetColorWrite( NGfx::COLORWRITE_ALL );
+				const int nApplyRegister = bSoftApply ? nScratchRegister : N_CL_TARGET_REGISTER;
+				if ( bSoftApply )
+					NGfx::CopyLightmapRegister( &rc, nApplyRegister, N_CL_TARGET_REGISTER );
 				if ( !rs.bCalcSky )
 				{
 					rc.SetColorWrite( NGfx::COLORWRITE_COLOR );
-					NGfx::AlphaSqrtModulateRegister( &rc, N_CL_TARGET_REGISTER, N_CL_TEMP_REGISTER, 1 );
+					NGfx::AlphaSqrtModulateRegister( &rc, nApplyRegister, N_CL_TEMP_REGISTER, 1 );
 				}
 				else
 				{
@@ -881,17 +909,17 @@ void CLightmapTracker::RecalcStep( NGfx::CRenderContext *pRC, CSceneFragments *p
 						if ( rs.bCalcColor )
 						{
 							CVec4 vOldBlend( 0, 0, 0, 1 - fNewBlend );
-							NGfx::ModulateRegister( &rc, N_CL_TARGET_REGISTER, vOldBlend );
+							NGfx::ModulateRegister( &rc, nApplyRegister, vOldBlend );
 							rc.SetAlphaCombine( NGfx::COMBINE_ADD );
-							NGfx::AlphaSqrtModulateRegister( &rc, N_CL_TARGET_REGISTER, N_CL_TEMP_REGISTER, fNewBlend );
+							NGfx::AlphaSqrtModulateRegister( &rc, nApplyRegister, N_CL_TEMP_REGISTER, fNewBlend );
 						}
 						else
 						{
 							CVec4 vOldBlend( 1, 1, 1, 1 - fNewBlend );
-							NGfx::ModulateRegister( &rc, N_CL_TARGET_REGISTER, vOldBlend );
+							NGfx::ModulateRegister( &rc, nApplyRegister, vOldBlend );
 							rc.SetColorWrite( NGfx::COLORWRITE_ALPHA );
 							rc.SetAlphaCombine( NGfx::COMBINE_ADD );
-							NGfx::AlphaSqrtModulateRegister( &rc, N_CL_TARGET_REGISTER, N_CL_TEMP_REGISTER, fNewBlend );
+							NGfx::AlphaSqrtModulateRegister( &rc, nApplyRegister, N_CL_TEMP_REGISTER, fNewBlend );
 						}
 					}
 					else
@@ -899,16 +927,56 @@ void CLightmapTracker::RecalcStep( NGfx::CRenderContext *pRC, CSceneFragments *p
 						// simple store
 						if ( !rs.bCalcColor )
 							rc.SetColorWrite( NGfx::COLORWRITE_ALPHA );
-						NGfx::AlphaSqrtModulateRegister( &rc, N_CL_TARGET_REGISTER, N_CL_TEMP_REGISTER, 1 );
+						NGfx::AlphaSqrtModulateRegister( &rc, nApplyRegister, N_CL_TEMP_REGISTER, 1 );
 					}
 					nLights += nPassesPerCalc;
 					nPassesPerCalc *= 2;
 					if ( nPassesPerCalc > 32 )
 						nPassesPerCalc = 32;
 				}
-				rs.nState = RC_START; // circle on the sand round and round ( (C)Belinda Carl..)
-				rs.bCalcSky = true;
-				rs.bCalcColor = !rs.bCalcColor; // calc color every second attempt
+				if ( bSoftApply )
+				{
+					rc.SetColorWrite( NGfx::COLORWRITE_ALL );
+					rc.SetAlphaCombine( NGfx::COMBINE_NONE );
+					NGfx::CopyLightmapRegister( &rc, N_CL_TEMP_REGISTER, nApplyRegister );
+					rs.nState = RC_SOFT_APPLY;
+					rs.nStep = 0;
+				}
+				else
+					FinishRecalc();
+			}
+			break;
+		case RC_SOFT_APPLY:
+			{
+				// Retail 0x52f5d4: prepare next sky sweep while blending this one.
+				if ( CanDrawSky() )
+				{
+					if ( rs.nStep == 0 )
+						ChooseNewSkyDirections();
+					int nBuf = rs.nStep / N_DEPTH_CHANNELS_PER_TEX;
+					int nChannel = rs.nStep % N_DEPTH_CHANNELS_PER_TEX;
+					if ( nBuf < GetSkyTexturesNum() )
+						RecalcDepthChannel( nBuf, 1 << nChannel, false );
+					nPreparedSkySteps = nBuf * (N_DEPTH_CHANNELS_PER_TEX + 1) + nChannel + 1;
+				}
+				NGfx::CRenderContext rc( *pRC );
+				rc.SetColorWrite( NGfx::COLORWRITE_ALL );
+				rc.SetDepth( NGfx::DEPTH_NONE );
+				rc.SetStencil( NGfx::STENCIL_NONE );
+				if ( ++rs.nStep >= 12 )
+				{
+					rc.SetAlphaCombine( NGfx::COMBINE_NONE );
+					NGfx::CopyLightmapRegister( &rc, N_CL_TARGET_REGISTER, N_CL_TEMP_REGISTER );
+					FinishRecalc();
+				}
+				else
+				{
+					float fRemaining = 1 - rs.nStep * (1.f / 12.f);
+					float fOld = fRemaining / ( fRemaining + 1.f / 12.f );
+					NGfx::ModulateRegister( &rc, N_CL_TARGET_REGISTER, CVec4(fOld,fOld,fOld,fOld) );
+					rc.SetAlphaCombine( NGfx::COMBINE_ADD );
+					NGfx::CopyLightmapRegister( &rc, N_CL_TARGET_REGISTER, N_CL_TEMP_REGISTER, 1 - fOld );
+				}
 			}
 			break;
 	}
@@ -944,7 +1012,7 @@ static void PrepareCLHistory( NGfx::CRenderContext *pRC )
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CLightmapTracker::CatchUp( NGfx::CRenderContext *_pRC, IRender *_pRender, CTransformStack *pTS, CSceneFragments *pScene,
-	bool bHasNewLightmaps, const SGroupSelect &_gs, const CVec4 &vDepth, bool bReuseLight )
+	bool bHasNewLightmaps, const SGroupSelect &_gs, const CVec4 &vDepth, bool bReuseLight, int nScratchRegister )
 {
 	NGfx::CRenderContext rc( *_pRC );
 	pRender = _pRender;
@@ -1057,6 +1125,7 @@ void CLightmapTracker::CatchUp( NGfx::CRenderContext *_pRC, IRender *_pRender, C
 		lmTarget.pRC->SetDepth( NGfx::DEPTH_NONE );
 		NGfx::AlphaSqrtModulateRegister( lmTarget.pRC, N_CL_TARGET_REGISTER, N_CL_TEMP_REGISTER, 1 );
 		// initiate recalc
+		nPreparedSkySteps = 0;
 		rs.nState = RC_START;
 		rs.bCalcSky = true;
 		rs.bCalcColor = true;
@@ -1064,7 +1133,7 @@ void CLightmapTracker::CatchUp( NGfx::CRenderContext *_pRC, IRender *_pRender, C
 		nPassesPerCalc = Max( 4, GetSkyTexturesNum() * 2 );
 	}
 	if ( pScene->HasSelectedFragments() && !bHasNewLightmaps && 1 ) // if not stress mode
-		RecalcStep( &rc, pScene, pTS );
+		RecalcStep( &rc, pScene, pTS, bReuseLight, nScratchRegister );
 	if ( bReuseLight )
 	{
 		if ( bHasNewLightmaps )
@@ -1091,6 +1160,7 @@ void CLightmapTracker::CatchUp( NGfx::CRenderContext *_pRC, IRender *_pRender, C
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CLightmapTracker::SetNewIllumination( const SGlobalIlluminationInfo &gl )
 {
+	nPreparedSkySteps = 0;
 	bLightStateUpdated = true;
 	globalIllumination = gl;
 	rs.nState = RC_START;

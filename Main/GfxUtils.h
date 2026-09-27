@@ -88,6 +88,7 @@ void CopyTexture( const NGfx::CRenderContext &_rc, const CVec2 &vTargetViewport,
 void BlurLight( NGfx::CRenderContext *pRC, int nSrcRegister, int nDestRegister, float fBlurStrength = 1.5f );
 void ModulateRegister( NGfx::CRenderContext *pRC, int nDestRegister, const CVec4 &vColor );
 void AlphaSqrtModulateRegister( NGfx::CRenderContext *pRC, int nDestRegister, int nSrcRegister, float fMul );
+void CopyLightmapRegister( NGfx::CRenderContext *pRC, int nDestRegister, int nSrcRegister, float fMul = 1 );
 // maximal number of rects in single tri list
 const int N_MAX_RECTANGLES = 16000;
 void MakeQuadTriList( int nRects, STriangleList *pRes );

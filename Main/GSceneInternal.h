@@ -571,7 +571,7 @@ OBJECT_BASIC_METHODS(CGScene);
 	void PrecacheMaterials( CVolumeNode *pNode );
 	// ICLRender
 	void RenderCL( NGfx::CRenderContext *pRC, IRender *pRender, CTransformStack *pTS, 
-		CSceneFragments *pGeom, bool bSceneHasChanged, const CVec4 &vDepth, bool bReuseLight );
+		CSceneFragments *pGeom, bool bSceneHasChanged, const CVec4 &vDepth, bool bReuseLight, int nScratchRegister );
 	// IDecalQuery
 	CObjectBase* CreateDecal( CNonePart *pTarget, const vector<CVec3> &srcPositions, const SDecalMappingInfo &_info, IMaterial *pMaterial );
 	CObjectBase* CreateStaticDecal( CNonePart *pTarget, CPtrFuncBase<CObjectInfo> *pDecal, IMaterial *pMaterial, const SFullGroupInfo &fg );

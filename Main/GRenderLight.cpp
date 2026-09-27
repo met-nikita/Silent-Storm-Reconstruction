@@ -404,7 +404,7 @@ void CDirectionalLight::RenderPPShadowOps( CTransformStack *pTS, CTransformStack
 			Render( pTS, pRC, renderPath, pRender, scene, lightInfo, RenderShadowTest, depthInfo );
 		}
 		if ( !(pCLRender->GetLightingOptions() & 2) )   // retail gate in @0x153df0
-			pCLRender->RenderCL( pRC, pRender, pTS, &scene, pCLStaticTrack.Refresh(), vDepth, bBlurCL );
+			pCLRender->RenderCL( pRC, pRender, pTS, &scene, pCLStaticTrack.Refresh(), vDepth, bBlurCL, bBlurSun ? 1 : N_GF3_TEMP_REG );
 		{
 			CSelectFragments filterLightmapped( &scene, SNonLightmappedFilter() );
 			RenderAlphaTested( pTS, pRC, pRender, &scene );
@@ -518,7 +518,7 @@ void CDirectionalLight::RenderAmbientLightmaps( CTransformStack *pTS, NGfx::CRen
 	}
 
 	if ( !(pCLRender->GetLightingOptions() & 2) )   // retail @0x151b80 gate
-		pCLRender->RenderCL( pRC, pRender, pTS, &scene, pCLStaticTrack.Refresh(), vDepth, false );
+		pCLRender->RenderCL( pRC, pRender, pTS, &scene, pCLStaticTrack.Refresh(), vDepth, false, N_GF3_TEMP_REG );
 	// multiply diffuse with lightmap
 	CTRect<float> regSize;
 	NGfx::GetRegisterSize( &regSize );
@@ -803,7 +803,7 @@ void CDirectionalLight::Render( CTransformStack *pTS, CTransformStack *pClipTS, 
 		case RP_UPDATE_CL:
 			FillZBufferForLightmapped( pRC, pRender, pTS, &scene );
 			if ( !(pCLRender->GetLightingOptions() & 2) )   // retail gate in @0x155730 UPDATE_CL arm
-				pCLRender->RenderCL( pRC, pRender, pTS, &scene, pCLStaticTrack.Refresh(), vDepth, bBlurCL );
+				pCLRender->RenderCL( pRC, pRender, pTS, &scene, pCLStaticTrack.Refresh(), vDepth, bBlurCL, 1 );
 			return;
 		case RP_GF2:
 		case RP_GF2_CL:

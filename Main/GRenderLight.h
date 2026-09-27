@@ -23,7 +23,7 @@ class ICacheLightRender : virtual public CObjectBase
 {
 public:
 	virtual void RenderCL( NGfx::CRenderContext *pRC, IRender *pRender, CTransformStack *pTS,
-		CSceneFragments *pGeom, bool bSceneHasChanged, const CVec4 &vDepth, bool bReuseLight ) = 0;
+		CSceneFragments *pGeom, bool bSceneHasChanged, const CVec4 &vDepth, bool bReuseLight, int nScratchRegister ) = 0;
 	// retail ICacheLightRender vtbl+8 @0x167380 (CGScene::nLightingOptions)
 	virtual int GetLightingOptions() = 0;
 };

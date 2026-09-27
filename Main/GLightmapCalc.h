@@ -55,7 +55,7 @@ struct SGlobalIlluminationInfo
 	SGlobalIlluminationInfo(): vAmbient(0,0,0), globalBounds(CVec3(0,0,0), 10) {}
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// для расчета динамических lightmap`ов
+// РґР»СЏ СЂР°СЃС‡РµС‚Р° РґРёРЅР°РјРёС‡РµСЃРєРёС… lightmap`РѕРІ
 class IGScene;
 struct SLightStateCalcSeed
 {
@@ -127,7 +127,8 @@ class CLightmapTracker : public CObjectBase
 		RC_SKY_DEPTH,
 		RC_COLOR_POINT,
 		RC_COLOR_SEMI,
-		RC_APPLY
+		RC_APPLY,
+		RC_SOFT_APPLY
 	};
 	struct SRecalcState
 	{
@@ -159,6 +160,7 @@ private:
 	};
 	int nLights, nPassesPerCalc;
 	SRecalcState rs;
+	int nPreparedSkySteps = 0;
 	IRender *pRender;
 	SBound currentBound;
 	SGroupSelect groupSelect;
@@ -193,12 +195,14 @@ private:
 		const CVec3 &_vCenter, float fRadius, const CVec3 &_vColor );
 	void RenderSkyCheck( SLightmapTargetGeom *pTarget, float fStrength, int nBuffer, bool bFast );
 	void ChooseNewSkyDirection( int nBuffer, int nTarget );
-	void RecalcStep( NGfx::CRenderContext *pRC, CSceneFragments *pScene, CTransformStack *pTS );
+	void ChooseNewSkyDirections();
+	void FinishRecalc();
+	void RecalcStep( NGfx::CRenderContext *pRC, CSceneFragments *pScene, CTransformStack *pTS, bool bSoftApply, int nScratchRegister );
 	void RecalcDepthChannel( int nBuffer, int nChannel, bool bFast );
 public:
 	CLightmapTracker();
 	void CatchUp( NGfx::CRenderContext *pRC, IRender *_pRender, CTransformStack *pTS, CSceneFragments *pScene,
-		bool bHasNewLightmaps, const SGroupSelect &groupSelect, const CVec4 &vDepth, bool bReuseLight );
+		bool bHasNewLightmaps, const SGroupSelect &groupSelect, const CVec4 &vDepth, bool bReuseLight, int nScratchRegister );
 	void SetNewIllumination( const SGlobalIlluminationInfo &gl );
 	const CLightState& GetLightState() const { return lightState; }
 };
