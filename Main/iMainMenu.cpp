@@ -241,7 +241,8 @@ bool CMainMenuInterface::ProcessEvent( const NInput::SEvent &sEvent )
 	}
 	else if ( bindLoadGame.ProcessEvent( sEvent ) )
 	{
-		NMainLoop::Command( new NGame::CICSaveLoadMenu( NGame::LOAD ) ); 
+		// Retail v1.2 0x5f8064: main-menu loading never offers a Save tab.
+		NMainLoop::Command( new NGame::CICSaveLoadMenu( NGame::LOAD, 0, false ) );
 		return true;
 	}
 	else if ( bindOptions.ProcessEvent( sEvent ) )
