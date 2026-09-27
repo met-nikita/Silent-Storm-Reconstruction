@@ -123,7 +123,8 @@ bool GetRestoreAPPoint( NWorld::CUnitServer *pServer, NWorld::CUnitServer *pEnem
 //   *pFlank  = a random reachable place off the own->attack path's 1/3 waypoint (budget min(dist*1.6,25))
 //              on the attack side of the own->enemy axis (perp . offset > 0);
 //   *pStop   = the first CM_INACTIVE waypoint of the own->flank path (a ladder/door transition) else *pFlank.
-// Short range (dist < 8) defaults flank=stop=own / attack=enemy. With bCheckFriends it gathers the centre
+// Short range (dist < 8) returns flank=stop=own / attack=enemy, unless a downed ally is too near.
+// With bCheckFriends it gathers the centre
 // of every DOWNED ally (diplomacy DS_ALLY, NOT still combat-capable) near the own/enemy midpoint and fails
 // the plan when the flank or flank->attack path passes within 4m of one.
 //
@@ -133,10 +134,8 @@ bool GetRestoreAPPoint( NWorld::CUnitServer *pServer, NWorld::CUnitServer *pEnem
 // target". A PK unit moves at WALK (else RUN) and is checked STANDing (else CROUCHing) -- the exact idiom the
 // dev tree already uses at aiActionPlaceSource.cpp:318. Reproduced as IsValid(pServer->GetWearingDBPK()).
 //
-// ORIGINAL BUG (confirmed @0x4a1aa1-0x4a1b0a, fmul @0x4a1ab9): the lateral-projection scalar's u-term is
-// multiplied by cpOwn.u (the unit's own WORLD u-coordinate) instead of n.u (the normalized own->enemy u-axis).
-// The v/q terms are correct; only the u-term has the buggy substitution. (The decomp answer-key miscopies
-// this as an UNSCALED u-term -- the raw bytes show the cpOwn.u multiply; this reconstruction is authoritative.)
+// v1.2 re-audit 0x4a1e80..0x4a1f08: the lateral projection is the ordinary e - n*dot(n,e).
+// Earlier "original bug" notes misread stack offsets across four pushes; the x multiplier is n.x.
 //
 // ONE documented ELISION (build-validation scope): the bCheckFriends control points use the +0x14c position
 // component's CP[0] (vtbl+0x94), which has no dev accessor -- approximated by the unit centre

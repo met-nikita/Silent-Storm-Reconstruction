@@ -335,25 +335,29 @@ CAILogPickUpItem::CAILogPickUpItem(	IAIUnit *_pAIUnit, NWorld::CDFrozenItem *_pI
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CAILogPickUpItem::RollBack() {}
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CAILogPickUpItem::Commit() {}
+void CAILogPickUpItem::Commit()
+{
+	if ( IsValid( pAIUnit ) && IsValid( pItem ) )
+		pAIUnit->GetAIInventory()->AddItem( pItem->GetInvItem() );
+}
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CAILogPickUpItem::GetCommands( list< CPtr<NWorld::CCommand> > *Commands )
 {
-	if ( !IsValid( pItem ) )
+	if ( !IsValid( pAIUnit ) || !IsValid( pItem ) )
 		return;
 	NRPG::IInventoryItem *pInvItem = pItem->GetInvItem();
 	if ( !IsValid( pInvItem ) )
 		return;
 	CPtr<NWorld::CUnitServer> pUnitServer = pAIUnit->GetUnitServer();
-	NRPG::IInventory *pInventory = pUnitServer->GetUnitRPG()->GetInventory();
-	NWorld::SItem From( pUnitServer, NWorld::SItem::GROUND );
-	From.pItem = pInvItem;
-	From.pUnit = pUnitServer;
-	CTPoint<int> Position;
-	pInventory->FindPlace( pInvItem, &Position );
-	NWorld::SItem To( pUnitServer, NWorld::SItem::BACKPACK, Position, pInvItem );
-	To.pUnit = pUnitServer;
-	//
+	if ( !IsValid( pUnitServer ) )
+		return;
+	EPose pose = pUnitServer->IsWearingPK() && wishPose > CROUCH ? WALK : wishPose;
+	Commands->push_back( new NWorld::CCmdSetCommand( pUnitServer, new NWorld::CCmdWishPose( pose ) ) );
+	Commands->push_back( new NWorld::CCmdSetCommand( pUnitServer, new NWorld::CCmdArrangeInventory() ) );
+	NWorld::SItem From( (NWorld::CUnit*)0, NWorld::SItem::GROUND, pInvItem );
+	From.pWorldItem = pItem;
+	// Resolve placement at execution time, after the preceding drops/repack.
+	NWorld::SItem To( pUnitServer, NWorld::SItem::BACKPACK, CTPoint<int>( -1, -1 ) );
 	Commands->push_back( new NWorld::CCmdSetCommand( pUnitServer,
 		new NWorld::CCmdMoveInventoryItem( From, To ) ) );
 }
@@ -367,10 +371,48 @@ CAILogDropItem::CAILogDropItem(	IAIUnit *_pAIUnit, NRPG::IInventoryItem *_pItem 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CAILogDropItem::RollBack() {}
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CAILogDropItem::Commit() {}
+void CAILogDropItem::Commit()
+{
+	if ( IsValid( pAIUnit ) && IsValid( pItem ) )
+		pAIUnit->GetAIInventory()->RemoveItem( pItem );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// Retail FindItem 0x45b4e0: backpack first, then the two equipment slots.
+static bool FindLootItem( NWorld::CUnitServer *pUS, NRPG::IInventoryItem *pItem, NWorld::SItem *pSource )
+{
+	if ( !IsValid( pUS ) || !IsValid( pItem ) )
+		return false;
+	NRPG::IInventory *pInv = pUS->GetUnitRPG()->GetInventory();
+	const vector<NRPG::SBackPackItem> &items = pInv->GetItems();
+	for ( int i = 0; i < (int)items.size(); ++i )
+		if ( items[i].pItem == pItem )
+		{
+			*pSource = NWorld::SItem( pUS, NWorld::SItem::BACKPACK, CTPoint<int>( -1, -1 ), pItem );
+			return true;
+		}
+	for ( int slot = 0; slot < NDb::N_SLOTS; ++slot )
+		if ( pInv->Get( (NDb::ESlot)slot ) == pItem )
+		{
+			*pSource = NWorld::SItem( pUS, NWorld::SItem::SLOT, slot, pItem );
+			return true;
+		}
+	return false;
+}
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CAILogDropItem::GetCommands( list< CPtr<NWorld::CCommand> > *Commands )
 {
+	if ( !IsValid( pAIUnit ) )
+		return;
+	NWorld::CUnitServer *pUS = pAIUnit->GetUnitServer();
+	NWorld::SItem source;
+	if ( !FindLootItem( pUS, pItem, &source ) )
+		return;
+	NWorld::SItem hand( pUS, NWorld::SItem::HAND );
+	NWorld::SItem ground( (NWorld::CUnit*)0, NWorld::SItem::GROUND );
+	Commands->push_back( new NWorld::CCmdSetCommand( pUS, new NWorld::CCmdMoveInventoryItem( source, hand ) ) );
+	Commands->push_back( new NWorld::CCmdSetCommand( pUS, new NWorld::CCmdMoveInventoryItem( hand, ground ) ) );
+	if ( source.eType == NWorld::SItem::BACKPACK )
+		Commands->push_back( new NWorld::CCmdSetCommand( pUS, new NWorld::CCmdArrangeInventory() ) );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CAILogThrowGrenade

@@ -426,7 +426,9 @@ void CUnitTracker::Update()
 
 	// retail CUnitTracker::Update @0x32d520 HIDEs the path/selection while a scripted sequence runs (mission
 	// vtbl+0x44 IsSequence) -- so the script-assigned move path of your character is not shown during a sequence.
-	if ( pMission->IsSequence() || pMission->IsInterfaceHidden() || !pMission->IsReady() ||
+	// v1.2 0x72d9ac calls IsPlayerTurn (+0x48), not IsReady: an active
+	// hotseat AI displays its path even though human input is disabled.
+	if ( pMission->IsSequence() || pMission->IsInterfaceHidden() || !pMission->IsPlayerTurn() ||
 		( !IsSelected() && !IsHilighted() ) ||
 		( pMission->IsRealTime() && NGlobal::GetVar( "game_pathinrealtime", 1 ).GetInt() == 0 ) )
 	{

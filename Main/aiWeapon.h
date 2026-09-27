@@ -28,6 +28,7 @@ class IAIInventoryItem: public CObjectBase
 {
 public:
 	virtual NRPG::IInventoryItem* GetInventoryItem() const = 0;
+	virtual void GetInventoryItemWithClips( vector< CPtr<NRPG::IInventoryItem> > *pItems ) const;
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CAIFireArmsWeaponClip: public CObjectBase
@@ -73,6 +74,7 @@ public:
 	CAIFireArmsWeaponBase() {}
 	NRPG::CWeaponItem* GetItem() const { return pWeaponItem; }
 	virtual NRPG::IInventoryItem* GetInventoryItem() const;
+	virtual void GetInventoryItemWithClips( vector< CPtr<NRPG::IInventoryItem> > *pItems ) const;
 	// clip management (retail base methods)
 	int GetClipCount() const;                                    // @0xb5890
 	CAIFireArmsWeaponClip* GetCurrentClip() const;

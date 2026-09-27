@@ -202,7 +202,7 @@ void CAINormalReaction::Update()
 	}
 	if ( bWasCombat )
 	{
-		SetLogic( CreateAIAfterCombatLogic( u, false ) );   // regroup once combat is over (loot off: stub body)
+		SetLogic( CreateAIAfterCombatLogic( u, true ) );   // v1.2 0x47f722: loot enabled
 		bWasCombat = false;
 	}
 	else

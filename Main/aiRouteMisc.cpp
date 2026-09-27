@@ -426,7 +426,7 @@ bool GetRestoreAPPoint( NWorld::CUnitServer *pServer, NWorld::CUnitServer *pEnem
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // NAI::GetRoundUpPlaces @0xa1320 -- see aiRouteMisc.h for the full contract, the GetWearingDBPK mislabel
-// correction, the ORIGINAL BUG, and the control-point elision. All floats verified against Game.exe raw bytes
+// correction and the control-point elision. All floats verified against Game.exe raw bytes
 // (1.6=0x3fcccccd, 8.0=0x41000000, 0.33333334=0x3eaaaaab, 0.5=0x3f000000, 5.0=0x40a00000, 4.0=0x40800000).
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool GetRoundUpPlaces( NWorld::CUnitServer *pServer, const SUnitPosition &enemyPos, SPosition *pStop,
@@ -473,10 +473,11 @@ bool GetRoundUpPlaces( NWorld::CUnitServer *pServer, const SUnitPosition &enemyP
 		*pFlank  = ownPos.pos;
 		*pStop   = *pFlank;
 		*pAttack = enemyPos.pos;
-		if ( bCheckFriends &&
-			 ( IsNear( *pFlank, points, 4.0f ) || IsNear( *pStop, points, 4.0f ) ||
-			   IsNear( *pAttack, points, 4.0f ) ) )
-			return true;                                              // allies already crowd a spot -> accept the defaults
+		// v1.2 0x4a19c3..0x4a1a68: close targets use the direct approach.
+		// Reject it only when the avoidance check finds a nearby downed ally.
+		return !bCheckFriends ||
+			 !( IsNear( *pFlank, points, 4.0f ) || IsNear( *pStop, points, 4.0f ) ||
+			    IsNear( *pAttack, points, 4.0f ) );
 	}
 	IPathNetwork *pNet  = pServer->GetWorld()->GetPathNetwork();
 	NRPG::IGame  *pGame = pServer->GetWorld()->GetGame();
@@ -530,12 +531,12 @@ bool GetRoundUpPlaces( NWorld::CUnitServer *pServer, const SUnitPosition &enemyP
 	e.u = cpAtk.u - cpOwn.u;
 	e.v = cpAtk.v - cpOwn.v;
 	e.q = cpAtk.q - cpOwn.q;
-	// ORIGINAL BUG (confirmed @0x4a1aa1-0x4a1b0a, fmul @0x4a1ab9): the u-term multiplies by cpOwn.u (the
-	// unit's own world u-coordinate) instead of n.u -- so `perp` is not the true perpendicular component.
-	// (The decomp answer-key miscopies this as an unscaled u-term; the raw bytes are authoritative.)
-	float fS = n.q * e.q + n.v * e.v + cpOwn.u * e.u;
+	// v1.2 0x4a1e80..0x4a1f08: projection onto the normalized direction.
+	// Four pushed arguments shift ESP by 16; [esp+0x30] at the first FMUL
+	// is n.u, not cpOwn.u. The former "retail bug" was a stack-offset misread.
+	float fS = n.u * e.u + n.v * e.v + n.q * e.q;
 	CVec3 perp;
-	perp.u = e.u - cpOwn.u * fS;
+	perp.u = e.u - n.u * fS;
 	perp.v = e.v - n.v * fS;
 	perp.q = e.q - n.q * fS;
 	// the FLANK spot: a reachable place off the path's 1/3 waypoint, on the attack side of the own->enemy axis.

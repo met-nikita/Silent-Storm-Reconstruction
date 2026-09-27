@@ -58,6 +58,7 @@ EActionType GetActionType( CUnitServer *pUS );
 // the places near ptTarget from which pUS could melee it (the "melee ring"); used by the AI
 // CAINearEnemyPlaceSource to path toward an enemy's melee ring.
 void GetMeleeAttackPlaces( CUnitServer *pUS, const CVec3 &ptTarget, vector<NAI::SPathPlace> *pRes );
+void GetHumanReachPlaces( CUnitServer *pUS, const CVec3 &ptTarget, vector<NAI::SPathPlace> *pRes, float fPlaneDist );
 // can the cannon engage a target at ptTarget (UCR_OK / UCR_NEED_RELOAD / ...); used by the AI heavy-gun
 // actions to decide whether a manned cannon can hit the current enemy.
 EUnitCommandResult CanAttackWithCannon( CCannon *pCannon, const CVec3 &ptTarget );

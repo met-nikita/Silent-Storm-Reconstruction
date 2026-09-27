@@ -1388,8 +1388,11 @@ void CMission::InternalStep()
 	else
 		++nFramesSameCameraPosition;
 
+	// v1.2 0x5a3688: the SAME mission IsPlayerTurn value goes to every
+	// tracker. In hotseat this removes inactive players' stale selections;
+	// passing false for them instead makes all their units selectable.
 	for ( vector< CObj<IPlayerTracker> >::iterator iPlayer = playersSet.begin(); iPlayer != playersSet.end(); iPlayer++ )
-		(*iPlayer)->Update( (*iPlayer)->GetPlayer() == pWorld->GetCurrentPlayer() );
+		(*iPlayer)->Update( IsPlayerTurn() );
 
 	pInterface->UpdateCursor();
 	GameStep();
@@ -1741,7 +1744,10 @@ bool CMission::ProcessEvent( const NInput::SEvent &sEvent )
 	{
 		if ( bindEndOfTurn.ProcessEvent( sEvent ) )
 		{
-			Command( new NWorld::CCmdEndOfTurn );
+			// Retail v1.2 0x60378d: the keyboard observes the same turn-change
+			// cooldown as the button. CanDoCommand owns the probe command.
+			if ( CanDoCommand( new NWorld::CCmdEndOfTurn ) )
+				Command( new NWorld::CCmdEndOfTurn );
 			return true;
 		}
 	}

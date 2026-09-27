@@ -11,8 +11,14 @@
 #include "wDebris.h"          // NWorld::CDFrozenItem: GetPos / GetInvItem
 #include "wUnitCommands.h"    // NWorld::CCmdMoveInventoryItem / SItem / UCR_OK
 #include "wInterface.h"       // NWorld::IPlayer::GetVisibleObjects
+#include "wMain.h"
+#include "wMainPath.h"
+#include "wUnitAttack.h"
+#include "aiPath.h"
+#include "aiMoveAction.h"
 //
 #include "aiActions.h"
+namespace NWorld { bool IsWithinHumanReach( const CVec3 &ptFrom, const CVec3 &ptTarget, float fPlaneDist ); }
 //
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // The after-combat loot action: pick up the most necessary item the player knows is on the ground (and
@@ -20,12 +26,8 @@
 // decomp/src/s2_ailootaction.h: GetInfoInner @0x63210 / Do @0x63a80). The item-necessity scoring
 // (CAIInventory::IsItemNecessary / GetMostNecessaryItem) is reconstructed in aiInventory.cpp.
 //
-// Documented dev<->release elisions (build-validation scope): the release additionally requires a reachable
-// human-reach PATH to the chosen item (NWorld::GetHumanReachPlaces @0x393610 -- a Ghidra-mangled CNodesLayer
-// flood with no clean dev primitive + no CVec3->SPathPlace accessor) and, having walked it, loots other
-// items within human-reach of the path's end in the same trip; that pathing-reachability gate + the
-// otherItem batching are elided here. The pick-up record carries no wishPose (the dev CAILogPickUpItem ctor
-// predates it). The core decision -- which item to take + what to drop -- is faithful.
+// Use the shared human-reach search to validate the destination and batch other
+// useful items reachable from its endpoint. Drop lists include the old gun's spares.
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 namespace NAI
 {
@@ -62,7 +64,7 @@ void CAILootAction::GetInfoInner( const SPlaceWithAP &, SInfo *pInfo ) const
 			continue;
 		wanted.push_back( CPtr<NWorld::CDFrozenItem>( pItem ) );
 		if ( IsValid( pToDrop ) )
-			pInfo->itemsToDrop[ CPtr<NWorld::CDFrozenItem>( pItem ) ].push_back( pToDrop->GetInventoryItem() );
+			pToDrop->GetInventoryItemWithClips( &pInfo->itemsToDrop[ CPtr<NWorld::CDFrozenItem>( pItem ) ] );
 	}
 	// keep the wanted items within 4m whose GROUND -> BACKPACK move the unit would accept (i.e. that fit).
 	CVec3 ptOwn = pU->GetPosition().GetCP();
@@ -90,6 +92,19 @@ void CAILootAction::GetInfoInner( const SPlaceWithAP &, SInfo *pInfo ) const
 	pInfo->pItem = pInv->GetMostNecessaryItem( wanted );
 	if ( !IsValid( pInfo->pItem ) )
 		return;
+	vector<SPathPlace> places;
+	NWorld::GetHumanReachPlaces( pUS, pInfo->pItem->GetPos(), &places, 0.625f );
+	if ( places.empty() )
+		return;
+	IPathNetwork *pNet = pUS->GetWorld()->GetPathNetwork();
+	CPtr<CPath> path = NWorld::FindPath( pNet, pUS, pU->GetPosition().p, places, pUS,
+		false, PF_DEFAULT, false, true, true );
+	if ( !IsValid( path ) || path->points.empty() )
+		return;
+	CVec3 ptDest = GetUnitPos( path->points.back(), pNet ).GetCP();
+	for ( list< CPtr<NWorld::CDFrozenItem> >::const_iterator it = wanted.begin(); it != wanted.end(); ++it )
+		if ( *it != pInfo->pItem && NWorld::IsWithinHumanReach( ptDest, (*it)->GetPos(), 0.625f ) )
+			pInfo->otherItem.push_back( *it );
 	pInfo->bCanDo = true;
 }
 void CAILootAction::Do( CAILog *pLog ) const                            // @0x63a80
@@ -108,8 +123,19 @@ void CAILootAction::Do( CAILog *pLog ) const                            // @0x63
 	for ( int i = 0; i < (int)drops.size(); ++i )
 		if ( IsValid( drops[i] ) )
 			*pLog << new CAILogDropItem( pU, drops[i].GetPtr() );
-	*pLog << new CAILogPickUpItem( pU, info.pItem, wishPose );
-	// (the release loots additional items within human-reach of the walked path's end in the same trip --
-	//  otherItem, tied to the elided GetHumanReachPlaces pathing -- omitted here; see the file header.)
+	EPose pose = pU->GetUnitServer()->IsWearingPK() ? WALK : wishPose;
+	*pLog << new CAILogPickUpItem( pU, info.pItem, pose );
+	for ( list< CPtr<NWorld::CDFrozenItem> >::const_iterator it = info.otherItem.begin(); it != info.otherItem.end(); ++it )
+	{
+		IAIInventoryItem *pToDrop = 0;
+		// Previous records have already updated the simulated inventory.
+		if ( !IsValid( *it ) || !pU->GetAIInventory()->IsItemNecessary( *it, &pToDrop ) )
+			continue;
+		const vector< CPtr<NRPG::IInventoryItem> > &otherDrops = info.itemsToDrop[*it];
+		for ( int i = 0; i < (int)otherDrops.size(); ++i )
+			if ( IsValid( otherDrops[i] ) )
+				*pLog << new CAILogDropItem( pU, otherDrops[i] );
+		*pLog << new CAILogPickUpItem( pU, *it, pose );
+	}
 }
 }
