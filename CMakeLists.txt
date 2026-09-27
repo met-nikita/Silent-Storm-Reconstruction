@@ -246,6 +246,10 @@ s2_module(LSConverter  console LINK FileIO Image libpng Misc squish lifestudio_s
 # ----------------------------------------------------------------------------
 set_property(DIRECTORY PROPERTY VS_STARTUP_PROJECT Game)
 
+# System-DPI-aware manifest: a DPI-unaware 32-bit exe gets its window virtualized on
+# scaled displays (4K windowed = only the top-left corner visible).
+set_property(TARGET Game PROPERTY VS_DPI_AWARE "ON")
+
 set(S2_GAME_DIR "" CACHE PATH "Silent Storm install dir")
 if(NOT S2_GAME_DIR)
   foreach(_d "C:/Program Files (x86)/Steam/steamapps/common/Silent Storm"
