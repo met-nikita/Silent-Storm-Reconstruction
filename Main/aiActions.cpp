@@ -149,7 +149,7 @@ static bool IsGoodGroup( NWorld::CUnitServer *pUS, const SUnitPosition &pos, CAI
 {
 	if ( !IsValid( pLauncher ) )
 		return false;
-	if ( !group.allies.empty() || group.enemies.empty() )
+	if ( group.fNearestAlly <= 3.0f || group.enemies.empty() )
 		return false;
 	//
 	// CWeaponItem publicly derives NRPG::IWeaponItem - implicit upcast (not CDynamicCast); guard null.
@@ -173,7 +173,7 @@ static bool IsGoodGroup( NWorld::CUnitServer *pUS, const SUnitPosition &pos, CAI
 {
 	if ( !IsValid( pGrenade ) )
 		return false;
-	if ( !group.allies.empty() || group.enemies.empty() )
+	if ( group.enemies.empty() )
 		return false;
 	//
 	// CGrenadeItem publicly derives NRPG::IGrenadeItem, so pass it via the plain (guaranteed) implicit
@@ -182,6 +182,14 @@ static bool IsGoodGroup( NWorld::CUnitServer *pUS, const SUnitPosition &pos, CAI
 	// does not.
 	NRPG::CGrenadeItem *pItem = pGrenade->GetItem();
 	if ( !IsValid( pItem ) )
+		return false;
+	float fRange = 0;
+	if ( pItem->GetDBGrenade() )
+		fRange = pItem->GetDBGrenade()->fFragmentRange;
+	else if ( pItem->GetDBEngGrenade() )
+		fRange = pItem->GetDBEngGrenade()->fFragmentRange;
+	// Retail 0x41c390: strict clearance, using the DB value without unit conversion.
+	if ( !(fRange < group.fNearestAlly) )
 		return false;
 	NWorld::EUnitCommandResult res = NWorld::CanUnitThrowGrenade( pUS, pos, group.ptCenter, pItem );
 	if ( res != NWorld::UCR_OK )

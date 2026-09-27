@@ -22,10 +22,13 @@ struct SAIUnitGroup
 {
 	ZDATA
 	CVec3 ptCenter;
+	float fNearestAlly;
 	vector< CPtr<IAIUnit> > enemies;
+	// Unserialized compatibility storage for the unused predecessor action implementation.
 	vector< CPtr<IAIUnit> > allies;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&ptCenter); f.Add(3,&enemies); f.Add(4,&allies); return 0; }
-	SAIUnitGroup(): ptCenter( VNULL3 ) {}
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&ptCenter); f.Add(3,&fNearestAlly); f.Add(4,&enemies); return 0; }
+	SAIUnitGroup(): ptCenter( VNULL3 ), fNearestAlly( 65535.0f ) {}
+	void AddUnit( IAIUnit *pUnit );
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // SAIState -- retail's flat AI-state VALUE struct (operator& @0x38c30). AI-convergence final structural
