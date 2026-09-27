@@ -560,6 +560,43 @@ bool CAmbientMean::NeedUpdate()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CGScene
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+class CAmbientAnimator: public CFuncBase<CVec3>
+{
+	OBJECT_BASIC_METHODS(CAmbientAnimator);
+protected:
+	// retail @0x164780: refresh the top-ambient edge; if an animated light is alive, refresh it too.
+	virtual bool NeedUpdate()
+	{
+		bool bTop = pTopAmbient.Refresh();
+		bool bAnim = IsValid( pAnim.Get() ) ? pAnim.Refresh() : false;
+		return bTop || bAnim;
+	}
+	// retail @0x1647f0: while an animated light is alive (and not ended) use its colour, else pass
+	// through the scene top-ambient colour.
+	virtual void Recalc()
+	{
+		if ( IsValid( pAnim.Get() ) )
+		{
+			CAnimLight *pLight = pAnim->GetValue();
+			if ( pLight && !pLight->bEnd )
+			{
+				value = pLight->color;
+				return;
+			}
+		}
+		value = pTopAmbient->GetValue();
+	}
+private:
+	ZDATA
+	CDGPtr< CFuncBase<CVec3> > pTopAmbient;
+	CDGPtr< CPtrFuncBase<CAnimLight> > pAnim;
+public:
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&pTopAmbient); f.Add(3,&pAnim); return 0; }
+	CAmbientAnimator() {}
+	explicit CAmbientAnimator( CFuncBase<CVec3> *pTop ) : pTopAmbient( pTop ) {}
+	void SetAnimation( CPtrFuncBase<CAnimLight> *pLight ) { pAnim = pLight; }
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
 CGScene::CGScene() : holdMask(0,0), nFrameCounter(100), lastMask(0,0), bWaitForLoad( true )
 {
 }
@@ -580,7 +617,8 @@ CGScene::CGScene( int ) : holdMask(0,0), nFrameCounter(100), lastMask(0,0)
 	// @0x161e70: build the two edge nodes first, then the mean node fed by both.
 	pTopAmbient = new CCVec3( vDefaultAmbient );
 	pBottomAmbient = new CCVec3( vDefaultAmbient );
-	pAmbient = new CAmbientMean( pTopAmbient, pBottomAmbient );
+	pTopAmbientAnimator = new CAmbientAnimator( pTopAmbient );
+	pAmbient = new CAmbientMean( pTopAmbientAnimator, pBottomAmbient );
 
 	//pAmbient->AddLight( new CAmbientLight( pAmbientColor, 0 ) );
 	//AddLightGroup( pAmbient );
@@ -1020,7 +1058,7 @@ CObjectBase* CGScene::AddDirectionalLight( CFuncBase<CVec3> *pColor, CFuncBase<C
 	pFakeParticleLM->SetColor( pColor );
 	ILight *pRes = new CDirectionalLight( pColor, pGlossColor, vShadowColor,
 		ptLight, ptOrigin, ptSize, fMaxHeight, trackers.pSolidTracker, pAmbient, bLightmapOnly, fBlurShift, this,
-		pTopAmbient, pBottomAmbient );
+		pTopAmbientAnimator, pBottomAmbient );
 	AddLight( pRes );
 	return pRes;
 }
@@ -2345,50 +2383,6 @@ START_REGISTER(GSceneInternal)
 	REGISTER_VAR_EX( "gfx_decals", NGlobal::VarBoolHandler, &bUseDecals, 1.0f, true )
 	REGISTER_VAR_EX( "gfx_block_buffering", NGlobal::VarBoolHandler, &bBlockBuffering, 0.0f, true )
 FINISH_REGISTER
-////////////////////////////////////////////////////////////////////////////////////////////////////
-// release-new animated-ambient DG node (GSceneInternal.obj, operator& @0x165350). Tracks the scene
-// top-ambient colour, overriding it with an animated light's colour while one is alive. This
-// predecessor render never CREATES a pTopAmbientAnimator (animated-ambient is a release-only feature),
-// but a RETAIL save does: its CAmbientMean's top edge points at a live CAmbientAnimator (not the raw
-// pTopAmbient), so loading such a save instantiates this node and the mean READS it. NeedUpdate/Recalc
-// must therefore be the real retail implementations (@0x164780 / @0x1647f0) -- the old no-op stubs
-// left value uninitialised, so the mean averaged garbage into the top ambient => a random whole-scene
-// colour tint after load. With no active animated light (pAnim null/dead) Recalc just passes through
-// pTopAmbient, i.e. the mean is (pTopAmbient + pBottomAmbient) * 0.5 exactly as the fresh-scene path.
-class CAmbientAnimator: public CFuncBase<CVec3>
-{
-	OBJECT_BASIC_METHODS(CAmbientAnimator);
-protected:
-	// retail @0x164780: refresh the top-ambient edge; if an animated light is alive, refresh it too.
-	virtual bool NeedUpdate()
-	{
-		bool bTop = pTopAmbient.Refresh();
-		bool bAnim = IsValid( pAnim.Get() ) ? pAnim.Refresh() : false;
-		return bTop || bAnim;
-	}
-	// retail @0x1647f0: while an animated light is alive (and not ended) use its colour, else pass
-	// through the scene top-ambient colour.
-	virtual void Recalc()
-	{
-		if ( IsValid( pAnim.Get() ) )
-		{
-			CAnimLight *pLight = pAnim->GetValue();
-			if ( pLight && !pLight->bEnd )
-			{
-				value = pLight->color;
-				return;
-			}
-		}
-		value = pTopAmbient->GetValue();
-	}
-private:
-	ZDATA
-	CDGPtr< CFuncBase<CVec3> > pTopAmbient;
-	CDGPtr< CPtrFuncBase<CAnimLight> > pAnim;
-public:
-	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&pTopAmbient); f.Add(3,&pAnim); return 0; }
-	CAmbientAnimator() {}
-};
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 }
 using namespace NGScene;
