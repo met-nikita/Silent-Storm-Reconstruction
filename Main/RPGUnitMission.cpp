@@ -229,8 +229,12 @@ public:
 	// reach via friendship.
 
 	virtual int  GetBulletsQuantityInShot() const;
-	virtual void HealVP( const SFirstAid &fa );
-	virtual void HealCriticals( int nDC, bool bStopBleeding = true );
+	virtual float HealVP( const SFirstAid &fa );
+	virtual float HealCriticals( int nDC, bool bStopBleeding = true );
+	virtual SHealCriticalInfo TryHealCritical( int nDC, bool bStopBleeding ) const;
+	virtual float HealCritical( const SHealCriticalInfo &info );
+	virtual void AddBleedingStopper( int nAmount ) { nBleedingStopAmount += nAmount; }
+	virtual void AddPostponedModifier( CDynamicSkill *pSkill, const SSkillModifyInfo &info, int nTurns );
 	virtual int  GetIC() const;
 	virtual bool CheckIC();
 	virtual int CheckInterrupt( const IUnitMission *pEnemy, bool bIsMutual, bool bWasShot );
@@ -435,6 +439,10 @@ void CUnitMission::GetInfo( NAI::EPose pose, SUnitInfo *pInfo ) const
 	pInfo->bWearingPK = pPanzerklein && pPanzerkleinVP;
 	pInfo->nPKLife = pInfo->bWearingPK ? int( *pPanzerkleinVP ) : 0;
 	pInfo->nMaxPKLife = pInfo->bWearingPK ? pPanzerkleinVP->GetMaxValue() : 0;
+	pInfo->bPKInfo = pInfo->bWearingPK;
+	pInfo->nPKHP = pInfo->nPKLife;
+	pInfo->nMaxPKHP = pInfo->nMaxPKLife;
+	pInfo->bUnitInfo = true;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 int CUnitMission::GetSnipeAP( IUnitMissionInfo *pTarget ) const
@@ -1869,14 +1877,16 @@ void CUnitMission::SaveAP( const SSnipeAP &ap )
 	savedSnipeAP.nAP = ap.nAP;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CUnitMission::HealVP( const SFirstAid &fa )
+float CUnitMission::HealVP( const SFirstAid &fa )
 {
-	GetRPGUnit()->Heal( fa );
+	float fHealed = GetRPGUnit()->Heal( fa );
 	ApplyCritical( SCritical( NDb::CL_ANY, NDb::C_VP ) );
+	return fHealed;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CUnitMission::HealCriticals( int nDC, bool bStopBleeding )
+float CUnitMission::HealCriticals( int nDC, bool bStopBleeding )
 {
+	float fHealed = 0;
 	for ( vector<CObj<CCritical> >::iterator i = criticals.begin(); i != criticals.end(); )
 	{
 		const SCritical &c = (*i)->GetCritical();
@@ -1885,12 +1895,58 @@ void CUnitMission::HealCriticals( int nDC, bool bStopBleeding )
 		{
 			csRPG << "\tCured: \t";
 			DumpCritical( *i );
+			fHealed += c.nDC;
 			i = criticals.erase( i );
 		}
 		else
 			++i;
 	}
 	ApplyCritical( SCritical( NDb::CL_ANY, NDb::C_VP ) );
+	return fHealed;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+SHealCriticalInfo CUnitMission::TryHealCritical( int nDC, bool bStopBleeding ) const
+{
+	for ( int i = 0; i < criticals.size(); ++i )
+	{
+		const SCritical &c = criticals[i]->GetCritical();
+		if ( ( c.nDC <= nDC && criticals[i]->CanBeSuspended() ) ||
+			( bStopBleeding && c.eCritical == NDb::C_BLEEDING ) )
+		{
+			SHealCriticalInfo info = { c.eCritical, c.eCl, c.nDC };
+			return info;
+		}
+	}
+	SHealCriticalInfo info = { NDb::C_NONE, NDb::CL_ANY, 0 };
+	return info;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+float CUnitMission::HealCritical( const SHealCriticalInfo &info )
+{
+	float fHealed = 0;
+	for ( vector<CObj<CCritical> >::iterator i = criticals.begin(); i != criticals.end(); )
+	{
+		const SCritical &c = (*i)->GetCritical();
+		if ( c.eCritical == info.eCritical && c.eCl == info.eCl &&
+			( (*i)->CanBeSuspended() || c.eCritical == NDb::C_BLEEDING ) )
+		{
+			fHealed += c.nDC;
+			i = criticals.erase( i );
+		}
+		else
+			++i;
+	}
+	ApplyCritical( SCritical( NDb::CL_ANY, NDb::C_VP ) );
+	return fHealed;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CUnitMission::AddPostponedModifier( CDynamicSkill *pSkill, const SSkillModifyInfo &info, int nTurns )
+{
+	SModifierHolder h;
+	h.pTarget = pSkill;
+	h.info = info;
+	h.nTimeLeft = nTurns;
+	postponedModifiers.push_back( h );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CUnitMission::Reload()

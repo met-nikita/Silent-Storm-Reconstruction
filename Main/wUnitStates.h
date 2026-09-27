@@ -3,6 +3,7 @@
 #if _MSC_VER > 1000
 #pragma once
 #endif // _MSC_VER > 1000
+#include "RPGUnitMission.h"
 namespace NRPG
 {
 	//enum ECriticalAction;
@@ -140,19 +141,31 @@ public:
 class CUnitStateHealer: public CUnitState
 {
 	OBJECT_BASIC_METHODS(CUnitStateHealer);
+	// Retail tag 7 is a raw 40-byte SUnitInfo snapshot. The live UI struct in
+	// this fork has extra fields, so keep the on-disk record separate.
+	struct STreatmentInfo
+	{
+		bool bPKInfo;
+		int nHP, nHealedHP, nMaxHP, nPKHP, nMaxPKHP, nAP, nMaxAP, nSightDistance;
+		bool bUnitInfo;
+		STreatmentInfo(): bPKInfo(false), nHP(0), nHealedHP(0), nMaxHP(0),
+			nPKHP(0), nMaxPKHP(0), nAP(0), nMaxAP(0), nSightDistance(0), bUnitInfo(false) {}
+	};
 	ZDATA_(CUnitState)
 	CPtr<CUnitServer> pTarget;
-	//int nRequiredAP;
 	bool bNewSegment;
-	//float fdVPFraction;
 	float fKitCapacity;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CUnitState*)this); f.Add(2,&pTarget); f.Add(3,&bNewSegment); f.Add(4,&fKitCapacity); return 0; }
+	int nCriticalHealAPRequired;
+	NRPG::SHealCriticalInfo healCriticalInfo;
+	STreatmentInfo sTargetInfo;
+	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CUnitState*)this); f.Add(2,&pTarget); f.Add(3,&bNewSegment); f.Add(4,&fKitCapacity); f.Add(5,&nCriticalHealAPRequired); f.Add(6,&healCriticalInfo); f.Add(7,&sTargetInfo); return 0; }
 	//
-	void SayAck();
+	void SayAck( bool bRepair );
 	void DoHealing( int nUnitAP );
+	void SetCriticalHealAPRequired();
 	//
 public:
-	CUnitStateHealer() {}
+	CUnitStateHealer();
 	CUnitStateHealer( CUnitServer *_pUS, CUnitServer *_pTarget );
 	//
 	virtual CCommandExecute* CreateExecutor( CCmd *pCmd, EUnitCommandResult *pResult );

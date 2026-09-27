@@ -720,33 +720,63 @@ bool CUnit::CreateFirstAid( SFirstAid *pRes, int nMaxSpentAP, float fKitCapacity
 	IFirstAidItem *pItem, CUnit *pTarget, int *pRequiredAP )
 {
 	SFirstAid tmp;
-	int nSkill = *skills[ NDb::ST_MEDICINE ] + pItem->GetDBFirstAid()->nSkillModifier;
+	if ( pItem->GetDBFirstAid()->effect == NDb::FAE_REPAIR_PK )
+	{
+		int nVPToHeal = pTarget->Skills(NDb::ST_VP).GetMaxValue() - pTarget->Skills(NDb::ST_VP);
+		if ( nVPToHeal <= 0 )
+			return false;
+		int nSkill = Skills( NDb::ST_ENGINEERING );
+		int nRequiredAP = int( float(nVPToHeal) / Max(1, nSkill) * 20.f );
+		if ( nRequiredAP > nMaxSpentAP )
+		{
+			nRequiredAP = nMaxSpentAP;
+			nVPToHeal = Float2Int( nRequiredAP * nSkill * 0.05f );
+		}
+		*pRequiredAP = nRequiredAP;
+		pRes->fdVP = nVPToHeal;
+		pRes->nMaxVP = 0;
+		return true;
+	}
+	float fPatientMult = 1.f, fPerk;
+	if ( pTarget->HasPerk( 24, &fPerk ) )
+		fPatientMult = fPerk;
+	int nSkill = int( int(*skills[ NDb::ST_MEDICINE ]) * fPatientMult + pItem->GetDBFirstAid()->nSkillModifier );
+	if ( HasPerk( 57, &fPerk ) )
+		nSkill = int( nSkill + fPerk );
 	CreateFirstAid( &tmp, 0, nSkill );
-	int nMaxHealed = pTarget->Skills(NDb::ST_VP).GetMaxValue() - pTarget->Skills(NDb::ST_VP);
+	int nMaxHealed = pTarget->Skills(NDb::ST_VP).GetMaxValue() - pTarget->Skills(NDb::ST_VP) - pTarget->nHealedVP;
 	int nVPToHeal = Max( 0, tmp.nMaxVP - pTarget->nHealedVP );
 	nVPToHeal = Min( nVPToHeal, nMaxHealed );
 	if ( nVPToHeal == 0 )
 		return false;
-	int nRequiredAP = 60.f / nSkill * nVPToHeal;
+	float fSpeed = 1.f;
+	if ( pItem->GetDBFirstAid()->effect == NDb::FAE_NORMAL && HasPerk( 63, &fPerk ) )
+		fSpeed = fPerk;
+	int nRequiredAP = int( nVPToHeal / Max(1.f, nSkill * fSpeed) * 60.f );
 	if ( nRequiredAP > nMaxSpentAP )
 	{
 		nRequiredAP = nMaxSpentAP;
-		nVPToHeal = Float2Int( nRequiredAP * nSkill / 60.0f );
+		nVPToHeal = Float2Int( nRequiredAP * nSkill * fSpeed / 60.0f );
 	}
 	*pRequiredAP = nRequiredAP;
-	CreateFirstAid( pRes, nVPToHeal, nSkill );
+	CreateFirstAid( pRes, Min(nVPToHeal, Float2Int(fKitCapacity)), nSkill );
 	return true;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-int CUnit::GetFirstAidDC( IFirstAidItem *pItem )
+int CUnit::GetFirstAidDC( IFirstAidItem *pItem, CUnit *pTarget )
 {
 	int nSkill = *skills[ NDb::ST_MEDICINE ];
+	float fPerk;
+	if ( HasPerk( 56, &fPerk ) )
+		nSkill = int( nSkill + fPerk );
+	if ( pTarget && pTarget->HasPerk( 24, &fPerk ) )
+		nSkill = int( nSkill * fPerk );
 	if ( IsValid(pItem) ) 
 		nSkill += pItem->GetDBFirstAid()->nSkillModifier;
 	return fDCScale * nSkill;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CUnit::Heal( const SFirstAid &fa )
+float CUnit::Heal( const SFirstAid &fa )
 {
 	int nTotalVP = Skills( NDb::ST_VP ) + nHealedVP;
 	const int nMaxVP = Min( Skills( NDb::ST_VP ).GetMaxValue(), Skills( NDb::ST_VP ) + fa.nMaxVP );
@@ -758,6 +788,7 @@ void CUnit::Heal( const SFirstAid &fa )
 	csRPG << "\tMaxVP=" << fa.nMaxVP << " \t dVP=" << Float2Int( fa.fdVP ) << endl;
 	csRPG << "<font size=16pt>";
 	csRPG << "\t" << GetName() << ": \tVP += " << ndVP << endl;
+	return ndVP;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CUnit::RegenerateVP( const SFirstAid &fa )
@@ -771,13 +802,17 @@ void CUnit::RegenerateVP( const SFirstAid &fa )
 	csRPG << "\t" << GetName() << ": VP = " << Skills( NDb::ST_VP ) << endl;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-bool CUnit::CanHeal( CUnit *pTarget ) const
+bool CUnit::CanHeal( CUnit *pTarget, IFirstAidItem *pItem ) const
 {
 	ASSERT( IsValid( pTarget ) );
 	if ( !IsValid( pTarget ) )
 		return false;
 	//
-	return int( fVPScale * *skills[ NDb::ST_MEDICINE ] ) > pTarget->nHealedVP;
+	int nSkill = *skills[ NDb::ST_MEDICINE ];
+	if ( IsValid(pItem) )
+		nSkill += pItem->GetDBFirstAid()->nSkillModifier;
+	return int( fVPScale * nSkill ) > pTarget->nHealedVP &&
+		pTarget->Skills(NDb::ST_VP) < pTarget->Skills(NDb::ST_VP).GetMaxValue();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CUnit::HasPerk( int nPerkID, float *pParam1, float *pParam2, float *pParam3 ) const

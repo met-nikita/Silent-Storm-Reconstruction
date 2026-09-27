@@ -90,7 +90,8 @@ enum EFirstAidEffect
 	FAE_BOOST_VP,
 	FAE_TEMP_STOP_BLEEDING,
 	FAE_REMOVE_BLEEDING,
-	FAE_REPAIR_PK   // retail =6: panzerklein repair kit -- gates on ST_ENGINEERING, not ST_MEDICINE (CSlot::Draw @0x1c34d0, healer @0x3ca340)
+	FAE_REPAIR_PK,  // retail =6: panzerklein repair kit
+	FAE_CRITICAL_FIRST // retail =7: treat a critical, falling back to wound healing
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // RPG data tables

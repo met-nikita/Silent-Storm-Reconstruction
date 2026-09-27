@@ -115,7 +115,7 @@ public:
 private:
 	//NAnimation::CAnimation* CreateAnimation( NDb::CAnimation::EType type, int nFlags, STime tStart );
 	void PlayAnimation( const NAI::SUnitPosition &cmdPos, 
-		NAnimation::CAnimation *pAnimation, bool bInstantly = false );
+		NAnimation::CAnimation *pAnimation, bool bInstantly = false, bool bStandFirst = true );
 	void PlayAnimation( const NAI::SUnitPosition &cmdPos,
 		int nType, const char *pszParams = 0, bool bInstantly = false );
 	void MoveOneStep( const NAI::SUnitPosition &cmdPos );	// @0x3409d0 -- MOVE_ONE_STEP clip
@@ -202,7 +202,7 @@ public:
 	// @0x3401b0 -- power-armour REPAIR overload: bPanzerklein => fixed PK-heal clip params
 	// ("PKHealGer" if a dedicated repair kit is active, else "PKHealEng"); else == the 2-arg form.
 	void StartHealing( const NAI::SUnitPosition &cmdPos, NAI::EBlowHeight eHeight, bool bPanzerklein, bool bRepairKit );
-	void FinishHealing( const NAI::SUnitPosition &cmdPos );
+	void FinishHealing( const NAI::SUnitPosition &cmdPos, bool bRepair = false, int nAnimationID = 0x1184 );
 	// corpses
 	void TakeCorpse( const NAI::SUnitPosition &cmdPos );
 	void DropCorpse( const NAI::SUnitPosition &cmdPos );
