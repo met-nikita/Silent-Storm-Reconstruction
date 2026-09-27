@@ -1749,9 +1749,9 @@ void CGScene::DrawLines( NGfx::CRenderContext *pRC )
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CGScene::RenderCL( NGfx::CRenderContext *pRC, IRender *pRender, CTransformStack *pTS, 
-	CSceneFragments *pGeom, bool bSceneHasChanged )
+	CSceneFragments *pGeom, bool bSceneHasChanged, const CVec4 &vDepth, bool bReuseLight )
 {
-	GetLMTracker()->CatchUp( pRC, pRender, pTS, pGeom, bSceneHasChanged, lastMask );
+	GetLMTracker()->CatchUp( pRC, pRender, pTS, pGeom, bSceneHasChanged, lastMask, vDepth, bReuseLight );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CObjectBase* CGScene::CreateStaticDecal( CNonePart *pTarget, CPtrFuncBase<CObjectInfo> *pDecal, IMaterial *pMaterial, const SFullGroupInfo &fg )

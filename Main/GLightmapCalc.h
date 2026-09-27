@@ -19,6 +19,8 @@ class CPerMaterialCombiner;
 struct SLightInfo;
 const int N_CL_TEMP_REGISTER = 2;
 const int N_CL_TARGET_REGISTER = 3;
+// Register 4 belongs to the legacy sun-shadow and specular scratch passes.
+const int N_CL_DEPTH_REGISTER = 5;
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 struct SGlobalIlluminationInfo
 {
@@ -161,6 +163,9 @@ private:
 	SBound currentBound;
 	SGroupSelect groupSelect;
 	SHMatrix mPrevView;
+	// Transient: registers are shared between scenes and recreated on device reset.
+	CPtr<NGfx::CTexture> pHistoryDepth, pHistoryLight;
+	bool bLightStateUpdated;
 	typedef unordered_map<SPointLightPos,CObj<NGfx::CCubeTexture>, SPointLightPosHash> CPointDepthHash;
 	CPointDepthHash pointDepths;
 private:
@@ -177,7 +182,8 @@ private:
 
 	static int GetSkyTexturesNum();
 	void RenderLight( SLightmapTargetGeom *pTarget, const SLightInfo &lightInfo,
-		ERenderOperation op, CRenderCmdList::UParameter param1, CRenderCmdList::UParameter param2, int nStencilOp );
+		ERenderOperation op, CRenderCmdList::UParameter param1, CRenderCmdList::UParameter param2, int nStencilOp,
+		CRenderCmdList::UParameter param3 = CRenderCmdList::UParameter() );
 	void RenderCubeMapDepth( SLightmapTargetGeom *pTarget, 
 		const CVec3 &vCenter, float fRadius, int nDir );
 	void DownsampleCubeMapDepth( const CVec3 &vCenter, float fRadius );
@@ -191,7 +197,8 @@ private:
 	void RecalcDepthChannel( int nBuffer, int nChannel, bool bFast );
 public:
 	CLightmapTracker();
-	void CatchUp( NGfx::CRenderContext *pRC, IRender *_pRender, CTransformStack *pTS, CSceneFragments *pScene, bool bHasNewLightmaps, const SGroupSelect &groupSelect );
+	void CatchUp( NGfx::CRenderContext *pRC, IRender *_pRender, CTransformStack *pTS, CSceneFragments *pScene,
+		bool bHasNewLightmaps, const SGroupSelect &groupSelect, const CVec4 &vDepth, bool bReuseLight );
 	void SetNewIllumination( const SGlobalIlluminationInfo &gl );
 	const CLightState& GetLightState() const { return lightState; }
 };

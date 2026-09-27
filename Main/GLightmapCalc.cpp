@@ -385,7 +385,7 @@ static void MakeLMTS( CTransformStack *pTS, CVec4 &vZ )
 	ts.Init( m );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CLightmapTracker::CLightmapTracker() : nLights(1), nPassesPerCalc(2), groupSelect(0,0)
+CLightmapTracker::CLightmapTracker() : nLights(1), nPassesPerCalc(2), groupSelect(0,0), bLightStateUpdated(true)
 {
 	//LoadShit( pLMTextureCache->GetTexture() );
 	currentBound.SphereInit( CVec3(10,10,10), 20 );
@@ -400,7 +400,7 @@ int CLightmapTracker::GetSkyTexturesNum()
 void CLightmapTracker::RenderLight( 
 	SLightmapTargetGeom *pTarget, const SLightInfo &lightInfo,
 	ERenderOperation op, CRenderCmdList::UParameter param1, CRenderCmdList::UParameter param2,
-	int nStencilOp )
+	int nStencilOp, CRenderCmdList::UParameter param3 )
 {
 	NGfx::CRenderContext &rc = *pTarget->pRC;
 	//render;
@@ -413,8 +413,11 @@ void CLightmapTracker::RenderLight(
 		if ( pTarget->pGeom->IsFilteredFragment( i ) )
 			continue;
 		const SRenderFragmentInfo &frag = *fragments[i];
+		if ( (op == RO_CL_COPY_LAST || op == RO_CL_TEST_PREV_FRAME || op == RO_CL_STORE_DEPTH) &&
+			!frag.pMaterial->GetMaterialInfo().IsSolid() )
+			continue;
 		SOpGenContext fi( &res.ops, &frag );
-		fi.AddOperation( op, 100, nStencilOp, pTarget->nTargetRegister, param1, param2 );
+		fi.AddOperation( op, 100, nStencilOp, pTarget->nTargetRegister, param1, param2, param3 );
 	}
 	Execute( 0, &rc, *pTarget->pTS, res, *pTarget->pGeom, lightInfo );
 }
@@ -830,6 +833,12 @@ void CLightmapTracker::RecalcStep( NGfx::CRenderContext *pRC, CSceneFragments *p
 				if ( nLight < lightState.points.size() )
 				{
 					const CLightState::SPointLight &p = lightState.points[ nLight ];
+					if ( !p.bCastShadow )
+					{
+						RenderPointNoShadows( &lmTarget, p.vCenter, p.fRadius, p.vColor );
+						rs.nStep += N_POINT_LIGHT_RECALC_STEPS;
+						break;
+					}
 					if ( nStep < 3 )
 					{
 						RenderCubeMapDepth( &lmTarget, p.vCenter, p.fRadius, nStep * 2 );
@@ -902,10 +911,48 @@ void CLightmapTracker::RecalcStep( NGfx::CRenderContext *pRC, CSceneFragments *p
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CLightmapTracker::CatchUp( NGfx::CRenderContext *_pRC, IRender *_pRender, CTransformStack *pTS, CSceneFragments *pScene, bool bHasNewLightmaps, const SGroupSelect &_gs )
+// The screen registers belong to the most recently rendered scene, not to its tracker.
+static CPtr<CLightmapTracker> pPreviousCLTracker;
+////////////////////////////////////////////////////////////////////////////////////////////////////
+static void PrepareCLHistory( NGfx::CRenderContext *pRC )
+{
+	NGfx::CRenderContext rc( *pRC );
+	CTRect<float> size;
+	NGfx::GetRegisterSize( &size );
+	rc.SetVirtualRT();
+	rc.SetRegister( N_CL_DEPTH_REGISTER );
+	rc.SetColorWrite( NGfx::COLORWRITE_ALL );
+	rc.SetStencil( NGfx::STENCIL_NONE );
+	rc.SetAlphaCombine( NGfx::COMBINE_NONE );
+	{
+		// White depth cannot match ordinary scene geometry. Clamp sampling outside
+		// the old viewport must hit this border, never reuse an edge pixel forever.
+		NGfx::C2DQuadsRenderer qr( rc, CVec2(size.x2, size.y2), NGfx::QRM_SOLID );
+		qr.AddRect( CTRect<float>(0, 0, size.x2, 1), 0, size );
+		qr.AddRect( CTRect<float>(0, size.y2 - 1, size.x2, size.y2), 0, size );
+		qr.AddRect( CTRect<float>(0, 0, 1, size.y2), 0, size );
+		qr.AddRect( CTRect<float>(size.x2 - 1, 0, size.x2, size.y2), 0, size );
+	}
+	// Clear only our scratch stencil bit, preserving the sun/point-light bit.
+	rc.SetColorWrite( NGfx::COLORWRITE_NONE );
+	rc.SetStencil( NGfx::STENCIL_WRITE, 0, 0x40 );
+	NGfx::C2DQuadsRenderer qr( rc, CVec2(size.x2, size.y2), NGfx::QRM_SOLID );
+	qr.AddRect( size, 0, size );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CLightmapTracker::CatchUp( NGfx::CRenderContext *_pRC, IRender *_pRender, CTransformStack *pTS, CSceneFragments *pScene,
+	bool bHasNewLightmaps, const SGroupSelect &_gs, const CVec4 &vDepth, bool bReuseLight )
 {
 	NGfx::CRenderContext rc( *_pRC );
 	pRender = _pRender;
+	bReuseLight = bReuseLight && NGfx::GetHardwareLevel() >= NGfx::HL_GFORCE3;
+	const bool bHistoryValid = bReuseLight && pPreviousCLTracker == this &&
+		pHistoryDepth == NGfx::GetRegisterTexture( N_CL_DEPTH_REGISTER ) &&
+		pHistoryLight == NGfx::GetRegisterTexture( N_CL_TARGET_REGISTER );
+	const bool bKeepPrevious = bHistoryValid && !bHasNewLightmaps && !bLightStateUpdated && !(_gs != groupSelect);
+	if ( pPreviousCLTracker != this || (bReuseLight && !bHistoryValid) || bLightStateUpdated )
+		bHasNewLightmaps = true;
+	bLightStateUpdated = false;
 	bool bRecalcAllDepth = false;
 	if ( _gs != groupSelect )
 	{
@@ -916,7 +963,6 @@ void CLightmapTracker::CatchUp( NGfx::CRenderContext *_pRC, IRender *_pRender, C
 	}
 	if ( memcmp( &pTS->Get().forward, &mPrevView, sizeof(mPrevView) ) != 0 )
 	{
-		mPrevView = pTS->Get().forward;
 		bHasNewLightmaps = true;
 	}
 	CSelectFragments filterLightmapped( pScene, SLightmappedFilter() );
@@ -953,6 +999,23 @@ void CLightmapTracker::CatchUp( NGfx::CRenderContext *_pRC, IRender *_pRender, C
 	if ( bHasNewLightmaps )
 	{
 		SLightmapTargetGeom lmTarget( pScene, &rc, pTS, N_CL_TEMP_REGISTER );
+		if ( bKeepPrevious )
+		{
+			// Retail v1.2 CatchUp @0x52fb90: reproject last light onto the current
+			// geometry; only matching previous surface depths set stencil bit 0x40.
+			PrepareCLHistory( &rc );
+			rc.SetColorWrite( NGfx::COLORWRITE_NONE );
+			RenderLight( &lmTarget, SLightInfo(), RO_CL_TEST_PREV_FRAME, &vDepth, &mPrevView.x,
+				DPM_EQUAL | STM_MARK_2, float(N_CL_DEPTH_REGISTER) );
+			rc.SetColorWrite( NGfx::COLORWRITE_ALL );
+			RenderLight( &lmTarget, SLightInfo(), RO_CL_COPY_LAST, &mPrevView.x,
+				float(N_CL_TARGET_REGISTER), DPM_EQUAL );
+			CTRect<float> size;
+			NGfx::GetRegisterSize( &size );
+			rc.SetRegister( N_CL_TARGET_REGISTER );
+			NGfx::CopyTexture( rc, CVec2(size.x2, size.y2), size,
+				NGfx::GetRegisterTexture(N_CL_TEMP_REGISTER), size );
+		}
 		// clear
 		lmTarget.pRC->SetRegister( N_CL_TEMP_REGISTER );
 		if ( CanDrawSky() )
@@ -966,17 +1029,24 @@ void CLightmapTracker::CatchUp( NGfx::CRenderContext *_pRC, IRender *_pRender, C
 				RenderSkyCheck( &lmTarget, F_SKY_SINGLE_STRENGTH_MUL / N_DEPTH_CHANNELS_PER_TEX / GetSkyTexturesNum(), nBuf, true );
 		}
 		// color map
+		// Keep the reprojected sky alpha; point-light color is updated independently.
+		lmTarget.nTargetRegister = N_CL_TARGET_REGISTER;
 		lmTarget.pRC->SetColorWrite( NGfx::COLORWRITE_COLOR );
+		lmTarget.pRC->SetStencil( NGfx::STENCIL_NONE );
+		NGfx::ModulateRegister( lmTarget.pRC, N_CL_TARGET_REGISTER, CVec4(0,0,0,0) );
 		for ( int k = 0; k < lightState.points.size(); ++k )
 		{
 			const CLightState::SPointLight &p = lightState.points[ k ];
-			RenderPointLightShadowed( &lmTarget, p.vCenter, p.fRadius, p.vColor,
-				pointDepths[ SPointLightPos( p.vCenter, p.fRadius ) ], 3, false );//true );
+			if ( p.bCastShadow )
+				RenderPointLightShadowed( &lmTarget, p.vCenter, p.fRadius, p.vColor,
+					pointDepths[ SPointLightPos( p.vCenter, p.fRadius ) ], 3, true );
+			else
+				RenderPointNoShadows( &lmTarget, p.vCenter, p.fRadius, p.vColor );
 		}
 		// copy to origin
-		lmTarget.pRC->SetColorWrite( NGfx::COLORWRITE_ALL );
+		lmTarget.pRC->SetColorWrite( NGfx::COLORWRITE_ALPHA );
 		lmTarget.pRC->SetAlphaCombine( NGfx::COMBINE_NONE );
-		lmTarget.pRC->SetStencil( NGfx::STENCIL_NONE );
+		lmTarget.pRC->SetStencil( bKeepPrevious ? NGfx::STENCIL_TEST_CLEAR : NGfx::STENCIL_NONE, 0, 0x40 );
 		lmTarget.pRC->SetDepth( NGfx::DEPTH_NONE );
 		NGfx::AlphaSqrtModulateRegister( lmTarget.pRC, N_CL_TARGET_REGISTER, N_CL_TEMP_REGISTER, 1 );
 		// initiate recalc
@@ -988,10 +1058,33 @@ void CLightmapTracker::CatchUp( NGfx::CRenderContext *_pRC, IRender *_pRender, C
 	}
 	if ( pScene->HasSelectedFragments() && !bHasNewLightmaps && 1 ) // if not stress mode
 		RecalcStep( &rc, pScene, pTS );
+	if ( bReuseLight )
+	{
+		if ( bHasNewLightmaps )
+		{
+			// This renderer predates retail's combined sun/depth output. Save the
+			// same biased surface height in a separate depth-equal pass instead.
+			SLightmapTargetGeom target( pScene, &rc, pTS, N_CL_DEPTH_REGISTER );
+			rc.SetRegister( N_CL_DEPTH_REGISTER );
+			rc.ClearTarget( 0xffffffff );
+			rc.SetColorWrite( NGfx::COLORWRITE_ALPHA );
+			RenderLight( &target, SLightInfo(), RO_CL_STORE_DEPTH, &vDepth, &pTS->Get().forward.x, DPM_EQUAL );
+		}
+		pHistoryDepth = NGfx::GetRegisterTexture( N_CL_DEPTH_REGISTER );
+		pHistoryLight = NGfx::GetRegisterTexture( N_CL_TARGET_REGISTER );
+	}
+	else
+	{
+		pHistoryDepth = 0;
+		pHistoryLight = 0;
+	}
+	pPreviousCLTracker = this;
+	mPrevView = pTS->Get().forward;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CLightmapTracker::SetNewIllumination( const SGlobalIlluminationInfo &gl )
 {
+	bLightStateUpdated = true;
 	globalIllumination = gl;
 	rs.nState = RC_START;
 	rs.bCalcColor = true;

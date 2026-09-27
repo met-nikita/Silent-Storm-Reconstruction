@@ -585,6 +585,26 @@ proc ProjectTexture
 
 proc RegisterMap
 	MakeRegisterMap oT0, c7
+
+; Retail cached-light history: current position, previous-view texture lookup.
+proc CLPrevFrameCopy
+	m4x4 oPos, v0, c10
+	locals pos, temp
+	m4x4 pos, v0, c25
+	mul temp.xy, c7.zw, pos.w
+	mad pos.xy, pos.xy, c7.xy, temp.xy
+	mov oT0, pos.xyww
+
+proc CLTestPrevFrame
+	m4x4 oPos, v0, c10
+	locals pos, temp, depth
+	m4x4 pos, v0, c25
+	mul temp.xy, c7.zw, pos.w
+	mad pos.xy, pos.xy, c7.xy, temp.xy
+	mov oT0, pos.xyww
+	dp4 depth.x, v0, c16
+	mad depth.w, -v1.z, c4.y, c4.y
+	add oD0.w, depth.x, depth.w
 	
 proc RegisterMapTex
 	MakeRegisterMap oT0, c7
@@ -2467,4 +2487,21 @@ mul r0.rgb, r0, v0
 [RS]
 D3DRS_ALPHATESTENABLE TRUE
 ;D3DRS_ALPHAREF 2
+D3DRS_ALPHAFUNC D3DCMP_LESSEQUAL
+
+[PS] CLTestPrevFrame
+ps.1.1
+tex t0
+add_sat r0.xyz, -v0.w, t0.w
+add_sat r0.w, v0.w, -t0.w
+add r0.w, r0.w, r0.z
+[PS14]
+ps.1.4
+texld r0, t0_dw.xyw
+add_sat r0.xyz, -v0.w, r0.w
+add_sat r0.w, v0.w, -r0.w
+add r0.w, r0.w, r0.z
+[RS]
+D3DRS_ALPHATESTENABLE TRUE
+D3DRS_ALPHAREF 1
 D3DRS_ALPHAFUNC D3DCMP_LESSEQUAL

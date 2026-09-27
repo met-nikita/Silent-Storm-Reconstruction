@@ -305,7 +305,10 @@ enum ERenderOperation
 	// effects
 	RO_ALIEN,
 	RO_EXPLOSION_DECAL,
-	RO_REGISTER
+	RO_REGISTER,
+	RO_CL_COPY_LAST,
+	RO_CL_TEST_PREV_FRAME,
+	RO_CL_STORE_DEPTH
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 const int N_DYNAMIC_AMBIENT_INFO_COMPONENTS = 6;

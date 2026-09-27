@@ -102,7 +102,9 @@ bool SetModeFromConfig( bool bRecreate )
 	if ( bCanRenderShadows )
 	{
 		if ( hl >= NGfx::HL_GFORCE3 )
-			rtInfo.nRegisters = 5;
+			// Keep cached surface-depth history separate from register 4, which
+			// this renderer reuses for both sun shadows and specular intermediates.
+			rtInfo.nRegisters = 6;
 		else
 		{
 			if ( bCanCacheLighting )
