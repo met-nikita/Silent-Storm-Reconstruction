@@ -1441,6 +1441,8 @@ void CUnitAnimator::ForcedMove( const NAI::SUnitPosition &cmdPos )
 	N_DEFAULT_TRANSIT_TIME = N_FORCED_MOVE_TIME;
 	DefaultAction( cmdPos );
 	N_DEFAULT_TRANSIT_TIME = backup;
+	// Retail v1.2 0x73e25b: this transition also retires an inactive/jump pose.
+	bInactivePose = cmdPos.pos.p.GetPose() == NAI::CM_INACTIVE;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CUnitAnimator::Fall( const NAI::SUnitPosition &cmdPos, float fPrevHeight )

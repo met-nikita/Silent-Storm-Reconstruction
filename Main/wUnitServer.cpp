@@ -18,6 +18,7 @@
 #include "..\Misc\RandomGen.h"
 #include "RPGUnit.h"
 #include "aiPath.h"
+#include "aiGrid.h"               // forced relocation requires a tile with movement exits
 #include "aiMap.h"                // NAI::IAIMap::GetObjectBound (mine-LOS probe pull-back)
 #include "scScenarioTracker.h"
 #include "scriptCallLUA.h"		// NScript::luaCallFunction (OnClickUsable)
@@ -713,59 +714,76 @@ void CUnitServer::ForcedMove()
 	SSphere s( GetPosition().GetCP(), 3 );
 	vector<NAI::SPathPlace> res;
 	pNet->GetNearPlaces( s, &res );
-	float fMinDist = 1000, fMinHorDist = 1000;
+	float fMinDist = 1000;
+	bool bFall = false;
 	NAI::SUnitPosition dst( GetPosition() );
 	int pose = GetPosition().pos.p.GetPose();
 	if ( pose == NAI::CM_INACTIVE )
 		pose = NAI::CM_CROUCH;
 	float fMaxFall = GetMaxFallDist( fLastHeight );   // retail @0x3c0b80 passes fLastHeight as the ray-origin z
+	float fDirection = GetPosition().GetDirection();
+	CVec3 facing( cos( fDirection ) * 0.3f, sin( fDirection ) * 0.3f, 0.3f );
 	for ( int i = 0; i < res.size(); ++i )
 	{
 		res[i].SetPose( pose );
 		res[i].SetDirection( GetPosition().GetDir() );
 		if ( !pNet->IsPassable( res[i] ) )
 			continue;
+		// Retail LookWhereToMoveUnit @0x47e530 also rejects passable but isolated tiles.
+		NAI::CNodesLayer *pLayer = GetPosition().pos.pNet->GetLayer( res[i].GetLayer() );
+		if ( !pLayer || pLayer->tiles[res[i].GetY()][res[i].GetX()].nMove[pose] == 0 )
+			continue;
 		NAI::SPosition pos;
 		pos.p = res[i];
 		pos.SetNetwork( pNet );
 		CVec3 cp = pos.GetCP();
 		CVec3 desired = GetPosition().GetCP();
-		if ( cp.z > fLastHeight + 0.01f )
+		if ( fLastHeight - cp.z < -0.05f )
 			continue;
 		CVec3 vDist = desired - cp; 
 		float fZDist = fLastHeight - cp.z;
 		float fHorDist = vDist.x * vDist.x + vDist.y * vDist.y;
+		// Retail criterion @0x47e420 mildly prefers destinations ahead of the unit.
+		float fPenalty = vDist.x * facing.x + vDist.y * facing.y + fZDist * facing.z > 0 ? 0.04f : 0;
+		bool bCandidateFall = false;
 		float fDist;
 		if ( fZDist < fMaxFall ) 
 		{
 			if ( fHorDist < 0.01f )
+			{
 				fDist = fHorDist + fZDist * fZDist * 0.2f * 0.2f;
+				bCandidateFall = true;
+			}
 			else
-				fDist = fHorDist + fZDist * fZDist;
+				fDist = fHorDist + fZDist * fZDist + fPenalty;
 		}
 		else
-			fDist = fHorDist + fZDist * fZDist * 4;
+			fDist = fHorDist + fZDist * fZDist * 4 + fPenalty;
 		if ( fDist < fMinDist )
 		{
 			fMinDist = fDist;
-			fMinHorDist = vDist.x * vDist.x + vDist.y * vDist.y;
+			bFall = bCandidateFall;
 			dst.pos.p = res[i];
 		}
 	}
 	if ( fMinDist < 100 )
 	{
-		if ( fMinHorDist < 0.01f )
+		if ( bFall )
 		{
 			SetPosition( dst );
 			Fall();
 		}
 		else
 		{
+			// Retail v1.2 0x7c1137: begin at NOW, not the end of the last (possibly old) action.
+			animator.AlignTime();
 			animator.ForcedMove( dst );
+			SetPosition( dst );
 			Update();
 			GetWorld()->UpdateVisible();
-			SetPosition( dst );
 		}
+		// Refresh the destination's grid information after re-locking (retail 0x7c118f).
+		pNet->GetPassability( GetPosition().pos.p );
 		return;
 	}
 	// retail @0x3c0b80: nowhere to land at all -> the unit dies FALLING. Stash the pre-fall height

@@ -194,6 +194,8 @@ void CWindowDoor::OpenClose( bool bOpen, bool bAbruptly, CUnitServer *pWho )
 		pAnimator->AddMemorizer( tEnd );
 	}
 	pWorld->GetPathNetwork()->FlipperOpenClose( this, bOpen );
+	// Retail v1.2 0x782816: relocate obstructed units when the swing starts.
+	pWorld->GridInfoUpdated();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // retail @0x3813b0: lock/unlock the door and, WHEN LOCKING, record the required-key id and the
