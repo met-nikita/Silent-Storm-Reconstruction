@@ -32,7 +32,7 @@ static void UpdateCharacterSkillUI( NGame::IUnitTracker *pUnit, CText *pText, CI
 	{
 		pIcon->SetStyle( STYLE_VISIBLE, nChange != 0 );
 		if ( nChange != 0 )
-			pIcon->SetImage( NDb::GetUITexture( nChange > 0 ? 950 : 951 ) );
+			pIcon->SetImage( NDb::GetUITexture( nChange > 0 ? 946 : 947 ) );
 	}
 	NRPG::IUnitMissionInfo *pInfo = pUnit->GetUnit()->GetRPG();
 	pBar->SetValue( pInfo->GetSkillProgress( skill ) );
