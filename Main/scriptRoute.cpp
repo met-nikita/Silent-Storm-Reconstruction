@@ -184,8 +184,7 @@ BEGIN_SCRIPT_COMMAND( UnitFlyToWaypoint, "us" )
 			unitPos.pos = pos;
 			unitPos.bRun = false;
 			// retail NScript::DoCommand(pUS, new CCmdFly(unitPos), true): set the command, then continue.
-			pUS->Do( new NWorld::CCmdSetCommand( pUS, new NWorld::CCmdFly( unitPos ) ) );
-			pUS->Do( new NWorld::CCmdSetCommand( pUS, new NWorld::CCmdContinue() ) );
+			DoCommand( pUS, new NWorld::CCmdFly( unitPos ), true );
 		}
 	}
 	return 0;

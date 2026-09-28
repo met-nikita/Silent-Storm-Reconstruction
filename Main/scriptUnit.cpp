@@ -256,8 +256,7 @@ BEGIN_SCRIPT_COMMAND( UnitShoot, "uun" )
 		return 0;
 	//
 	NAI::EHitLocation hl = ( NAI::EHitLocation )( int )luaParams[ 2 ].n;
-	pUS->Do( new NWorld::CCmdSetCommand( pUS, new NWorld::CCmdShootObject( pTarget, 0, hl ) ) );
-	pUS->Do( new NWorld::CCmdSetCommand( pUS, new NWorld::CCmdContinue() ) );
+	DoCommand( pUS, new NWorld::CCmdShootObject( pTarget, 0, hl ), true );
 	return 0;
 END_SCRIPT_COMMAND
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -266,8 +265,7 @@ BEGIN_SCRIPT_COMMAND( UnitSetShootMode, "un" )
 	if (pUS)
 	{
 		NDb::EShootMode mode = ( NDb::EShootMode )luaParams[ 1 ].n;
-		pUS->Do( new NWorld::CCmdSetCommand( pUS, new NWorld::CCmdShootMode( mode ) ) );
-		pUS->Do( new NWorld::CCmdSetCommand( pUS, new NWorld::CCmdContinue() ) );
+		DoCommand( pUS, new NWorld::CCmdShootMode( mode ), true );
 	}
 	return 0;
 END_SCRIPT_COMMAND
@@ -277,8 +275,7 @@ BEGIN_SCRIPT_COMMAND( UnitSetWishPose, "un" )
 	if (pUS)
 	{
 		NAI::EPose pose = ( NAI::EPose )luaParams[ 1 ].n;
-		pUS->Do( new NWorld::CCmdSetCommand( pUS, new NWorld::CCmdWishPose( pose ) ) );
-		pUS->Do( new NWorld::CCmdSetCommand( pUS, new NWorld::CCmdContinue() ) );
+		DoCommand( pUS, new NWorld::CCmdWishPose( pose ), true );
 	}
 	return 0;
 END_SCRIPT_COMMAND
@@ -290,8 +287,7 @@ BEGIN_SCRIPT_COMMAND( UnitSetPose, "un" )
 		NAI::EPose pose = ( NAI::EPose )luaParams[ 1 ].n;
 		NAI::SUnitPosition pos = pUS->GetPosition();
 		pos.SetPose( pose );
-		pUS->Do( new NWorld::CCmdSetCommand( pUS, new NWorld::CCmdPath( pos.pos, NAI::PF_USE_POSEDIR ) ) );
-		pUS->Do( new NWorld::CCmdSetCommand( pUS, new NWorld::CCmdContinue() ) );
+		DoCommand( pUS, new NWorld::CCmdPath( pos.pos, NAI::PF_USE_POSEDIR ), true );
 	}
 	return 0;
 END_SCRIPT_COMMAND
@@ -304,8 +300,7 @@ BEGIN_SCRIPT_COMMAND( UnitSetDirection, "un" )
 		NAI::SPosition pos = pUS->GetPosition().pos;
 		pos.p.SetDirection( dir );
 		// retail @0x2f7600 queues a LOOK (turn in place), not a path
-		pUS->Do( new NWorld::CCmdSetCommand( pUS, new NWorld::CCmdLook( pos ) ) );
-		pUS->Do( new NWorld::CCmdSetCommand( pUS, new NWorld::CCmdContinue() ) );
+		DoCommand( pUS, new NWorld::CCmdLook( pos ), true );
 	}
 	return 0;
 END_SCRIPT_COMMAND
@@ -370,8 +365,7 @@ BEGIN_SCRIPT_COMMAND( UnitReload, "u" )
 	CDynamicCast<NWorld::CUnitServer> pUS(luaParams[0].p);
 	if (pUS)
 	{
-		pUS->Do( new NWorld::CCmdSetCommand( pUS, new NWorld::CCmdReload() ) );
-		pUS->Do( new NWorld::CCmdSetCommand( pUS, new NWorld::CCmdContinue() ) );
+		DoCommand( pUS, new NWorld::CCmdReload(), true );
 	}
 	return 0;
 END_SCRIPT_COMMAND
@@ -445,12 +439,11 @@ BEGIN_SCRIPT_COMMAND( UnitPlayAnimation, "unbb[false]" )
 	return 0;
 END_SCRIPT_COMMAND
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-BEGIN_SCRIPT_COMMAND( UnitHide, "u" )
+BEGIN_SCRIPT_COMMAND( UnitHide, "ub[true]" )
 	CDynamicCast<NWorld::CUnitServer> pUS(luaParams[0].p);
 	if (pUS)
 	{
-		pUS->Do( new NWorld::CCmdSetCommand( pUS, new NWorld::CCmdHide() ) );
-		pUS->Do( new NWorld::CCmdSetCommand( pUS, new NWorld::CCmdContinue() ) );
+		DoCommand( pUS, new NWorld::CCmdHide( luaParams[ 1 ].b ), true );
 	}
 	return 0;
 END_SCRIPT_COMMAND
@@ -582,8 +575,7 @@ BEGIN_SCRIPT_COMMAND( UnitTakeCorpse, "uu" )
 	CDynamicCast<NWorld::CUnitServer> pCorpse( luaParams[ 1 ].p );
 	if ( IsValid( pUS ) && IsValid( pCorpse ) && pUS->CanFight() && !pCorpse->CanFight() )
 	{
-		pUS->Do( new NWorld::CCmdSetCommand( pUS, new NWorld::CCmdTakeCorpse( ( NWorld::CUnit * )pCorpse ) ) );
-		pUS->Do( new NWorld::CCmdSetCommand( pUS, new NWorld::CCmdContinue() ) );
+		DoCommand( pUS, new NWorld::CCmdTakeCorpse( ( NWorld::CUnit * )pCorpse ), true );
 	}
 	return 0;
 END_SCRIPT_COMMAND
@@ -592,8 +584,7 @@ BEGIN_SCRIPT_COMMAND( UnitDropCorpse, "u" )
 	CDynamicCast<NWorld::CUnitServer> pUS(luaParams[0].p);
 	if (pUS)
 	{
-		pUS->Do( new NWorld::CCmdSetCommand( pUS, new NWorld::CCmdDropCorpse() ) );
-		pUS->Do( new NWorld::CCmdSetCommand( pUS, new NWorld::CCmdContinue() ) );
+		DoCommand( pUS, new NWorld::CCmdDropCorpse(), true );
 	}
 	return 0;
 END_SCRIPT_COMMAND
@@ -610,9 +601,7 @@ BEGIN_SCRIPT_COMMAND( UnitActivateWeapon, "ub[true]" )
 	if (pUS)
 	{
 		NWorld::ENeedActiveItem needActiveItem = luaParams[ 1 ].b ? NWorld::ITEM_ACTIVE : NWorld::ITEM_INACTIVE;
-		pUS->Do( new NWorld::CCmdSetCommand( pUS, 
-			new NWorld::CCmdPath( pUS->GetPosition().pos, NAI::PF_DEFAULT, needActiveItem ) ) );
-		pUS->Do( new NWorld::CCmdSetCommand( pUS, new NWorld::CCmdContinue() ) );
+		DoCommand( pUS, new NWorld::CCmdPath( pUS->GetPosition().pos, NAI::PF_DEFAULT, needActiveItem ), true );
 		// Retail v1.2 0x6f9d30: later movement must preserve a scripted holster.
 		pUS->SetWalkWithoutWeapon( !luaParams[ 1 ].b );
 	}
@@ -849,8 +838,7 @@ BEGIN_SCRIPT_COMMAND( UnitAttackWaypoint, "us" )
 		if ( IsValid( pWaypoint ) )
 		{
 			CVec3 cp = pWaypoint->pos.GetCP();
-			pUS->Do( new NWorld::CCmdSetCommand( pUS, new NWorld::CCmdShootTile( cp ) ) );
-			pUS->Do( new NWorld::CCmdSetCommand( pUS, new NWorld::CCmdContinue() ) );
+			DoCommand( pUS, new NWorld::CCmdShootTile( cp ), true );
 		}
 	}
 	return 0;
@@ -958,8 +946,7 @@ BEGIN_SCRIPT_COMMAND( UnitShootPrepare, "uun" )
 		NAI::EHitLocation hl = ( NAI::EHitLocation )( int )luaParams[ 2 ].n;
 		NWorld::CCmdShootObject *pCmd = new NWorld::CCmdShootObject( pTarget, 0, hl );
 		pCmd->bOnlyPrepareToShoot = true;			// public flag: aim/prepare only
-		pUS->Do( new NWorld::CCmdSetCommand( pUS, pCmd ) );
-		pUS->Do( new NWorld::CCmdSetCommand( pUS, new NWorld::CCmdContinue() ) );
+		DoCommand( pUS, pCmd, true );
 	}
 	return 0;
 END_SCRIPT_COMMAND
@@ -972,8 +959,7 @@ BEGIN_SCRIPT_COMMAND( UnitLeavePK, "u" )
 	{
 		if ( IsValid( pUS->GetWearingPK() ) )
 		{
-			pUS->Do( new NWorld::CCmdSetCommand( pUS, new NWorld::CCmdExitPK() ) );
-			pUS->Do( new NWorld::CCmdSetCommand( pUS, new NWorld::CCmdContinue() ) );
+			DoCommand( pUS, new NWorld::CCmdExitPK(), true );
 		}
 		else
 		{
@@ -996,7 +982,7 @@ BEGIN_SCRIPT_COMMAND( UnitWearPK, "uu" )
 	if ( pWho && pCorpse )
 	{
 		if ( pCorpse->CanFight() )						// ORIGINAL BUG: inverted
-			pWho->Do( new NWorld::CCmdSetCommand( pWho, new NWorld::CCmdTakeCorpse( ( NWorld::CUnit * )pCorpse ) ) );
+			DoCommand( pWho, new NWorld::CCmdTakeCorpse( ( NWorld::CUnit * )pCorpse ), true );
 		else
 		{
 			string szWho, szCorpse;
@@ -1055,7 +1041,7 @@ END_SCRIPT_COMMAND
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // Shared scan+equip for UnitDrawWeapon / UnitSwitchToGrenade (retail @0x2faa50 / @0x2fa760): find the
 // FIRST live backpack item of runtime type TItem and exchange it into the unit's active hand, displacing
-// the in-hand item. The target hand slot = (no active item) ? SLOT_2 : SLOT_1 (the retail "(active==0)?1:0",
+// the in-hand item. The target hand slot is the opposite of the active SLOT (retail "(active==0)?1:0",
 // disasm @0x6fabc9). The exchange is the new NWorld::CCmdExchangeInventoryItems.
 template< class TItem >
 static void DrawFirstInventoryItem( NWorld::CUnitServer *pUS )
@@ -1067,11 +1053,10 @@ static void DrawFirstInventoryItem( NWorld::CUnitServer *pUS )
 		NRPG::IInventoryItem *pItem = items[ i ].pItem;
 		if ( !IsValid( pItem ) || !CDynamicCast<TItem>( pItem ) )
 			continue;
-		int nSlot = ( pInfo->GetActive() == 0 ) ? NDb::SLOT_2 : NDb::SLOT_1;
+		int nSlot = ( pInfo->GetActiveSlot() == NDb::SLOT_1 ) ? NDb::SLOT_2 : NDb::SLOT_1;
 		NWorld::SItem sSource( pUS, NWorld::SItem::BACKPACK, pItem );
 		NWorld::SItem sTarget( pUS, NWorld::SItem::SLOT, nSlot, pInfo->Get( (NDb::ESlot)nSlot ) );
-		pUS->Do( new NWorld::CCmdSetCommand( pUS, new NWorld::CCmdExchangeInventoryItems( sSource, sTarget, true, nSlot ) ) );
-		pUS->Do( new NWorld::CCmdSetCommand( pUS, new NWorld::CCmdContinue() ) );
+		DoCommand( pUS, new NWorld::CCmdExchangeInventoryItems( sSource, sTarget, true, nSlot ), true );
 		return;		// first match only
 	}
 }
@@ -1084,15 +1069,25 @@ BEGIN_SCRIPT_COMMAND( UnitDrawWeapon, "u" )
 	return 0;
 END_SCRIPT_COMMAND
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// retail @0x2fa760 ("u"): if neither hand already holds a grenade, draw the first grenade from the
-// backpack into the active hand.
+// Retail v1.2 0x6f61d0: a held grenade takes priority over backpack items.
+static bool CheckGrenade( NWorld::CUnitServer *pUS, NRPG::IInventoryInfo *pInfo, NDb::ESlot slot )
+{
+	NRPG::IInventoryItem *pItem = pInfo->Get( slot );
+	if ( !IsValid( pItem ) || !CDynamicCast<NDb::CRPGGrenade>( pItem->GetDBItem()->pSuccessor ) )
+		return false;
+	if ( pInfo->GetActiveSlot() != slot )
+		DoCommand( pUS, new NWorld::CCmdSetActiveItem( slot ), true );
+	return true;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// Activate a held grenade first; otherwise draw one from the backpack.
 BEGIN_SCRIPT_COMMAND( UnitSwitchToGrenade, "u" )
 	CDynamicCast<NWorld::CUnitServer> pUS( luaParams[ 0 ].p );
 	if ( IsValid( pUS ) )
 	{
 		NRPG::IInventoryInfo *pInfo = pUS->GetRPG()->GetInventoryInfo();
-		if ( !CDynamicCast<NRPG::CGrenadeItem>( pInfo->Get( NDb::SLOT_1 ) ) &&
-			 !CDynamicCast<NRPG::CGrenadeItem>( pInfo->Get( NDb::SLOT_2 ) ) )
+		if ( !CheckGrenade( pUS, pInfo, NDb::SLOT_1 ) &&
+			 !CheckGrenade( pUS, pInfo, NDb::SLOT_2 ) )
 			DrawFirstInventoryItem<NRPG::CGrenadeItem>( pUS );
 	}
 	return 0;
@@ -1120,8 +1115,7 @@ BEGIN_SCRIPT_COMMAND( CreateAndActivateItem, "un" )
 				CTPoint<int> sPlace;
 				sMoveTarget = NWorld::SItem( pUS, pInfo->FindPlace( pOld, &sPlace ) ? NWorld::SItem::BACKPACK : NWorld::SItem::GROUND, CTPoint<int>( -1, -1 ) );
 			}
-			pUS->Do( new NWorld::CCmdSetCommand( pUS, new NWorld::CCmdCreateAndActivateInventoryItem( pItem, NDb::SLOT_1, bNeedMove, sMoveSource, sMoveTarget ) ) );
-			pUS->Do( new NWorld::CCmdSetCommand( pUS, new NWorld::CCmdContinue() ) );
+			DoCommand( pUS, new NWorld::CCmdCreateAndActivateInventoryItem( pItem, NDb::SLOT_1, bNeedMove, sMoveSource, sMoveTarget ), true );
 		}
 		else
 			csSystem << CC_RED << "Script warning: Invalid rpgitem id: " << luaParams[ 1 ].n << endl;
@@ -1301,8 +1295,8 @@ END_SCRIPT_COMMAND
 // IS-A CDebrisController) GetFrozenItem(). Faithfulness: the retail builds the two SItems inline (the decomp's
 // "@0x76fcb0" calls are just CPtr<IObject>::operator=, NOT a helper) with src/dst eType stores 3/4 -- which,
 // under the release EPlacement enum (a VACUUM=0 prefix the dev enum lacks), are GROUND/BACKPACK; i.e. exactly
-// the dev's proven loot-move idiom (aiLootAction.cpp:77-82). Issued via the CCmdSetCommand+CCmdContinue idiom
-// the landed UnitCreateItem uses. (Build-verified; user runtime-tests the pickup behaviour.)
+// the dev's proven loot-move idiom (aiLootAction.cpp:77-82). Retail queues the move and Continue
+// through the owning commander (v1.2 0x6faad8).
 BEGIN_SCRIPT_COMMAND( UnitTakeObject, "uu" )
 	CDynamicCast<NWorld::CUnitServer> pUS( luaParams[ 0 ].p );
 	// GetItem(name) returns the on-ground CDFrozenItem -- an IItem that HOLDS the inventory item, not an
@@ -1322,8 +1316,7 @@ BEGIN_SCRIPT_COMMAND( UnitTakeObject, "uu" )
 			NWorld::SItem dst( (NWorld::CUnit*)pUS.GetPtr(), NWorld::SItem::BACKPACK );
 			dst.sPosition.x = -1;
 			dst.sPosition.y = -1;
-			pUS->Do( new NWorld::CCmdSetCommand( pUS, new NWorld::CCmdMoveInventoryItem( src, dst ) ) );
-			pUS->Do( new NWorld::CCmdSetCommand( pUS, new NWorld::CCmdContinue() ) );
+			DoCommand( pUS, new NWorld::CCmdMoveInventoryItem( src, dst ), true );
 		}
 	}
 	return 0;
