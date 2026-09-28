@@ -3312,18 +3312,75 @@ void CWorld::OnNewPlayerTurn( CPlayer *pPlayer )
 	// (StartPlayerTurn calls OnNewPlayerTurn then OnPassControl -- still exactly ONE pass-control throw).
 	//
 	GetGlobalAck()->OnNewTurnStarted( pPlayer );
-	RollNewWeather( 60 );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // retail CTBSWorld::OnPassControl @0x372bf0 (via ProcessTBSEvents @0x3675d0, STBSEvent tag9): every
-// control hand-over throws CEventOnPassControl(current stack-top owner). Subscribers: the per-unit
+// control hand-over throws CEventOnPassControl(captured owner). Subscribers: the per-unit
 // threat tracker (OnNewTurn @0xab180 -> CAIBeginTurnEvent -> PrepareEnemies @0xb17a0 == dev Populate)
-// and, dev-side, the commanders are notified by the base body's direct OnPassControl loop. An ownerless
+// and, dev-side, commanders receive the same captured owner here. An ownerless
 // (sequence) top throws with a null player -- the tracker's own-player filter makes that a no-op,
 // matching retail.
-void CWorld::OnPassControlNotify()
+void CWorld::OnPassControlNotify( CPlayer *pPlayer )
 {
-	NGlobal::ThrowEvent( CEventOnPassControl( GetTBSCurrentPlayer() ) );
+	NGlobal::ThrowEvent( CEventOnPassControl( pPlayer ) );
+	vector< CPtr<CPlayer> > players;
+	GetPlayersList( &players );
+	for ( int k = 0; k < players.size(); ++k )
+		players[k]->GetCommander()->OnPassControl( pPlayer );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CWorld::ProcessTBSEvents()
+{
+	// Retail v1.2 0x767820: pop before dispatch, and drain events appended by callbacks.
+	bool bRecalc = false;
+	while ( !events.empty() )
+	{
+		STBSEvent event = events.front();
+		events.pop_front();
+		CDynamicCast<CPlayer> pPlayer( event.pParam );
+		vector< CPtr<CPlayer> > players;
+		switch ( event.event )
+		{
+		case TBS_START_NEW_TURN:
+			willWantTBS.clear();
+			pPlayer->OnTBSEvent( TBS_START_NEW_TURN );
+			OnNewPlayerTurn( pPlayer );
+			UINeedUpdate();
+			RollNewWeather( 60 );
+			break;
+		case TBS_FINISH_OWN_TURN:
+			if ( IsValid( pPlayer ) )
+				pPlayer->OnTBSEvent( TBS_FINISH_OWN_TURN );
+			break;
+		case TBS_START_REAL_TIME:
+			GetPlayersList( &players );
+			for ( int k = 0; k < players.size(); ++k )
+				players[k]->OnTBSEvent( TBS_START_REAL_TIME );
+			OnRealTimeStarted();
+			break;
+		case TBS_GLOBAL_SITUATION_CHANGED:
+			GetPlayersList( &players );
+			for ( int k = 0; k < players.size(); ++k )
+				players[k]->GetCommander()->ClearList();
+			CancelAllAction();
+			break;
+		case TBS_NEW_LARGE_TURN:
+			OnNewTurn();
+			break;
+		case TBS_PASS_CONTROL:
+			OnPassControlNotify( pPlayer );
+			// Fall through: all control notifications share one final command recalculation.
+		case TBS_RECALC_COMMAND:
+			bRecalc = true;
+			break;
+		case TBS_GRID_INFO_UPDATED:
+			GetPlayersList( &players );
+			for ( int k = 0; k < players.size(); ++k )
+				players[k]->OnTBSEvent( TBS_GRID_INFO_UPDATED );
+			break;
+		}
+	}
+	ProcessActionTracker( bRecalc );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CWorld::OnNewPlayerFastTurnOrTime( const CEventOnNewPlayerFastTurnOrTime &event )

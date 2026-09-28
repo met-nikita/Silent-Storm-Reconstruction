@@ -566,7 +566,8 @@ public:
 	// queues STBSEvent tag9 -> ProcessTBSEvents @0x3675d0 throws) -- base turn AND stacked interrupt AND
 	// interrupt-pop resume. The event drives the per-unit begin-turn threat refresh (tracker OnNewTurn
 	// @0xab180 -> CAIBeginTurnEvent -> PrepareEnemies @0xb17a0 == dev Populate). Defined in wMain.cpp.
-	virtual void OnPassControlNotify();
+	void OnPassControlNotify( CPlayer *pPlayer );
+	virtual void ProcessTBSEvents();
 	virtual bool IsUnitActive( CUnit *pTest ) const { return IsTBSUnitActive( GetUnit(pTest) ); }
 	virtual void GetActiveUnits( IPlayer *pPlayer, list<CUnit*> *pRes );
 	virtual bool IsFirstTurn() const { return TTBSWorld::IsFirstTurn(); }

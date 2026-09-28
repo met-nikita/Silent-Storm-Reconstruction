@@ -880,41 +880,24 @@ void CUnitServer::OnTBSEvent( ETBSEvent event )
 			}
 			break;
 		case TBS_STOP_MOVE_AND_CANCEL_ACTION:
-			// retail CUnitServer::OnTBSEvent @0x3c2a90 snaps a unit interrupted MID-MOVE to its current grid
-			// cell (animator.PlaceUnit) and then RELEASES its move executor (pExec = 0), so it ends on a
-			// valid, pathable place -- not mid-stride/off-grid with a half-cancelled CExecMove that would
-			// make every later move order FindPath-fail and silently drop.
-			//
-			// HOWEVER: in this tree the sighting interrupt can fire RE-ENTRANTLY from inside the unit's own
-			// move processing (CExecMove::DoCommand -> ... -> AddInterrupt -> CancelAllAction -> here), so
-			// releasing the executor outright would FREE it while its own DoCommand is still on the call
-			// stack -> use-after-free (double-free of pCurCmd in CObjectBase::ReleaseObj, then heap
-			// corruption). Retail can free here because it never delivers the interrupt re-entrantly. So we
-			// keep the SNAP (PlaceUnit is already invoked mid-exec safely by IsWaitingForPath) but tear the
-			// move down the SAFE way via CancelAction -> CExecMove::Cancel(), which only MARKS the exec
-			// FAILED (no free); CheckCmdExecState then drops pExec on a later Segment tick. Same on-grid end
-			// state, no re-entrant free.
-			// Retail v1.2 0x7c3234 tests this same animation flag. Vaults,
-			// ladders and mounted poses must retain their current animation.
+			// Retail v1.2 0x7c3215: queued delivery is outside executor callbacks.
 			if ( CDynamicCast<IExecMove>( pExec ) && CanFight() && animator.bStandIfRecalcCommand )
+			{
 				animator.PlaceUnit( GetPosition() );
-			CancelAction();
-			// TURN-STALL FIX (dev-bugs s6 retest#5, bug B): retail @0x3c2a90 RELEASES the move executor
-			// here, so the interrupted move COMMAND is gone with it. The dev tree keeps pExec alive (the
-			// re-entrant-free hazard documented above) but must still abandon the command: CancelAction's
-			// own `pCurrentCmd = 0` is commented out and CheckCmdExecState clears pCurrentCmd only on
-			// FINISHED -- so a move cancelled by this global broadcast (WantTurnBased ->
-			// GlobalSituationHasChanged -> CancelAllAction, i.e. the real-time -> turn-based transition)
-			// left a STALE pCurrentCmd. CAICombatLogic::HasCommandToExecute() (@0x432da0) reads it via
-			// HasCommand(), which made the unit's think-job IsIdleJob()==true forever (@0x4331c0), the
-			// job manager never ran it, the tactical commander's WaitForJob dependency never finished,
-			// bEndOfTurn never latched -- the AI player's first turn never ended. Clearing the command
-			// here mirrors retail's executor release; the unit's route/logic re-decides from scratch.
-			pCurrentCmd = 0;
+				pExec = 0;
+			}
+			if ( IsValid( pExec ) )
+				CancelAction();
 			break;
 		default:
 			ASSERT( 0 );
 	}
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+bool CUnitServer::HasAutoFirstTurnInterrupt() const
+{
+	// Retail v1.2 0x7bf730, reached by first-turn interrupt collection.
+	return GetUnitRPG()->GetRPGUnit()->HasPerk( 0x1b );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CUnitServer::IsPerformingAction() const
@@ -986,41 +969,10 @@ void CUnitServer::Segment()
 		// pump now lives in CExecMove::CheckCanDoMove/CheckLockerState/TryToSetNewPath, driven from
 		// CPathConflictsRemover::Segment (@0x3cc670). Still waiting after servicing -> hold this tick.
 		pExec->Segment();
-		// RETAIL RETIRE PREDICATE (disasm @0x3c2f00, re-derived dev-bugs s7 after the hold-aim
-		// regression): the retail pump retires an executor (AnimationFinished vtbl+0x20 +
-		// CheckCmdExecState @0x3c08b0) ONLY at an animation edge -- `if (tCur < animator.TimeEnd
-		// [this+0x5c]) break;` guards both calls, and the loop's only other exits are pExec
-		// null/zombie, !IsExecuting (vtbl+0x28) and the PCR wait probe (vtbl+0x14). There is NO
-		// state-based reap anywhere in the retail loop: a FINISHED executor installed while the
-		// animator's end-time stays ahead IS retail's hold-aim -- the shoot exec goes FINISHED at
-		// the shot and keeps the aiming pose until the anim edge / a new command tears it down.
-		// (The first s7 attempt reaped ANY non-RUNNING exec every pass; that retired healthy
-		// FINISHED attack execs instantly = pose reset after every shot. REGRESSION -- narrowed.)
-		//
-		// Two dev-necessary deviations remain, both because dev cancels DEFER the release (the TBS
-		// stop paths here cannot free the exec re-entrantly the way retail @0x3c2a90 does), so a
-		// DEAD exec can linger installed where retail structurally cannot:
-		//   (s7) FAILED = cancelled/failed -- never a hold-pose state (hold-aim is FINISHED,
-		//        regression-trace-proven) -> reap promptly. This is the wedge net for a cancelled
-		//        exec (e.g. a queue Cancel latching FAILED while its front's clip still plays)
-		//        sitting under an ever-ahead TimeEnd, swallowing MOVE re-aims until an attack.
-		if ( pExec->GetState() == CCommandExecute::FAILED )
-		{
-			CheckCmdExecState();
-			break;
-		}
+		// Retail v1.2 0x7c3346: parked movement waits; normal retirement is
+		// driven by the animation boundary, not the executor's finish-state flag.
 		if ( pExec->IsWaitingForPath() )
-		{
-			//   (s6, retest#5 bug B) a wait-PARKED mover whose move already terminated
-			//        (TryToSetNewPath found no route -> FullCancel latched state=FINISHED but,
-			//        retail-faithfully, left bWaiting set) can never reach the animation pump
-			//        below, so it was NEVER reaped: its CObj<CActionCounter> pinned
-			//        CTBSWorld::IsAction() true forever and froze the first enemy turn. Reap the
-			//        dead park; only a still-RUNNING park (live 10-tick locker retry) holds the tick.
-			if ( pExec->GetState() != CCommandExecute::RUNNING )
-				CheckCmdExecState();
 			break;
-		}
 		if ( bCallTimeLabel && tCur >= animator.GetTimeLabel1() )
 			bCallTimeLabel = pExec->TimeLabelReached();
 		if ( tCur >= animator.GetTimeEnd() )

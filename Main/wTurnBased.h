@@ -9,23 +9,27 @@ template<class TUnit> struct SAISound;   // wUnitSounds.h (CanPlayerSeeOrHearAct
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 enum ETBSEvent
 {
-	TBS_START_NEW_TURN,
-	TBS_FINISH_OWN_TURN,
-	TBS_START_REAL_TIME,
-	TBS_ACTION_FINISH,
-	TBS_CANCEL_ACTION,
-	TBS_RECALC_COMMAND,
-	// retail ETBSEvent value 10 (transient runtime event, never serialized, so the enumerator order
-	// here is internal): broadcast by CTBSWorld::GridInfoUpdated @0x375ca0 when the path network
-	// reported a change (CWorld::Segment -> CPathNetwork::CheckUpdated @0x4c9a0). The per-unit
-	// handler (CUnitServer::OnTBSEvent @0x3c2a90 case 10) re-seats a locker unit whose tile went
-	// non-passable / whose ground height drifted.
-	TBS_GRID_INFO_UPDATED,
-	// retail ETBSEvent (its value differs in the binary; transient runtime event, never serialized, so the
-	// enumerator order here is internal). A global situation change / interrupt broadcasts THIS, not
-	// TBS_CANCEL_ACTION: a unit caught MID-MOVE must be snapped to a clean grid cell and have its move
-	// executor released (see CUnitServer::OnTBSEvent @0x3c2a90 / CTBSWorld::CancelAllAction @0x36f820).
-	TBS_STOP_MOVE_AND_CANCEL_ACTION
+	TBS_NONE = 0,
+	TBS_START_NEW_TURN = 1,
+	TBS_FINISH_OWN_TURN = 2,
+	TBS_START_REAL_TIME = 3,
+	TBS_ACTION_FINISH = 4,
+	TBS_CANCEL_ACTION = 5,
+	TBS_RECALC_COMMAND = 6,
+	TBS_GLOBAL_SITUATION_CHANGED = 7,
+	TBS_NEW_LARGE_TURN = 8,
+	TBS_PASS_CONTROL = 9,
+	TBS_GRID_INFO_UPDATED = 10,
+	TBS_STOP_MOVE_AND_CANCEL_ACTION = 11
+};
+// Retail STBSEvent: queue payload, not an immediate unit callback.
+struct STBSEvent
+{
+	ETBSEvent event;
+	CPtr<CObjectBase> pParam;
+	STBSEvent() : event(TBS_NONE) {}
+	STBSEvent( ETBSEvent e, CObjectBase *p = 0 ) : event(e), pParam(p) {}
+	int operator&( CStructureSaver &f ) { f.Add(2,&event); f.Add(3,&pParam); return 0; }
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // when someone holds CObj on such object then action is in progress
@@ -160,8 +164,11 @@ class CTBSWorld
 	typedef list<SInterrupt> TInterruptList;
 	ZDATA
 	CPtr<CActionCounter> pSkippableCount, pActiveCount;
-	TInterruptList interrupts, addInterrupts;
+	TInterruptList interrupts;
 	TPlayerList players;
+protected:
+	list<STBSEvent> events;
+private:
 	int nLastPlayerID, nTurnPlayerID;
 	bool bWasAction;
 	bool bFirstTurn;
@@ -176,18 +183,11 @@ public:
 	// retail v1.2 save convergence: retail's CTBSWorld::operator& (@0x37b300) serializes
 	// {2=interrupts, 3=players, 4=nLastPlayerID, 5=nTurnPlayerID, 6=bFirstTurn, 7=events,
 	// 8=bHasCommandFromCurrentPlayer}. Tag 8 is now carried (see the member above).
-	// Tag 7 (Add<STBSEvent>(7,&events), retail +0x18) is the DEFERRED STBSEvent queue drained by
-	// CWorld::ProcessTBSEvents (@0x3675d0) from Segment (@0x36bce0). This fork deliberately applies
-	// STBSEvents SYNCHRONOUSLY at each queue site (GridInfoUpdated/OnPassControl above), so it owns no
-	// such list and the tag is graceful-skipped (the format is tag-addressed + length-prefixed).
-	// This costs NOTHING on the wire: the queue is drained inside Segment, so it is empty at every
-	// save point -- byte-walking all 9 v1.2 slots shows CWorld chunk 1 tag 7 with length 0 in every
-	// one. Modelling it would mean porting the whole deferred pump, not just the field.
+	// Tag 7 is the deferred event queue, drained at the four retail segment boundaries.
 	// The action-counter state (pSkippableCount/pActiveCount/bWasAction/nActionLag) is NOT on retail's
 	// CTBSWorld base -- retail refactored it into a standalone CActionTracker sub-object serialized at
-	// CWorld tag 4 (operator& @0x37a020); CWorld emits it through ActionTrackerChunk() below. The
-	// addInterrupts rebuild list is transient and retail never serializes it.
-	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&interrupts); f.Add(3,&players); f.Add(4,&nLastPlayerID); f.Add(5,&nTurnPlayerID); f.Add(6,&bFirstTurn); f.Add(8,&bHasCommandFromCurrentPlayer); return 0; }   // tag 7 (events) skipped -- see above
+	// CWorld tag 4 (operator& @0x37a020); CWorld emits it through ActionTrackerChunk() below.
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&interrupts); f.Add(3,&players); f.Add(4,&nLastPlayerID); f.Add(5,&nTurnPlayerID); f.Add(6,&bFirstTurn); f.Add(7,&events); f.Add(8,&bHasCommandFromCurrentPlayer); return 0; }
 	// retail CActionTracker (CWorld save tag 4) wire adapter: {2=pSkippableCount, 3=pActiveCount,
 	// 4=bWasAction, 5=nActionLag}. Pointer-holder so CWorld (which cannot see these private fields)
 	// can emit the chunk without reparenting.
@@ -224,25 +224,13 @@ private:
 	}
 	void StartPlayerTurn( TPlayer *pPlayer )
 	{
-		if ( IsSequence() )   // retail @0x375e90 gate: no player turn may start under the ownerless top
+		if ( IsSequence() || !IsValid( pPlayer ) )
 			return;
-		if ( !IsValid( pPlayer ) )
-			return;
-		// Register this player's interrupt BEFORE running the turn-start callbacks. The release Game.exe
-		// does this first thing (CTBSWorld::StartPlayerTurn @0x00775e90; it even defers OnNewPlayerTurn onto
-		// an STBSEvent queue), whereas this dev snapshot pushed it only AFTER OnNewPlayerTurn. The new-turn
-		// event (CEventOnNewPlayerTurnOrTime, thrown from OnNewPlayerTurn) processes periodic damage
-		// (bleeding/fire) and can KILL a unit; with the interrupt not yet present that death reached
-		// OnUnitDied -> MakeUnitInactive with an empty interrupt list, which called StartNextPlayerTurn ->
-		// StartPlayerTurn -> OnNewPlayerTurn again -> re-applied the periodic damage -> another death ->
-		// unbounded recursion (observed stack overflow). With the interrupt present the dying unit is just
-		// removed from it, and the turn only advances once the player genuinely has no units left.
 		interrupts.push_back( SInterrupt( pPlayer ) );
-		pPlayer->OnTBSEvent( TBS_START_NEW_TURN );
-		OnNewPlayerTurn( pPlayer );
+		events.push_back( STBSEvent( TBS_START_NEW_TURN, pPlayer ) );
 		OnPassControl();
 		nTurnPlayerID = pPlayer->GetPlayerID();
- 	}
+	}
 	void StartNextPlayerTurn()
 	{
 		// retail @0x375f80: TWO gates in this order -- IsRealTimePossible (vtbl+0x3c) first,
@@ -256,24 +244,15 @@ private:
 			if ( !pNext )
 			{
 				pNext = GetNextPlayer( 0 );
-				OnNewTurn();
+				events.push_back( STBSEvent( TBS_NEW_LARGE_TURN ) );
 			}
 			StartPlayerTurn( pNext );
 		}
 	}
 public:
-	// retail CTBSWorld::GridInfoUpdated @0x375ca0: queue STBSEvent{10} for the deferred pump. The dev
-	// tree applies STBSEvents synchronously at the queue site (established pattern, see OnPassControl
-	// below), so this broadcasts TBS_GRID_INFO_UPDATED to every player's units directly.
 	void GridInfoUpdated()
 	{
-		for ( TPlayerList::iterator i = players.begin(); i != players.end(); ++i )
-		{
-			const vector< CMObj<TUnit> > &pUnits = (*i)->GetPlayerUnits();
-			for ( unsigned int k = 0; k < pUnits.size(); ++k )
-				if ( IsValid( pUnits[k].GetPtr() ) )
-					pUnits[k]->OnTBSEvent( TBS_GRID_INFO_UPDATED );
-		}
+		events.push_back( STBSEvent( TBS_GRID_INFO_UPDATED ) );
 	}
 	void RecalcCurrentPlayerCommands()
 	{
@@ -305,28 +284,10 @@ public:
 			if ( IsValid( *u ) )
 				(*u)->OnTBSEvent( TBS_RECALC_COMMAND );
 	}
-	// Retail CTBSWorld::OnPassControl @0x372bf0 queues STBSEvent tag9 -> ProcessTBSEvents @0x3675d0
-	// throws CEventOnPassControl on EVERY control hand-over: base turn via StartPlayerTurn @0x375e90,
-	// stacked interrupt via AddInterrupt @0x377400, interrupt-pop resume via EndOfTurn @0x3776f0.
-	// The event drives the begin-turn threat refresh (tracker OnNewTurn @0xab180 -> CAIBeginTurnEvent
-	// -> PrepareEnemies @0xb17a0). The dev tree used to throw it only from OnNewPlayerTurn (base-turn
-	// start), so an interrupting AI unit entered its interrupt turn WITHOUT the threat refresh ->
-	// enemy=0 -> IsEndOfTurn -> instant give-back. Dev expression of the retail queue: a virtual
-	// notify hook (CWorld throws the event). The hook is virtual INSTEAD of OnPassControl itself
-	// because a virtual OnPassControl instantiates with the vtable in every TU and drags
-	// RecalcCurrentPlayerCommands' TUnit::OnTBSEvent calls into TUs where TUnit is incomplete.
-	virtual void OnPassControlNotify() {}
 	void OnPassControl()
 	{
-		TPlayer *pCurrentPlayer = 0;
-		if ( !interrupts.empty() )
-			pCurrentPlayer = interrupts.back().pPlayer;
-
-		OnPassControlNotify();
-		RecalcCurrentPlayerCommands();
-		for ( TPlayerList::iterator i = players.begin(); i != players.end(); ++i )
-			(*i)->GetCommander()->OnPassControl( pCurrentPlayer );
-		bHasCommandFromCurrentPlayer = false;   // retail @0x372bf0 tail (after the STBSEvent{9} queue push)
+		events.push_back( STBSEvent( TBS_PASS_CONTROL, GetTBSCurrentPlayer() ) );
+		bHasCommandFromCurrentPlayer = false;
 	}
 	// (EndOfTurn moved to the public section -- retail vtbl+0x1c is public; luaEndSequence calls it.)
 	void FetchPlayerCommands( TPlayer *pPlayer, bool bAllowNotSkippable )
@@ -407,7 +368,6 @@ protected:
 		if ( IsRealTime() )
 			return;
 		//
-		addInterrupts.clear();
 		for ( TInterruptList::iterator i = interrupts.begin(); i != interrupts.end(); ++i )
 		{
 			if ( i->pPlayer == pPlayer )
@@ -430,21 +390,12 @@ protected:
 			else
 				++i;
 		}
-		for ( TInterruptList::iterator i = addInterrupts.begin(); i != addInterrupts.end(); )
-		{
-			i->RemoveUnit( pUnit );
-			if ( !i->HasUnits() )
-				i = addInterrupts.erase( i );
-			else
-				++i;
-		}
-		if ( interrupts.empty() && addInterrupts.empty() )
+		if ( interrupts.empty() )
 			StartNextPlayerTurn();
 	}
 	void StartTBSGame()
 	{
 		interrupts.clear();
-		addInterrupts.clear();
 		nTurnPlayerID = 0;
 		if ( !IsRealTimePossible() )
 			StartNextPlayerTurn();
@@ -452,14 +403,7 @@ protected:
 	}
 	virtual void OnNewTurn() = 0;
 public:
-	// retail CTBSWorld::StartSequence @0x375dd0 (vtbl+0x18; reached from luac_BeginSequence @0x2f1890
-	// AFTER the per-unit OnSequenceStarted notifies): queue STBSEvent{7} -- applied synchronously here
-	// as GlobalSituationHasChanged, cf. GivePlayerTurn -- then push the OWNERLESS sequence interrupt
-	// {pPlayer=null, units empty} and pass control. The ownerless top IS the sequence state: the
-	// IsRealTime/IsSequence/IsTurnBased tri-state keys on it, GetTBSCurrentPlayer() returns null for
-	// the whole span (CMission::IsRealTime, CUnitServer::IsMoving et al. see retail's ownerless top),
-	// and a turn begun BEFORE the sequence stays buried beneath it and RESUMES when EndOfTurn pops.
-	// Nested sequences stack one entry per Begin (retail nests through the stack itself).
+	// The interrupt stack changes immediately; its notifications are deferred.
 	void StartSequence()
 	{
 		GlobalSituationHasChanged();
@@ -488,13 +432,11 @@ public:
 		}
 		bFirstTurn = false;
 		if ( IsValid( pPrevPlayer ) )
-			pPrevPlayer->OnTBSEvent( TBS_FINISH_OWN_TURN );//FinishOwnTurn();
+			events.push_back( STBSEvent( TBS_FINISH_OWN_TURN, pPrevPlayer ) );
 		StartNextPlayerTurn();
 		if ( IsRealTime() )
 		{
-			OnRealTimeStarted();
-			for ( TPlayerList::iterator i = players.begin(); i != players.end(); ++i )
-				(*i)->OnTBSEvent( TBS_START_REAL_TIME );
+			events.push_back( STBSEvent( TBS_START_REAL_TIME ) );
 		}
 	}
 	CTBSWorld()
@@ -553,38 +495,51 @@ public:
 	}
 	void GlobalSituationHasChanged()
 	{
-		// clear all queued cmds since situation has changed
-		for ( TPlayerList::iterator i = players.begin(); i != players.end(); ++i )
-			(*i)->GetCommander()->ClearList();
-		CancelAllAction();
+		events.push_back( STBSEvent( TBS_GLOBAL_SITUATION_CHANGED ) );
 	}
-	// retail CTBSWorld::GivePlayerTurn @0x377650 (ITBSWorld vtbl+0x14): force the active turn to a specific
-	// player -- reset the situation, drop the whole interrupt stack, and start that player's fresh base turn.
-	// Bails during a scripted sequence (IsSequence -- the ownerless top). The retail STBSEvent-7
-	// (TBS_GLOBAL_SITUATION_CHANGED) is applied synchronously here via GlobalSituationHasChanged().
-	// Must be a CTBSWorld member: StartPlayerTurn + interrupts are private (and this mirrors retail,
-	// where GivePlayerTurn is itself a CTBSWorld vtbl slot).
 	void GivePlayerTurn( TPlayer *pPlayer )
 	{
 		if ( IsSequence() )   // retail @0x377650 gate (CWorld::IsSequence)
 			return;
 		if ( !IsValid( pPlayer ) )
 			return;
-		GlobalSituationHasChanged();	// retail event 7: clear queued cmds + cancel actions
+		GlobalSituationHasChanged();
 		interrupts.clear();				// retail drops the SInterrupt stack
 		StartPlayerTurn( pPlayer );		// retail StartPlayerTurn @0x375e90 (pushes a fresh interrupt)
 	}
 	void AddInterrupt( const list<TUnit*> &units )
 	{
-		if ( IsSequence() )   // retail @0x377400 gate 1 (vtbl+0x24): no interrupt while a sequence runs
-			return;
-		//
-		ASSERT( !units.empty() );
-		if ( units.empty() )
+		if ( IsSequence() || units.empty() )
 			return;
 		GlobalSituationHasChanged();
-		addInterrupts.clear();
-		addInterrupts.push_back( SInterrupt( units ) );
+		TPlayer *pPlayer = units.front()->GetTBSPlayer();
+		if ( interrupts.empty() )
+		{
+			bFirstTurn = true;
+			StartPlayerTurn( pPlayer );
+			CheckAutoFirstTurnInterrupts( pPlayer );
+			return;
+		}
+		while ( interrupts.size() > 1 )
+			interrupts.pop_back();
+		if ( pPlayer != interrupts.back().pPlayer )
+			interrupts.push_back( SInterrupt( units ) );
+		OnPassControl();
+	}
+	void CheckAutoFirstTurnInterrupts( TPlayer *pFirst )
+	{
+		for ( TPlayerList::iterator i = players.begin(); i != players.end(); ++i )
+		{
+			if ( *i == pFirst )
+				continue;
+			list<TUnit*> units;
+			const vector<CMObj<TUnit> > &roster = (*i)->GetPlayerUnits();
+			for ( int k = 0; k < roster.size(); ++k )
+				if ( IsValid( roster[k] ) && roster[k]->HasAutoFirstTurnInterrupt() )
+					units.push_back( roster[k] );
+			if ( !units.empty() )
+				AddInterrupt( units );
+		}
 	}
 	void OnUnitDied( TUnit *p )
 	{
@@ -602,41 +557,37 @@ public:
 			nTemp++;
 		}
 	}
-	// retail CWorld::ProcessTBSEvents @0x3675d0 tail (the STBSEvent queue itself is applied synchronously
-	// in this fork -- see the tag-7 note above -- so only the tail survives): one nActionLag tick
-	// (@0x7677da) + the action-window edge machine (state latch @0x767816). CWorld::Segment @0x36bce0
-	// calls ProcessTBSEvents FOUR times per segment -- 0x76bd13 (before commander segments), 0x76bd39
-	// (after them), 0x76bd4a (after CheckCancelAndInterruptRequests @0x377830), 0x76bd68 (after
-	// FetchNewCommands @0x372950) -- so a lag of N spans N/4 segments of wall clock; the consumer args
-	// (10/30 in wBuilding/wObject/wOSBase/wExplTracker) are calibrated to that rate.
-	void ProcessActionTracker()
+	virtual void ProcessTBSEvents() = 0;
+	// Retail action-window tail runs after the queued notifications at every drain.
+	void ProcessActionTracker( bool bRecalc )
 	{
-		if ( nActionLag > 0 )   // retail @0x7677da
+		if ( nActionLag > 0 )
 			--nActionLag;
-
-		if ( bWasAction && !IsAction() )
+		bool bAction = IsAction();
+		bool bChanged = bWasAction != bAction;
+		bWasAction = bAction;
+		if ( bChanged )
 		{
-			// retail falling edge: the finish is DEFERRED while the incremental vision recalc is behind
-			// (TryUpdateVisible @0x361610; its UpdateVision probe fires at most once per segment).
-			if ( !TryUpdateVisible() )
+			if ( bAction )
+				OnAction( true );
+			else if ( !TryUpdateVisible() )
 			{
-				// re-arm @0x7678fa: renew-and-kill the active counter so ONLY nActionLag holds the window
-				// open -- retail GetActiveCounter(2) = half a segment at four ticks per segment.
-				{
-					CObj<CActionCounter> pTemp = GetActiveCounter( 2 );
-				}
-				OnAction( true );   // retail's only live OnAction(true): idle-ban + PathNetwork freeze held
+				{ CObj<CActionCounter> pTemp = GetActiveCounter( 2 ); }
+				bWasAction = IsAction();
+				OnAction( true );
+				return;
 			}
 			else
 			{
 				OnAction( false );
 				UpdateVisible();
 				for ( TPlayerList::const_iterator k = players.begin(); k != players.end(); ++k )
-					(*k)->OnTBSEvent( TBS_ACTION_FINISH );//OnActionFinish();
-				RecalcCurrentPlayerCommands();
+					(*k)->OnTBSEvent( TBS_ACTION_FINISH );
+				bRecalc = true;
 			}
 		}
-		bWasAction = IsAction();   // per-tick latch re-arm, retail @0x767819
+		if ( bRecalc )
+			RecalcCurrentPlayerCommands();
 	}
 	void Segment()
 	{
@@ -651,50 +602,13 @@ public:
 		// nothing can push onto the stack (AddInterrupt / WantTurnBased / StartPlayerTurn /
 		// GivePlayerTurn all bail on IsSequence, all retail-gated).
 
-		ProcessActionTracker();   // retail @0x76bd13: ProcessTBSEvents #1, before the commander segments
+		ProcessTBSEvents();   // retail @0x76bd13: ProcessTBSEvents #1, before the commander segments
 
 		for ( TPlayerList::iterator i = players.begin(); i != players.end(); ++i )
 			(*i)->GetCommander()->Segment();
 
-		ProcessActionTracker();   // retail @0x76bd39: ProcessTBSEvents #2, after the commander segments
+		ProcessTBSEvents();   // retail @0x76bd39: ProcessTBSEvents #2, after the commander segments
 
-		if ( !addInterrupts.empty() )
-		{
-			ASSERT( addInterrupts.size() == 1 );
-			if ( interrupts.empty() )
-			{
-				bFirstTurn = true;
-				StartPlayerTurn( addInterrupts.front().pPlayer );
-				// retail folded the addInterrupts staging away entirely (CTBSWorld::AddInterrupt @0x377400 /
-				// WantTurnBased @0x375b10 consume the request synchronously: ONE StartPlayerTurn, ONE
-				// pass-control). Leaving the staged entry here made the NEXT Segment take the else-branch
-				// on the SAME player -- a duplicate OnPassControl that re-entered every commander's
-				// turn-start (double CAICommander::OnPassControl -> double tactical Think / lua OnStartTurn)
-				// one segment after the first, wrecking the just-started AI turn's job bookkeeping.
-				addInterrupts.clear();
-			}
-			else if ( interrupts.back().pPlayer == 0 )
-			{
-				// retail AddInterrupt @0x377400: an OWNERLESS top (sequence) silently discards the
-				// request -- no truncation, no push, no pass-control (disasm 0x7774bb early-return).
-				addInterrupts.clear();
-			}
-			else
-			{
-				// no more then one interrupt in stack is allowed
-				while ( interrupts.size() > 1 )
-					interrupts.pop_back();
-				// ignore same player interrupt
-				if ( addInterrupts.front().pPlayer == interrupts.back().pPlayer )
-				{
-//					ASSERT( 0 );
-					addInterrupts.clear();
-				}
-				else
-					interrupts.splice( interrupts.end(), addInterrupts );
-				OnPassControl();
-			}
-		}
 		// check if someone want interrupt
 		if ( interrupts.empty() )
 		{
@@ -726,7 +640,7 @@ public:
 		for ( TPlayerList::iterator i = players.begin(); i != players.end(); ++i )
 			(*i)->GetCommander()->ClearRequests();
 
-		ProcessActionTracker();   // retail @0x76bd4a: ProcessTBSEvents #3, after CheckCancelAndInterruptRequests @0x377830
+		ProcessTBSEvents();   // retail @0x76bd4a: ProcessTBSEvents #3, after CheckCancelAndInterruptRequests @0x377830
 
 		// decide on commands for next segment. Keyed on IsRealTime() (empty stack OR ownerless top):
 		// retail FetchNewCommands @0x372950 fetches from EVERY player both in real time (arg false)
@@ -758,7 +672,7 @@ public:
 			// mid-pose during any TB move/shot (runtime-proven vs retail via d_idle_animation).
 		}
 
-		ProcessActionTracker();   // retail @0x76bd68: ProcessTBSEvents #4, after FetchNewCommands (latch = retail end-of-pump state)
+		ProcessTBSEvents();   // retail @0x76bd68: ProcessTBSEvents #4, after FetchNewCommands (latch = retail end-of-pump state)
 	}
 	// retail GetTBSCurrentPlayer @0x375ab0: the stack top's owner -- NULL during a sequence (ownerless
 	// top) and in real time (empty stack). THE key consumer fix: CWorld::GetCurrentPlayer and the
@@ -840,13 +754,13 @@ public:
 	}
 	void WantTurnBased( TPlayer *pPlayer )
 	{
-		if ( IsSequence() )   // retail @0x375b10 gate (redundant with the empty check below, kept 1:1)
+		if ( IsSequence() || !interrupts.empty() )
 			return;
-		if ( interrupts.empty() && addInterrupts.empty() )
-		{
-			GlobalSituationHasChanged();
-			addInterrupts.push_back( SInterrupt( pPlayer ) );
-		}
+		list<TUnit*> units;
+		const vector<CMObj<TUnit> > &roster = pPlayer->GetPlayerUnits();
+		for ( int k = 0; k < roster.size(); ++k )
+			units.push_back( roster[k] );
+		AddInterrupt( units );
 	}
 	virtual void OnNewPlayerTurn( TPlayer *pPlayer ) {}
 	virtual void OnRealTimeStarted() {}

@@ -223,6 +223,7 @@ public:
 	virtual bool IsHiding() const;
 	virtual bool IsEmptyPK() const { return bIsPK; }
 	virtual void OnTBSEvent( ETBSEvent event );
+	bool HasAutoFirstTurnInterrupt() const;
 	virtual bool IsPerformingAction() const;
 	virtual bool GetPointOfInterest( CVec3 *pOut );
 	// implement CUnit	
