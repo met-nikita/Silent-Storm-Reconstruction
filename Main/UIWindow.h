@@ -129,6 +129,8 @@ public:
 
 	CToolTip* GetToolTip() const;		// retail @0x327220: returns the typed CObj<CToolTip> member
 	void SetToolTip( CToolTip *pWindow );
+	const SPoint& GetToolTipAnchor() const { return sToolTipAnchor; }
+	NDb::EUIAnchor GetToolTipAnchorType() const { return eToolTipAnchorType; }
 
 	const SCursorInfo& GetCursorInfo() const;
 	void SetCursorInfo( const SCursorInfo &sInfo );

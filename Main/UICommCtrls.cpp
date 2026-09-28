@@ -21,7 +21,7 @@ namespace NUI
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 const int
 	N_LIST_SCROLL_STEP = 16,
-	N_TOOLTIP_DEFAULT_WIDTH = 400,
+	N_TOOLTIP_DEFAULT_WIDTH = 512,
 	N_TOOLTIP_BORDER_SIZE = 4;
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CEdit
@@ -651,13 +651,7 @@ void CToolTip::SetText( const wstring &wsText )
 	pText->SetText( wsText );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CToolTip::SetPosition( const SPoint &_sPosition )
-{
-	CWindow::SetSize( SPoint( 0, 0 ) );
-	CWindow::SetPosition( _sPosition );
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-void CToolTip::Draw( const STime &sTime, NGScene::I2DGameView *pView )
+void CToolTip::UpdateToolTip()
 {
 	SPoint sRealSize;
 	pText->SetSize( SPoint( N_TOOLTIP_DEFAULT_WIDTH, 0 ) );
@@ -666,26 +660,9 @@ void CToolTip::Draw( const STime &sTime, NGScene::I2DGameView *pView )
 	sRealSize.x += N_TOOLTIP_BORDER_SIZE * 2;
 	sRealSize.y += N_TOOLTIP_BORDER_SIZE * 2;
 
-	SPoint sPosition = GetPosition();
-	sPosition.y = sPosition.y + GetSize().y - sRealSize.y;
-
-	if ( sPosition.x < 0 )
-		sPosition.x = 0;
-	if ( sPosition.y < 0 )
-		sPosition.y = 0;
-	if ( sPosition.x + sRealSize.x > 1024 )
-		sPosition.x = 1024 - sRealSize.x;
-	if ( sPosition.y + sRealSize.y > 768 )
-		sPosition.y = 768 - sRealSize.y;
-
 	CWindow::SetSize( sRealSize );
-	CWindow::SetPosition( sPosition );
 	pText->SetSize( SPoint( N_TOOLTIP_DEFAULT_WIDTH, sRealSize.y ) );
 	pText->SetPosition( SPoint( N_TOOLTIP_BORDER_SIZE, N_TOOLTIP_BORDER_SIZE ) );
-
-	// retail: the nine border slices + children are drawn by the CFrame base (CFrame::Draw lays the
-	// slices out over the current window size, clamping bands when too small, then chains CWindow::Draw).
-	CFrame::Draw( sTime, pView );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CFrame -- retail NUI::CFrame (convergence W4). The nine-slice border widget.

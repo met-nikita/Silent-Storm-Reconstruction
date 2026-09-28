@@ -286,9 +286,7 @@ public:
 
 	void SetText( const wstring &szText );
 
-	void SetPosition( const SPoint &_sPosition );
-
-	void Draw( const STime &sTime, NGScene::I2DGameView *pView );
+	void UpdateToolTip();
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CSlider
