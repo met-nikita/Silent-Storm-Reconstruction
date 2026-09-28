@@ -449,9 +449,8 @@ void CAIHealAction::GetInfoInner( const SPlaceWithAP &place, SInfo *pInfo ) cons
 	CPtr<IAIUnit> pEnemy = GetEnemy();
 	if ( IsValid( pEnemy ) && fabs( pEnemy->GetPosition().GetCP() - pUnit->GetPosition().GetCP() ) < 4.0f )
 		return;
-	// affordable from this place? (release: GetActionAP(pose, AC_FIRSTAID, firstAidLen); dev 2-arg form.)
-	NRPG::IUnitMission *pMission = pUnit->GetUnitMission();
-	if ( IsValid( pMission ) && pMission->GetActionAP( place.place.GetPose(), NRPG::AC_FIRSTAID ) > place.nUnitAP )
+	// Retail 0x452206 / 0x6c1253: price the selected kit, not the item in hand.
+	if ( pInfo->pFirstAid->GetItem()->GetDBFirstAid()->nAPToUse > place.nUnitAP )
 		return;
 	// world allows first-aid here (self target)?
 	if ( NWorld::CanDoFirstAid( pUnit->GetUnitServer(), place.place, pUnit->GetUnitServer(),
@@ -472,7 +471,7 @@ void CAIHealAction::Do( CAILog *pLog ) const   // @0x00451c90
 	if ( !pUnit->GetAIInventory()->IsCurrentItem( info.pFirstAid ) )
 		*pLog << new CAILogChangeWeapon( pUnit, info.pFirstAid );
 	*pLog << new CAILogHeal( pUnit, pUnit );   // self-heal
-	*pLog << new CAILogSpendAP( pUnit, pUnit->GetUnitMission()->GetActionAP( pUnit->GetUnitPosition().GetPose(), NRPG::AC_FIRSTAID ) );
+	*pLog << new CAILogSpendAP( pUnit, info.pFirstAid->GetItem()->GetDBFirstAid()->nAPToUse );
 }
 bool CAIHealAction::ComparePlaces( const SPlaceWithAP &p1, const SPlaceWithAP &p2 ) const
 {

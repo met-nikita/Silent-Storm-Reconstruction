@@ -250,8 +250,34 @@ static EUnitCommandResult GetActionValidPlaces( CUnitServer *pUS, CCmdHeal *pCmd
 
 	if ( pTarget == pUS )
 		pRes->push_back( pUS->GetPosition().pos.p );
+	else if ( IsValid( pTarget->GetWearingPK() ) || pTarget->IsEmptyPK() )
+	{
+		// Retail v1.2 0x793cf4: repair from behind cardinal-facing suits,
+		// or from four standing approaches around diagonal-facing suits.
+		NAI::IPathNetwork *pNet = pUS->GetWorld()->GetPathNetwork();
+		const NAI::SPathPlace target = pTarget->GetPosition().pos.p;
+		const int dx = NAI::nMoveShift[target.GetDirection()][0];
+		const int dy = NAI::nMoveShift[target.GetDirection()][1];
+		NAI::SPathPlace place = target;
+		if ( dx == 0 || dy == 0 )
+		{
+			place.SetXY( target.GetX() - 2 * dx, target.GetY() - 2 * dy );
+			if ( pNet->IsNativePassable( place ) )
+				pRes->push_back( place );
+		}
+		else
+		{
+			const int offsets[4][2] = { { -2 * dx, 0 }, { 2 * dx, 0 }, { 0, -2 * dy }, { 0, 2 * dy } };
+			for ( int i = 0; i < 4; ++i )
+			{
+				place.SetXY( target.GetX() + offsets[i][0], target.GetY() + offsets[i][1] );
+				if ( pNet->IsNativePassable( place ) )
+					GetDirectedPoints( pNet, place, pTarget->GetPosition().GetCP(), pRes, PM_STAND );
+			}
+		}
+	}
 	else
-		GetHumanReachPlaces( pUS, pTarget->GetPosition().GetEyePosition(), pRes );
+		GetHumanReachPlaces( pUS, pTarget->GetPosition().GetEyePosition(), pRes, GetHealOrRepairPKDistance( pTarget ) );
 	return UCR_OK;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
