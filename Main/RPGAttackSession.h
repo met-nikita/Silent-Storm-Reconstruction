@@ -11,7 +11,7 @@
 // unit took part in (attackedInSession), which connected (hitInSession), which
 // were critical (criticalHits) and which struck a panzerklein (hitsPK), plus the
 // bullets it is still waiting to resolve (waitForBullets). The mission lists are
-// de-duplicated linear stores; medals are tallied from them at end of session.
+// de-duplicated linear stores. Retail's end-of-session wait loop does NOT tally medals.
 // NRPG::IUnitMissionForMedals is the release-new 4-byte vtable-only interface base
 // (PDB size 4); CUnitMissionForMedals is PDB size 76 with the members below in
 // exact offset order.
@@ -19,14 +19,14 @@
 // Landed here: the three pure-bookkeeping methods (no cross-subsystem / vtable
 // reach) -- AddAttackToAttackSession, AddPKHitToAttackSession, Segment.
 //
-// DEFERRED: AddMedalPoints (release VA 0x68fbf0). Its end-of-session tally needs
-// the medal SINK NRPG::CMedalsGainer::AddMedalPoints(CGlobalGame*,EMedalPointCases,
-// float) -- still ABSENT from RPGUnit.h pending the NDb::CSide::medals DB column --
-// plus two virtuals on this interface (the enemy/self/ally relation classifier and
-// the gainer's own panzerklein) whose concrete impls live in an out-of-compiland
-// subclass. (EMedalPointCases itself is now present in RPGMedals.h.) The method is
-// declared below for class-surface parity but intentionally left undefined until
-// that subsystem lands; nothing calls it, so the build stays green.
+// Audited 2026-09-28: the medal sink and side-medal DB column ARE implemented.
+// However, v1.1 AddMedalPoints (0x68fbf0) has no absolute references or direct
+// call/jump references in the retail image. Both v1.1 Segment (0x68ff40) and
+// v1.2 Segment (0x68fce0) only drain expired weak projectile references and reset
+// bFinished; neither dispatches the tally. This isolated tracker remains unwired:
+// it is not an AI action-completion gate, and wiring awards here would invent
+// behavior absent from the inspected retail paths. See the scratch backlog audit
+// and audit_attack_session_reachability.py for reproducible binary checks.
 //
 // The object is transient (no operator& in the PDB -> not serialised, and it is not
 // a CObjectBase), so it gets neither REGISTER_SAVELOAD_CLASS nor a class-registrar
@@ -76,10 +76,7 @@ public:
 	// awaited bullet has resolved (null or destroyed); otherwise stay pending.
 	void Segment();
 
-	// DEFERRED (see file banner): end-of-session medal tally. Needs the absent
-	// CMedalsGainer::AddMedalPoints sink + out-of-compiland relation/PK virtuals.
-	// Declared for class-surface parity; intentionally left undefined (nothing
-	// calls it, so this is link-safe).
+	// Unreferenced retail tally (see file banner); deliberately not dispatched by Segment.
 	void AddMedalPoints();
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////

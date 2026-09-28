@@ -8,7 +8,7 @@
 // open-codes the std::vector grow + per-append CPtr AddRef/ReleaseRef churn (net +1
 // ref on each stored slot); here that is one push_back of a bare IUnitMission* into
 // a vector<CPtr<IUnitMission> >, with CPtr doing the refcounting. See RPGAttackSession.h
-// for why AddMedalPoints (VA 0x68fbf0) is deferred.
+// for the reachability audit of the unreferenced AddMedalPoints (VA 0x68fbf0).
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 namespace NRPG
 {
