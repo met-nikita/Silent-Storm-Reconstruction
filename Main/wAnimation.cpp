@@ -1069,7 +1069,9 @@ void CUnitAnimator::Attack( const NAI::SUnitPosition &cmdPos, const CRay &ray, b
 	}
 
 	// horizontal turn
-	float fHorizAngle = SignumNormalizeAngleInRadian( fNextAngle - fCurAngle );
+	// Retail v1.2 0x741788..0x7417d3 caps the torso twist independently
+	// of the chosen shot ray and the unit's world-facing direction.
+	float fHorizAngle = Clamp( SignumNormalizeAngleInRadian( fNextAngle - fCurAngle ), -1.2f, 1.2f );
 	// vertical turn
 	float fVertAngle = asin( shootDir.z );
 

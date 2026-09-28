@@ -22,12 +22,11 @@ void CFastRenderer::GetDir( CVec3 *pRes, float x, float y ) const
 	ASSERT( bPerspective );
 	CVec3 base( fPerPixelShiftX * (x+0.5f+region.x1), fPerPixelShiftY * (y+0.5f+region.y1), 1 );
 	Normalize( &base );
-	CVec3 res;
+	// Retail v1.2 0x491fc0 divides by homogeneous w before subtracting
+	// the origin; the 3-component overload silently drops that coordinate.
+	CVec4 res;
 	backForPoints.RotateHVector( &res, base );
-	*pRes = res - ptFrom;
-	//CVec4 res;
-	//backForPoints.RotateHVector( &res, base );
-	//*pRes = Unhomogen(res) - ptFrom;
+	*pRes = Unhomogen(res) - ptFrom;
 	Normalize( pRes );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
