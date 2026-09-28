@@ -392,7 +392,8 @@ void CDumbUnitServer::SetPosition( const NAI::SUnitPosition &dst )
 {
 	bool bNeedUpdate = dst.pos.GetFloor() != position.pos.GetFloor();
 	bool bRealMove = false;
-	if ( position.GetPose() == dst.GetPose() && position.GetDir() == dst.GetDir() ) // the actual movement
+	// Retail v1.2 0x751c94..bf: crawling has no position-update noise event.
+	if ( position.GetPose() == dst.GetPose() && position.GetDir() == dst.GetDir() && position.GetPose() != NAI::CRAWL )
 			bRealMove = true;
 
 	SetPositionCore( dst );
@@ -1168,10 +1169,10 @@ void CDumbUnitServer::MakeStepSound( bool bSound )
 		nAISoundType = pArmor->nAISoundType;
 
 	// retail @0x34fbe0: the quiet-step perk (data-driven id 0x4d) attenuates the step like a
-	// silencer -- fSilencer = 1/coeff when the coeff exceeds 1
+	// silencer -- fSilencer = 1/coeff for a positive coefficient (v1.2 0x74ffd0).
 	float fSilencer = 1.0f;
 	float fPerk = 0;
-	if ( IsValid( pRPG->GetRPGUnit() ) && pRPG->HasPerk( 0x4d, &fPerk ) && fPerk > 1.0f )
+	if ( IsValid( pRPG->GetRPGUnit() ) && pRPG->HasPerk( 0x4d, &fPerk ) && fPerk > 0.0f )
 		fSilencer = 1.0f / fPerk;
 
 	NDb::SAISound sound = { pAISound, nAISoundType, fSilencer };
