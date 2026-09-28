@@ -641,16 +641,16 @@ int CUnit::GetWeaponBurstAP( CWeaponItem *_pWeapon ) const
 	CPtr<CWeaponItem> pWeapon = _pWeapon;
 	if ( !IsValid( pWeapon ) )
 		pWeapon = GetWeaponItem();
-	if ( IsValid( pWeapon ) )
+	// Retail v1.2 0x6bb6f0: extra rounds also receive Fast short burst.
+	if ( IsValid( pWeapon ) && pWeapon->GetDBWeapon()->nRoF != 0 )
 	{
-		if ( 0 == pWeapon->GetDBWeapon()->nRoF )
-		{
-			ASSERT( 0 );
-			return 0;
-		}
-		return skills[NDb::ST_AP]->GetMaxValue() / pWeapon->GetDBWeapon()->nRoF;
+		const int nAP = skills[NDb::ST_AP]->GetMaxValue() / pWeapon->GetDBWeapon()->nRoF;
+		float fDelta = 0;
+		if ( pWeapon->GetShootMode() == NDb::SM_ShortBurst )
+			HasPerk( N_PERK_CHEAP_SHORT_BURST, &fDelta );
+		return max( 1, int( nAP - nAP * fDelta ) );
 	}
-	return 0;
+	return 10000;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 int CUnit::GetWeaponReloadAP( CWeaponItem *_pWeapon ) const
