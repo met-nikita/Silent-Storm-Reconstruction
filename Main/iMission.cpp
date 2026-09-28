@@ -669,7 +669,15 @@ void CMission::GetActionInfo( EUnitAction eAction, SActionInfo *pInfo )
 		case UA_LOOK: pCmd = new NWorld::CCmdLook( NAI::SPosition() ); break;
 		case UA_HEAL: pCmd = new NWorld::CCmdHeal( 0 ); break;
 		case UA_MINE: pCmd = new NWorld::CCmdSetMineOnTile( NAI::SPosition() ); break;
-		case UA_ATTACK: pCmd = new NWorld::CCmdShootObject( 0, 0 ); break;
+		case UA_ATTACK:
+			{
+				// Retail v1.2 0x5ff043: probe the same reload substitution as
+				// the actual attack cursor, so an empty weapon can enter attack mode.
+				NWorld::CCmdShootObject *pAttack = new NWorld::CCmdShootObject( 0, 0 );
+				pAttack->bCanBeReplacedByReload = true;
+				pCmd = pAttack;
+				break;
+			}
 		case UA_USETOOL: pCmd = new NWorld::CCmdUntrapObject( 0 ); break;
 		case UA_DROPCORPSE: pCmd = new NWorld::CCmdDropCorpse(); break;
 		case UA_WEAPONRELOAD: pCmd = new NWorld::CCmdReload(); break;
