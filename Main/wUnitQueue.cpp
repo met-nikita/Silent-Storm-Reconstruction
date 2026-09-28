@@ -39,13 +39,13 @@ int CSimpleExecQueue::GetStartAP() const
 	return 0;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-int CSimpleExecQueue::GetActionAP() const 
+int CSimpleExecQueue::GetActionAP( int nAlreadyReservedAP ) const
 { 
 	int nTemp = 0;
 	NAI::SUnitPosition pos = pUS->GetPosition(), dst = pos;
 	for( list<CObj<CCommandExecute> >::const_iterator iTemp = execList.begin(); iTemp != execList.end(); iTemp++ )
 	{
-		nTemp += (*iTemp)->GetActionAP();
+		nTemp += (*iTemp)->GetActionAP( nAlreadyReservedAP + nTemp );
 		CObj<NAI::CPath> pPath = (*iTemp)->GetCurrentPath();
 		if ( pPath )
 			dst.pos.p = pPath->points.back();

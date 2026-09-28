@@ -1162,7 +1162,7 @@ bool CExecShoot::CheckBurst( int nFired, bool bDoAction )
 	return true;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-int CExecShoot::GetActionAP() const 
+int CExecShoot::GetActionAP( int nAlreadyReservedAP ) const
 { 
 	if ( IsAccidental() )
 		return 0;
@@ -1172,9 +1172,7 @@ int CExecShoot::GetActionAP() const
 		NDb::EShootMode ShootMode = pWeapon->GetShootMode();
 		if ( ShootMode == NDb::SM_Careful || ShootMode == NDb::SM_LongBurst )
 		{
-			NRPG::SUnitInfo Info;
-			pUS->GetInfo( &Info );
-			return max( Info.nAP,  GetStartAP() );
+			return max( pUS->GetAP() - nAlreadyReservedAP, GetStartAP() );
 		} 
 	}
 

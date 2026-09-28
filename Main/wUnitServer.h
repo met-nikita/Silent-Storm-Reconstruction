@@ -61,7 +61,7 @@ public:
 	CCommandExecute( CUnitServer *_pUS = 0 ): state(RUNNING), pUS(_pUS) {}
 	EFinishType GetState() const { return state; }
 	virtual int GetStartAP() const { return 0; }
-	virtual int GetActionAP() const { return GetStartAP(); }
+	virtual int GetActionAP( int nAlreadyReservedAP = 0 ) const { return GetStartAP(); }
 	virtual void Run() { Finished(); }
 	virtual bool TimeLabelReached() { return false; }
 	virtual void AnimationFinished() { Finished(); }

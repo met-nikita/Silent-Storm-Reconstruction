@@ -62,7 +62,7 @@ public:
 			pItem = pUS->GetUnitRPG()->GetInventory()->Get( NDb::ESlot( nSlot ) );
 	}
 	int GetStartAP() const { return pUS->GetActionAP( NRPG::AC_RELOAD ); }
-	int GetActionAP() const { return pUS->GetActionAP( NRPG::AC_RELOAD ); }
+	int GetActionAP( int nAlreadyReservedAP = 0 ) const { return pUS->GetActionAP( NRPG::AC_RELOAD ); }
 	virtual void Run()
 	{
 		/*
@@ -505,7 +505,7 @@ public:
 	CExecLoadWeapon() {}
 	CExecLoadWeapon( CUnitServer *_pUS, NRPG::IWeaponItemInfo* _pWeapon, const SItem &_sClip ): CCommandExecute(_pUS), pWeapon( _pWeapon ), sClip( _sClip ) {}
 	int GetStartAP() const { return pUS->GetActionAP( NRPG::AC_RELOAD ); }
-	int GetActionAP() const { return pUS->GetActionAP( NRPG::AC_RELOAD ); }
+	int GetActionAP( int nAlreadyReservedAP = 0 ) const { return pUS->GetActionAP( NRPG::AC_RELOAD ); }
 	virtual void Run()
 	{
 		pUS->DoAction( NRPG::AC_RELOAD );
@@ -619,7 +619,7 @@ class CExecSetWishPose: public CCommandExecute
 public:
 	CExecSetWishPose() {}
 	CExecSetWishPose( CUnitServer *_pUS, NAI::EPose _pose ): CCommandExecute(_pUS), pose(_pose) {}
-	int GetActionAP() const
+	int GetActionAP( int nAlreadyReservedAP = 0 ) const
 	{
 		switch( pose )
 		{
@@ -730,7 +730,7 @@ public:
 	CExecHide( CUnitServer *_pUS = 0, bool _bState = true ): CCommandExecute(_pUS), bState( _bState ) {}
 	//
 	virtual int GetStartAP() const;
-	virtual int GetActionAP() const;
+	virtual int GetActionAP( int nAlreadyReservedAP = 0 ) const;
 	EUnitCommandResult CanDoIt();
 	virtual void Run();
 };
@@ -743,7 +743,7 @@ int CExecHide::GetStartAP() const
 	return pUS->GetActionAP( NRPG::AC_HIDE );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-int CExecHide::GetActionAP() const
+int CExecHide::GetActionAP( int nAlreadyReservedAP ) const
 {
 	return GetStartAP();
 }

@@ -31,7 +31,7 @@ public:
 		return pFront;
 	}
 	int GetStartAP() const;
-	int GetActionAP() const;
+	int GetActionAP( int nAlreadyReservedAP = 0 ) const;
 	virtual void Run();
 	virtual bool TimeLabelReached();
 	virtual void AnimationFinished();

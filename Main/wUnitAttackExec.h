@@ -142,7 +142,7 @@ public:
 
 	virtual EUnitCommandResult CanDoIt( const NAI::SUnitPosition &from, bool bIgnoreTarget = false ) const;
 	virtual int GetStartAP() const;
-	virtual int GetActionAP() const;
+	virtual int GetActionAP( int nAlreadyReservedAP = 0 ) const;
 	virtual void Start();
 	virtual void Segment();                      // @0x3a8d20 -- per-tick timed-bullet driver (overrides CCommandExecute::Segment)
 	virtual bool CheckBurst( int nFired, bool bDoAction );   // @0x3a1fa0 -- may the burst keep firing (+ optionally spend burst AP)

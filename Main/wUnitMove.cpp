@@ -276,7 +276,7 @@ public:
 	virtual void AnimationFinished();
 	virtual void Cancel();
 	virtual NAI::CPath* GetCurrentPath() const;
-	virtual int GetActionAP() const;
+	virtual int GetActionAP( int nAlreadyReservedAP = 0 ) const;
 	// IExecMove
 	void GetSearchFromPosition( NAI::SPathPlace *pRes );
 	void SetNewPath( NAI::CPath *pPath, NAI::EFindPathParams _eParams, ENeedActiveItem eActive );
@@ -1263,7 +1263,7 @@ public:
 	int GetResult() const { return nRes; }
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-int CExecMove::GetActionAP() const
+int CExecMove::GetActionAP( int nAlreadyReservedAP ) const
 {
 	CPathAPCalcer apCalc( pUS->GetWorld(), pUS->GetUnitRPG(), pUS->GetPosition(), pUS->IsCarryingCorpse() );
 
