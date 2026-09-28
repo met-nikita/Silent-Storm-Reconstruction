@@ -11,6 +11,8 @@
 
 namespace NGfx
 {
+static bool bSupportOcclusionQueries = false;
+bool DoesSupportOcclusionQueries() { return bSupportOcclusionQueries; }
 class COcclusionQuery : public IOcclusionQuery
 {
 	OBJECT_NOCOPY_METHODS(COcclusionQuery);
@@ -1413,6 +1415,7 @@ static void InitEffects()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 HRESULT InitRender()
 {
+	bSupportOcclusionQueries = SUCCEEDED( pDevice->CreateQuery( D3DQUERYTYPE_OCCLUSION, 0 ) );
 	InitEffects();
 	HRESULT hr;
 	wireframeMode.DoApply();

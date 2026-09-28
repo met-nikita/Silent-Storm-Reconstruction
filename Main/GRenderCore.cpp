@@ -7,10 +7,37 @@ namespace NGScene
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CSceneFragments
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CSceneFragments::CSceneFragments() : nSceneTris(0)//, pRejected(0), nRejectedUsed(0) 
+CSceneFragments::CSceneFragments() : nSceneTris(0), bNeedHSR(false)
 {
 	fragments.push_back( fragmentInfos.Alloc() );
 	ASSERT( fragments.size() == 1 );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CSceneFragments::HideGeometry( const vector<CPartFlags> &occluded )
+{
+	// Retail v1.2 0x548aa0: query bits exclude parts from subsequent passes,
+	// intersecting rather than replacing any existing geometry selection.
+	if ( filterGeometry.empty() )
+	{
+		filterGeometry.resize( geometries.size(), FST_ACCEPT );
+		selectedParts.resize( geometries.size(), TakeAllParts() );
+	}
+	const int nCount = Min( geometries.size(), occluded.size() );
+	for ( int k = 0; k < nCount; ++k )
+	{
+		if ( filterGeometry[k] == FST_REJECT )
+			continue;
+		CPartFlags remaining = ~occluded[k];
+		if ( filterGeometry[k] == FST_SPLIT )
+			remaining &= selectedParts[k];
+		if ( remaining.IsEmpty() )
+			filterGeometry[k] = FST_REJECT;
+		else
+		{
+			filterGeometry[k] = FST_SPLIT;
+			selectedParts[k] = remaining;
+		}
+	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 int CSceneFragments::AddGeometry( CObjectBase *pHandle, SRenderGeometryInfo *pGeometry, const SBound &_bv )

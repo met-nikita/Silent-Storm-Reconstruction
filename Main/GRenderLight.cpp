@@ -401,7 +401,14 @@ void CDirectionalLight::RenderPPShadowOps( CTransformStack *pTS, CTransformStack
 		{
 			CSelectFragments filterLightmapped( &scene, SLightmappedFilter() );
 			RenderAlphaTested( pTS, pRC, pRender, &scene );
-			Render( pTS, pRC, renderPath, pRender, scene, lightInfo, RenderShadowTest, depthInfo );
+			if ( scene.bNeedHSR )
+			{
+				vector<CPartFlags> occluded;
+				Render( pTS, pRC, renderPath, pRender, scene, lightInfo, RenderShadowTest, depthInfo, EM_DEPTH_SORT, &occluded );
+				scene.HideGeometry( occluded );
+			}
+			else
+				Render( pTS, pRC, renderPath, pRender, scene, lightInfo, RenderShadowTest, depthInfo, EM_DEPTH_SORT );
 		}
 		if ( !(pCLRender->GetLightingOptions() & 2) )   // retail gate in @0x153df0
 			pCLRender->RenderCL( pRC, pRender, pTS, &scene, pCLStaticTrack.Refresh(), vDepth, bBlurCL, bBlurSun ? 1 : N_GF3_TEMP_REG );

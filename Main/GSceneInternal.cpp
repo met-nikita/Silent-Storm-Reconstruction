@@ -38,6 +38,7 @@ namespace NGScene
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 static SRenderStats lastFrameStats;
 static bool bWireframe;
+static bool bUseHWHSR = false;
 static bool bShow2DTextureCache = false, bShowTranspTextureCache = false, bShowParticleLMCache = false;
 static int nTotalParts, nTotalElements;
 enum EShowLinearCache
@@ -2022,6 +2023,9 @@ void CGScene::Draw( CTransformStack *pTS, CTransformStack *pClipTS, NGfx::CRende
 		nUseIgnoreMark = nCurrentIgnoreMark;
 	}
 	ERLRequest rlReq = RN_ALL;
+	// Retail v1.2 0x561758: hardware queries bridge the first two software
+	// occlusion updates; they remain opt-in and require device support.
+	geom.bNeedHSR = bUseHWHSR && NGfx::DoesSupportOcclusionQueries() && nIgnoreListWasCalced < 2;
 	switch ( renderPath )
 	{
 		case RP_TNL:
@@ -2380,7 +2384,6 @@ static void VarSwitchLinearCache( const string &szID, const NGlobal::CValue &sVa
 // retail GSceneInternalInit @0x162a50 registers SEVEN vars: the 4 showcache debug switches plus
 // gfx_hw_hsr / gfx_decals / gfx_block_buffering bound through VarBoolHandler (0x99e2f3 / 0x97901b /
 // 0x99e2f4).
-static bool bUseHWHSR = false;        // gfx_hw_hsr @0x99e2f3
 START_REGISTER(GSceneInternal)
 	REGISTER_VAR( "gfx_showcache_2d", VarSwitchTexCache, 0.0f, false )
 	REGISTER_VAR( "gfx_showcache_transp", VarSwitchTranspCache, 0.0f, false )

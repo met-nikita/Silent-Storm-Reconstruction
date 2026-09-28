@@ -414,6 +414,8 @@ private:
 	vector<CPartFlags> selectedParts;
 public:
 	CSceneFragments();
+	bool bNeedHSR;
+	void HideGeometry( const vector<CPartFlags> &occluded );
 	int AddGeometry( CObjectBase *pHandle, SRenderGeometryInfo *pGeometry, const SBound &_bv );
 	void AddElement( int nGeometryIndex, const CPartFlags &_parts, IMaterial *pMaterial, 
 		NGfx::CTexture *pLightmap, const SDynamicAmbientInfo *pLM );

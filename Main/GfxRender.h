@@ -27,6 +27,7 @@ public:
 	virtual void Flush() = 0;
 };
 IOcclusionQuery* CreateOcclusionQuery();
+bool DoesSupportOcclusionQueries();
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 enum EAlphaCombineMode
 {

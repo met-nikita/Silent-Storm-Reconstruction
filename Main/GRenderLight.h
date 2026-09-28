@@ -5,6 +5,7 @@
 #endif // _MSC_VER > 1000
 
 #include "GRenderCore.h"
+#include "GRenderExecute.h"
 #include "Transform.h"
 #include "GShadowVolume.h"
 namespace NGfx
@@ -54,7 +55,7 @@ class CDirectionalLight: public ILight
 	template<class TParam, class TOp>
 	void Render( CTransformStack *pTS, NGfx::CRenderContext *pRC, ERenderPath renderPath, 
 		IRender *pRender, const CSceneFragments &scene, const SLightInfo &lightInfo, TOp process,
-		const TParam &param )
+		const TParam &param, EExecMode mode = EM_NORMAL, vector<CPartFlags> *pOccluded = 0 )
 	{
 		CRenderCmdList lightOps;
 		const vector<SRenderFragmentInfo*> &fragments = scene.GetFragments();
@@ -67,7 +68,7 @@ class CDirectionalLight: public ILight
 			const SMaterialInfo &info = frag.pMaterial->GetMaterialInfo();
 			process( op, info, param, renderPath );
 		}
-		Execute( pRender, pRC, *pTS, lightOps, scene, lightInfo );
+		Execute( pRender, pRC, *pTS, lightOps, scene, lightInfo, mode, pOccluded );
 	}
 	void FinalPass( NGfx::CRenderContext *pRC, ERenderPath renderPath );
 	// retail @0x153900: fills depthInfo and re-renders the shared depth map; a no-shadow scene
