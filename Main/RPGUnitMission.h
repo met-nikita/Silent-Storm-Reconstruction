@@ -190,6 +190,9 @@ public:
 	// CUnitServer ctor. Appended NON-PURE at the vtable tail (dev<->release order is name-dispatched) so
 	// other IUnitMission implementors keep building; CUnitMission overrides it.
 	virtual void SetGlobalGame( CGlobalGame *p ) {}
+	virtual void Segment() {}
+	virtual void SetScenarioPlayerID( int nPlayer ) {}
+	virtual int GetScenarioPlayerID() const { return 0; }
 	// Getter counterpart: the release reads the campaign difficulty record through the world's global
 	// game (e.g. the called-shots gate pDifficulty->bHeadshotShouldKill in the to-hit paths). Appended
 	// NON-PURE at the vtable tail like SetGlobalGame; CUnitMission overrides it.

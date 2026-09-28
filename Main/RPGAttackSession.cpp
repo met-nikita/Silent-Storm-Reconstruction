@@ -2,9 +2,10 @@
 #include "RPGAttackSession.h"
 #include "RPGUnit.h"     // complete NRPG::CUnit       (for the CPtr<CUnit> member)
 #include "rpgGlobal.h"   // complete NRPG::CGlobalGame  (for the CPtr<CGlobalGame> member)
+#include "../DBFormat/DataMap.h"
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // rpgAttackSession.obj -- NRPG::CUnitMissionForMedals attack-session bookkeeping.
-// Three pure-bookkeeping methods reconstructed from the release decomp. The decomp
+// Transient bookkeeping reconstructed from retail. The decomp
 // open-codes the std::vector grow + per-append CPtr AddRef/ReleaseRef churn (net +1
 // ref on each stored slot); here that is one push_back of a bare IUnitMission* into
 // a vector<CPtr<IUnitMission> >, with CPtr doing the refcounting. See RPGAttackSession.h
@@ -12,6 +13,60 @@
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 namespace NRPG
 {
+////////////////////////////////////////////////////////////////////////////////////////////////////
+CUnitMissionForMedals::CUnitMissionForMedals( CUnit *pUnit, CGlobalGame *pGlobalGame ):
+	bFinished( false ), pMedalsGainer( pUnit ), pGame( pGlobalGame )
+{
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CUnitMissionForMedals::AddMedalPoints()
+{
+	if ( IsValid( pMedalsGainer ) )
+	{
+		const bool bOwnPK = IsValid( GetPanzerklein() );
+		for ( int i = 0; i < attackedInSession.size(); ++i )
+		{
+			IUnitMission *pTarget = attackedInSession[i];
+			if ( IsValid( pTarget ) && MedalDiplomacyState( pTarget->GetScenarioPlayerID() ) == NDb::DS_ENEMY )
+				pMedalsGainer->AddMedalPoints( pGame,
+					IsValid( pTarget->GetPanzerklein() ) && !bOwnPK ? MPC_ATTACK_ENEMY_IN_PK : MPC_ATTACK_ENEMY, 0 );
+		}
+		for ( int i = 0; i < hitInSession.size(); ++i )
+		{
+			IUnitMission *pTarget = hitInSession[i];
+			if ( !IsValid( pTarget ) )
+				continue;
+			NDb::EDiplomacyState relation = MedalDiplomacyState( pTarget->GetScenarioPlayerID() );
+			if ( relation == NDb::DS_NEUTRAL )
+				continue;
+			pMedalsGainer->AddMedalPoints( pGame, relation == NDb::DS_ALLY ? MPC_HIT_ALLY :
+				( IsValid( pTarget->GetPanzerklein() ) && !bOwnPK ? MPC_HIT_ENEMY_IN_PK : MPC_HIT_ENEMY ), 0 );
+		}
+		for ( int i = 0; i < criticalHits.size(); ++i )
+		{
+			IUnitMission *pTarget = criticalHits[i];
+			if ( !IsValid( pTarget ) )
+				continue;
+			NDb::EDiplomacyState relation = MedalDiplomacyState( pTarget->GetScenarioPlayerID() );
+			if ( relation == NDb::DS_NEUTRAL )
+				continue;
+			if ( relation == NDb::DS_ALLY )
+				pMedalsGainer->AddMedalPoints( pGame, MPC_CRITICAL_HIT_ALLY, 0 );
+			else if ( IsValid( pTarget->GetPanzerklein() ) && !bOwnPK )
+				pMedalsGainer->AddMedalPoints( pGame, MPC_CRITICAL_HIT_ENEMY_IN_PK, 0 );
+		}
+		for ( int i = 0; i < hitsPK.size(); ++i )
+		{
+			IUnitMission *pTarget = hitsPK[i];
+			if ( IsValid( pTarget ) && MedalDiplomacyState( pTarget->GetScenarioPlayerID() ) == NDb::DS_ENEMY )
+				pMedalsGainer->AddMedalPoints( pGame, MPC_HIT_PK, 0 );
+		}
+	}
+	attackedInSession.clear();
+	hitInSession.clear();
+	criticalHits.clear();
+	hitsPK.clear();
+}
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // True if pAttack is already stored in list (pointer identity), mirroring the
 // release linear scan `for ( it = begin; it != end && *it != pAttack; ++it )`.

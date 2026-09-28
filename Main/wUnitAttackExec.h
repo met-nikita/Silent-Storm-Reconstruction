@@ -61,6 +61,7 @@ protected:
 
 public:
 	CExecAttack( CUnitServer *_pUS = 0 );
+	void FinishMe();
 
 	virtual EUnitCommandResult CanDoIt( const NAI::SUnitPosition &from, bool bIgnoreTarget = false ) const = 0;
 	virtual void Start() = 0;

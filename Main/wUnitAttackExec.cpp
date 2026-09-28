@@ -1,4 +1,5 @@
 #include "StdAfx.h"
+#include "RPGAttackSession.h"
 #include "wUnitAttack.h"
 #include "wUnitMove.h"
 #include "wUnitServer.h"
@@ -974,12 +975,24 @@ bool CExecAttack::TimeLabelReached()
 	//   (1) NextBullet() is DROPPED -- retail does NOT advance the RPG bullet cursor per label; the timed
 	//       pipeline tracks bullets via nBulletGone/nBulletPrepared + SelectRay's per-bullet CreateAttack.
 	//       (The one-shot CExecMelee*/CExecThrowKnife OnLabel overrides call NextBullet() themselves.)
-	//   (2) the Jan03 "!bRes -> StartAttack() reset burst state" re-arm is GONE; instead, on cancel we Finish
-	//       the executor here. Return !bAttackCanceled (consumed by CUnitServer::Segment's bCallTimeLabel).
+	//   (2) the Jan03 re-arm is gone; on cancel retail finishes the attack session.
+	//       Return !bAttackCanceled (consumed by CUnitServer::Segment's bCallTimeLabel).
 	OnLabel();
 	if ( bAttackCanceled )
-		Finished();
+		FinishMe();
 	return !bAttackCanceled;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CExecAttack::FinishMe()
+{
+	// Retail v1.2 0x7a2090 only closes the medal session; AnimationFinished
+	// remains responsible for completing the executor, not the firing label.
+	if ( IsValid( pUS ) && IsValid( pUS->GetUnitRPG() ) )
+	{
+		NRPG::IUnitMissionForMedals *pMedals = dynamic_cast<NRPG::IUnitMissionForMedals*>( pUS->GetUnitRPG() );
+		if ( pMedals )
+			pMedals->FinishAttackSession();
+	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CExecAttack::Cancel()
@@ -1000,6 +1013,12 @@ bool CExecAttack::CreateAttack( vector<NRPG::CAttackPortion> *pAttack, CUnitServ
 			csSystem << CC_RED << "Backstab attack" << endl;
 	}
 	CPtr<NRPG::IUnitMission> pTarget = IsValid( pUnitTarget ) ? pUnitTarget->GetUnitRPG() : 0;
+	if ( IsValid( pUS ) && IsValid( pUS->GetUnitRPG() ) )
+	{
+		NRPG::IUnitMissionForMedals *pMedals = dynamic_cast<NRPG::IUnitMissionForMedals*>( pUS->GetUnitRPG() );
+		if ( pMedals )
+			pMedals->AddAttackToAttackSession( pTarget, false, false );
+	}
 	return pUS->GetUnitRPG()->CreateAttack( pAttack, bSpendAmmo, false, pTarget, bBackStab, bAdaptWeapon );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1076,9 +1095,8 @@ void CExecShoot::OnLabel()
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // @0x3a4480 -- retail fires ONE ranged attack per call (no args), from this->attack + this->ray (Jan03 looped
-// a vector<CAttackPortion>). Trail model/speed come from the equipped weapon's DB record. (Retail also reports
-// the spawned bullet to IUnitMissionForMedals::AddWaitForBullet -- DEFERRED: the concrete CUnitMission does not
-// derive that interface in-tree, so the cross-cast never resolves; the whole medal-session subsystem is unwired.)
+// a vector<CAttackPortion>). Trail model/speed come from the equipped weapon's DB record.
+// The spawned projectile is retained weakly by the transient attack-session tracker.
 void CExecShoot::PerformAttack()
 {
 	float fTrailSpeed = 0;
@@ -1100,7 +1118,10 @@ void CExecShoot::PerformAttack()
 	NDb::CRPGGrenade *pGrenade = 0;
 	if ( pWeapon && pWeapon->GetInnerClip() && pWeapon->GetInnerClip()->GetDBAmmo() )
 		pGrenade = pWeapon->GetInnerClip()->GetDBAmmo()->pExplosiveBullet;
-	pUS->GetWorld()->PerformRangedAttack( rayInfo, pUS->GetWorld()->GetTime()->GetValue(), pTrailEffect, fTrailSpeed, pGrenade, nEffectType );
+	CObjectBase *pBullet = pUS->GetWorld()->PerformRangedAttack( rayInfo, pUS->GetWorld()->GetTime()->GetValue(), pTrailEffect, fTrailSpeed, pGrenade, nEffectType );
+	NRPG::IUnitMissionForMedals *pMedals = dynamic_cast<NRPG::IUnitMissionForMedals*>( pUS->GetUnitRPG() );
+	if ( pMedals )
+		pMedals->AddWaitForBullet( pBullet );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // @0x3a1fa0 -- retail CheckBurst(nFired, bDoAction): may the burst keep firing? (return TRUE == continue) and,
@@ -1953,9 +1974,12 @@ void CExecThrowGrenade::ThrowGrenade()
 
 	// retail @0x764140: BOTH records go to the world -- CWorld::ThrowGrenade dispatches an
 	// engineer grenade (null regular record) to the contact-fused eng grenade server.
-	pUS->GetWorld()->ThrowGrenade( grenadeParams.ptStart, grenadeParams.vel,
+	CObjectBase *pBullet = pUS->GetWorld()->ThrowGrenade( grenadeParams.ptStart, grenadeParams.vel,
 		pUS->animator.GetTimeLabel1(), grenadeParams.fT, item.pModel,
 		pGrenade->GetDBGrenade(), pUS, pGrenade->GetDBEngGrenade() );
+	NRPG::IUnitMissionForMedals *pMedals = dynamic_cast<NRPG::IUnitMissionForMedals*>( pRPG );
+	if ( pMedals )
+		pMedals->AddWaitForBullet( pBullet );
 	pUS->Update();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -2009,6 +2033,9 @@ void CExecThrowGrenade::AnimationFinished()
 	pUS->Update();
 	if ( IsActiveItemToShow( pInventory ) )
 		pUS->animator.SetWeaponAnimation( pUS->GetUnitRPG()->GetWeaponType() );
+	NRPG::IUnitMissionForMedals *pMedals = dynamic_cast<NRPG::IUnitMissionForMedals*>( pUS->GetUnitRPG() );
+	if ( pMedals )
+		pMedals->FinishAttackSession();
 	if ( bUpdateVision )
 		pUS->GetWorld()->UpdateVisible( false );
 	Finished();
@@ -2104,8 +2131,11 @@ void CExecLaunchRocket::LaunchRocket( )
 	STime tThrow = pUS->animator.GetTimeLabel1();
 	if ( IsAccidental() )
 		tThrow = pUS->GetWorld()->GetTime()->GetValue();
-	pUS->GetWorld()->LaunchRocket( r.ptOrigin, speed, tThrow,
+	CObjectBase *pBullet = pUS->GetWorld()->LaunchRocket( r.ptOrigin, speed, tThrow,
 		pToHitCalcer->GetMaxDistance() * FP_GRID_STEP, pModel, attack.front(), pRocket, pUS, pEffect );
+	NRPG::IUnitMissionForMedals *pMedals = dynamic_cast<NRPG::IUnitMissionForMedals*>( pUS->GetUnitRPG() );
+	if ( pMedals )
+		pMedals->AddWaitForBullet( pBullet );
 	pUS->Update();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -3277,7 +3307,10 @@ void CExecThrowKnife::ThrowKnife()
 	// Retail 0x7aa4e8/0x7aa52d: truncate the range and multiply velocity by 1.5.
 	float fMaxDist = int( NRPG::GetMaxTrowDistance( pRPG, pMelee, false ) );
 	float fSpeed = NRPG::GetMaxThrowVelocity( pRPG, pMelee, false ) * 1.5f;
-	pWorld->ThrowKnife( rayInfo, fSpeed, tThrow, fMaxDist, item.pModel, item.pItem );
+	CObjectBase *pBullet = pWorld->ThrowKnife( rayInfo, fSpeed, tThrow, fMaxDist, item.pModel, item.pItem );
+	NRPG::IUnitMissionForMedals *pMedals = dynamic_cast<NRPG::IUnitMissionForMedals*>( pRPG );
+	if ( pMedals )
+		pMedals->AddWaitForBullet( pBullet );
 	pUS->Update();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////

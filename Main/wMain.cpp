@@ -2929,12 +2929,12 @@ void CWorld::KillObject( CObjectServerBase *pOS )
 	ActivateDebris( SSphere( pOS->GetPosition(), 5 ), GetAIMap(), pTime );*/
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CWorld::PerformRangedAttack( const NRPG::SAttackRayInfo &rayInfo, STime sCast, NDb::CModel *pTrailModel, float fTrailSpeed, NDb::CRPGGrenade *pGrenade, int nEffectType )
+CObjectBase *CWorld::PerformRangedAttack( const NRPG::SAttackRayInfo &rayInfo, STime sCast, NDb::CModel *pTrailModel, float fTrailSpeed, NDb::CRPGGrenade *pGrenade, int nEffectType )
 {
-	NRPG::PerformRangedAttack( this, rayInfo, sCast, pTrailModel, fTrailSpeed, pGrenade, nEffectType );
+	return NRPG::PerformRangedAttack( this, rayInfo, sCast, pTrailModel, fTrailSpeed, pGrenade, nEffectType );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CWorld::PerformRangedAttack( const NRPG::CAttackPortion &ap, const CRay &ray, const vector<NRPG::IAttackable*> &ignores, STime sCast, NDb::CModel *pTrailModel, float fTrailSpeed, float fMaxRange )
+CObjectBase *CWorld::PerformRangedAttack( const NRPG::CAttackPortion &ap, const CRay &ray, const vector<NRPG::IAttackable*> &ignores, STime sCast, NDb::CModel *pTrailModel, float fTrailSpeed, float fMaxRange )
 {
 	NRPG::SAttackRayInfo rayInfo( ap, ray.ptOrigin, ray.ptDir, true, 0.0f, fMaxRange, 0 );
 	if ( !ignores.empty() )
@@ -2943,44 +2943,52 @@ void CWorld::PerformRangedAttack( const NRPG::CAttackPortion &ap, const CRay &ra
 		if ( pObj )
 			rayInfo.pIgnore = pObj;
 	}
-	NRPG::PerformRangedAttack( this, rayInfo, sCast, pTrailModel, fTrailSpeed );
+	return NRPG::PerformRangedAttack( this, rayInfo, sCast, pTrailModel, fTrailSpeed );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CWorld::ThrowGrenade( const CVec3 &vFrom, const CVec3 &vSpeed, STime tThrow,
+CObjectBase *CWorld::ThrowGrenade( const CVec3 &vFrom, const CVec3 &vSpeed, STime tThrow,
 	float fTFly, NDb::CModel *pModel, NDb::CRPGGrenade *pRPGGrenade, CUnitServer *pUnitServer,
 	NDb::CRPGEngGrenade *pRPGEngGrenade )
 {
 	// retail @0x764140: a valid regular record flies as the timed grenade; otherwise a valid
 	// engineer record flies as the contact-fused eng grenade, carrying the thrower's
 	// ENGINEERING skill for the explosion (read here, at throw time).
+	IDynamicObject *pBullet = 0;
 	if ( IsValid( pRPGGrenade ) )
 	{
-		miscObjects.push_back( CreateGrenadeServer( this, vFrom, vSpeed, tThrow,
-			fTFly, pModel, pRPGGrenade, pUnitServer ) );
+		pBullet = CreateGrenadeServer( this, vFrom, vSpeed, tThrow,
+			fTFly, pModel, pRPGGrenade, pUnitServer );
 	}
 	else if ( IsValid( pRPGEngGrenade ) )
 	{
 		int nEngSkill = 0;
 		if ( IsValid( pUnitServer ) )
 			nEngSkill = pUnitServer->GetUnitRPG()->GetRPGUnit()->Skills( NDb::ST_ENGINEERING );
-		miscObjects.push_back( CreateGrenadeServer( this, vFrom, vSpeed, tThrow,
-			fTFly, pModel, pRPGEngGrenade, pUnitServer, nEngSkill ) );
+		pBullet = CreateGrenadeServer( this, vFrom, vSpeed, tThrow,
+			fTFly, pModel, pRPGEngGrenade, pUnitServer, nEngSkill );
 	}
+	if ( pBullet )
+		miscObjects.push_back( pBullet );
+	return pBullet;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CWorld::ThrowKnife( const NRPG::SAttackRayInfo &rayInfo, float fSpeed, STime tThrow, float fDistance,
+CObjectBase *CWorld::ThrowKnife( const NRPG::SAttackRayInfo &rayInfo, float fSpeed, STime tThrow, float fDistance,
 	NDb::CModel *pModel, NRPG::IInventoryItem *pIItem )
 {
-	miscObjects.push_back( CreateKnifeServer( this, rayInfo, fSpeed, tThrow,
-		fDistance, pModel, pIItem ) );
+	IDynamicObject *pBullet = CreateKnifeServer( this, rayInfo, fSpeed, tThrow,
+		fDistance, pModel, pIItem );
+	miscObjects.push_back( pBullet );
+	return pBullet;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CWorld::LaunchRocket( const CVec3 &vFrom, const CVec3 &vSpeed,
+CObjectBase *CWorld::LaunchRocket( const CVec3 &vFrom, const CVec3 &vSpeed,
 		STime tThrow, float fDistance, NDb::CModel *pModel, NRPG::CAttackPortion &attack, 
 		NRPG::IClipItem *pRocket, CUnitServer *pIgnored, NDb::CEffect *pEffect   )
 {
-	miscObjects.push_back( CreateRocketServer( this, vFrom, vSpeed, tThrow, 
-		fDistance, pModel, attack, pRocket, pIgnored, pEffect ) );
+	IDynamicObject *pBullet = CreateRocketServer( this, vFrom, vSpeed, tThrow,
+		fDistance, pModel, attack, pRocket, pIgnored, pEffect );
+	miscObjects.push_back( pBullet );
+	return pBullet;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 const float F_UNIT_REACH_DISTANCE = 20.0f;

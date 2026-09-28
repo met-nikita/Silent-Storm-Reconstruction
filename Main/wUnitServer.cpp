@@ -139,7 +139,7 @@ CUnitServer::CUnitServer( CWorld *pWorld, NRPG::IUnitMission *_pRPG, NDb::CModel
 	registerOnNewPlayerTurnOrTime( this, &CUnitServer::OnNewPlayerTurnOrTime ),
 	registerOnNewPlayerFastTurnOrTime( this, &CUnitServer::OnNewPlayerFastTurnOrTime ), bCanTalk( false ), nDialog( 0 )
 {
-	pPlayer = _pPlayer;
+	SetPlayer( _pPlayer );
 	bCallTimeLabel = false;
 	SetState( new CUnitStateNormal( this ) );
 	bIsRunningForcedAction = false;
@@ -1057,6 +1057,7 @@ void CUnitServer::Segment()
 	}
 	pState->Segment();
 	FetchRPGAcks();
+	GetUnitRPG()->Segment();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CUnitServer::HearUnit( CUnitServer *pSource )
@@ -1925,6 +1926,8 @@ NDb::EDiplomacyState CUnitServer::GetDiplomacyState( CUnitServer *pTarget ) cons
 void CUnitServer::SetPlayer( CPlayer *_pPlayer )
 {
 	pPlayer = _pPlayer;
+	// Retail 0x7c1340: the medal relation query uses the mission's owner ID.
+	GetUnitRPG()->SetScenarioPlayerID( IsValid( pPlayer ) ? pPlayer->GetScenarioPlayerID() : -1 );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CUnitServer::SetDialog( const string &szDialogCode )

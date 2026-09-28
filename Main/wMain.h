@@ -595,8 +595,8 @@ public:
 	CMineTracker* GetMineTracker() const { return pMineTracker; }
 	
 	CCTime* GetTime() const { return pTime; }
-	void PerformRangedAttack( const NRPG::SAttackRayInfo &rayInfo, STime sCast, NDb::CModel *pTrailModel, float fTrailSpeed, NDb::CRPGGrenade *pGrenade = 0, int nEffectType = 0 );
-	void PerformRangedAttack( const NRPG::CAttackPortion &ap, const CRay &ray, const vector<NRPG::IAttackable*> &ignores, STime sCast, NDb::CModel *pTrailModel, float fTrailSpeed, float fMaxRange = 30.0f );
+	CObjectBase *PerformRangedAttack( const NRPG::SAttackRayInfo &rayInfo, STime sCast, NDb::CModel *pTrailModel, float fTrailSpeed, NDb::CRPGGrenade *pGrenade = 0, int nEffectType = 0 );
+	CObjectBase *PerformRangedAttack( const NRPG::CAttackPortion &ap, const CRay &ray, const vector<NRPG::IAttackable*> &ignores, STime sCast, NDb::CModel *pTrailModel, float fTrailSpeed, float fMaxRange = 30.0f );
 	virtual void Explode( const CVec3 &ptEpicentre, int nPower );
 	virtual void CreateParticle( const CVec3 &ptPos, const CQuat &rot, NDb::CEffect *pEffect, int nFloor = -100 );
 	void AttachMiscObject( CTimedObject *p );
@@ -609,12 +609,12 @@ public:
 	void AddHitLocator( CHitLocator* pLocator );
 	// retail @0x764140 takes BOTH grenade records: an engineer grenade arrives with a null
 	// pRPGGrenade and a live pRPGEngGrenade (contact-fused eng server, thrower's ENG skill).
-	void ThrowGrenade( const CVec3 &vFrom, const CVec3 &vSpeed, STime tThrow, float fTFly,
+	CObjectBase *ThrowGrenade( const CVec3 &vFrom, const CVec3 &vSpeed, STime tThrow, float fTFly,
 		NDb::CModel *pModel, NDb::CRPGGrenade *pRPGGrenade, CUnitServer *pUnitServer,
 		NDb::CRPGEngGrenade *pRPGEngGrenade = 0 );
-	void ThrowKnife( const NRPG::SAttackRayInfo &rayInfo, float fSpeed, STime tThrow, float fDistance,
+	CObjectBase *ThrowKnife( const NRPG::SAttackRayInfo &rayInfo, float fSpeed, STime tThrow, float fDistance,
 		NDb::CModel *pModel, NRPG::IInventoryItem *pIItem );
-	void LaunchRocket( const CVec3 &vFrom, const CVec3 &vSpeed,
+	CObjectBase *LaunchRocket( const CVec3 &vFrom, const CVec3 &vSpeed,
 		STime tThrow, float fDistance, NDb::CModel *pModel, NRPG::CAttackPortion &attack, 
 		NRPG::IClipItem *pRocket, CUnitServer *pIgnored, NDb::CEffect *_pEffect = 0 );
 	virtual void AddGrenadeExplosion( const CVec3 &vStartPosition,

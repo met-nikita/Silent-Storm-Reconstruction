@@ -25,6 +25,7 @@
 #include "..\DBFormat\DataMisc.h"   // NDb::CRPGAP (GetActionAP RPGAP-table costs) + CRPGPicklock (AC_PICK_LOCK nAPToUse)
 
 #include "RPGUnitMission.h"
+#include "RPGAttackSession.h"
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 namespace NRPG
 {
@@ -69,7 +70,7 @@ struct SModifierHolder
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CUnitMission
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-class CUnitMission: public IUnitMission
+class CUnitMission: public CUnitMissionForMedals, public IUnitMission
 {
 	friend class CUnitToHitCalcer;
 	friend class CTileToHitCalcer;
@@ -189,7 +190,19 @@ public:
 	// Retail threads it through the ctor (CreateUnit @0x2c4f50); this fork binds it in the
 	// CUnitServer ctor (SetGlobalGame).
 	CPtr<CGlobalGame> pGlobalGame;
-	virtual void SetGlobalGame( CGlobalGame *p ) { pGlobalGame = p; }
+	virtual void SetGlobalGame( CGlobalGame *p )
+	{
+		pGlobalGame = p;
+		// This fork supplies the retail constructor's game/unit context when a
+		// fresh server is created. Not serialized and not rebound during load.
+		CUnitMissionForMedals::pGame = p;
+		pMedalsGainer = pRPGUnit;
+	}
+	virtual void Segment() { CUnitMissionForMedals::Segment(); }
+	virtual NDb::EDiplomacyState MedalDiplomacyState( int nPlayer )
+	{
+		return GetDiplomacy().GetDiplomacyState( nPlayer );
+	}
 	virtual CGlobalGame* GetGlobalGame() const { return pGlobalGame; }
 	// retail @0x2c5b40/@0x2c5b50/@0x2c5b90/@0x2c5ba0/@0x2c5bb0 -- plain setters/getters.
 	bool IsAIPlayer() const { return bIsAIUnit; }
