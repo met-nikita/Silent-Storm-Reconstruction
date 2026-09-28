@@ -1000,6 +1000,11 @@ CObjectBase* CGScene::CreatePostProcessor( CObjectBase *pRenderNode, IPostProces
 	return 0;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+void CGScene::SetAmbientAnimation( CPtrFuncBase<CAnimLight> *pLight )
+{
+	pTopAmbientAnimator->SetAnimation( pLight );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 void CGScene::SetAmbient( const CVec3 &_vBottomAmbientColor, const CVec3 &_vTopAmbientColor )
 {
 	// @0x159f20: write the two edge nodes (Set bumps their versions); pAmbient (CAmbientMean) and the

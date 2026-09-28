@@ -14,6 +14,7 @@
 #include "iMain.h"
 #include "iRenderWorld.h"
 #include "iCommonUI.h"
+#include "iDesktopWindow.h"
 #include "..\Misc\StrProc.h"
 #include "..\MiscDll\Commands.h"
 #include "..\DBFormat\DataMap.h"
@@ -123,11 +124,12 @@ void CRenderBaseInterface::Step()
 {
 	if ( CanRender() )
 	{
-		// Retail's common mission-base pump dispatches script sounds in backdrop
-		// menus as well. In particular, map script 10 plays the menu ambience.
+		// The same base command handler serves backdrop menus and playable worlds.
 		while ( CPtr<NWorld::CUICmd> pCmd = pWorld->GetUICommand() )
 			if ( IsValid( pCmd ) )
-				ExecWorldSoundCommand( pCmd );
+				if ( !GetDesktop() || GetDesktop()->IsValidCommand( pCmd ) )
+					ExecWorldCommonCommand( pCmd );
+		UpdateWorldCameraCommand( pWorld->GetAimTime()->GetValue() );
 		EraseInvalidRefs( &soundsList );
 		pCamera->Update( GetTime() );
 

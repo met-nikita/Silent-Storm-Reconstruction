@@ -183,10 +183,6 @@ private:
 	// retail tag 26: the test-weather-effect VECTOR (retail ShowWeatherEffect @0x201c60 clears the
 	// vector, then pushes the one new effect handle).
 	vector<CObj<CObjectBase> > testWeatherEffect;
-	// LUA convergence: the single, replaceable scene-wide ambient effect (SetAmbientEffect). The retail keeps it
-	// in a scene slot (CGameView::SetAmbientEffect @0x1895f0); the dev parks the live render handle here instead.
-	// Runtime-only (a render handle, like CUICmdPlayEffect::pHandle) -- NOT serialized.
-	CObj<CObjectBase> pAmbientEffect;
 	// SetLeaveZoneMode: bLeaveBlockedByScript blocks the player from leaving the zone; pBlockReason is
 	// the DB string of the "can't leave" message (retail tag 33; the dev previously kept the raw int id).
 	// Consumed by CanLeaveZone (retail @0x1fcbd0); set by the CUICmdLeaveZoneMode dispatch.

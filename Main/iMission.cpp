@@ -2370,6 +2370,8 @@ void CMission::ExecWorldCommands()
 		// filters commands before dispatch, including camera-locator arbitration.
 		if ( !GetDesktop()->IsValidCommand( pCmd ) )
 			continue;
+		if ( ExecWorldCommonCommand( pCmd ) )
+			continue;
 		CDynamicCast<NWorld::CUICmdPartFinished> pPartFinished(pCmd);
 		if (pPartFinished)
 		{
@@ -2380,121 +2382,6 @@ void CMission::ExecWorldCommands()
 		else if ( CDynamicCast<NWorld::CUICmdPause>( pCmd ) )
 		{
 			PauseGame( !IsGamePaused() );
-		}
-		// CameraLock(bLock) -> retail ICamera vtbl+0x74 = CBaseCamera::FreezeCamera @0xcffc0 (vftable
-		// dump @0x4b529c; +0x70 is the separate scroll-lock Lock @0xcffa0 -- the round-4 SetLock
-		// routing was ONE SLOT OFF). FreezeCamera is a bare refcount, NO pose pin: CCamera::Update
-		// bails before the movement/approach tail while frozen (SetPlacement stays ungated, so the
-		// HQ per-room CameraSet still lands and HOLDS), and retail's SetCutFloor no-ops while frozen
-		// -- THAT is the base's one-floor lock (EBase OnEnterZone calls
-		// CameraLock() once and never unlocks; EFirst doesn't, so its two floors switch freely).
-		else if ( CDynamicCast<NWorld::CUICmdLockCamera>( pCmd ) )
-		{
-			bool bLock = CDynamicCast<NWorld::CUICmdLockCamera>( pCmd )->bLock;
-			// retail CMissionBase::ExecWorldCommand @0x1a30c0, CUICmdLockCamera branch @0x5a3367
-			// (RTTI descriptor @0x97aaa4): the freeze targets the SELECTED camera (GetCamera vtbl+0xb8
-			// @0x5a337e -> FreezeCamera vtbl+0x74 @0x5a338c) -- during a sequence the cinematic camera,
-			// during normal play the active player's.
-			GetCamera()->FreezeCamera( bLock );
-			// ...and in TUTORIAL mode retail freezes the ACTIVE TRACKER's camera as well -- a SECOND
-			// freeze the dev tree never had. @0x5a338f tests [this+0xe5] = bTutorialMode (PDB offset
-			// 229, between bCanSave@228 and bCanRestart@230); @0x5a33a1 is IPlayerTracker vtbl+0x18 =
-			// GetCamera, @0x5a33ac the FreezeCamera on it. Both calls push the same pCmd->bLock
-			// (CUICmdLockCamera+0x10). Targeting the tracker EXPLICITLY is what makes a tutorial
-			// CameraLock/Unlock pair balance even when the selector returns a different camera for the
-			// lock than for the unlock.
-			if ( bTutorialMode )
-				pActivePlayer->GetCamera()->FreezeCamera( bLock );
-		}
-		// retail CMissionBase::ExecWorldCommand @0x5a15e4: CameraSetClipping(near, far) queues a
-		// CUICmdSetCameraClipDistance; dispatch it to the currently selected camera. This used to fall
-		// through the command chain and disappear, so campaign camera scripts could never change their
-		// near/far planes even though the Lua binding and the command's save-load class were present.
-		else if ( CDynamicCast<NWorld::CUICmdSetCameraClipDistance>( pCmd ) )
-		{
-			NWorld::CUICmdSetCameraClipDistance *pClip =
-				CDynamicCast<NWorld::CUICmdSetCameraClipDistance>( pCmd );
-			GetCamera()->SetClipDistance( pClip->fMinDistance, pClip->fMaxDistance );
-		}
-		// release CMissionBase::ExecWorldCommand @0x1a30c0: a camera-locator command (CUICmdUnitCamera
-		// auto-focus) goes to the dedicated pExecLocator slot, NOT the general pCmdExec -- so it never stalls
-		// the UI-command drain and is preempted by priority (MustReplaceCameraExecutor: higher wins; equal
-		// wins unless the newcomer is priority 2). Keep the running exec unless the newcomer must replace it.
-		else if ( CDynamicCast<NWorld::CUICmdCameraLocator>( pCmd ) )
-		{
-			NWorld::CUICmdCameraLocator *pLoc = CDynamicCast<NWorld::CUICmdCameraLocator>( pCmd );
-			if ( IsValid( pExecLocator ) && !NGame::MustReplaceCameraExecutor( pExecLocator->GetPriority(), pLoc->GetPriority() ) )
-				continue;                                   // keep the current focus, drop the newcomer
-			if ( IsValid( pExecLocator ) )
-				pExecLocator->Cancel();
-			pExecLocator = NGame::CreateCameraExecutor( pLoc, this );
-			// does NOT stall pCmdExec: continue draining the queue (the focus runs in its own slot)
-		}
-		else if ( ExecWorldSoundCommand( pCmd ) )
-		{
-			}
-		// LUA convergence PART B: PlayEffect spawns a particle effect at the command's position and parks the
-		// live handle (retail CMissionBase::ExecWorldCommand @0x1a30c0: GetEffect + MakeTransform + render).
-		// Mirrors CMission::ShowWeatherEffect; StopEffect later releases pHandle to remove it.
-		else if ( CDynamicCast<NWorld::CUICmdPlayEffect>( pCmd ) )
-		{
-			NWorld::CUICmdPlayEffect *pPlayEffect = CDynamicCast<NWorld::CUICmdPlayEffect>( pCmd );
-			if ( IsValid( pPlayEffect->pEffect ) )
-			{
-				SFBTransform place;
-				MakeMatrix( &place, CVec3( 1, 1, 1 ), pPlayEffect->vPos, 0 );
-				SRand rnd;
-				pPlayEffect->pHandle = GetScene()->CreateParticles( pPlayEffect->pEffect->GetEffect( &rnd ), 0, pRender->GetTime(), place );
-			}
-		}
-		// LUA convergence PART B: SetupAmbientLight sets the scene's ambient light from the record
-		// (retail CMissionBase::ExecWorldCommand @0x1a30c0: GetLight + scene->SetAmbient; mirrors SetLightMode).
-		else if ( CDynamicCast<NWorld::CUICmdAIUnitWillMove>( pCmd ) )
-		{
-			// Retail 1.2 0x5a3fe0: one additive flash when the AI chooses its next unit.
-			NWorld::CUICmdAIUnitWillMove *pMove = CDynamicCast<NWorld::CUICmdAIUnitWillMove>( pCmd );
-			if ( IsValid( pMove->pUnit ) && IsValid( pActivePlayer ) && IsValid( pWorld ) )
-			{
-				NDb::EDiplomacyState state = pWorld->GetDiplomacyState( pActivePlayer->GetPlayer(), pMove->pUnit->GetPlayer() );
-				if ( state == NDb::DS_ENEMY )
-					pRender->FlashUnit( pMove->pUnit, CVec4( 78.0f / 255, 20.0f / 255, 0, 0 ) );
-				else if ( state == NDb::DS_NEUTRAL || state == NDb::DS_ALLY )
-					pRender->FlashUnit( pMove->pUnit, CVec4( 0, 77.0f / 255, 78.0f / 255, 0 ) );
-			}
-		}
-		else if ( CDynamicCast<NWorld::CUICmdSetAmbient>( pCmd ) )
-		{
-			NWorld::CUICmdSetAmbient *pSetAmbient = CDynamicCast<NWorld::CUICmdSetAmbient>( pCmd );
-			if ( IsValid( pSetAmbient->pLight ) )
-			{
-				SRand rnd;
-				CPtr<NDb::CAmbientLightReal> pLight = pSetAmbient->pLight->GetLight( &rnd );
-				GetScene()->SetAmbient( pLight );
-			}
-			else
-				SetLightMode( nLightMode );   // SetTimeOfDay queues a null-light cmd -> recompute the current ambient (retail: not a no-op)
-		}
-		// LUA convergence: SetAmbientEffect(id) sets a single, replaceable scene-wide ambient effect from the
-		// record (retail CMissionBase::ExecWorldCommand @0x1a30c0 -> CGameView::SetAmbientEffect @0x1895f0). The
-		// retail keeps it in a scene slot + builds a CLightAnimator from the effect's first light; the dev parks
-		// the live render handle on the mission and creates the full effect at the scene origin via the proven
-		// CreateParticles path (same call as PlayEffect). A null/invalid record clears it (SetAmbientEffect(-1)).
-		else if ( CDynamicCast<NWorld::CUICmdSetAmbientEffect>( pCmd ) )
-		{
-			NWorld::CUICmdSetAmbientEffect *pSetAmbientEffect = CDynamicCast<NWorld::CUICmdSetAmbientEffect>( pCmd );
-			pAmbientEffect = 0;		// release the previous ambient effect -> removes it from the scene
-			if ( IsValid( pSetAmbientEffect->pEffect ) )
-			{
-				SFBTransform place;
-				MakeMatrix( &place, CVec3( 1, 1, 1 ), CVec3( 0, 0, 0 ), 0 );
-				SRand rnd;
-				pAmbientEffect = GetScene()->CreateParticles( pSetAmbientEffect->pEffect->GetEffect( &rnd ), 0, pRender->GetTime(), place );
-			}
-		}
-		// LUA convergence PART B: BeginZone(zoneName) begins the named scenario zone
-		// (retail CMissionBase::ExecWorldCommand @0x1a30c0: GetZoneByName -> CICBeginMission).
-		else if ( ExecWorldBeginZoneCommand( pCmd ) )
-				{
 		}
 		// LUA convergence PART B: FadeOut(BeginFade) spawns the fade desktop window; FadeIn(EndFade) tells the
 		// running fade to fade back out (retail CMission::ExecWorldCommand @0x1fd8c0 BeginFade/EndFade arms).
@@ -2537,12 +2424,6 @@ void CMission::ExecWorldCommands()
 			pScreenshot->Generate();
 			NMainLoop::Command( new NGame::CICLeaveZoneMenu( this, NDb::GetString( pDlg->nRecordID ), false, pScreenshot ) );
 		}
-		// LUA convergence (hint machinery): SetTutorialMode(b) stores the flag on the mission (retail
-		// CMissionBase::ExecWorldCommand @0x1a30c0). Its sole consumer is the ShowHint gate just below.
-		else if ( CDynamicCast<NWorld::CUICmdTutorialMode>( pCmd ) )
-		{
-			bTutorialMode = CDynamicCast<NWorld::CUICmdTutorialMode>( pCmd )->bTutorial;
-		}
 		// LUA convergence: SetFirstMissionMode(b) -- close the medals/biography panels now + latch the flag
 		// (retail CMission::ExecWorldCommand @0x1fd8c0: SetPanelState(0x14,0) -- retail bits MEDALS|BIOGRAPHY --
 		// then bSpecialFirstMissionMode=b).
@@ -2570,26 +2451,6 @@ void CMission::ExecWorldCommands()
 				pBlockReason = NDb::GetString( pLeaveMode->nReason );
 			else
 				pBlockReason = 0;
-		}
-		// LUA convergence: PlayVideo -- play the named .seq cut-scene via the existing iIntroScreen sequence
-		// player (retail CMissionBase::ExecWorldCommand @0x1a30c0 -> new CICPlaySequence(this, nID, file, false)).
-		else if ( CDynamicCast<NWorld::CUICmdPlayVideo>( pCmd ) )
-		{
-			NWorld::CUICmdPlayVideo *pVideo = CDynamicCast<NWorld::CUICmdPlayVideo>( pCmd );
-			NGame::PlayVideoSequence( this, pVideo->GetID(), pVideo->szFileName, false );
-		}
-		// LUA convergence (hint machinery): ShowHint(id) shows the hint modal (NGame::CICShowHint, which awards
-		// the hint's XP), BUT only when the "ui_showhints" game option is on OR we're in tutorial mode (retail
-		// CMissionBase::ExecWorldCommand @0x1a30c0 gate). When hints are suppressed it still releases the lua
-		// WaitForUI(id) immediately by posting the interface event itself (the screen would otherwise do that).
-		else if ( CDynamicCast<NWorld::CUICmdShowHint>( pCmd ) )
-		{
-			NWorld::CUICmdShowHint *pShowHint = CDynamicCast<NWorld::CUICmdShowHint>( pCmd );
-			bool bShow = ( NGlobal::GetVar( "ui_showhints" ).GetFloat() == 1.0f ) || bTutorialMode;
-			if ( bShow )
-				NMainLoop::Command( new NGame::CICShowHint( this, pShowHint->GetID(), pShowHint->pHint, pGlobalGame ) );
-			else
-				DoEvent( new NWorld::CCmdInterfaceEvent( pShowHint->GetID() ) );
 		}
 		// LUA convergence: campaign OnRealExit() -> ExitToChapter() (scriptScenario.cpp:96) queues a
 		// CUICmdContinueChapter. retail CMission::ExecWorldCommand @0x1fd8c0 posts a CICRealEndMission and
@@ -2700,55 +2561,23 @@ void CMission::ExecWorldCommands()
 						NUI::LoadTemplate(pMissionDlgUI, NDb::GetUIContainer(364));
 						pMissionDlgUI->ShowDesktop();
 					}
-					else {
-						CDynamicCast<NWorld::CUICmdPlayAck> pAck(pCmd);
-						if (pAck)
-							GetDesktop()->PlayAck(pAck->phrases.front());
-						else {
-							CDynamicCast<NWorld::CUICmdSetFloor> pFloor(pCmd);
-							if (pFloor)
-								SetCutFloor(pFloor->nFloor);
-							else {
-								CDynamicCast<NWorld::CUICmdShowClue> pClue(pCmd);
-								if (pClue)
-								{
-									if (IsValid(pClue->pClue))
-										NMainLoop::Command(new NGame::CICShowClue(this, pClue->GetID(), pGlobalGame, GetActivePlayer()->GetGlobalPlayer(), pClue->pClue));
-								}
-								// W5 serialization-convergence: the NGame UICmdExec wrappers are gone -- retail
-								// CMission::ExecWorldCommand @0x1fd8c0 executes these three INLINE:
-								// LoadTemplate -> NMainLoop::Command(new CICBeginMission(pZone, nTemplateID,
-								// vector<string>(), GetRPGGame())); ShowStore -> the immediate panel open
-								// (mission vtbl+0x68 == SetPanelState(PANEL_STORE|PANEL_INVENTORY, true));
-								// ShowTeamMng -> NMainLoop::Command(new CICTeamMngMenu(globalPlayer, this, nID))
-								// -- NB retail passes the command's wait id as the 3rd arg.
-								else {
-									CDynamicCast<NWorld::CUICmdLoadTemplate> pLoadTemplate(pCmd);
-									if (pLoadTemplate)
-										NMainLoop::Command(new CICBeginMission(pLoadTemplate->pZone,
-											pLoadTemplate->nTemplateID, vector<string>(), GetRPGGame()));
-									else {
-										CDynamicCast<NWorld::CUICmdShowStore> pShowStore(pCmd);
-										if (pShowStore)
-										{
-											NWorld::CPlayer *pPlayer = dynamic_cast<NWorld::CPlayer*>( GetActivePlayer()->GetPlayer() );
-											if ( pPlayer )
-												pPlayer->UpdateStore();
-											SetPanelState(PANEL_STORE | PANEL_INVENTORY, true);
-										}
-										else {
-											CDynamicCast<NWorld::CUICmdShowTeamMng> pShowTeamMng(pCmd);
-											if (pShowTeamMng)
-												NMainLoop::Command(new CICTeamMngMenu(
-													GetActivePlayer()->GetGlobalPlayer(), this, pShowTeamMng->GetID()));
-											else
-												pCmdExec = GetDesktop()->CreateExecutor(pCmd);
-										}
-									}
-								}
-							}
-						}
+					else if ( CDynamicCast<NWorld::CUICmdPlayAck> pAck = pCmd )
+						GetDesktop()->PlayAck( pAck->phrases.front() );
+					else if ( CDynamicCast<NWorld::CUICmdLoadTemplate> pLoadTemplate = pCmd )
+						NMainLoop::Command( new CICBeginMission( pLoadTemplate->pZone,
+							pLoadTemplate->nTemplateID, vector<string>(), GetRPGGame() ) );
+					else if ( CDynamicCast<NWorld::CUICmdShowStore> pShowStore = pCmd )
+					{
+						NWorld::CPlayer *pPlayer = dynamic_cast<NWorld::CPlayer*>( GetActivePlayer()->GetPlayer() );
+						if ( pPlayer )
+							pPlayer->UpdateStore();
+						SetPanelState( PANEL_STORE | PANEL_INVENTORY, true );
 					}
+					else if ( CDynamicCast<NWorld::CUICmdShowTeamMng> pShowTeamMng = pCmd )
+						NMainLoop::Command( new CICTeamMngMenu(
+							GetActivePlayer()->GetGlobalPlayer(), this, pShowTeamMng->GetID() ) );
+					else
+						pCmdExec = GetDesktop()->CreateExecutor( pCmd );
 				}
 			}
 		}

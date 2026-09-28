@@ -210,15 +210,8 @@ void CGlobalMap::ProcessWorldCommands()
 		CPtr<NWorld::CUICmd> pCmd = pWorld->GetUICommand();
 		if ( !IsValid( pCmd ) )
 			return;
-		if ( ExecWorldBeginZoneCommand( pCmd ) || ExecWorldSoundCommand( pCmd ) )
-			continue;
-		if ( CDynamicCast<NWorld::CUICmdShowHint> pHint = pCmd )
-		{
-			if ( NGlobal::GetVar( "ui_showhints" ).GetFloat() == 1.0f || bTutorialMode )
-				NMainLoop::Command( new CICShowHint( this, pHint->GetID(), pHint->pHint, pGlobalGame ) );
-			else
-				DoEvent( new NWorld::CCmdInterfaceEvent( pHint->GetID() ) );
-		}
+		if ( GetDesktop()->IsValidCommand( pCmd ) )
+			ExecWorldCommonCommand( pCmd );
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -234,6 +227,7 @@ void CGlobalMap::Step()
 	{
 		pRender->UpdateViewWorld( !bPause, GetGameTime(), pActivePlayer->GetPlayer(), bCheatVisibility );
 		ProcessWorldCommands();
+		UpdateWorldCameraCommand( GetGameTime() );
 		if ( NMainLoop::HaveInterfaceCommand() )
 			return;
 		for ( int nPlayer = 0; nPlayer < playersSet.size(); ++nPlayer )

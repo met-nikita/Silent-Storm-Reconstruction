@@ -192,6 +192,7 @@ public:
 	virtual CDecalTarget* CreateDecalTarget( const vector<CObjectBase*> &targets, const SDecalMappingInfo &_info );
 	virtual CObjectBase* AddDecal( NGScene::CDecalTarget *pTarget, NDb::CMaterial *pMaterial );
 	virtual void SetAmbient( NDb::CAmbientLightReal *pLight, ELightMode lm );
+	virtual void SetAmbientEffect( NDb::CEffect *pEffect, STime stBeginTime, CFuncBase<STime> *pTime );
 	// retail IGameView vtbl+0xa0 (folded getter @0x776ea0): the light last passed to SetAmbient.
 	virtual NDb::CAmbientLightReal* GetPrevLight() { return pPrevLight; }
 	virtual ESceneRenderMode GetRenderMode() const;
@@ -1192,6 +1193,30 @@ static void CheckCircularGF2LightLink( NDb::CAmbientLightReal *pLight )
 {
 	if ( pLight && pLight->pGF2Light )
 		pLight->pGF2Light->pGF2Light = 0;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CGameView::SetAmbientEffect( NDb::CEffect *pEffect, STime stBeginTime, CFuncBase<STime> *pTime )
+{
+	// Retail GView: only the first light drives ambient; no effect geometry or particles.
+	if ( pEffect && !pEffect->lights.empty() )
+	{
+		NDb::CLightInstance *pInstance = pEffect->lights.front();
+		NDb::CAnimLight *pLight = pInstance->pLight;
+		if ( pLight )
+		{
+			CLightAnimator *pAnimator = new CLightAnimator( pInstance, stBeginTime, pInstance->fScale );
+			pAnimator->pInfo = shareAnimLights.Get( pLight->GetRecordID() );
+			pAnimator->pTime = pTime;
+			SFBTransform trans;
+			CVec3 scale( pInstance->fScale, pInstance->fScale, pInstance->fScale );
+			MakeMatrix( &trans.forward, pInstance->position, pInstance->rotation, scale );
+			trans.backward.HomogeneousInverse( trans.forward );
+			pAnimator->pPlacement = new CCFBTransform( trans );
+			pScene->SetAmbientAnimation( pAnimator );
+		}
+		return;
+	}
+	pScene->SetAmbientAnimation( 0 );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CGameView::SetAmbient( NDb::CAmbientLightReal *pLight, ELightMode lm )

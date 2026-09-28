@@ -652,6 +652,7 @@ public:
 	// the building-aware field, so the two are NOT interchangeable.
 	virtual IHeightLayers* GetHeightLayers() = 0;
 	virtual NDb::CAmbientLightReal* GetDefaultLight() = 0;
+	virtual const vector<int>& GetCreateFlags() const = 0;
 	// retail IWorld vtbl+0xd8 = CWorld::GetPocket @0x376f60 -- the strategic between-maps pocket
 	// (units + objects). Every retail consumer reaches the pocket through this and calls CPocket
 	// directly: luaUnitPlaceInPocket @0x2f9500, luaObjectPlaceInPocket @0x2e9000,

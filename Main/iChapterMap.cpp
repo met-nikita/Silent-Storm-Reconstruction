@@ -262,8 +262,6 @@ void CChapterMap::ProcessWorldCommands()
 			return;
 		if ( !GetDesktop()->IsValidCommand( pCmd ) )
 			continue;
-		if ( ExecWorldBeginZoneCommand( pCmd ) || ExecWorldSoundCommand( pCmd ) )
-			continue;
 		if ( CDynamicCast<NWorld::CUICmdLoadTemplate> pLoad = pCmd )
 		{
 			NMainLoop::CommandWithAutoSave( NStr::ToAscii( NUI::GetDBString( 20243 ).c_str() ),
@@ -276,13 +274,8 @@ void CChapterMap::ProcessWorldCommands()
 			if ( pFeature->nFeature == 0 )
 				bV12WorldCmdFlag = true;
 		}
-		else if ( CDynamicCast<NWorld::CUICmdShowHint> pHint = pCmd )
-		{
-			if ( NGlobal::GetVar( "ui_showhints" ).GetFloat() == 1.0f || bTutorialMode )
-				NMainLoop::Command( new CICShowHint( this, pHint->GetID(), pHint->pHint, pGlobalGame ) );
-			else
-				DoEvent( new NWorld::CCmdInterfaceEvent( pHint->GetID() ) );
-		}
+		else
+			ExecWorldCommonCommand( pCmd );
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -300,6 +293,7 @@ void CChapterMap::Step()
 	{
 		pRender->UpdateViewWorld( !bPause, GetGameTime(), pActivePlayer->GetPlayer(), bCheatVisibility );
 		ProcessWorldCommands();
+		UpdateWorldCameraCommand( GetGameTime() );
 		if ( NMainLoop::HaveInterfaceCommand() )
 			return;
 		for ( int nPlayer = 0; nPlayer < playersSet.size(); ++nPlayer )

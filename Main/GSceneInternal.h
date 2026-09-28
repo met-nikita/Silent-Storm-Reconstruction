@@ -496,8 +496,7 @@ OBJECT_BASIC_METHODS(CGScene);
 	CObj<CDecalsManager> pDecalsManager;
 	CObj<CCVec3> pTopAmbient, pBottomAmbient;
 	// release save-format tags 33/34: animated top-ambient DG node + lighting-options bitmask.
-	// pTopAmbientAnimator is the release-new animated-ambient feature; this predecessor render
-	// never creates it (stays a null CObj -> serializes as a null ref).
+	// Animated top ambient is shared by the ambient mean and directional lighting.
 	CObj<CAmbientAnimator> pTopAmbientAnimator;
 	// bit 1 = scene receives no depth shadows (fast interface views), bit 2 = no CL updates
 	int nLightingOptions = 0;
@@ -604,6 +603,7 @@ public:
 	virtual CObjectBase* CreateSelection( CObjectBase *pRenderNode, const CVec4 &vColor );
 	virtual CObjectBase* CreatePostProcessor( CObjectBase *pRenderNode, IPostProcess *pProcessor );
 	virtual void SetAmbient( const CVec3 &vBottomAmbientColor, const CVec3 &vTopAmbientColor );
+	virtual void SetAmbientAnimation( CPtrFuncBase<CAnimLight> *pLight );
 	virtual CObjectBase* AddDirectionalLight( CFuncBase<CVec3> *pColor, CFuncBase<CVec3> *pGlossColor, const CVec3 &vShadowColor, const CVec3 &ptLight, const CVec3 &ptOrigin, const CVec2 &ptSize, float fMaxHeight, bool bLightmapOnly, float fBlurShift );
 	virtual CObjectBase* AddPointLight( const CVec3 &_vColor, const CVec3 &ptOrigin, float fR, bool bLightmapOnly, bool bCastShadow );
 	virtual CObjectBase* AddPointLight( CPtrFuncBase<CAnimLight> *pLight );

@@ -159,6 +159,7 @@ public:
 	virtual CDecalTarget* CreateDecalTarget( const vector<CObjectBase*> &targets, const SDecalMappingInfo &_info ) = 0;
 	virtual CObjectBase* AddDecal( NGScene::CDecalTarget *pTarget, NDb::CMaterial *pMaterial ) = 0;
 	virtual void SetAmbient( NDb::CAmbientLightReal *pLight, ELightMode lm = LT_ZONE ) = 0;
+	virtual void SetAmbientEffect( NDb::CEffect *pEffect, STime stBeginTime, CFuncBase<STime> *pTime ) = 0;
 	// retail IGameView vtbl+0xa0 (COMDAT-folded getter @0x776ea0: `return this->pPrevLight`
 	// @CGameView+0xf4): the light last installed by SetAmbient. CRenderGame::SyncWeather
 	// (@0x2cb9b0) latches it as the "sun" reference light for the weather cross-fade.
