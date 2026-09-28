@@ -736,13 +736,17 @@ void NDatabase::ImportRelation( CDBRecord *pSrc, CDBTableBase *pDestTable, std::
 	ASSERT( bDone );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void NDatabase::ImportField( const char *pszFieldName, CDBRecord **pRef, CDBTableBase *pDestTable )
+bool NDatabase::ImportField( const char *pszFieldName, CDBRecord **pRef, CDBTableBase *pDestTable )
 {
 	ASSERT( pDestTable );
 	*pRef = 0;
-	int nID = pStorageSource ? pStorageSource->GetInt( pszFieldName ) : table.GetInt( pszFieldName );
-	if ( pDestTable )
+	int nID = 0;
+	// Retail v1.2 0x401940 / typed wrapper 0x7ef6d0: missing/sentinel
+	// references must not clear a live record's link during a partial mod import.
+	const bool bImported = ImportField( pszFieldName, &nID );
+	if ( bImported && pDestTable )
 		*pRef = pDestTable->GetDBRecord( nID );
+	return bImported;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // Post-load link builder (DBFormat/DataMap.cpp). For the dev-format (v0) game.db these links are

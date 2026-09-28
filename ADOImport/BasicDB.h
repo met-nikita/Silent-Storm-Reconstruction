@@ -161,21 +161,23 @@ namespace NDatabase
 	// getters @0x401900..0x402740 return a bool and yield the value via out-param).
 	// A missing column returns false and leaves *pData UNTOUCHED, so guarded call
 	// sites keep the record's previous value when a (mod) db lacks the column.
-	// The record-reference overloads below keep the v1.1 always-assign form.
+	// Record references likewise retain their previous value on a missing field.
 	bool ImportField( const char *pszFieldName, int *pData );
 	bool ImportField( const char *pszFieldName, bool *pData );
 	bool ImportField( const char *pszFieldName, float *PData );
 	bool ImportField( const char *pszFieldName, std::string *pData );
 	bool ImportField( const char *pszFieldName, std::wstring *pData );
 	// simple reference
-	void ImportField( const char *pszFieldName, CDBRecord **pRef, CDBTableBase *pDestTable );
+	bool ImportField( const char *pszFieldName, CDBRecord **pRef, CDBTableBase *pDestTable );
 	template< class T >
-	void ImportField( const char *pszFieldName, CPtr<T> *pRef )
+	bool ImportField( const char *pszFieldName, CPtr<T> *pRef )
 	{
 		CDBRecord *pRes;
 		CDBTable<T> *pTable = NDatabase::GetTable<T>();
-		ImportField( pszFieldName, &pRes, pTable );
-		*pRef = (T*)pRes;
+		const bool bImported = ImportField( pszFieldName, &pRes, pTable );
+		if ( bImported )
+			*pRef = (T*)pRes;
+		return bImported;
 	}
 	// array of refs
 	void ImportRelation( CDBRecord *pSrc, CDBTableBase *pDestTable, std::vector< CPtr<CDBRecord> > *pRefs );
