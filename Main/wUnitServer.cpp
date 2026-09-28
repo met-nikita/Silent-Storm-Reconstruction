@@ -1773,11 +1773,13 @@ bool CUnitServer::IsFlyingBoss() const
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CUnitServer::FlipPanzerklein( CUnitServer *pPK, bool bUnloadWeapons, bool bTakeInventory )
 {
-	NDb::CModel *pPKModel;
+	// Retail v1.2 0x7c1e50 owns a copy on both entry and exit; the live
+	// visual model must not alias the RPG source model.
+	CPtr<NDb::CModel> pPKModel = new NDb::CModel;
 	if ( !pPK ) // return to non-PK mode
-		pPKModel = GetUnitRPG()->GetRPGUnit()->pModel;
+		*pPKModel = *GetUnitRPG()->GetRPGUnit()->pModel;
 	else
-		pPKModel = pPK->GetUnitRPG()->GetRPGUnit()->pModel;
+		*pPKModel = *pPK->GetUnitRPG()->GetRPGUnit()->pModel;
 	CUnitServer *pOldPK = pWearingPK;
 	pWearingPK = pPK;
 	NAI::SUnitPosition pos = GetPosition();
