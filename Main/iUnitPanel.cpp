@@ -922,17 +922,21 @@ void CInfoPanelSlot::Draw( const STime &sTime, NGScene::I2DGameView *pView )
 	if (pWeapon)
 	{
 		CPtr<NRPG::IClipItem> pRPGClipItem = pWeapon->GetInnerClip();
-		pReload->SetStyle( STYLE_VISIBLE, true );
-		pReload->Set( pRPGClipItem->GetDBItem() );
-
-		WCHAR wsBuffer[256];
-		swprintf( wsBuffer, L"<color=FFB4997C><font face=Impact size=36pt outlinesize=2 outlinecolor=FF513E2B><left>%d/%d", pRPGClipItem->GetIncQuantity(), pRPGClipItem->GetMaxIncQuantity() );
-		pAmmo->SetText( wsBuffer );
-		pAmmo->SetStyle( STYLE_VISIBLE, true );
+		pReload->SetStyle( STYLE_VISIBLE, IsValid( pRPGClipItem ) );
+		if ( IsValid( pRPGClipItem ) )
+		{
+			pReload->Set( pRPGClipItem->GetDBItem() );
+			pAmmo->SetText( GetDBString( 18759 ) + NStr::Format( L"%d/%d", pRPGClipItem->GetIncQuantity(), pRPGClipItem->GetMaxIncQuantity() ), true );
+			pAmmo->SetStyle( STYLE_VISIBLE, true );
+		}
 	}
 	else
 	{
-		pAmmo->SetStyle( STYLE_VISIBLE, false );
+		// Retail v1.2 0x655c3e: medical/tool charges use the same counter as ammo.
+		CDynamicCast<NRPG::IItemContainerInfo> pContainer( pItem );
+		if ( pContainer )
+			pAmmo->SetText( GetDBString( 18759 ) + NStr::Format( L"%d/%d", pContainer->GetIncQuantity(), pContainer->GetMaxIncQuantity() ), true );
+		pAmmo->SetStyle( STYLE_VISIBLE, pContainer != 0 );
 		pReload->SetStyle( STYLE_VISIBLE, false );
 	}
 

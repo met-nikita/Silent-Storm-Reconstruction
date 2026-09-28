@@ -116,6 +116,7 @@ public:
 	virtual void AddLastCritical( NDb::ECritical eCA ) = 0; // for Criticals
 	virtual void GetLastCriticals( vector<NDb::ECritical> *pResCritical ) = 0;
 	virtual bool HasCritical( NDb::ECritical eCritical, CCritical** ppCritical = 0 ) const = 0;
+	virtual bool HasCurableCriticals() const { return false; }
 	virtual void UseTwoHanded( bool bUse ) = 0;
 	virtual bool CanUseTwoHanded() const = 0;
 	// (Jan03 Blind/Deaf are GONE in retail -- CBlindCritical/CDeafCritical @0x294da0/@0x294e00
