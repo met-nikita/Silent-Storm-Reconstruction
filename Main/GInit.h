@@ -13,6 +13,7 @@ void GetConfiguredVideoMode( int *pModeX, int *pModeY );   // WIDESCREEN (Sentin
 bool CanRenderShadows();
 bool CanCacheLighting();
 bool CanCalcAmbient();
+bool UsePrecisePointShadows();
 int GetDepthTexResolution();
 int GetCLSkyTexturesNumber();
 int GetCLCubeResolution();

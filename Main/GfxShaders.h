@@ -170,5 +170,8 @@ externA5 SPShader psCLTestPrevFrame;
 externA5 SPShader psCLPointDiffuse;
 externA5 SPShader psCLPointBump;
 externA5 SPShader psCLPointDiffuseShadowed;
-externA5 SPShader *psAllShaders[82];
+externA5 SPShader psCLPointDepthCheckRGB;
+externA5 SPShader psCLPointDiffuseShadowedRGB;
+externA5 SPShader psCLPointDiffuseShadowedRGBA;
+externA5 SPShader *psAllShaders[85];
 #endif

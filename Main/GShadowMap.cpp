@@ -520,6 +520,11 @@ void CShadowMapsShare::Refresh()
 {
 	if ( IsValid( pDepthShadow ) )
 		return;
+	for ( int i = 0; i < cubeSlots.size(); ++i )
+		for ( int c = 0; c < 4; ++c )
+			if ( IsValid(cubeSlots[i].channels[c]) )
+				cubeSlots[i].channels[c]->pTexture = 0;
+	cubeSlots.clear();
 	nDepthResolution = GetDepthTexResolution();
 	nCLSkyTextures = NGScene::GetCLSkyTexturesNumber();
 	pDepthShadow = NGfx::MakeTexture( nDepthResolution, nDepthResolution, 1, NGfx::SPixel8888::ID, NGfx::TARGET, NGfx::CLAMP );
@@ -527,11 +532,50 @@ void CShadowMapsShare::Refresh()
 	pParticleLM = NGfx::MakeTexture( n, n, 1, NGfx::SPixel8888::ID, NGfx::TARGET, NGfx::CLAMP );
 	for ( int k = 0; k < nCLSkyTextures; ++k )
 		pLMDepthBuffers[k] = NGfx::MakeTexture( n, n, 1, NGfx::SPixel8888::ID, NGfx::TARGET, NGfx::CLAMP );
-	if ( CanCacheLighting() )
+	if ( CanCacheLighting() && UsePrecisePointShadows() )
 	{
 		n = GetCubeDepthResolution();
 		pCubeDepth = NGfx::MakeCubeTexture( n, 1, NGfx::SPixel8888::ID, NGfx::TARGET );
 	}
+	else
+		pCubeDepth = 0;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+CCubeTextureChannel *CShadowMapsShare::AllocCubeChannel()
+{
+	Refresh();
+	const int nChannels = NGfx::GetHardwareLevel() >= NGfx::HL_GFORCE3 ? 4 : 1;
+	const int nCubes = 152 / nChannels;
+	cubeSlots.resize(nCubes);
+	int nOldCube = 0, nOldChannel = 0, nOldest = 0x7fffffff;
+	for ( int i = 0; i < nCubes; ++i )
+	{
+		SCubeSlot &slot = cubeSlots[i];
+		for ( int c = 0; c < nChannels; ++c )
+		{
+			if ( !IsValid(slot.channels[c]) || !IsValid(slot.channels[c]->pTexture) )
+			{
+				if ( !IsValid(slot.pTexture) )
+					slot.pTexture = NGfx::MakeCubeTexture( GetCLCubeResolution(), 1, NGfx::SPixel8888::ID, NGfx::TARGET );
+				CCubeTextureChannel *p = new CCubeTextureChannel( slot.pTexture, c );
+				slot.channels[c] = p;
+				return p;
+			}
+			if ( slot.channels[c]->nLRU < nOldest )
+			{
+				nOldest = slot.channels[c]->nLRU;
+				nOldCube = i;
+				nOldChannel = c;
+			}
+		}
+	}
+	SCubeSlot &slot = cubeSlots[nOldCube];
+	// Retire the old lease before sharing its channel with another light.
+	// Scene caches retain their lease object, but must allocate again on use.
+	slot.channels[nOldChannel]->pTexture = 0;
+	CCubeTextureChannel *p = new CCubeTextureChannel( slot.pTexture, nOldChannel );
+	slot.channels[nOldChannel] = p;
+	return p;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////

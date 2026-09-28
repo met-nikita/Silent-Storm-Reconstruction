@@ -15,6 +15,7 @@ namespace NGfx
 namespace NGScene
 {
 class CMaterial;
+class CCubeTextureChannel;
 class CPerMaterialCombiner;
 struct SLightInfo;
 const int N_CL_TEMP_REGISTER = 2;
@@ -127,6 +128,7 @@ class CLightmapTracker : public CObjectBase
 		RC_SKY_DEPTH,
 		RC_COLOR_POINT,
 		RC_COLOR_SEMI,
+		RC_DEPTH_POINT,
 		RC_APPLY,
 		RC_SOFT_APPLY
 	};
@@ -136,6 +138,7 @@ class CLightmapTracker : public CObjectBase
 		int nStep;
 		bool bCalcSky;
 		bool bCalcColor;
+		bool bColorReady = false;
 	};
 	ZDATA
 	SGlobalIlluminationInfo globalIllumination;
@@ -161,6 +164,7 @@ private:
 	int nLights, nPassesPerCalc;
 	SRecalcState rs;
 	int nPreparedSkySteps = 0;
+	int nPointLight = 0, nPointLightStart = 0;
 	IRender *pRender;
 	SBound currentBound;
 	SGroupSelect groupSelect;
@@ -168,8 +172,10 @@ private:
 	// Transient: registers are shared between scenes and recreated on device reset.
 	CPtr<NGfx::CTexture> pHistoryDepth, pHistoryLight;
 	bool bLightStateUpdated;
-	typedef unordered_map<SPointLightPos,CObj<NGfx::CCubeTexture>, SPointLightPosHash> CPointDepthHash;
+	typedef unordered_map<SPointLightPos,CObj<CCubeTextureChannel>, SPointLightPosHash> CPointDepthHash;
 	CPointDepthHash pointDepths;
+	CCubeTextureChannel *GetPointDepth( const CVec3 &vCenter, float fRadius );
+	void SortLights( vector<int> *pOrder );
 private:
 	struct SLightmapTargetGeom
 	{
@@ -183,14 +189,16 @@ private:
 	};
 
 	static int GetSkyTexturesNum();
+	void RenderCachedPoints( SLightmapTargetGeom *pTarget );
+	void BeginPointRecalc();
 	void RenderLight( SLightmapTargetGeom *pTarget, const SLightInfo &lightInfo,
 		ERenderOperation op, CRenderCmdList::UParameter param1, CRenderCmdList::UParameter param2, int nStencilOp,
 		CRenderCmdList::UParameter param3 = CRenderCmdList::UParameter() );
 	void RenderCubeMapDepth( SLightmapTargetGeom *pTarget, 
-		const CVec3 &vCenter, float fRadius, int nDir );
+		const CVec3 &vCenter, float fRadius, int nDir, CCubeTextureChannel *pChannel = 0 );
 	void DownsampleCubeMapDepth( const CVec3 &vCenter, float fRadius );
 	void RenderPointLightShadowed( SLightmapTargetGeom *pTarget, 
-		const CVec3 &vCenter, float fRadius, const CVec3 &_vColor, NGfx::CCubeTexture *pDepth, int nDepthBias, bool bFast );
+		const CVec3 &vCenter, float fRadius, const CVec3 &_vColor, NGfx::CCubeTexture *pDepth, int nDepthBias, bool bFast, int nChannel = 0 );
 	void RenderPointNoShadows( SLightmapTargetGeom *pTarget, 
 		const CVec3 &_vCenter, float fRadius, const CVec3 &_vColor );
 	void RenderSkyCheck( SLightmapTargetGeom *pTarget, float fStrength, int nBuffer, bool bFast );

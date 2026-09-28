@@ -816,7 +816,16 @@ static void ExecOps( NGfx::CRenderContext *pRC, const vector<CRenderCmdList::SOp
 			triListType = TLT_GEOM;
 			break;
 		case RO_CL_PNT_DEPTH_CHECK:
-			pRC->SetPixelShader( psCLPointDepthCheck );
+			if ( op.p3.f != 0 )
+			{
+				pRC->SetPixelShader( psCLPointDepthCheckRGB );
+				CVec4 select(0,0,0,0);
+				(&select.x)[Clamp(int(op.p3.f) - 1, 0, 2)] = 1;
+				pRC->SetPSConst( 0, select );
+				pRC->SetPSConst( 1, CVec4(1,1,1,1) - select );
+			}
+			else
+				pRC->SetPixelShader( psCLPointDepthCheck );
 			pRC->SetAlphaRef( Float2Int( op.p2.f ) );
 			pRC->SetVertexShader( vsCLPointDepthCheck );
 			pRC->SetVSConst( 16, CVec4( 0.5f, 1 / ( lightInfo.vRadius.x + 4 ), 0, 0 ) );
@@ -825,7 +834,24 @@ static void ExecOps( NGfx::CRenderContext *pRC, const vector<CRenderCmdList::SOp
 			triListType = TLT_GEOM;
 			break;
 		case RO_CL_PNT_LIGHT_SHADOWED:
-			pRC->SetPixelShader( psCLPointDiffuseShadowed );
+			if ( NGfx::GetHardwareLevel() > NGfx::HL_GFORCE3 )
+			{
+				pRC->SetPixelShader( psCLPointDiffuseShadowedRGBA );
+				CVec4 select(0,0,0,0);
+				(&select.x)[op.p3.f <= 0 ? 3 : Clamp(int(op.p3.f) - 1, 0, 2)] = 1;
+				pRC->SetPSConst( 0, select );
+				pRC->SetPSConst( 1, CVec4(1,1,1,1) - select );
+			}
+			else if ( op.p3.f != 0 )
+			{
+				pRC->SetPixelShader( psCLPointDiffuseShadowedRGB );
+				CVec4 select(0,0,0,0);
+				(&select.x)[Clamp(int(op.p3.f) - 1, 0, 2)] = 1;
+				pRC->SetPSConst( 0, select );
+				pRC->SetPSConst( 1, CVec4(1,1,1,1) - select );
+			}
+			else
+				pRC->SetPixelShader( psCLPointDiffuseShadowed );
 			pRC->SetAlphaRef( Float2Int( op.p2.f ) );
 			pRC->SetVertexShader( vsCLPointDiffuseShadowed );
 			pRC->SetVSConst( 16, CVec4( 0.5f, 1 / ( lightInfo.vRadius.x + 4 ), 0, 0 ) );

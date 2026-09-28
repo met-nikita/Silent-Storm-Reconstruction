@@ -16,11 +16,28 @@ namespace NGScene
 {
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 const int N_DEFAULT_RT_RESOLUTION = 512;
+class CCubeTextureChannel: public CObjectBase
+{
+	OBJECT_NOCOPY_METHODS(CCubeTextureChannel);
+public:
+	CObj<NGfx::CCubeTexture> pTexture;
+	int nChannel, nLRU;
+	CCubeTextureChannel(): nChannel(0), nLRU(0) {}
+	CCubeTextureChannel( NGfx::CCubeTexture *p, int n ): pTexture(p), nChannel(n), nLRU(0) {}
+	int GetWriteMask() const { return nChannel == 0 ? 8 : 1 << (nChannel - 1); }
+};
 class CShadowMapsShare
 {
 	CObj<NGfx::CTexture> pDepthShadow, pParticleLM, pLMDepthBuffers[ N_MAX_SKY_TEXTURES ];
 	CObj<NGfx::CCubeTexture> pCubeDepth;
 	int nDepthResolution, nCLSkyTextures;
+	struct SCubeSlot
+	{
+		CObj<NGfx::CCubeTexture> pTexture;
+		CPtr<CCubeTextureChannel> channels[4];
+	};
+	vector<SCubeSlot> cubeSlots;
+	int nCubeLRU = 0;
 
 	void Refresh();
 public:
@@ -37,6 +54,9 @@ public:
 	int GetDepthResolution() { Refresh(); return nDepthResolution; }
 	int GetCLSkyTexturesNumber() { Refresh(); return nCLSkyTextures; }
 	int GetCubeDepthResolution() const { return 256; }
+	CCubeTextureChannel *AllocCubeChannel();
+	void TouchCubeChannel( CCubeTextureChannel *p ) { p->nLRU = nCubeLRU; }
+	void NextCubeFrame() { Refresh(); ++nCubeLRU; }
 };
 externA5 CShadowMapsShare shadowMapsShare;
 void DrawBorder( NGfx::CRenderContext *pRC, int nSize );
