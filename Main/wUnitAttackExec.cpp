@@ -1008,7 +1008,9 @@ bool CExecAttack::CreateAttack( vector<NRPG::CAttackPortion> *pAttack, CUnitServ
 	bool bBackStab = false;
 	if ( IsValid( pUnitTarget ) )
 	{
-		bBackStab = !pUnitTarget->IsUnitAudible( pUS ) && !pUnitTarget->IsUnitVisible( pUS );
+		// Retail v1.2 0x7a43d6 tests visibility only; hearing the attacker
+		// does not remove the unaware-target damage/critical bonuses.
+		bBackStab = !pUnitTarget->IsUnitVisible( pUS );
 		if ( bBackStab )
 			csSystem << CC_RED << "Backstab attack" << endl;
 	}
@@ -1848,6 +1850,9 @@ void CExecMeleeUnit::OnLabel()
 	ASSERT( bComplete );
 	if ( !attack.empty() )
 	{
+		// Retail v1.2 0x7a99a3..0x7a99af preserves the requested body part
+		// on the damage portion before tracing (including HL_ANY).
+		attack.front().eWantedHL = hlInfo.eHL;
 		// retail @0x3a94c0 hands &hlInfo (as resolved by Start's SelectTargetHLs and SERIALIZED with
 		// the executor) into NRPG::AttackObjectRanged @0x2b6560, whose unit branch feeds hlInfo.eHL +
 		// hlInfo.accessibleHLs into the to-hit -- the Jan03 bIsHitLocationShot branch and the
