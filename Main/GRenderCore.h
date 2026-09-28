@@ -90,10 +90,11 @@ struct SRenderPartSet
 	const vector< CPtr<IPart> > *pParts;
 	CPartFlags parts, castShadow;
 	SRenderGeometryInfo *pGeometry;
+	int nFloorMask;
 
-	SRenderPartSet() {}
-	SRenderPartSet( CObjectBase *_pNode, const vector< CPtr<IPart> > *_pParts, SRenderGeometryInfo *_pGeometry ) 
-		: pNode(_pNode), pParts(_pParts), pGeometry(_pGeometry) 
+	SRenderPartSet() : nFloorMask(0) {}
+	SRenderPartSet( CObjectBase *_pNode, const vector< CPtr<IPart> > *_pParts, SRenderGeometryInfo *_pGeometry, int _nFloorMask )
+		: pNode(_pNode), pParts(_pParts), pGeometry(_pGeometry), nFloorMask(_nFloorMask)
 	{ 
 		parts.Clear();
 	}

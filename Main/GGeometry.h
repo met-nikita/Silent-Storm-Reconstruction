@@ -109,13 +109,16 @@ private:
 	SPolygonIndices geometry;
 	vector<SLMLOD> lmLODs;
 	int nTris;
+	float fAverageTriArea;
 
 	void EstablishRefs();
 	void MergePositions();
 	void AssignGeometry( const SData &data );
+	void CalcAverageTriArea();
 
 public:
-	CObjectInfo() : nTris(0) {}	
+	CObjectInfo() : nTris(0), fAverageTriArea(0) {}
+	float GetAverageTriArea() const { return fAverageTriArea; }
 	void Assign( const SData &data );
 	void AssignLM( const SData &data );
 	void AssignFast( const SData &data );

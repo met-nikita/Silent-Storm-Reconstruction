@@ -70,8 +70,9 @@ public:
 	vector<CVec3> xformedPositions;
 	vector<char> gfxData;
 	CVec3 vBVMin, vBVMax;
+	float fAverageTriArea;
 
-	IPart() : bIsSolid(false) {}
+	IPart() : bIsSolid(false), fAverageTriArea(0) {}
 	IPart( CPtrFuncBase<CObjectInfo> *pData, CPerMaterialCombiner *_pCombiner, bool _bIsSolid );
 	~IPart();
 	void SetCombiner( CPerMaterialCombiner *_pCombiner, bool bForceUpdate, bool bAnimated );

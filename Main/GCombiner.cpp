@@ -16,7 +16,7 @@ extern bool bLowRAM; // gfx_low_ram, registered in GTexture.cpp
 // IPart
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 IPart::IPart( CPtrFuncBase<CObjectInfo> *pData, CPerMaterialCombiner *_pCombiner, bool _bIsSolid )
-	: pObjInfo(pData), pCombiner( _pCombiner ), bIsSolid( _bIsSolid )
+	: pObjInfo(pData), pCombiner( _pCombiner ), bIsSolid( _bIsSolid ), fAverageTriArea(0)
 {
 	if ( IsValid( pCombiner ) )
 		pCombiner->AddPart( this );
@@ -1000,6 +1000,7 @@ void CVBCombiner::XFormPosition()
 				for ( int k = 0; k < nSize; ++k )
 					AddMMXBoundPoint( &(*pRes)[k] );
 				StoreMMXBoundResult( &pPart->vBVMin, &pPart->vBVMax );
+				pPart->fAverageTriArea = pObjInfo->GetAverageTriArea();
 			}
 		}
 		if ( nSize > 0 )

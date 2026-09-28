@@ -110,10 +110,11 @@ static void AttachPart( CNonePart *pRes, CVolumeNode *pNode,
 {
 	bool bIsLightmapped = !bIsDynamic && pRes->GetGroupInfo().nLightGroup == 0 && pRes->GetMaterial()->GetType() == IMaterial::MT_NORMAL;//!= IMaterial::MT_OCCLUDER;
 	CCombinedPart *pCPart;
+	const int nFloorMask = pRes->GetGroupInfo().nObjectGroup & 0xfff;
 	if ( bIsDynamic )
-		pCPart = pNode->dynamicParts.GetCombinerPartForAdd( pRes->GetMaterial(), 0, bIsLightmapped );
+		pCPart = pNode->dynamicParts.GetCombinerPartForAdd( pRes->GetMaterial(), 0, nFloorMask, bIsLightmapped );
 	else
-		pCPart = pNode->staticParts.GetCombinerPartForAdd( pRes->GetMaterial(), pTrackers, bIsLightmapped );
+		pCPart = pNode->staticParts.GetCombinerPartForAdd( pRes->GetMaterial(), pTrackers, nFloorMask, bIsLightmapped );
 	pRes->pOwner = pCPart;
 	if ( bAnimationOnly )
 		pRes->SetCombiner( pCPart->GetCombiner(), false, true );
@@ -426,8 +427,8 @@ void CPostProcessBinder::Store( vector<IPostProcess::SObject> *pRes, CTransformS
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CCombinedPart
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CCombinedPart::CCombinedPart( SStaticTrackers *pTrackers, EType t )
-	: nFloorMask(0), nIgnoreMark(0), pCombiner( new CPerMaterialCombiner( pTrackers ) ), partType(t)
+CCombinedPart::CCombinedPart( SStaticTrackers *pTrackers, EType t, int _nFloorMask )
+	: nFloorMask(_nFloorMask), nIgnoreMark(0), pCombiner( new CPerMaterialCombiner( pTrackers ) ), partType(t)
 {
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1135,7 +1136,7 @@ static void AddParts( CTransformStack *pTS, list<SRenderPartSet> *pRes,
 		CDGPtr<CPerMaterialCombiner> pCombiner = pElement->GetCombiner();
 		pCombiner.Refresh();
 		const vector< CPtr<IPart> > &listParts = pCombiner->GetValue();
-		SRenderPartSet &res = *pRes->insert( pRes->end(), SRenderPartSet( pElement, &listParts, pElement->GetGeometryInfo() ) );
+		SRenderPartSet &res = *pRes->insert( pRes->end(), SRenderPartSet( pElement, &listParts, pElement->GetGeometryInfo(), pElement->GetFloorMask() ) );
 		SelectParts( &res.parts, pTS, pVB, pElement, mask );
 		CalcCastShadow( &res.castShadow, pElement );
 

@@ -273,6 +273,7 @@ public:
 	void SetRefsNumber( int n ) { refCount.assign( n, 0 ); }
 	void SetRefs( int n, int nVal ) { refCount[n] = nVal; }
 	int GetRefs( int n ) { return refCount[n]; }
+	CHZBuffer* GetHZBuffer() { return pHZBuffer; }
 	CHZBuffer* BuildHZ()
 	{
 		pHZBuffer->BuildHZ();
@@ -289,18 +290,43 @@ static int CountParts( const list<SRenderPartSet> &l )
 	return nRes;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-static void RenderStuff( CPartsRender &pr, IRender *pRender, CTransformStack *pTS, const list<SRenderPartSet> &listParts )
+struct SCompareRPS
+{
+	CVec3 vZ;
+	explicit SCompareRPS( const CVec3 &_vZ ) : vZ(_vZ) {}
+	bool operator()( const SRenderPartSet &a, const SRenderPartSet &b ) const
+	{
+		if ( a.nFloorMask != b.nFloorMask )
+			return a.nFloorMask > b.nFloorMask;
+		return a.pGeometry->pVertices->GetBound().s.ptCenter * vZ <
+			b.pGeometry->pVertices->GetBound().s.ptCenter * vZ;
+	}
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
+static void RenderStuff( CPartsRender &pr, IRender *pRender, CTransformStack *pTS, list<SRenderPartSet> &listParts,
+	float fMinAverageArea, float fMinBoundSizeSquared, CHZBuffer *pHZ )
 {
 	SHMatrix sRes;
 	sRes = pTS->Get().forward;
 	sRes.x = ( sRes.x * 0.5f + sRes.w * 0.5f ) * pr.GetWidth();
 	sRes.y = ( sRes.y * 0.5f + sRes.w * 0.5f ) * pr.GetHeight();
+	listParts.sort( SCompareRPS( CVec3( sRes.wx, sRes.wy, sRes.wz ) ) );
 
 	pr.SetRefsNumber( CountParts( listParts ) + 1 );
 	int nIDCounter = 0;
-	for ( list<SRenderPartSet>::const_iterator i = listParts.begin(); i != listParts.end(); i++ )
+	int nFloorMask = 0;
+	bool bFirst = true;
+	for ( list<SRenderPartSet>::iterator i = listParts.begin(); i != listParts.end(); i++ )
 	{
-		const SRenderPartSet &rps = *i;
+		SRenderPartSet &rps = *i;
+		if ( rps.nFloorMask != nFloorMask )
+		{
+			if ( pHZ )
+				pHZ->BuildHZ();
+			nFloorMask = rps.nFloorMask;
+			bFirst = false;
+		}
+		const vector<SSphere> &bounds = rps.pGeometry->pVertices->GetBounds();
 		for ( int nPart = 0; nPart < rps.pParts->size(); ++nPart )
 		{
 			pr.SetCurrentID( ++nIDCounter );
@@ -312,6 +338,15 @@ static void RenderStuff( CPartsRender &pr, IRender *pRender, CTransformStack *pT
 				continue;
 			IPart *pPart = rps.GetPart( nPart );
 			if ( !IsValid( pPart ) )
+				continue;
+			if ( pPart->fAverageTriArea < fMinAverageArea ||
+				( fMinBoundSizeSquared > 0 && fabs2( pPart->vBVMax - pPart->vBVMin ) < fMinBoundSizeSquared ) )
+			{
+				// Small geometry remains a visibility candidate, but cannot occlude others.
+				rps.castShadow.Reset( nPart );
+				continue;
+			}
+			if ( pHZ && !bFirst && !pHZ->IsVisible( bounds[nPart], pTS ) )
 				continue;
 			
 			vector<CVec3> points;
@@ -357,7 +392,7 @@ void GeneratePartList( IRender *pRender, const CVec3 &vCenter, float fRadius,
 		list<SRenderPartSet> listParts;
 		pRender->FormPartList( &sTransform, &listParts, eType, mask );
 		pr.InitZBuffer( sTransform.GetProjection().forward, fRadius );
-		RenderStuff( pr, pRender, &sTransform, listParts );
+		RenderStuff( pr, pRender, &sTransform, listParts, 0, 0, 0 );
 
 		CObj<CHZBuffer> pHZ = pr.BuildHZ();
 
@@ -374,7 +409,7 @@ void GeneratePartList( IRender *pRender, const CVec3 &vCenter, float fRadius,
 				}
 			}
 			if ( !pDst )
-				pDst = &*pRes->insert( pRes->end(), SRenderPartSet( rps.pNode, rps.pParts, rps.pGeometry ) );
+				pDst = &*pRes->insert( pRes->end(), SRenderPartSet( rps.pNode, rps.pParts, rps.pGeometry, rps.nFloorMask ) );
 			const vector<SSphere> &bounds = rps.pGeometry->pVertices->GetBounds();
 			for ( int k = 0; k < rps.pParts->size(); ++k )
 			{
@@ -431,7 +466,7 @@ void MakeInvisibleElementsList( IRender *pRender, CTransformStack *pTS,
 	list<SRenderPartSet> listParts;
 	pRender->FormPartList( pTS, &listParts,IRender::DT_STATIC, _mask );
 	pr.FastInitZBuffer();
-	RenderStuff( pr, pRender, pTS, listParts );
+	RenderStuff( pr, pRender, pTS, listParts, 0, 0.25f, pr.GetHZBuffer() );
 	
 	CHZBuffer *pHZ = pr.BuildHZ();
 	*pHZBuffer = pHZ;
@@ -479,7 +514,7 @@ void MakeInvisibleElementsListFast( IRender *pRender, CTransformStack *pTS,
 	list<SRenderPartSet> listParts;
 	pRender->FormPartList( pTS, &listParts, IRender::DT_STATIC, _mask );
 	pr.FastInitZBuffer();
-	RenderStuff( pr, pRender, pTS, listParts );
+	RenderStuff( pr, pRender, pTS, listParts, 0.19f, 0.25f, pr.GetHZBuffer() );
 
 	CHZBuffer *pHZ = pr.BuildHZ();
 	*pHZBuffer = pHZ;

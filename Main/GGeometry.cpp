@@ -368,10 +368,12 @@ void CObjectInfo::Assign( const SData &data )
 	MergePositions();
 	nTris = geometry.GetTrianglesCount();
 	EstablishRefs();
+	CalcAverageTriArea();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CObjectInfo::AssignFast( const SData &data )
 {
+	fAverageTriArea = 0;
 	AssignGeometry( data );
 	lmLODs.clear();
 	nTris = geometry.GetTrianglesCount();
@@ -448,6 +450,22 @@ void CObjectInfo::GetPosTriangles( vector<STriangle> *pRes ) const
 	GetVxVerticesTriangles( pRes );
 	if ( !posIndices.empty() )
 		FilterTrinagles( pRes, posIndices );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CObjectInfo::CalcAverageTriArea()
+{
+	// Retail v1.2 0x521c10: object-space area, not transformed screen area.
+	vector<STriangle> tris;
+	GetPosTriangles( &tris );
+	fAverageTriArea = 0;
+	for ( int k = 0; k < tris.size(); ++k )
+	{
+		const STriangle &t = tris[k];
+		fAverageTriArea += fabs( ( positions[t.i1] - positions[t.i2] ) ^
+			( positions[t.i3] - positions[t.i2] ) ) * 0.5f;
+	}
+	if ( !tris.empty() )
+		fAverageTriArea /= tris.size();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CObjectInfo::CalcBound( SBound *pRes )
