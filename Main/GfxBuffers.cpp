@@ -1249,8 +1249,12 @@ void NextFrameBuffes( bool bOnThrashing )
 		transparentCache.DrawRU();
 
 	++nCurrentFrame;
-	EraseInvalidRefs( &lostable );
-	EraseInvalidRefs( &managed );
+	// Retail v1.2 0x5101cb: amortize the two ownership-list scans.
+	if ( ( nCurrentFrame & 0x7f ) == 0x35 )
+	{
+		EraseInvalidRefs( &lostable );
+		EraseInvalidRefs( &managed );
+	}
 	for ( CRTCache::iterator i = rtCache.begin(); i != rtCache.end(); ++i )
 		i->second.Walk();
 	for ( CCMCache::iterator i = cmCache.begin(); i != cmCache.end(); ++i )
