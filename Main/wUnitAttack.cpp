@@ -455,6 +455,26 @@ static CCommandExecute* CreateActionQueue( CUnitServer *pUS, TCommand *pCmd, TEx
 
 	vector<NAI::SPathPlace> dst;
 	*pError = GetActionValidPlaces( pUS, pCmd, &dst );
+	// Retail v1.2 0x798d13..0x798d97: a matching action place needs no
+	// path, provided the held-item state is already suitable. Ignore only
+	// integral/final/moving bits, not facing or pose.
+	bool bNeedMove = *pError != UCR_NO_TARGET;
+	for ( unsigned int k = 0; bNeedMove && k < dst.size(); ++k )
+		if ( NAI::IsSamePlace( pUS->GetPosition().pos.p, dst[k], 0xf9feffff ) )
+			bNeedMove = false;
+	if ( ( eActive == ITEM_ACTIVE && !pUS->animator.IsActiveItem() ) ||
+		( eActive == ITEM_INACTIVE && pUS->animator.IsActiveItem() ) || pUS->GetUndrawItem() )
+		bNeedMove = true;
+	if ( !bNeedMove )
+	{
+		*pError = pAction->CanDoIt( pUS->GetPosition() );
+		if ( *pError != UCR_OK && *pError != UCR_NO_TARGET )
+			return 0;
+		CExecQueue *pRes = new CExecQueue( pUS );
+		pRes->AddExecutor( pAction );
+		return pRes;
+	}
+
 	if ( *pError == UCR_NO_TARGET )
 		dst.push_back( pUS->GetPosition().pos.p );
 	else if ( dst.empty() )
