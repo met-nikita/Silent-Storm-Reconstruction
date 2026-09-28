@@ -165,13 +165,7 @@ CAILogReloadWeapon::CAILogReloadWeapon(	IAIUnit *_pAIUnit, CAIFireArmsWeapon *_p
 	if (IsValid( pWeapon ) )
 	{
 		pNewClip = pWeapon->GetNextClip();
-		pOldClip = pWeapon->GetCurrentClip();
 	}
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-void CAILogReloadWeapon::RollBack()
-{
-	pWeapon->SetCurrentClip( pOldClip );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CAILogReloadWeapon::Commit()

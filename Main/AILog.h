@@ -284,14 +284,12 @@ class CAILogReloadWeapon: public CAILogRecord
 	ZDATA
 	ZPARENT(CAILogRecord)
 	CPtr<CAIFireArmsWeapon> pWeapon;
-	CObj<CAIFireArmsWeaponClip> pOldClip;
 	CPtr<CAIFireArmsWeaponClip> pNewClip;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(2,(CAILogRecord*)this); f.Add(3,&pWeapon); f.Add(4,&pOldClip); f.Add(5,&pNewClip); return 0; }
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,(CAILogRecord*)this); f.Add(3,&pWeapon); f.Add(4,&pNewClip); return 0; }
 public:
 	CAILogReloadWeapon() {}
 	CAILogReloadWeapon(	IAIUnit *_pAIUnit, CAIFireArmsWeapon *_pWeapon );
 	// IAILogRecord
-	virtual void RollBack();
 	virtual void Commit();
 	virtual void GetCommands( list< CPtr<NWorld::CCommand> > *Commands );
 };
