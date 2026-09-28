@@ -158,19 +158,19 @@ void CDynamicSkill::Modify( int nModif )
 	nValue = nSum < nMaxValue ? nSum : nMaxValue;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// retail @0x2bbc30: accumulate progress toward the XP cap; whole points move into nXPValue
-// (clamped to ROUND(fCap)) and the cap is recomputed via Update().
+// Retail v1.2 0x6bbce0: both integer conversions explicitly use x87 truncation.
+// Earn only whole progress points; rounding at 0.5 creates a negative remainder.
 bool CDynamicSkill::Upgrade( float fAddToProgress, float fCap )
 {
 	if ( float( nXPValue ) + fProgress < fCap )
 	{
 		fProgress += fAddToProgress;
-		int nModif = SkillRound( fProgress );
+		int nModif = int( fProgress );
 		if ( nModif > 0 )
 		{
 			nXPValue += nModif;
 			fProgress -= float( nModif );
-			int nCap = SkillRound( fCap );
+			int nCap = int( fCap );
 			if ( nXPValue > nCap )
 				nXPValue = nCap;
 			Update();
