@@ -194,8 +194,7 @@ static NGfx::CTexture* LoadConvertTo16Bit( CDataStream *pStream, const SMMPFileH
 		if ( !IsValid( pTexture ) )
 		{
 			nFormat = Select16BitFormat( pixels, eUsage );
-			// Keep converted textures separate from the dev renderer's 8888-only atlases.
-			pTexture = NGfx::MakeTexture( nWidth, nHeight, hdr.nNumMipLevels - nSkipMip, nFormat, NGfx::REGULAR, eWrap );
+			pTexture = NGfx::MakeTexture( nWidth, nHeight, hdr.nNumMipLevels - nSkipMip, nFormat, eUsage, eWrap );
 			if ( !IsValid( pTexture ) )
 				return 0;
 		}
@@ -270,7 +269,7 @@ void CFileTexture::Recalc()
 		{
 			if ( NGfx::Is16BitTextures() )
 			{
-				pValue = NGfx::MakeTexture( 1, 1, 1, NGfx::SPixel4444::ID, NGfx::REGULAR, eWrap );
+				pValue = NGfx::MakeTexture( 1, 1, 1, NGfx::SPixel4444::ID, eUsage, eWrap );
 				NGfx::CTextureLock<NGfx::SPixel4444> lock( pValue, 0, NGfx::INPLACE );
 				NGfx::SPixel8888 average; average.color = pTex->dwAverageColor;
 				lock[0][0].color = Convert16BitPixel( average, 0, NGfx::CF_A4R4G4B4 );

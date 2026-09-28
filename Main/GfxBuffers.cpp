@@ -745,42 +745,50 @@ public:
 		//pRes->Touch();
 		return pRes;
 	}
-	void DrawRU()
+	template<class TPixel>
+	void DrawRUImpl( int nShift )
 	{
-		CTextureLock<SPixel8888> tl( pTexture, 0, INPLACE );
+		CTextureLock<TPixel> tl( pTexture, 0, INPLACE );
 		vector<CCache::SStatePlace> places;
 		pCache->GetState( &places );
 		for ( int y = 0; y < tl.GetYSize(); ++y )
 			for ( int x = 0; x < tl.GetXSize(); ++x )
-				tl[y][x] = SPixel8888( 255,255,255 );
+				tl[y][x] = TPixel( (255 >> nShift),(255 >> nShift),(255 >> nShift) );
 		for ( int k = 0; k < places.size(); ++k )
 		{
 			const CCache::SStatePlace &p = places[k];
-			SPixel8888 color;
+			TPixel color;
 			if ( p.pUser )
 			{
 				switch ( pCache->GetCurrentRU() - p.nMRU )
 				{
-				case 0: color = SPixel8888( 0,0,255 ); break;
-				case 1: color = SPixel8888( 0,0,200 ); break;
-				case 2: color = SPixel8888( 0,0,100 ); break;
-				default: color = SPixel8888( 0,0,50 ); break;
+				case 0: color = TPixel( 0,0,(255 >> nShift) ); break;
+				case 1: color = TPixel( 0,0,(200 >> nShift) ); break;
+				case 2: color = TPixel( 0,0,(100 >> nShift) ); break;
+				default: color = TPixel( 0,0,(50 >> nShift) ); break;
 				}
 			}
 			else
 			{
 				ASSERT( p.nMRU == 0 );
-				color = SPixel8888( 255,0,0 );
+				color = TPixel( (255 >> nShift),0,0 );
 			}
 			const NCache::CQuadTreeElement &te = p.place;
 			if ( ( (te.nShiftX >> te.nXSize ) + (te.nShiftY >> te.nYSize ) ) & 1 )
-				color.g = 30;
+				color.g = 30 >> nShift;
 			for ( int y = te.nShiftY; y < te.nShiftY + (1<<te.nYSize); ++y )
 			{
 				for ( int x = te.nShiftX; x < te.nShiftX + (1<<te.nXSize); ++x )
 					tl[y][x] = color;
 			}
 		}
+	}
+	void DrawRU()
+	{
+		if ( pBuffer->GetFormat() == D3DFMT_A4R4G4B4 )
+			DrawRUImpl<SPixel4444>( 4 );
+		else
+			DrawRUImpl<SPixel8888>( 0 );
 	}
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1292,8 +1300,10 @@ void AddGeometryCache( int nSize, EBufferUsage usage, ETrueBufferUsage trueUsage
 }
 void InitBuffers()
 {
-	textureCache.Init( new CTB( 1024, 1024, 1, PixelID2D3DFormat(SPixel8888::ID), REGULAR ) );
-	transparentCache.Init( new CTB( 1024, 1024, 4, PixelID2D3DFormat(SPixel8888::ID), REGULAR ) );
+	// Retail v1.2 0x510fa1: both shared atlases follow the applied texture format.
+	const D3DFORMAT atlasFormat = Is16BitTextures() ? D3DFMT_A4R4G4B4 : D3DFMT_A8R8G8B8;
+	textureCache.Init( new CTB( 1024, 1024, 1, atlasFormat, REGULAR ) );
+	transparentCache.Init( new CTB( 1024, 1024, 4, atlasFormat, REGULAR ) );
 
 	for (unordered_map<int,int>::iterator i = rtInfo.targets.begin(); i != rtInfo.targets.end(); ++i )
 		rtCache[ i->first ].Init( i->first, i->second );
@@ -1404,13 +1414,13 @@ CTexture* MakeTexture( int nXSize, int nYSize, int nMipLevels, int nPixelID, ETe
 	{
 		InformNew2DTextureAlloc();
 		D3DFORMAT fmt = PixelID2D3DFormat( nPixelID );
-		ASSERT( fmt == D3DFMT_A8R8G8B8 );
+		ASSERT( fmt == textureCache.GetTB()->GetFormat() );
 		return textureCache.Alloc( nXSize, nYSize );
 	}
 	if ( eUsage == TRANSPARENT_TEXTURE )
 	{
 		D3DFORMAT fmt = PixelID2D3DFormat( nPixelID );
-		ASSERT( fmt == D3DFMT_A8R8G8B8 );
+		ASSERT( fmt == transparentCache.GetTB()->GetFormat() );
 		return transparentCache.Alloc( nXSize, nYSize );
 	}
 	ASSERT( wrap == CLAMP );
