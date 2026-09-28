@@ -224,55 +224,81 @@ class CRasterizer
 			RasterTriangleLowFixed( pLeft[0], pRight[0], pRight[0], &zGrad,
 				pLeft[0].nSY, pRight[0].nFY, pLeft[0].nFY, nBack );
 	}
-	void Intersect( SProjectedPoint *pRes, const SProjectedPoint &vA, const SProjectedPoint &vB )
+	float ClipDistance( const SProjectedPoint &v, int nPlane ) const
 	{
-		float ffA = vA.src.z - F_RASTERIZER_NEAR_PLANE;// - vA.w;
-		float ffB = vB.src.z - F_RASTERIZER_NEAR_PLANE;// - vB.w;
+		// Retail v1.2 0x4946a0: near plane, then four guard planes.
+		// Bound projected x/y to +/-1000 before the 16.16 edge walk.
+		switch ( nPlane )
+		{
+		case 0: return v.src.z - F_RASTERIZER_NEAR_PLANE;
+		case 1: return v.src.z - v.src.x * 0.001f;
+		case 2: return v.src.z + v.src.x * 0.001f;
+		case 3: return v.src.z - v.src.y * 0.001f;
+		case 4: return v.src.z + v.src.y * 0.001f;
+		default: __assume(0);
+		}
+	}
+	void Intersect( SProjectedPoint *pRes, const SProjectedPoint &vA, const SProjectedPoint &vB, int nPlane )
+	{
+		float ffA = ClipDistance( vA, nPlane );
+		float ffB = ClipDistance( vB, nPlane );
 		float fKoef1 = 1 / (ffB - ffA), fA = fKoef1 * ffB, fB = -fKoef1 * ffA;
 		pRes->src.x = vA.src.x * fA + vB.src.x * fB;
 		pRes->src.y = vA.src.y * fA + vB.src.y * fB;
 		pRes->src.z = vA.src.z * fA + vB.src.z * fB;
 		pRes->Project();
 	}
-	void RenderClipped1( const SProjectedPoint &v1, const SProjectedPoint &v2, const SProjectedPoint &v3 )
+	void RenderClipped1( const SProjectedPoint &v1, const SProjectedPoint &v2, const SProjectedPoint &v3, int nPlane )
 	{
 		SProjectedPoint vI12;
-		Intersect( &vI12, v1, v2 );
+		Intersect( &vI12, v1, v2, nPlane );
 		SProjectedPoint vI13;
-		Intersect( &vI13, v1, v3 );
-		RasterTriangle( v1.res, vI12.res, vI13.res );
+		Intersect( &vI13, v1, v3, nPlane );
+		RasterClipped( v1, vI12, vI13, nPlane + 1 );
 	}
-	void RenderClipped2( const SProjectedPoint &v1, const SProjectedPoint &v2, const SProjectedPoint &v3 )
+	void RenderClipped2( const SProjectedPoint &v1, const SProjectedPoint &v2, const SProjectedPoint &v3, int nPlane )
 	{
 		SProjectedPoint vI13;
-		Intersect( &vI13, v1, v3 );
+		Intersect( &vI13, v1, v3, nPlane );
 		SProjectedPoint vI23;
-		Intersect( &vI23, v2, v3 );
-		RasterTriangle( v1.res, vI23.res, vI13.res );
-		RasterTriangle( v1.res, v2.res, vI23.res );
+		Intersect( &vI23, v2, v3, nPlane );
+		RasterClipped( v1, vI23, vI13, nPlane + 1 );
+		RasterClipped( v1, v2, vI23, nPlane + 1 );
 	}
-	void RasterClipped( const SProjectedPoint &v1, const SProjectedPoint &v2, const SProjectedPoint &v3, int nTemp )
+	void RasterClipped( const SProjectedPoint &v1, const SProjectedPoint &v2, const SProjectedPoint &v3, int nPlane )
 	{
-		ASSERT( nTemp < 8 );
+		unsigned int nTemp = 0;
+		for ( ; nPlane < 5; ++nPlane )
+		{
+			float f1 = ClipDistance( v1, nPlane ), f2 = ClipDistance( v2, nPlane ), f3 = ClipDistance( v3, nPlane );
+			nTemp = ( GetBits( &f1 ) < 0 ) * 4 | ( GetBits( &f2 ) < 0 ) * 2 | ( GetBits( &f3 ) < 0 );
+			if ( nTemp )
+				break;
+		}
+		if ( nPlane == 5 )
+		{
+			RasterTriangle( v1.res, v2.res, v3.res );
+			return;
+		}
 		switch ( nTemp )
 		{
 		case 1:
-			RenderClipped2( v1, v2, v3 );
+			RenderClipped2( v1, v2, v3, nPlane );
 			break;
 		case 2:
-			RenderClipped2( v3, v1, v2 );
+			RenderClipped2( v3, v1, v2, nPlane );
 			break;
 		case 3:
-			RenderClipped1( v1, v2, v3 );
+			RenderClipped1( v1, v2, v3, nPlane );
 			break;
 		case 4:
-			RenderClipped2( v2, v3, v1 );
+			RenderClipped2( v2, v3, v1, nPlane );
 			break;
 		case 5:
-			RenderClipped1( v2, v3, v1 );
+			RenderClipped1( v2, v3, v1, nPlane );
 			break;
 		case 6:
-			RenderClipped1( v3, v1, v2 );
+			RenderClipped1( v3, v1, v2, nPlane );
 			break;
 		case 7:
 			break;
@@ -284,17 +310,7 @@ class CRasterizer
 public:
 	void Raster( const SProjectedPoint &v1, const SProjectedPoint &v2, const SProjectedPoint &v3 )
 	{
-		unsigned int nTemp;
-		nTemp = ( GetBits( &v1.src.z ) < N_F_RASTERIZER_NEAR_PLANE ) * 4;//( v1.z > v1.w || v1.z < -v1.w ) * 4;
-		nTemp |= ( GetBits( &v2.src.z ) < N_F_RASTERIZER_NEAR_PLANE ) * 2;//( v2.z > v2.w || v2.z < -v2.w ) * 2;
-		nTemp |= ( GetBits( &v3.src.z ) < N_F_RASTERIZER_NEAR_PLANE ) * 1;//( v3.z > v3.w || v3.z < -v3.w ) * 1;
-		//nTemp = ( v1.src.z < F_RASTERIZER_NEAR_PLANE ) * 4;//( v1.z > v1.w || v1.z < -v1.w ) * 4;
-		//nTemp |= ( v2.src.z < F_RASTERIZER_NEAR_PLANE ) * 2;//( v2.z > v2.w || v2.z < -v2.w ) * 2;
-		//nTemp |= ( v3.src.z < F_RASTERIZER_NEAR_PLANE ) * 1;//( v3.z > v3.w || v3.z < -v3.w ) * 1;
-		if ( nTemp == 0 )
-			RasterTriangle( v1.res, v2.res, v3.res );
-		else
-			RasterClipped( v1, v2, v3, nTemp );
+		RasterClipped( v1, v2, v3, 0 );
 	}
 	void RasterNoClip( const CVec3 &v1, const CVec3 &v2, const CVec3 &v3 )
 	{
