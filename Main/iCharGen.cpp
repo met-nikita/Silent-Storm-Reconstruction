@@ -227,7 +227,7 @@ public:
 
 	void Set( bool bMode );
 
-	void Update( const STime &sTime, NGScene::I2DGameView *pView );
+	bool Update( const STime &sTime, NGScene::I2DGameView *pView );
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CHilight::CHilight( const SWindowInfo &sInfo ):
@@ -250,7 +250,7 @@ void CHilight::Set( bool bNewMode )
 	bTargetMode = bNewMode;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CHilight::Update( const STime &sTime, NGScene::I2DGameView *pView )
+bool CHilight::Update( const STime &sTime, NGScene::I2DGameView *pView )
 {
 	// Release @0x1b3d00: fade the overlay alpha toward the latched goal, then commit (and hide) at the end.
 	if ( bTargetMode != bMode )
@@ -272,6 +272,7 @@ void CHilight::Update( const STime &sTime, NGScene::I2DGameView *pView )
 	// any texture are ignored for the tint); fCoeff only fades the alpha in/out.
 	SetColor( NGfx::SPixel8888( 0x39, 0x4A, 0x51, 0x80 * fCoeff ) );
 	CImage::Update( sTime, pView );
+	return true;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CCharGenUI

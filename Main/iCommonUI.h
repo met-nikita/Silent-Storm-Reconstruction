@@ -354,7 +354,7 @@ public:
 	void SetFlashMode( bool bState );
 
 	bool ProcessMessage( const SEvent &sEvent );
-	void Update( const STime &sTime, NGScene::I2DGameView *pView );
+	bool Update( const STime &sTime, NGScene::I2DGameView *pView );
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CScrollWindowBase
@@ -392,7 +392,7 @@ public:
 	void SetVScroll( CScroll *pScroll );
 
 	bool ProcessMessage( const SEvent &sEvent );
-	void Update( const STime &sTime, NGScene::I2DGameView *pView );
+	bool Update( const STime &sTime, NGScene::I2DGameView *pView );
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CScrollWindow

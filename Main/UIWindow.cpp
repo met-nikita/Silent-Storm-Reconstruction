@@ -76,6 +76,8 @@ CInterface* CWindow::GetInterface() const
 void CWindow::SetInterface( CInterface *_pInterface )
 {
 	pInterface = _pInterface;
+	for ( int i = 0; i < listChildren.size(); ++i )
+		listChildren[i]->SetInterface( _pInterface );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CWindow* CWindow::GetParent() const
@@ -93,6 +95,9 @@ void CWindow::AddChild( CWindow *pWindow )
 	listChildren.push_back( pWindow );
 	if ( *listChildren.begin() == pWindow )
 		SendMessage( *listChildren.begin(), SEvent( EVENT_ACTIVATE, EAF_ACTIVATE ) );
+	pWindow->pParent = this;
+	pWindow->SetInterface( pInterface );
+	bRequireUpdate = true;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CWindow::RemoveChild( CWindow *pWindow )
@@ -502,10 +507,13 @@ bool CWindow::ProcessMessage( const SEvent &sEvent )
 	return false;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CWindow::Update( const STime &sTime, NGScene::I2DGameView *pView )
+bool CWindow::Update( const STime &sTime, NGScene::I2DGameView *pView )
 {
+	if ( !bRequireUpdate )
+		return false;
 	if ( IsValid( pScript ) )
 		pScript->ExecuteThreads();
+	bRequireUpdate = GetStyle( STYLE_ALWAYSUPDATE );
 	// retail @0x3273d0 walks listChildren (a vector) BY INDEX, re-reading the bounds each step so a child's
 	// Update mutating the vector cannot invalidate the walk. The guard below is defensive: a rare deserialize
 	// can leave a wild/dangling child entry; retail has no guard, but keep it (verify the object AND its
@@ -518,8 +526,9 @@ void CWindow::Update( const STime &sTime, NGScene::I2DGameView *pView )
 			continue;
 		if ( IsBadReadPtr( pChild, 4 ) || IsBadReadPtr( *(void**)pChild, 4 ) || !IsValid( listChildren[i] ) )
 			continue;
-		pChild->Update( sTime, pView );
+		bRequireUpdate |= pChild->Update( sTime, pView );
 	}
+	return bRequireUpdate;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 int CWindow::GetEventHandler( NScript::CScript *pHandlerScript ) const

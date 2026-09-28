@@ -258,7 +258,7 @@ public:
 	void Set( EMode eMode, const wstring &wsText = L"" );
 
 	bool ProcessMessage( const SEvent &sEvent );
-	void Update( const STime &sTime, NGScene::I2DGameView *pView );
+	bool Update( const STime &sTime, NGScene::I2DGameView *pView );
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // retail ctor @0x1a9190: CWindow(sInfo) then stores the mission back-pointer (a refcounted CPtr
@@ -291,7 +291,7 @@ bool CDescriptionText::ProcessMessage( const SEvent &sEvent )
 	return CWindow::ProcessMessage( sEvent );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CDescriptionText::Update( const STime &sTime, NGScene::I2DGameView *pView )
+bool CDescriptionText::Update( const STime &sTime, NGScene::I2DGameView *pView )
 {
 	if ( eTargetMode != eMode )
 	{
@@ -327,6 +327,7 @@ void CDescriptionText::Update( const STime &sTime, NGScene::I2DGameView *pView )
 
 	sMorphTime = sTime;
 	CWindow::Update( sTime, pView );
+	return true;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CChapterSector
@@ -591,7 +592,7 @@ public:
 	CRandomSector( const SWindowInfo &sInfo, NGame::IMission *pChapter, const SChapterSector &sSector );
 
 	void UpdateSector( const STime &sTime, const CVec2 &vTeamPos );
-	void Update( const STime &sTime, NGScene::I2DGameView *pView );
+	bool Update( const STime &sTime, NGScene::I2DGameView *pView );
 	void Draw( const STime &sTime, NGScene::I2DGameView *pView );
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -660,7 +661,7 @@ void CRandomSector::UpdateSector( const STime &sTime, const CVec2 &vTeamPos )
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CRandomSector::Update( const STime &sTime, NGScene::I2DGameView *pView )
+bool CRandomSector::Update( const STime &sTime, NGScene::I2DGameView *pView )
 {
 	if ( IsVisible() )
 		fCoeff = CalcFlashCoeff( fCoeff, 1.0f, sTime, sMorphTime );
@@ -670,6 +671,7 @@ void CRandomSector::Update( const STime &sTime, NGScene::I2DGameView *pView )
 	sMorphTime = sTime;
 
 	CChapterSector::Update( sTime, pView );
+	return true;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CRandomSector::Draw( const STime &sTime, NGScene::I2DGameView *pView )

@@ -28,7 +28,8 @@ const int
 	STYLE_TOPMOST					= 0x00000008,
 	STYLE_BOTTOMMOST			= 0x00000010,
 	STYLE_TRANSPARENT			= 0x00000020,
-	STYLE_NOACTIVATE			= 0x00000040;
+	STYLE_NOACTIVATE			= 0x00000040,
+	STYLE_ALWAYSUPDATE			= 0x00000080;
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // Show window types
 const int								
@@ -61,9 +62,7 @@ protected:
 	ZDATA
 	int nStyle;
 	bool bActive;
-	bool bRequireUpdate;		// retail tag 4 (@0xd4220); retail CWindow::Update @0x3273d0 gates the lazy
-							// per-frame update on it -- the dev Update pipeline updates unconditionally,
-							// so this stays latched true here (serialized for save-format parity)
+	bool bRequireUpdate;			// retail tag 4: own style or a child's Update keeps this branch awake
 	string szID;
 	SPoint sSize;
 	SPoint sPosition;
@@ -148,7 +147,7 @@ public:
 	int GetEventHandler( NScript::CScript *pScript ) const;
 	void SetEventHandler( int nCallInfo, NScript::CScript *pScript );
 
-	virtual void Update( const STime &sTime, NGScene::I2DGameView *pView );
+	virtual bool Update( const STime &sTime, NGScene::I2DGameView *pView );
 	virtual void Draw( const STime &sTime, NGScene::I2DGameView *pView );
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////

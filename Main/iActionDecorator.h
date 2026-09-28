@@ -86,7 +86,7 @@ public:
 
 		return Type::ProcessMessage( sEvent );
 	}
-	void Update( const STime &sTime, NGScene::I2DGameView *pView )
+	bool Update( const STime &sTime, NGScene::I2DGameView *pView )
 	{
 		// retail @0x1ef4c0: claim the state target only if this window can handle the CURRENT state.
 		// Ungated, an item icon under the cursor claims the target during a drag even though it
@@ -95,6 +95,7 @@ public:
 			pMission->SetStateTarget( GetTarget() );
 
 		Type::Update( sTime, pView );
+		return true;
 	}
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////

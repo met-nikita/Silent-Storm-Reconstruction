@@ -47,7 +47,7 @@ public:
 	CGlobalMapUI( const SWindowInfo &sInfo, NGame::IMission *pGlobal );
 
 	bool ProcessMessage( const SEvent &sEvent );
-	void Update( const STime &sTime, NGScene::I2DGameView *pView );
+	bool Update( const STime &sTime, NGScene::I2DGameView *pView );
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 } // Namespace

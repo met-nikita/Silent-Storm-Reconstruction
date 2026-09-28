@@ -180,7 +180,7 @@ bool CCharacterPanel::ProcessMessage( const SEvent &sEvent )
 	return false;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CCharacterPanel::Update( const STime &sTime, NGScene::I2DGameView *pView )
+bool CCharacterPanel::Update( const STime &sTime, NGScene::I2DGameView *pView )
 {
 	// Retail v1.2 0x5b0ec2..0x5b0f1a: acknowledge the viewed unit when
 	// closing the panel, then release the serialized tracker reference.
@@ -191,7 +191,7 @@ void CCharacterPanel::Update( const STime &sTime, NGScene::I2DGameView *pView )
 	if ( !bVisible )
 	{
 		pUnit = 0;
-		return;
+		return true;
 	}
 
 	// retail @0x1b0420: medals/biography tabs grayed while first-mission (tutorial) mode (mission vtbl+0xf8)
@@ -204,7 +204,7 @@ void CCharacterPanel::Update( const STime &sTime, NGScene::I2DGameView *pView )
 	if ( unitsSet.size() != 1 )
 	{
 		SetStyle( STYLE_VISIBLE, false );
-		return;
+		return true;
 	}
 
 	// Retail v1.2 0x5b0fc8..0x5b1007 also acknowledges the previous unit
@@ -254,6 +254,7 @@ void CCharacterPanel::Update( const STime &sTime, NGScene::I2DGameView *pView )
 		pPerks->SetShowFlash( pPerksTree->GetPerkPoints() != 0 );
 
 	CWindow::Update( sTime, pView );
+	return true;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 } // namespace

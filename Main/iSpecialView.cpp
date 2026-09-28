@@ -237,11 +237,11 @@ CXComMapUI::CXComMapUI( const SWindowInfo &sInfo, NGame::IMission *_pGlobal ):
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CXComMapUI::Update @0x23f170 -- a stub that just reports "handled" ( the per-frame sector hit-test
-// of the CGlobalMapUI predecessor was removed ). CWindow::Update is void here, so the shipped
-// `return true` is observably a no-op.
+// of the CGlobalMapUI predecessor was removed ). Keep the parent update branch awake.
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CXComMapUI::Update( const STime &sTime, NGScene::I2DGameView *pView )
+bool CXComMapUI::Update( const STime &sTime, NGScene::I2DGameView *pView )
 {
+	return true;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CXComMapUI::ProcessMessage @0x240040 -- build the owned children / push the cursor, then defer to

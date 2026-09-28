@@ -145,7 +145,7 @@ public:
 	bool IsMouseCover() const;
 
 	bool ProcessMessage( const SEvent &sEvent );
-	void Update( const STime &sTime, NGScene::I2DGameView *pView );
+	bool Update( const STime &sTime, NGScene::I2DGameView *pView );
 	void Draw( const STime &sTime, NGScene::I2DGameView *pView );
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -323,7 +323,7 @@ public:
 	void SetPageStep( int nPageStep );
 
 	bool ProcessMessage( const SEvent &sEvent );
-	void Update( const STime &sTime, NGScene::I2DGameView *pView );
+	bool Update( const STime &sTime, NGScene::I2DGameView *pView );
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CScroll
@@ -405,7 +405,7 @@ public:
 	void SetSelectedItem( int nID );
 
 	bool ProcessMessage( const SEvent &sEvent );
-	void Update( const STime &sTime, NGScene::I2DGameView *pView );
+	bool Update( const STime &sTime, NGScene::I2DGameView *pView );
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CComboBox
