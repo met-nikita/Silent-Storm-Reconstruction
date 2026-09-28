@@ -66,8 +66,95 @@ static void SetDepthCmpVal( NGfx::CRenderContext *pRC, const CVec4 &vChannelSele
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-static void AddTriangles( NGfx::CRenderContext *pRC, const SRenderFragmentInfo &fragment, 
-	const CSceneFragments &scene, ETrilistType triListType )
+enum EExecuteMethod { EMR_FAST, EMR_SORT, EMR_HW_HSR_QUERY };
+struct SGeometryQuery
+{
+	CObj<NGfx::IOcclusionQuery> pQuery;
+	CPartFlags flags;
+	bool bWasIssued;
+	SGeometryQuery() : bWasIssued(false) { flags.Clear(); }
+};
+static vector<SGeometryQuery> queries;
+static void RenderDepthSorted( NGfx::CRenderContext *pRC, ETrilistType triListType,
+	const CSceneFragments &scene, EExecuteMethod method, vector<CPartFlags> *pOccluded )
+{
+	const int nGeometries = scene.GetGeometriesNumber();
+	if ( queries.size() < nGeometries )
+		queries.resize( nGeometries );
+	vector<float> depth( nGeometries );
+	vector<int> order( nGeometries );
+	const SHMatrix &m = pRC->GetTransform().forward;
+	const CVec3 vZ( m.wx, m.wy, m.wz );
+	for ( int k = 0; k < nGeometries; ++k )
+	{
+		depth[k] = scene.GetStaticInfo(k).bv.s.ptCenter * vZ;
+		order[k] = k;
+	}
+	sort( order.begin(), order.end(), [&depth]( int a, int b ) { return depth[a] < depth[b]; } );
+	NGfx::IOcclusionQuery *pLastQuery = 0;
+	for ( int k = 0; k < order.size(); ++k )
+	{
+		const int nGeometry = order[k];
+		SGeometryQuery &q = queries[nGeometry];
+		if ( q.flags.IsEmpty() )
+			continue;
+		if ( method == EMR_HW_HSR_QUERY )
+		{
+			if ( !IsValid(q.pQuery) )
+				q.pQuery = NGfx::CreateOcclusionQuery();
+			q.pQuery->Start();
+		}
+		SRenderGeometryInfo *pGeometry = scene.GetGeometryInfo(nGeometry);
+		pGeometry->pTriLists[triListType].Refresh();
+		pGeometry->pVertices.Refresh();
+		const vector<NGfx::STriangleList> &tris = pGeometry->pTriLists[triListType]->GetValue();
+		for ( int b = 0; b < q.flags.GetBlocksNumber(); ++b )
+		{
+			const int nFlags = q.flags.GetBlock(b);
+			if ( nFlags )
+				pRC->AddPrimitive( pGeometry->pVertices->GetValue(), &tris[0] + b * 32,
+					Min( 32, int(tris.size()) - b * 32 ), nFlags );
+		}
+		if ( method == EMR_HW_HSR_QUERY )
+		{
+			pRC->Flush();
+			q.pQuery->Finish();
+			pLastQuery = q.pQuery;
+		}
+		q.bWasIssued = true;
+	}
+	if ( method == EMR_HW_HSR_QUERY )
+	{
+		if ( pLastQuery )
+			pLastQuery->Flush();
+		// Retail overlaps query completion with geometry refresh.
+		for ( int k = 0; k < nGeometries; ++k )
+		{
+			if ( scene.GetGeometryFlags(k) == FST_REJECT )
+				continue;
+			SRenderGeometryInfo *pGeometry = scene.GetGeometryInfo(k);
+			pGeometry->pTriLists[TLT_GEOM].Refresh();
+			pGeometry->pVertices.Refresh();
+		}
+	}
+	else
+		pRC->Flush();
+	for ( int k = 0; k < order.size(); ++k )
+	{
+		const int nGeometry = order[k];
+		SGeometryQuery &q = queries[nGeometry];
+		if ( !q.bWasIssued )
+			continue;
+		// Zero visible samples means occluded, not visible (v1.2 0x54aaa3).
+		if ( method == EMR_HW_HSR_QUERY && q.pQuery->GetData() == 0 )
+			(*pOccluded)[nGeometry] |= q.flags;
+		q.bWasIssued = false;
+		q.flags.Clear();
+	}
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+static void AddTriangles( NGfx::CRenderContext *pRC, const SRenderFragmentInfo &fragment,
+	const CSceneFragments &scene, ETrilistType triListType, EExecuteMethod method )
 {
 	for ( int k = 0; k < fragment.elements.size(); ++k )
 	{
@@ -75,6 +162,19 @@ static void AddTriangles( NGfx::CRenderContext *pRC, const SRenderFragmentInfo &
 		EFragmentsSplit filter = scene.GetGeometryFlags( element.nGeometry );
 		if ( filter == FST_REJECT )
 			continue;
+		if ( method != EMR_FAST )
+		{
+			if ( queries.size() <= element.nGeometry )
+				queries.resize( element.nGeometry + 1 );
+			int nFlags = element.nFlags;
+			if ( filter == FST_SPLIT )
+				nFlags &= scene.GetGeometryParts( element.nGeometry ).GetBlock( element.nBlock );
+			CPartFlags &flags = queries[element.nGeometry].flags;
+			for ( int b = 0; b < 32; ++b )
+				if ( (unsigned)nFlags & (1u << b) )
+					flags.Set( element.nBlock * 32 + b );
+			continue;
+		}
 		SRenderGeometryInfo *pGeometryInfo = scene.GetGeometryInfo( element.nGeometry );
 		pGeometryInfo->pTriLists[triListType].Refresh();
 		pGeometryInfo->pVertices.Refresh();
@@ -89,10 +189,16 @@ static void AddTriangles( NGfx::CRenderContext *pRC, const SRenderFragmentInfo &
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 static void ExecOps( NGfx::CRenderContext *pRC, const vector<CRenderCmdList::SOperation> &ops,
-	const CSceneFragments &scene, const SLightInfo &lightInfo )
+	const CSceneFragments &scene, const SLightInfo &lightInfo, EExecuteMethod method, vector<CPartFlags> *pOccluded )
 {
 	if ( ops.empty() )
 		return;
+	if ( pOccluded )
+	{
+		CPartFlags empty;
+		empty.Clear();
+		pOccluded->assign( scene.GetGeometriesNumber(), empty );
+	}
 	vector<const CRenderCmdList::SOperation*> renderThem;
 	for ( vector<CRenderCmdList::SOperation>::const_iterator i = ops.begin(); i != ops.end(); ++i )
 		renderThem.push_back( &(*i) );
@@ -112,11 +218,13 @@ static void ExecOps( NGfx::CRenderContext *pRC, const vector<CRenderCmdList::SOp
 		{
 			if ( op.IsSame( *pPrevOp ) )
 			{
-				AddTriangles( pRC, *op.pFrag, scene, triListType );
+				AddTriangles( pRC, *op.pFrag, scene, triListType, method );
 				continue;
 			}
-			else
+			else if ( method == EMR_FAST )
 				pRC->Flush();
+			else
+				RenderDepthSorted( pRC, triListType, scene, method, pOccluded );
 		}
 		pPrevOp = &op;
 		if ( pRC->HasRegisters() )
@@ -131,7 +239,7 @@ static void ExecOps( NGfx::CRenderContext *pRC, const vector<CRenderCmdList::SOp
 			case ABM_ADD:  pRC->SetAlphaCombine( NGfx::COMBINE_ADD ); break;
 			case ABM_MUL:  pRC->SetAlphaCombine( NGfx::COMBINE_MUL ); break;
 			case ABM_SRC_AMUL: pRC->SetAlphaCombine( NGfx::COMBINE_SRC_ALPHA_MUL ); break;
-			case ABM_MUL2: pRC->SetAlphaCombine( NGfx::COMBINE_MUL2 ); break;
+			case ABM_ADD_SRC_AMUL: pRC->SetAlphaCombine( NGfx::COMBINE_ADD_SRC_ALPHA_MUL ); break;
 			case ABM_ALPHA_BLEND: pRC->SetAlphaCombine( NGfx::COMBINE_ALPHA ); break;
 			case ABM_SMART: pRC->SetAlphaCombine( NGfx::COMBINE_SMART_ALPHA ); break;
 			default: ASSERT( 0 ); break;
@@ -960,17 +1068,23 @@ static void ExecOps( NGfx::CRenderContext *pRC, const vector<CRenderCmdList::SOp
 			break;
 		default: ASSERT(0); break;
 		}
-		AddTriangles( pRC, *op.pFrag, scene, triListType );
+		AddTriangles( pRC, *op.pFrag, scene, triListType, method );
 	}
 	if ( pPrevOp )
-		pRC->Flush();
+	{
+		if ( method == EMR_FAST )
+			pRC->Flush();
+		else
+			RenderDepthSorted( pRC, triListType, scene, method, pOccluded );
+	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void Execute( IRender *pRender, NGfx::CRenderContext *pRC, const CTransformStack &ts, const CRenderCmdList &cl,
-	const CSceneFragments &scene, const SLightInfo &lightInfo )
+	const CSceneFragments &scene, const SLightInfo &lightInfo, EExecMode mode, vector<CPartFlags> *pOccluded )
 {
 	pRC->SetTransform( ts.Get() );
-	ExecOps( pRC, cl.ops, scene, lightInfo );
+	// Retail v1.2 0x54e6a0 selects by the result pointer; mode is unused.
+	ExecOps( pRC, cl.ops, scene, lightInfo, pOccluded ? EMR_HW_HSR_QUERY : EMR_FAST, pOccluded );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 }

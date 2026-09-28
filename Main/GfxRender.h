@@ -18,6 +18,15 @@ enum EHardwareLevel
 };
 EHardwareLevel GetHardwareLevel();
 bool IsTnLDevice();
+class IOcclusionQuery : public CObjectBase
+{
+public:
+	virtual void Start() = 0;
+	virtual void Finish() = 0;
+	virtual int GetData() = 0;
+	virtual void Flush() = 0;
+};
+IOcclusionQuery* CreateOcclusionQuery();
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 enum EAlphaCombineMode
 {
@@ -30,6 +39,7 @@ enum EAlphaCombineMode
 	COMBINE_ZERO_ONE,
 	COMBINE_SRC_ALPHA_MUL,
 	COMBINE_SMART_ALPHA,
+	COMBINE_ADD_SRC_ALPHA_MUL,
 };
 enum EStencilMode
 {

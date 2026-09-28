@@ -177,7 +177,7 @@ enum EStencilBlendingOp
 	ABM_SRC_AMUL = 128,
 	ABM_ALPHA_BLEND = 160,
 	ABM_SMART = 192,
-	ABM_MUL2     = 224,
+	ABM_ADD_SRC_AMUL = 224,
 	ABM_MASK     = 224
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -431,6 +431,7 @@ public:
 	const SRenderFragmentInfo& GetLitParticles() const { return *fragments[0]; }
 	const SRenderStaticInfo& GetStaticInfo( int nGeom ) const { return *statics[ nGeom ]; }
 	SRenderGeometryInfo* GetGeometryInfo( int nGeom ) const { return geometries[ nGeom ]; }
+	int GetGeometriesNumber() const { return geometries.size(); }
 	friend class CSelectFragments;
 	friend class CSelectGeometries;
 };

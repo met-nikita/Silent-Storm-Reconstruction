@@ -6,6 +6,7 @@
 class CTransformStack;
 namespace NGScene
 {
+enum EExecMode { EM_NORMAL, EM_DEPTH_SORT };
 struct SLightInfo
 {
 	bool bNeedSet;
@@ -19,7 +20,8 @@ struct SLightInfo
 };
 
 void Execute( IRender *pRender, NGfx::CRenderContext *pRC, const CTransformStack &ts, const CRenderCmdList &cl,
-	const CSceneFragments &scene, const SLightInfo &lightInfo );
+	const CSceneFragments &scene, const SLightInfo &lightInfo, EExecMode mode = EM_NORMAL,
+	vector<CPartFlags> *pOccluded = 0 );
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 }

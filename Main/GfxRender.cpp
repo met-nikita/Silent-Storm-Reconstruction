@@ -11,6 +11,38 @@
 
 namespace NGfx
 {
+class COcclusionQuery : public IOcclusionQuery
+{
+	OBJECT_NOCOPY_METHODS(COcclusionQuery);
+	NWin32Helper::com_ptr<IDirect3DQuery9> pQuery;
+public:
+	COcclusionQuery() {}
+	explicit COcclusionQuery( IDirect3DQuery9 *_pQuery ) : pQuery(_pQuery) {}
+	void Start() { pQuery->Issue( D3DISSUE_BEGIN ); }
+	void Finish() { pQuery->Issue( D3DISSUE_END ); }
+	int GetData()
+	{
+		int nSamples = 10000;
+		while ( pQuery->GetData( &nSamples, sizeof(nSamples), D3DGETDATA_FLUSH ) == S_FALSE ) {}
+		return nSamples;
+	}
+	void Flush()
+	{
+		int nSamples;
+		pQuery->GetData( &nSamples, sizeof(nSamples), D3DGETDATA_FLUSH );
+	}
+};
+static vector<CMObj<COcclusionQuery> > occlusionQueries;
+IOcclusionQuery* CreateOcclusionQuery()
+{
+	NWin32Helper::com_ptr<IDirect3DQuery9> pQuery;
+	if ( FAILED( pDevice->CreateQuery( D3DQUERYTYPE_OCCLUSION, pQuery.GetAddr() ) ) )
+		return 0;
+	EraseInvalidRefs( &occlusionQueries );
+	COcclusionQuery *p = new COcclusionQuery( pQuery );
+	occlusionQueries.push_back( p );
+	return p;
+}
 externA5 SRenderTargetsInfo rtInfo;
 static bool operator==( const SFBTransform &a, const SFBTransform &b )
 {
@@ -350,6 +382,7 @@ static void Apply( const EAlphaCombineMode &alphaMode )
 			ApplyRenderState( D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA );
 			break;
 		case COMBINE_ALPHA_ADD:
+		case COMBINE_ADD_SRC_ALPHA_MUL:
 			ApplyRenderState( D3DRS_ALPHABLENDENABLE, TRUE );
 			ApplyRenderState( D3DRS_SRCBLEND, D3DBLEND_SRCALPHA );
 			ApplyRenderState( D3DRS_DESTBLEND, D3DBLEND_ONE );
@@ -1222,6 +1255,7 @@ bool InitZBuffer( D3DFORMAT format )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void DoneZBuffer()
 {
+	occlusionQueries.clear();
 	pCurrentRTTB = 0;
 	pCurrentRTZB = 0;
 	pCurrentRenderContext = 0;
