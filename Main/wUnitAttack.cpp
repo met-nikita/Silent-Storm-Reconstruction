@@ -647,7 +647,17 @@ CCommandExecute* CreateActionExecutor( CUnitServer *pUS, CCmd *pCmd, EUnitComman
 				return CreateActionQueue(pUS, pAttackTile.GetPtr(), new CExecThrowGrenade(pUS, pAttackTile->ptTarget), ITEM_ACTIVE, pError);
 			}
 			case AT_SHOOT:
+			{
+				// Retail v1.2 0x79d9bd..0x79da02 rejects tile targeting in
+				// Snipe mode even before the unit enters the sniping state.
+				CDynamicCast<NRPG::IWeaponItem> pWeapon(pUS->GetUnitRPG()->GetInventory()->GetActive());
+				if ( IsValid( pWeapon ) && pWeapon->GetShootMode() == NDb::SM_Snipe )
+				{
+					*pError = UCR_UNAVAILABLE;
+					return 0;
+				}
 				return CreateActionQueueOrReload(pUS, pAttackTile.GetPtr(), new CExecShootTile(pUS, pAttackTile->ptTarget), pError);
+			}
 			case AT_THROW:
 				return CreateActionQueue(pUS, pAttackTile.GetPtr(), new CExecThrowKnife(pUS, pAttackTile->ptTarget + CVec3(0, 0, 0.5f)), ITEM_ACTIVE, pError);
 			case AT_BAZOOKA:
