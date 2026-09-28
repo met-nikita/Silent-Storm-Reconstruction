@@ -1014,6 +1014,7 @@ void CVBCombiner::XFormPosition()
 	bcAll.Make( &bound );
 	bNeedXForm = false;
 	bNeedRecalc = true;
+	bDroppedXForm = false;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 static void CopyVertex( SGfxVertex *pDst, const NGfx::SGeomVecFull &src, const CVec2 &tex )
@@ -1050,7 +1051,35 @@ void CVBCombiner::SimpleTransform( TTrans *p )
 // for static & dynamic geometry
 void CVBCombiner::Recalc()
 {
-	if ( bNeedXForm )
+	// Retail v1.2 0x4fff10 releases CPU caches only after the upload and
+	// its buffer lock have completed, including all early-return paths.
+	DoRecalc();
+	if ( bLowRAM )
+		FreeMemory();
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CVBCombiner::FreeMemory()
+{
+	// Retail v1.2 0x4fe4c0 retains GPU geometry and bounds, but drops both
+	// CPU transform arrays. std::vector::clear alone would retain capacity.
+	if ( bDroppedXForm )
+		return;
+	const vector< CPtr<IPart> > &parts = pCombiner->GetValue();
+	for ( int i = 0; i < parts.size(); ++i )
+	{
+		IPart *pPart = parts[i];
+		if ( pPart )
+		{
+			vector<CVec3>().swap( pPart->xformedPositions );
+			vector<char>().swap( pPart->gfxData );
+		}
+	}
+	bDroppedXForm = true;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CVBCombiner::DoRecalc()
+{
+	if ( bNeedXForm || bDroppedXForm )
 		XFormPosition();
 	bNeedRecalc = false;
 	ASSERT( NGfx::N_VEC_FULL_TEX_SIZE == N_VERTEX_TEX_SIZE );

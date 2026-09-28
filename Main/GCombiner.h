@@ -156,17 +156,19 @@ class CVBCombiner: public IVBCombiner
 	float fOffset;
 	CDGPtr<CVersioningBase> pLMMapping;
 	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(IVBCombiner*)this); f.Add(2,&pCombiner); f.Add(3,&lt); f.Add(4,&ct); f.Add(5,&pAnimation); f.Add(6,&fOffset); f.Add(7,&pLMMapping); return 0; }
-	bool bNeedXForm, bNeedRecalc;
+	bool bNeedXForm = false, bNeedRecalc = false, bDroppedXForm = false;
 	template<class TTrans>
 		void SimpleTransform( TTrans *p );
 protected:
 	void XFormPosition();
+	void DoRecalc();
 	bool RealNeedUpdate() { if ( pAnimation ) return pAnimation.Refresh() | pCombiner.Refresh(); return pCombiner.Refresh(); }
 	bool NeedXForm() { bool bRes = RealNeedUpdate(); bNeedXForm |= bRes; return bNeedXForm; }
 	virtual bool NeedUpdate() { if ( pLMMapping ) return NeedXForm() | bNeedRecalc | pLMMapping.Refresh(); return NeedXForm() | bNeedRecalc; }
 	virtual void Recalc();
 public:
 	CVBCombiner() {}
+	virtual void FreeMemory();
 	CVBCombiner( CFuncBase< vector< CPtr<IPart> > > *_pCombiner, ELightmapType _lt, ECombinerType _ct, CVersioningBase *_pAnimation )
 		: pCombiner(_pCombiner), lt(_lt), ct(_ct), pAnimation(_pAnimation), fOffset(0) {}
 	void SetOffset( float _f ) { fOffset = _f; }
