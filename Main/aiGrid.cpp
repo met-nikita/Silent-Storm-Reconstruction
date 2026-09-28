@@ -114,7 +114,7 @@ public:
 			r.y1 = p.y * N_RECALC_GRID_SIZE;
 			r.x2 = Min( ( p.x + 1 ) * N_RECALC_GRID_SIZE, pLayer->tiles.GetXSize() );
 			r.y2 = Min( ( p.y + 1 ) * N_RECALC_GRID_SIZE, pLayer->tiles.GetYSize() );
-			pLayer->pColourer->AddZoneToRecalc( r );
+			pLayersGroup->pNet->GetColourer( pLayer->nLayer )->AddZoneToRecalc( r );
 			/*if ( pLayer->nLayer == 0 )
 			{
 				char buf[128];
@@ -563,15 +563,6 @@ void CLayersGroup::SetTracker( int nX, int nY, IAIMap *pMap, const STempArrayGro
 		if ( pTracker->bv == bv )
 			return;
 	}
-#ifdef _DEBUG
-	for ( int i = 0; i < layers.size(); ++i )
-	{
-		if ( !IsValid( layers[i] ) )
-			continue;
-		CNodesLayer *pLayer = layers[i];
-		ASSERT( IsValid( pLayer->pColourer ) );
-	}
-#endif
 	//char buf[128];
 	//sprintf( buf, "Added tracker for X = %d..%d, Y = %d..%d,",  );
 	//OutputDebugString( buf );
@@ -1103,12 +1094,24 @@ int CPathNetwork::CreateLayer( int nXSize, int nYSize, const CVec2 &ptOrigin,
 		OutputDebugString("Warning! Layers number limit exceeded!\n");
 		return -1;
 	}
+	pLayer->bHappySave = bHappySave;
 	pLayer->BuildLayer( nXSize, nYSize, ptOrigin, ptXDir, nFloor, nLayer, this, pGroup );
 	layers.push_back( pLayer );
-	pLayer->pColourer = new CMapColourer();
-	pLayer->pColourer->SetLayer( pLayer, pMap, nLayer );
 	bColouringConstructed = false;
 	return nLayer;
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+CMapColourer* CPathNetwork::GetColourer( int nLayer ) const
+{
+	// Retail v1.2 0x442400: compact saves and fresh layers can omit this cache.
+	CNodesLayer *pLayer = layers[nLayer];
+	if ( !IsValid( pLayer->pColourer ) )
+	{
+		pLayer->pColourer = new CMapColourer;
+		pLayer->pColourer->SetLayer( pLayer, pMap, nLayer );
+	}
+	return pLayer->pColourer;
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////

@@ -528,7 +528,7 @@ public:
 	bool IsGridReady() { return bColouringConstructed; }
 	void AddDirectTransitions( const CNodesLayer::CTransitionsHash &newtrans );
 	CNodesLayer* GetLayer( int nLayer ) const { ASSERT( nLayer < layers.size() && nLayer >= 0 ); return layers[nLayer]; }
-	CMapColourer* GetColourer( int nLayer ) const { return layers[nLayer]->pColourer; }
+	CMapColourer* GetColourer( int nLayer ) const;
 	CColouredWaysCalcer* GetWaysCalcer() { return pWaysCalcer; };
 	void PrintConsoleInfo( SPathPlace p );
 	void PrintLayerInfo( int nLayer );
