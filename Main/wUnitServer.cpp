@@ -311,6 +311,10 @@ void CUnitServer::RunCriticalExecutor( CCommandExecute *p )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CUnitServer::SetState( CUnitState *_pState ) 
 { 
+	// Retail v1.2 0x7c1885..0x7c190a holds the incoming state as an owner
+	// through both callbacks. OnStateStarted may replace itself (self-overdose).
+	// A CPtr only keeps the allocation, not its contents, alive in that case.
+	CObj<CUnitState> pHold( _pState );
 	ASSERT( IsValid( _pState ) );
 	if ( !IsValid( _pState ) )
 		return;
