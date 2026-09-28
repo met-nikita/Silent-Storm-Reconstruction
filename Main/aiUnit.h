@@ -16,6 +16,7 @@ namespace NDb
 	class IUnitMission;
 	class CUnit;
 	enum EShootMode;   // MS-extension fwd decl (as NAI::EHitLocation below) -- DataRPG.h defines it
+	enum EDiplomacyState;
 }
 
 namespace NWorld
@@ -54,6 +55,7 @@ public:
 	virtual void Synchronize( bool bEnemies = true ) = 0;
 	virtual SPosition GetPosition() = 0;
 	virtual SUnitPosition GetUnitPosition() = 0;
+	virtual NDb::EDiplomacyState GetDiplomacyState( IAIUnit *pUnit ) = 0;
 	virtual void SetPosition( SPosition _pPosition ) = 0;
 	virtual void SetPosition( SPathPlace _pPosition ) = 0;
 	virtual SPosition GetPrevPosition() = 0;

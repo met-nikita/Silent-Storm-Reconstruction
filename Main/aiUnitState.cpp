@@ -15,19 +15,13 @@
 //
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // SAIUnitState - per-unit threat tracker. See aiUnitState.h for the fidelity/scope notes (event-driven
-// maintenance + the position cache are partially reconstructed).
+// maintenance and the position cache follow retail's membership protocol).
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 namespace NAI
 {
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 static bool IsAlive( IAIUnit *p ) { return IsValid( p ) && !p->IsDead(); }
 static bool IsFightable( IAIUnit *p ) { return IsValid( p ) && IsValid( p->GetUnitServer() ) && p->GetUnitServer()->CanFight(); }
-static void AddUnique( vector< CPtr<IAIUnit> > *pv, IAIUnit *p )
-{
-	for ( vector< CPtr<IAIUnit> >::iterator i = pv->begin(); i != pv->end(); ++i )
-		if ( (*i).GetPtr() == p ) return;
-	pv->push_back( p );
-}
 static void RemoveFrom( vector< CPtr<IAIUnit> > *pv, IAIUnit *p )
 {
 	for ( vector< CPtr<IAIUnit> >::iterator i = pv->begin(); i != pv->end(); ++i )
@@ -57,6 +51,34 @@ IAIUnit *FindNearestUnit( IAIUnit *pSelf, vector< CPtr<IAIUnit> > &units )
 SAIUnitState::SAIUnitState(): bHelpCalled( false ), bScared( false )
 {
 	selfModified.data = false;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+bool SUnitsAndPositions::IsContain( IAIUnit *pUnit, bool bCheckPosition ) const
+{
+	for ( vector< CPtr<IAIUnit> >::const_iterator i = units.begin(); i != units.end(); ++i )
+		if ( (*i).GetPtr() == pUnit )
+		{
+			if ( !bCheckPosition )
+				return true;
+			unordered_map< CPtr<IAIUnit>, SUnitPosition, SPtrHash >::const_iterator pos = positions.find( pUnit );
+			return pos != positions.end() && pos->second == pUnit->GetUnitPosition();
+		}
+	return false;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void SUnitsAndPositions::Remove( IAIUnit *pUnit )
+{
+	units.erase( remove( units.begin(), units.end(), CPtr<IAIUnit>( pUnit ) ), units.end() );
+	positions.erase( pUnit );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void SUnitsAndPositions::Add( IAIUnit *pUnit )
+{
+	if ( !IsValid( pUnit ) )
+		return;
+	Remove( pUnit );
+	units.push_back( pUnit );
+	positions[pUnit] = pUnit->GetUnitPosition();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void SAIUnitState::Synchronize()
@@ -95,30 +117,63 @@ void SAIUnitState::Notify( IAIEvent *pEvent )
 	--allies.nLock;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void SAIUnitState::AddEnemy( IAIUnit *p )         { if ( IsValid( p ) ) { AddUnique( &enemies.data.units, p ); enemies.SetModified(); } }
+void SAIUnitState::AddEnemy( IAIUnit *p )
+{
+	if ( IsValid( pUnit ) && IsFightable( p ) && pUnit->GetDiplomacyState( p ) == NDb::DS_ENEMY
+		&& !enemies.data.IsContain( p, true ) )
+	{
+		enemies.SetModified();
+		enemies.data.Add( p );
+	}
+}
 // Retail v1.2 0x4b1630/0x4b1690/0x4b16f0 also clear the matching selected contact
 // immediately, without marking selfModified. Deferring the clear until Update()
 // would report a new threat change and cancel the investigation that consumed it.
 void SAIUnitState::RemoveEnemy( IAIUnit *p )
 {
-	RemoveFrom( &enemies.data.units, p );
-	enemies.SetModified();
+	if ( enemies.data.IsContain( p, false ) )
+	{
+		enemies.SetModified();
+		enemies.data.Remove( p );
+	}
 	if ( pEnemy.GetPtr() == p )
 		pEnemy = 0;
 }
-void SAIUnitState::AddPossibleEnemy( IAIUnit *p ) { if ( IsValid( p ) ) { AddUnique( &possibleEnemies.data.units, p ); possibleEnemies.SetModified(); } }
+void SAIUnitState::AddPossibleEnemy( IAIUnit *p )
+{
+	if ( IsValid( pUnit ) && IsFightable( p ) && pUnit->GetDiplomacyState( p ) == NDb::DS_ENEMY
+		&& !enemies.data.IsContain( p, false ) && !possibleEnemies.data.IsContain( p, true ) )
+	{
+		possibleEnemies.SetModified();
+		possibleEnemies.data.Add( p );
+	}
+}
 void SAIUnitState::RemovePossibleEnemy( IAIUnit *p )
 {
-	RemoveFrom( &possibleEnemies.data.units, p );
-	possibleEnemies.SetModified();
+	if ( possibleEnemies.data.IsContain( p, false ) )
+	{
+		possibleEnemies.SetModified();
+		possibleEnemies.data.Remove( p );
+	}
 	if ( pPossibleEnemy.GetPtr() == p )
 		pPossibleEnemy = 0;
 }
-void SAIUnitState::AddAlly( IAIUnit *p )          { if ( IsValid( p ) && p != pUnit.GetPtr() ) { AddUnique( &allies.data.units, p ); allies.SetModified(); } }   // retail AddAlly @0xb1630: never yourself
+void SAIUnitState::AddAlly( IAIUnit *p )
+{
+	if ( p != pUnit.GetPtr() && IsValid( pUnit ) && IsFightable( p ) && pUnit->GetDiplomacyState( p ) != NDb::DS_ENEMY
+		&& !allies.data.IsContain( p, true ) )
+	{
+		allies.SetModified();
+		allies.data.Add( p );
+	}
+}
 void SAIUnitState::RemoveAlly( IAIUnit *p )
 {
-	RemoveFrom( &allies.data.units, p );
-	allies.SetModified();
+	if ( allies.data.IsContain( p, false ) )
+	{
+		allies.SetModified();
+		allies.data.Remove( p );
+	}
 	if ( pAlly.GetPtr() == p )
 		pAlly = 0;
 }

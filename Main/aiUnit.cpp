@@ -153,6 +153,13 @@ public:
 	virtual NRPG::CUnit* GetRPGUnit() const { return pUnitServer->GetUnitRPG()->GetRPGUnit(); }
 	virtual SPosition GetPosition() { return pos.pos; } 
 	virtual SUnitPosition GetUnitPosition();
+	virtual NDb::EDiplomacyState GetDiplomacyState( IAIUnit *pUnit )
+	{
+		// Retail v1.2 0x4ad6d0: invalid participants are neutral.
+		if ( IsValid( pUnitServer ) && IsValid( pUnit ) && IsValid( pUnit->GetUnitServer() ) )
+			return pUnitServer->GetDiplomacyState( pUnit->GetUnitServer() );
+		return NDb::DS_NEUTRAL;
+	}
 	virtual void SetPosition( SPosition _ptPrevPosition );
 	virtual void SetPosition( SPathPlace _ptPrevPosition );
 	virtual SPosition GetPrevPosition();
