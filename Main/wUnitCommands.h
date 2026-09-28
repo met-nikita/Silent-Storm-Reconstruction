@@ -28,37 +28,30 @@ class IPassageObject;
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 enum EUnitCommandResult
 {
-	//// General
-	UCR_OK,
-	UCR_UNAVAILABLE,
-	UCR_GENERAL_FAILURE,
-	UCR_INVALID_COMMAND,
-	//// Path
-	UCR_NO_TARGET,
-	UCR_NOT_ENOUGH_AP,
-	UCR_PATH_NOT_FOUND,
-	//// Condition
-	UCR_NEED_RELOAD,
-	UCR_NO_EQUIPMENT,
-	UCR_WEAPON_JAMMED,
-	UCR_CRITICALS_BAN,
-	UCR_TARGET_OUT_OF_RANGE,
-	//// Inventory
-	UCR_INVENTORY_NO_PLACE,
-	//// Skill / hero / passage  (retail PDB result codes; appended at END so existing ordinals are
-	//// unchanged -- eResult IS raw-serialized via NGame::SActionInfo (mission save, DoDataVector) but an
-	//// append is byte-safe because eResult is a per-frame-recomputed UI cache; NEVER reorder/insert existing)
-	UCR_NEED_HIGHER_SKILL,            // clearing tool unusable / skill too low (disarm trap+mine CanDoIt)
-	UCR_NOT_HERO,                     // can-talk-but-not-hero -- SILENT no-op (CExecTalk::CanDoIt)
-	UCR_NOT_ALL_UNITS_NEAR_PASSAGE,   // unit not in the passage zone (CExecUsePassage::CanDoIt)
-	UCR_PK_BAN,                       // crouched unit WEARING a Panzerklein may not look-around -- CanDo @0x3c1570
-	                                  // (retail ordinal 0x15; here appended -> 16)
-	UCR_CANT_HEAL,                    // heal target's CanHeal() failed -- CanDoFirstAid @0x3a2d40
-	                                  // (retail ordinal 16; here appended -> 17)
-	UCR_DOOR_LOCKED,                  // locked door, no key and no charged picklock in hand --
-	                                  // CExecOpenClose::CanDoIt @0x3bd290 (retail ordinal 17; here appended -> 18)
-	UCR_OK_RELOAD,                   // attack replaced by a reload (retail ordinal 2)
-	UCR_CANT_SEE_TARGET              // aimed body part has no direct line of sight (retail ordinal 14)
+	// Retail wire values: SActionInfo stores this enum verbatim. Numeric order
+	// also determines the result priority when probing multiple selected units.
+	UCR_NULL = 0,
+	UCR_OK = 1,
+	UCR_OK_RELOAD = 2,
+	UCR_NO_TARGET = 3,
+	UCR_NOT_ENOUGH_AP = 4,
+	UCR_UNAVAILABLE = 5,
+	UCR_GENERAL_FAILURE = 6,
+	UCR_INVALID_COMMAND = 7,
+	UCR_PATH_NOT_FOUND = 8,
+	UCR_NEED_RELOAD = 9,
+	UCR_NO_EQUIPMENT = 10,
+	UCR_WEAPON_JAMMED = 11,
+	UCR_CRITICALS_BAN = 12,
+	UCR_TARGET_OUT_OF_RANGE = 13,
+	UCR_CANT_SEE_TARGET = 14,
+	UCR_NEED_HIGHER_SKILL = 15,
+	UCR_CANT_HEAL = 16,
+	UCR_DOOR_LOCKED = 17,
+	UCR_INVENTORY_NO_PLACE = 18,
+	UCR_NOT_HERO = 19,
+	UCR_NOT_ALL_UNITS_NEAR_PASSAGE = 20,
+	UCR_PK_BAN = 21
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CCmd: public CObjectBase

@@ -173,10 +173,8 @@ struct SActionInfo
 
 	// retail SActionInfo::SActionInfo @0x1a0a20 (bEnoughAPToStart is left UNINITIALIZED by the
 	// retail ctor; initialized false here -- an uninitialized read cannot be reproduced safely).
-	// Retail seeds eResult = UCR_NULL (retail ordinal 0, the "no result yet" value); the dev enum
-	// has no UCR_NULL (its ordinals deliberately diverge -- see wUnitCommands.h), so the dev keeps
-	// its established UCR_UNAVAILABLE sentinel.
-	SActionInfo(): bValid( false ), nMinAP( -1 ), nMaxAP( -1 ), bOk( false ), bEnoughAP( false ), bEnoughAPToStart( false ), bAvailable( false ), eResult( NWorld::UCR_UNAVAILABLE ) {}
+	// UCR_NULL is the retail "no result yet" sentinel, including in saved caches.
+	SActionInfo(): bValid( false ), nMinAP( -1 ), nMaxAP( -1 ), bOk( false ), bEnoughAP( false ), bEnoughAPToStart( false ), bAvailable( false ), eResult( NWorld::UCR_NULL ) {}
 
 	// retail SActionInfo::SetValid @0x1a18d0: the "instant OK, zero AP" filler used by
 	// CMission::UpdateActionsInfo for the always-possible actions.

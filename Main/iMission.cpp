@@ -763,6 +763,7 @@ void CMission::CanDoCommand( NWorld::CCmd *pCmd, bool bNoTarget, SActionInfo *pI
 	case NWorld::UCR_CRITICALS_BAN:
 	case NWorld::UCR_TARGET_OUT_OF_RANGE:
 	case NWorld::UCR_CANT_SEE_TARGET:
+	case NWorld::UCR_INVENTORY_NO_PLACE:
 	case NWorld::UCR_CANT_HEAL:                    // heal target's CanHeal() failed -- blocked but available (retail @0x1fb680 groups it here)
 	case NWorld::UCR_NEED_HIGHER_SKILL:           // skill too low to use the tool -- blocked but available
 	case NWorld::UCR_NOT_ALL_UNITS_NEAR_PASSAGE:  // not every selected unit is at the passage -- blocked but available
@@ -777,39 +778,8 @@ void CMission::CanDoCommand( NWorld::CCmd *pCmd, bool bNoTarget, SActionInfo *pI
 		pInfo->bAvailable = false;
 		break;
 	default:
-		ASSERT( 0 );
+		break; // retail leaves NULL/unknown results unavailable
 	}
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-// PDB EUnitCommandResult values for the retail result-combining rule below.
-// UCR_NULL=0 is absent from the dev enum.
-static int UCRRetailOrdinal( NWorld::EUnitCommandResult eRes )
-{
-	switch ( eRes )
-	{
-	case NWorld::UCR_OK:							return 1;
-	case NWorld::UCR_OK_RELOAD:                    return 2;
-	case NWorld::UCR_NO_TARGET:						return 3;
-	case NWorld::UCR_NOT_ENOUGH_AP:					return 4;
-	case NWorld::UCR_UNAVAILABLE:					return 5;
-	case NWorld::UCR_GENERAL_FAILURE:				return 6;
-	case NWorld::UCR_INVALID_COMMAND:				return 7;
-	case NWorld::UCR_PATH_NOT_FOUND:				return 8;
-	case NWorld::UCR_NEED_RELOAD:					return 9;
-	case NWorld::UCR_NO_EQUIPMENT:					return 10;
-	case NWorld::UCR_WEAPON_JAMMED:					return 11;
-	case NWorld::UCR_CRITICALS_BAN:					return 12;
-	case NWorld::UCR_TARGET_OUT_OF_RANGE:			return 13;
-	case NWorld::UCR_NEED_HIGHER_SKILL:				return 15;
-	case NWorld::UCR_CANT_SEE_TARGET:              return 14;
-	case NWorld::UCR_CANT_HEAL:						return 16;
-	case NWorld::UCR_DOOR_LOCKED:					return 17;
-	case NWorld::UCR_INVENTORY_NO_PLACE:			return 18;
-	case NWorld::UCR_NOT_HERO:						return 19;
-	case NWorld::UCR_NOT_ALL_UNITS_NEAR_PASSAGE:	return 20;
-	case NWorld::UCR_PK_BAN:						return 21;
-	}
-	return 21;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // retail CMission::CanDoCommand @0x1fc870 (mission vtbl+0xac). Probes the command against EVERY
@@ -840,8 +810,7 @@ NWorld::EUnitCommandResult CMission::CanDoCommand( NWorld::CCmd *pCmd, bool bNoT
 
 	int nMinAP = -1, nMaxAP = -1;
 	bool bHaveAP = false;
-	bool bHaveRes = false;
-	NWorld::EUnitCommandResult eTotalRes = NWorld::UCR_OK;
+	NWorld::EUnitCommandResult eTotalRes = NWorld::UCR_NULL;
 	for ( vector< CPtr<IUnitTracker> >::iterator iTemp = unitsSet.begin(); iTemp != unitsSet.end(); iTemp++ )
 	{
 		CPtr<NWorld::CUnit> pUnit = (*iTemp)->GetUnit();
@@ -895,14 +864,13 @@ NWorld::EUnitCommandResult CMission::CanDoCommand( NWorld::CCmd *pCmd, bool bNoT
 		//   total <= eRes (retail ordinals) -> keep total, EXCEPT two distinct hard failures
 		//                                      (both ordinal > 4) collapse to UCR_UNAVAILABLE
 		//   total >  eRes                   -> total = eRes (no collapse check in retail)
-		if ( !bHaveRes )
+		if ( eTotalRes == NWorld::UCR_NULL )
 		{
-			bHaveRes = true;
 			eTotalRes = eRes;
 		}
-		else if ( UCRRetailOrdinal( eTotalRes ) <= UCRRetailOrdinal( eRes ) )
+		else if ( eTotalRes <= eRes )
 		{
-			if ( UCRRetailOrdinal( eTotalRes ) > 4 && UCRRetailOrdinal( eRes ) > 4 && eTotalRes != eRes )
+			if ( eTotalRes > NWorld::UCR_NOT_ENOUGH_AP && eRes > NWorld::UCR_NOT_ENOUGH_AP && eTotalRes != eRes )
 				eTotalRes = NWorld::UCR_UNAVAILABLE;
 		}
 		else
