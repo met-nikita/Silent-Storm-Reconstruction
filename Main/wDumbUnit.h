@@ -168,7 +168,17 @@ public:
 	void SyncConscious();   // retail @0x3515a0: reconcile world alive/conscious state with the RPG persona
 	void SetPosition( const NAI::SUnitPosition &dst );
 	void SetTemporaryPosition( const NAI::SUnitPosition &dst ) // to be used only in CExecQueue; in all other cases use SetPosition
-	{	position = dst;	}
+	{
+		// Retail v1.2 0x7bde79: a queued position/pose/direction change loses aim.
+		bTemporaryAimed = bTemporaryAimed && position.pos.p == dst.pos.p;
+		position = dst;
+	}
+	bool IsTemporaryAimed() const { return bTemporaryAimed; }
+	void ResetTemporaryPosition( const NAI::SUnitPosition &pos )
+	{
+		position = pos;
+		bTemporaryAimed = true; // retail 0x7bdf4c: finish the preview, not an actual move
+	}
 	void DoGameMove( const NAI::SUnitPosition &dst );
 	void LockNextPlace( const NAI::SUnitPosition &dst );
 	ECanMoveRes CanDoGameMove( const NAI::SUnitPosition &dst );  // @0x34f100 retail widened bool->ECanMoveRes

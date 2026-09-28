@@ -124,6 +124,8 @@ protected:
 	int  GetExtraAP() const { return nExtraAP; }
 	void CalculateExtraAP();
 	void SpendAP();
+	int GetFirstShotAP() const;
+	int GetShortBurstAP() const;
 	int  GetBulletDelay() const;                 // @0x3a1f30 -- per-shot label->launch delay (ms) from the weapon DB
 	NDb::EShootMode GetShootMode() const;        // @0x3a1ee0 -- the equipped weapon's shoot mode (SM_Snap if none)
 	int  GetShortBurstLength() const;            // short-burst bullet count (nRoF/6 + LONGER_SHORT_BURST perk)

@@ -1244,9 +1244,21 @@ void CExecShoot::Start()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 int CExecShoot::GetStartAP() const
 {
+	// Retail v1.2 0x7a23a0: reserve/preview the entire short burst.
+	return GetShootMode() == NDb::SM_ShortBurst ? GetShortBurstAP() : GetFirstShotAP();
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+int CExecShoot::GetShortBurstAP() const
+{
+	// Retail v1.2 0x7a1f60. Execution still charges each additional round in CheckBurst.
+	return GetFirstShotAP() + max( 0, GetShortBurstLength() - 1 ) * pUS->GetActionAP( NRPG::AC_BURST );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+int CExecShoot::GetFirstShotAP() const
+{
 	if ( IsAccidental() )
 		return 0;
-	if ( pUS->animator.IsAiming() )
+	if ( pUS->animator.IsAiming() && pUS->IsTemporaryAimed() )
 		return pUS->GetActionAP( NRPG::AC_SHOOT ) + nExtraAP;
 	else
 		return pUS->GetActionAP( NRPG::AC_PREPARE_AND_SHOOT ) + nExtraAP;
