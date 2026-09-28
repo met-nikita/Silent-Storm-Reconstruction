@@ -17,6 +17,7 @@
 #include "RPGCritical.h"
 #include "RPGToHit.h"
 #include "wUnitServer.h"   // NWorld::CUnitServer / CUnit -- the to-hit dispatch RTTI-casts to the server
+#include "wMain.h"
 #include "wAckBase.h"
 #include "RPGDiplomacy.h"
 #include "rpgCheatConstants.h"
@@ -1448,7 +1449,7 @@ int GetTileToHit( const NWorld::CUnit *pAttacker, NAI::EPose curPose, int nDista
 	if ( pUS && pUS->GetScriptToHit() >= 0 )
 		return pUS->GetScriptToHit();
 	CUnitMission *pMission = CDynamicCast<CUnitMission>( pUS->GetUnitRPG() );
-	const bool bNight = false;
+	const bool bNight = pUS->GetWorld()->GetGame()->IsNight();
 	CPtr<IToHitCalcer> pToHitCalcer;
 	switch ( pMission->GetToHitWeaponType() )
 	{
@@ -1496,7 +1497,7 @@ int GetRLauncherToHit( const NWorld::CUnit *pAttacker, NAI::EPose curPose, int n
 	CUnitMission *pMission = CDynamicCast<CUnitMission>( pUS->GetUnitRPG() );
 	CPtr<CRLauncherToHitCalcer> pToHitCalcer =
 		new CRLauncherToHitCalcer( pUS, curPose, nDistance, ptAttacker, 100.f, nExtraAP, bFirstRound,
-			false, ptIllumination, ptTilePos );
+			pUS->GetWorld()->GetGame()->IsNight(), ptIllumination, ptTilePos );
 
 	int nToHit = pToHitCalcer->GetToHit();
 
@@ -1516,7 +1517,7 @@ int GetGrenadeToHit( const NWorld::CUnit *pAttacker, NAI::EPose curPose, int nDi
 	// release: the thrown grenade is no longer an argument -- the calcer derives it from the active item.
 	CPtr<CGrenadeToHitCalcer> pToHitCalcer =
 		new CGrenadeToHitCalcer( pUS, curPose, nDistance, ptAttacker,
-			bFirstRound, false, ptIllumination, ptTilePos );
+			bFirstRound, pUS->GetWorld()->GetGame()->IsNight(), ptIllumination, ptTilePos );
 
 	int nToHit = pToHitCalcer->GetToHit();
 

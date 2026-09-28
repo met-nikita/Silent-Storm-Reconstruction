@@ -363,7 +363,7 @@ EUnitCommandResult CanUnitThrowGrenade( CUnitServer *pUS, const NAI::SUnitPositi
 // uses NO inventory grenade, AP spend or wind-up animation: it spawns a temp grenade item from the DB
 // record, computes the ballistic params (skill-based max velocity + to-hit scatter + fuse delay, exactly
 // as CExecThrowGrenade::CheckToHitAndDelay) and hands the flight to CWorld::ThrowGrenade.
-void UnitThrowGrenade( CUnitServer *pUS, NDb::CRPGGrenade *pGrenade, const CVec3 &ptTarget, int /*nReserved*/ )
+void UnitThrowGrenade( CUnitServer *pUS, NDb::CRPGGrenade *pGrenade, const CVec3 &ptTarget, int nToHit )
 {
 	if ( !IsValid( pUS ) || !IsValid( pGrenade ) )
 		return;
@@ -376,16 +376,12 @@ void UnitThrowGrenade( CUnitServer *pUS, NDb::CRPGGrenade *pGrenade, const CVec3
 
 	const NAI::SUnitPosition position = pUS->GetPosition();
 
-	int nDistance = fabs( ptTarget - position.GetCP() ) / FP_GRID_STEP;
-	CPtr<NRPG::CGrenadeToHitCalcer> pToHitCalcer = new NRPG::CGrenadeToHitCalcer( pUS, position.GetPose(),
-		nDistance, position.GetCP(), pUS->GetWorld()->IsFirstTurn(), false, CVec3( 1, 1, 1 ), ptTarget, pGrenadeItem.GetPtr() );	// transient script grenade is not equipped/active -> pass it explicitly
-
 	SGrenadeParams grenadeParams;
 	if ( !FindGrenadeParams( pUS, pGrenadeItem, position, ptTarget, &grenadeParams ) )
 		return;
 
 	// Retail uses the shared gameplay random generator for both throw paths.
-	int nToHit = pToHitCalcer->GetToHit();
+	// v1.2 0x7acc74: scripts supply the chance explicitly, not a reserved argument.
 	int nRandom = random.Get( 100 );
 	if ( nRandom > nToHit )
 	{
@@ -1920,7 +1916,7 @@ void CExecThrowGrenade::CheckToHitAndDelay( NRPG::IGrenadeItem *pGrenade )
 	int nDistance = fabs( ptTarget - position.GetCP() ) / FP_GRID_STEP;
 	CPtr<NRPG::CGrenadeToHitCalcer> pToHitCalcer = new NRPG::CGrenadeToHitCalcer(
 		pUS, position.GetPose(), nDistance, position.GetCP(),
-		pUS->GetWorld()->IsFirstTurn(), false, CVec3(1,1,1), ptTarget, pGrenade );
+		pUS->GetUnitRPG()->IsFirstTurn(), pUS->GetWorld()->GetGame()->IsNight(), CVec3(1,1,1), ptTarget, pGrenade );
 	// check ToHit and find the point where the grenade is actually thrown
 	int nToHit = pToHitCalcer->GetToHit();
 	pToHitCalcer->Log();

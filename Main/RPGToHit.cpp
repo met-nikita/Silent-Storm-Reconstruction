@@ -346,7 +346,6 @@ float CToHitCalcer::GetLight()
 	float fRes = 0.5f * (1 + fabs( ptLight ) / fabs( CVec3(1,1,1) ) );
 	// release-new: at night the light factor drops 10% unless the unit has night-vision (perk 0x15).
 	// Unit-target previews, attacks and incidental bullet rolls pass the night flag.
-	// Remaining tile/grenade callers need the separate environment-input audit.
 	if ( bNight && !pUnitMission->HasPerk( 0x15 ) )
 		fRes *= 0.9f;
 	return fRes;
@@ -752,8 +751,8 @@ void CGrenadeToHitCalcer::Log()
 // CAIUnitToHitCalcer
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // The ctor keeps the dev IAIUnit* shape (an internal API, not serialized) and derives both
-// CUnitServer*s to chain the release CUnitToHitCalcer ctor. bNight derives false (CWorld::IsNight
-// absent in this tree -- documented elision).
+// CUnitServer*s to chain the release CUnitToHitCalcer ctor. Retail GetAIShootToHit
+// (v1.2 0x6b4960) supplies the mission game's night flag to this constructor.
 CAIUnitToHitCalcer::CAIUnitToHitCalcer(	NAI::IAIUnit *pShooter, const NAI::SUnitPosition &shooterPos,
 	NAI::IAIUnit *pTarget, float fHitCover, NAI::EHitLocation _eHitLocation, int _nBullet, IInventoryItem *_pWeapon, int _nExtraAP ):
 		CUnitToHitCalcer( pShooter->GetUnitServer(),
@@ -761,7 +760,7 @@ CAIUnitToHitCalcer::CAIUnitToHitCalcer(	NAI::IAIUnit *pShooter, const NAI::SUnit
 		fabs( shooterPos.GetCP() - pTarget->GetPosition().GetCP() ) / FP_GRID_STEP,
 		shooterPos.GetEyePosition(),
 		pTarget->GetPosition(),
-		_nExtraAP, 0, fHitCover, false, false, CVec3( 1, 1, 1 ),
+		_nExtraAP, 0, fHitCover, false, pShooter->GetUnitServer()->GetWorld()->GetGame()->IsNight(), CVec3( 1, 1, 1 ),
 		_eHitLocation,
 		pTarget->GetUnitServer(),
 		_nBullet, false )

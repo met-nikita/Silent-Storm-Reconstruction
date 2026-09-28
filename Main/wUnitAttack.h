@@ -64,7 +64,7 @@ void GetHumanReachPlaces( CUnitServer *pUS, const CVec3 &ptTarget, vector<NAI::S
 EUnitCommandResult CanAttackWithCannon( CCannon *pCannon, const CVec3 &ptTarget );
 // script-driven instant grenade throw (no inventory grenade / AP / wind-up animation); used by the lua
 // UnitGrenadeToUnit / UnitGrenadeToWaypoint handlers. retail NWorld::UnitThrowGrenade @0x3ac740.
-void UnitThrowGrenade( CUnitServer *pUS, NDb::CRPGGrenade *pGrenade, const CVec3 &ptTarget, int nReserved = 0 );
+void UnitThrowGrenade( CUnitServer *pUS, NDb::CRPGGrenade *pGrenade, const CVec3 &ptTarget, int nToHit = 0 );
 //EUnitCommandResult CanDoFirstAid( CUnitServer *pUS, const NAI::SUnitPosition &from, CUnitServer *pTarget );
 //EUnitCommandResult CanUnitThrowGrenade( CUnitServer *pUS, const NAI::SUnitPosition &from, const CVec3 &ptTarget, NRPG::IGrenadeItem *pGrenade ); // AI
 //EUnitCommandResult CanAttackWithCannon( CCannon *pCannon, const CVec3 &ptTarget ); // AI
