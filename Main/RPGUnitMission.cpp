@@ -1736,6 +1736,13 @@ bool CUnitMission::RemoveCritical( NDb::ECritical eCritical )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CUnitMission::ApplyCritical( CCritical *p )
 {
+	if ( !IsValid( p ) )
+		return;
+	// Retail v1.2 0x6c3368..0x6c3373: a new bleeding injury cancels
+	// temporary suppression BEFORE merging, even if the injury is weaker.
+	if ( p->GetCriticalType() == NDb::C_BLEEDING )
+		nBleedingStopAmount = 0;
+
 	for ( vector<CObj<CCritical> >::iterator i = criticals.begin(); i != criticals.end(); ++i )
 	{
 		if ( !(*i)->CanBeMerged() )
