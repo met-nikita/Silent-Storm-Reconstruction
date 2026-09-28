@@ -58,6 +58,8 @@ public:
 	vector< CVec2 > UVs;
 	vector< WORD > indices;
 	vector< int > tris;
+	vector< WORD > trueIndices;
+	vector< WORD > trueTris;
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CHeadSequenceInfo: public CObjectBase
@@ -352,8 +354,8 @@ struct SGlasses
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // SRawHeadMeshInfo -- the preloaded raw head-mesh description a CFaceGenMeshHolder holds inline: the
 // per-animator LifeStudio byte streams plus the seven geometry vectors. The FaceGen-time analogue of
-// the data CHeadMeshLoader::Recalc reads from a CResourceOpener (note the release head mesh additionally
-// carries trueIndices/trueTris -- the doubled-vertex index buffers). (PDB size 96.)
+// the data CHeadMeshLoader::Recalc reads from a CResourceOpener, plus the expanded
+// render triangles (trueIndices/trueTris). (PDB size 96.)
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 struct SRawHeadMeshInfo
 {
@@ -366,8 +368,8 @@ struct SRawHeadMeshInfo
 	vector<WORD>          trueIndices;       // +0x48
 	vector<WORD>          trueTris;          // +0x54
 	// retail SRawHeadMeshInfo::operator& @0x2636a0 (8 chunks). animatorStreams serialise per-element as a
-	// BLOB; the POD vectors as raw blocks (CStructureSaver DoDataVector). trueIndices/trueTris are written
-	// for format symmetry though the dev render path never reads them.
+	// BLOB; the POD vectors as raw blocks (CStructureSaver DoDataVector). Retail renders
+	// baked heads directly from trueIndices/trueTris, so they must be saved as well.
 	int operator&( CStructureSaver &f )
 	{
 		f.Add(2,&animatorStreams); f.Add(3,&nVertices); f.Add(4,&copys); f.Add(5,&UVs);

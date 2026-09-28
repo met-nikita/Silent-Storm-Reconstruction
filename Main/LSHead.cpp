@@ -47,6 +47,25 @@ static void LoadLSTree()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CHeadMeshLoader
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+static void BuildHeadRenderTopology( CHeadMeshInfo *pMesh )
+{
+	// Retail v1.2 0x666365..0x66678b. The resource's tris are cumulative END
+	// offsets: only the first three indices in each range form the render triangle;
+	// any remaining indices belong to smoothing-group duplicates for its normal.
+	pMesh->trueIndices.clear();
+	pMesh->trueTris.clear();
+	pMesh->trueTris.push_back( 0 );
+	int nFrom = 0;
+	for ( int i = 0; i < pMesh->tris.size(); ++i )
+	{
+		pMesh->trueIndices.push_back( pMesh->indices[nFrom] );
+		pMesh->trueIndices.push_back( pMesh->indices[nFrom + 1] );
+		pMesh->trueIndices.push_back( pMesh->indices[nFrom + 2] );
+		pMesh->trueTris.push_back( pMesh->trueIndices.size() );
+		nFrom = pMesh->tris[i];
+	}
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 void CHeadMeshLoader::Recalc()
 {
 	EnsureLSInit();   // IAnimator::Create() below is a main-API call -> Init() must precede it
@@ -70,6 +89,7 @@ void CHeadMeshLoader::Recalc()
 			if ( pLSTree )
 				pValue->pLSAnimators[i]->RegisterMacroMuscle( pLSTree->RootMacroMuscle() );
 		}
+		BuildHeadRenderTopology( pValue );
 	}
 	catch(...)
 	{
@@ -474,27 +494,10 @@ void CHeadAnimator::Recalc()
 	// ==== release @0x265a30 tail: assemble the CObjectInfo ======================================
 	NGScene::CObjectInfo::SData res;
 	res.verts.resize( nVerts );
-	// The head pack's indices/tris are the NORMAL-SMOOTHING data: each poly range is
-	// [a,b,c, +every smoothing-group duplicate of a/b/c], and tris[] holds cumulative END
-	// offsets with no leading 0. That layout is only meant for the face-normal accumulation
-	// above (CalcHeadGeometry @0x265100). The renderer's SPolygonIndices fan-walker expects
-	// an N+1 sentinel table of pure triangles; release stores that TRUE triangle list as
-	// CHeadMeshInfo::trueIndices/trueTris (built once by CHeadMeshLoader::Recalc @0x266070 and
-	// copied by Recalc @0x265a30). The dev CHeadMeshInfo carries no trueIndices/trueTris, so the
-	// identical list is derived inline here -- same bytes, both mesh sources (base pack + baked
-	// FaceGen holders) covered.
-	res.geometry.indices.clear();
-	res.geometry.polys.clear();
-	res.geometry.polys.push_back( 0 );				// release trueTris leading sentinel
-	int nBase = 0;
-	for ( int k = 0; k < pMesh->tris.size(); ++k )
-	{
-		res.geometry.indices.push_back( pMesh->indices[nBase] );
-		res.geometry.indices.push_back( pMesh->indices[nBase + 1] );
-		res.geometry.indices.push_back( pMesh->indices[nBase + 2] );
-		res.geometry.polys.push_back( res.geometry.indices.size() );
-		nBase = pMesh->tris[k];
-	}
+	// Retail v1.2 0x665afe..0x665b17 consumes the topology carried by either
+	// the base resource loader or the saved FaceGen holder, without rebuilding it.
+	res.geometry.indices = pMesh->trueIndices;
+	res.geometry.polys = pMesh->trueTris;
 
 	// Per-vertex normal + tangent basis (release CalcHeadVectors @0x264ee0, float form of its MMX
 	// fixed-point: texU = normalize(n.y, -n.x, 0), texV = texU ^ n). MODEL-space -- the part's
@@ -810,6 +813,8 @@ void CFaceGenMeshHolder::Recalc()
 		pValue->UVs       = info.UVs;
 		pValue->indices   = info.indices;
 		pValue->tris      = info.tris;
+		pValue->trueIndices = info.trueIndices;
+		pValue->trueTris    = info.trueTris;
 		pValue->pLSAnimators.resize( info.animatorStreams.size() );
 		for ( int i = 0; i < info.animatorStreams.size(); ++i )
 		{
@@ -1083,6 +1088,8 @@ CHeadInfo* CHeadTransformInfo::CreateHeadInfo()
 					info.UVs       = pBaseMesh->UVs;
 					info.indices   = pBaseMesh->indices;
 					info.tris      = pBaseMesh->tris;
+					info.trueIndices = pBaseMesh->trueIndices;
+					info.trueTris    = pBaseMesh->trueTris;
 				}
 			}
 
