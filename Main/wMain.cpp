@@ -231,7 +231,9 @@ void CPlayer::GetEnemyUnitInfo( CObjectBase *pEnemy, SEnemyInfo *out ) const
 	*out = SEnemyInfo();
 
 	CDynamicCast<CUnitServer> pE( pEnemy );
-	if ( !IsValid( pE ) || pE->IsDead() )
+	// v1.2 @0x787108..0x78711d checks object validity, not gameplay death.
+	// Corpses still expose their name and VP condition when explicitly aimed at.
+	if ( !IsValid( pE ) )
 		return;
 
 	// is pEnemy one of MY units? -> full HP visibility (skip the perk scan)
