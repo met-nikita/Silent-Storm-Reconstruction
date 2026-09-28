@@ -10,6 +10,8 @@
 #include "UIWindow.h"
 #include "UICommCtrls.h"	// CToolTip -- CWindow::pToolTip is the typed retail CObj<CToolTip>
 #include "A5Script.h"		// NScript::CScript -- retail CWindow window-scripting members (eventsMap/pScript)
+#include "scriptCallLUA.h"
+#include "..\DBFormat\DataScript.h"
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 namespace NUI
 {
@@ -340,6 +342,7 @@ bool CWindow::SendMessage( CWindow *_pTarget, const SEvent &sEvent )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CWindow::ProcessMessage( const SEvent &sEvent )
 {
+	DispatchScriptEvent( sEvent );
 	switch( sEvent.nEvent )
 	{
 	case EVENT_ACTIVATE:
@@ -421,6 +424,15 @@ bool CWindow::ProcessMessage( const SEvent &sEvent )
 			pMouseFocus = 0;
 			break;
 		}
+	case EVENT_TEMPLATELOAD:
+		{
+			if ( IsValid( sEvent.pContainer ) && IsValid( sEvent.pContainer->pScript ) )
+			{
+				pScript = NScript::CreateScript( 0, GetInterface() );
+				pScript->RunScriptByID( sEvent.pContainer->pScript->GetRecordID() );
+			}
+			break;
+		}
 	case EVENT_TEMPLATECREATE:
 		{
 			if ( IsValid( sEvent.pControl ) )
@@ -492,6 +504,8 @@ bool CWindow::ProcessMessage( const SEvent &sEvent )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CWindow::Update( const STime &sTime, NGScene::I2DGameView *pView )
 {
+	if ( IsValid( pScript ) )
+		pScript->ExecuteThreads();
 	// retail @0x3273d0 walks listChildren (a vector) BY INDEX, re-reading the bounds each step so a child's
 	// Update mutating the vector cannot invalidate the walk. The guard below is defensive: a rare deserialize
 	// can leave a wild/dangling child entry; retail has no guard, but keep it (verify the object AND its
@@ -505,6 +519,52 @@ void CWindow::Update( const STime &sTime, NGScene::I2DGameView *pView )
 		if ( IsBadReadPtr( pChild, 4 ) || IsBadReadPtr( *(void**)pChild, 4 ) || !IsValid( listChildren[i] ) )
 			continue;
 		pChild->Update( sTime, pView );
+	}
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+int CWindow::GetEventHandler( NScript::CScript *pHandlerScript ) const
+{
+	unordered_map<CPtr<NScript::CScript>,int,SPtrHash>::const_iterator i = eventsMap.find( pHandlerScript );
+	return i != eventsMap.end() ? i->second : 0;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CWindow::SetEventHandler( int nCallInfo, NScript::CScript *pHandlerScript )
+{
+	eventsMap[pHandlerScript] = nCallInfo;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CWindow::DispatchScriptEvent( const SEvent &sEvent )
+{
+	// Retail v1.2 0x728760..0x728f10: callbacks observe these events before
+	// built-in dispatch; callback return values do not consume the message.
+	const char *pszEvent = 0;
+	switch ( sEvent.nEvent )
+	{
+		case EVENT_NOTIFY: pszEvent = "notify"; break;
+		case EVENT_LBUTTONUP: pszEvent = "lbtnup"; break;
+		case EVENT_LBUTTONDOWN: pszEvent = "lbtndown"; break;
+		case EVENT_LBUTTONDBLCLK: pszEvent = "lbtndblclk"; break;
+		case EVENT_RBUTTONUP: pszEvent = "rbtnup"; break;
+		case EVENT_RBUTTONDOWN: pszEvent = "rbtndown"; break;
+		case EVENT_RBUTTONDBLCLK: pszEvent = "rbtndblclk"; break;
+		default: return;
+	}
+	// A callback can register another script: pin the dispatch list across rehash.
+	vector< pair<CPtr<NScript::CScript>, int> > handlers;
+	for ( unordered_map<CPtr<NScript::CScript>,int,SPtrHash>::const_iterator i = eventsMap.begin(); i != eventsMap.end(); ++i )
+		handlers.push_back( make_pair( i->first, i->second ) );
+	for ( int i = 0; i < handlers.size(); ++i )
+	{
+		NScript::CScript *pHandler = handlers[i].first;
+		if ( !IsValid( pHandler ) || handlers[i].second == 0 )
+			continue;
+		vector< CObj<NScript::CLUACallParam> > params;
+		params.push_back( new NScript::CLUACallParam( tagLuaWindow, this ) );
+		params.push_back( new NScript::CLUACallParam( string( pszEvent ) ) );
+		if ( sEvent.nEvent == EVENT_NOTIFY )
+			params.push_back( new NScript::CLUACallParam( sEvent.szID ) );
+		NScript::luaCallFunction( pHandler, handlers[i].second, params );
+		pHandler->ExecuteThreads();
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////

@@ -30,9 +30,7 @@
 //   * retail's 'o' arg-spec (generic userdata parent) was absent from
 //     Script::CheckArgs -> added (case 'o' stores raw lua_touserdata).
 //   * window userdata tag == retail's 8 (tagLuaWindow, a third RegisterNewTag).
-//   * `onmessage` needs the lua callinfo C-API (lua_tocallinfo/pushcallinfo),
-//     ABSENT in this lua build -> both onmessage thunks report "unsupported"
-//     (CWindow still carries the retail eventsMap/pScript save fields).
+//   * `onmessage` uses the Lua closure-handle API and per-script window handlers.
 //   * text property: retail SetText(GetDBString(s)); dev GetDBString takes an
 //     int id -> SetText(GetDBString(atoi(s))). image likewise GetUITexture(atoi).
 //   * CMission wires CScript::pInterface to its HUD interface. GetWindow,
@@ -56,6 +54,7 @@
 #include "scriptCommon.h"				// luaPrepareData, BEGIN_SCRIPT_COMMAND, SLuaParams
 #include "scriptPtr.h"					// tagLuaWindow (lua.h), luaGetPtr
 #include "scriptUI.h"
+#include "..\Script\lstate.h"
 //
 #include <math.h>
 #include <stdlib.h>
@@ -128,7 +127,9 @@ static NUI::CWindow* GetChildByPath( NUI::CWindow *pRoot, const string &szPath )
 static bool CheckProperty( lua_State *pState, bool bIsGet, CScript **ppScript, NUI::CWindow **ppWindow,
 	string *pszName )
 {
-	CScript *pScript = GetScript();
+	CScript *pScript = CDynamicCast<CScript>( pState->pContext );
+	if ( !IsValid( pScript ) )
+		pScript = GetScript();
 	if ( pScript == 0 )
 		return false;
 	if ( lua_gettop( pState ) < ( bIsGet ? 2 : 3 ) )
@@ -317,13 +318,12 @@ static int luaGetparent( CScript *s, NUI::CWindow *w, const string &, int )
 static int luaSetparent( CScript *, NUI::CWindow *w, const string &name, int )
 	{ return ShowPropertyError( w, name, false, "unsupported" ); }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// onmessage: needs the lua callinfo C-API (lua_tocallinfo/pushcallinfo) which this lua build lacks ->
-// both report "unsupported" (so CWindow's save format is left untouched).
+// onmessage: closure handles are local to the owning script's Lua state.
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-static int luaGetonmessage( CScript *, NUI::CWindow *w, const string &name, int )
-	{ return ShowPropertyError( w, name, false, "unsupported" ); }
-static int luaSetonmessage( CScript *, NUI::CWindow *w, const string &name, int )
-	{ return ShowPropertyError( w, name, false, "unsupported" ); }
+static int luaGetonmessage( CScript *s, NUI::CWindow *w, const string &, int )
+	{ lua_pushcallinfo( s->GetState(), w->GetEventHandler( s ) ); return 1; }
+static int luaSetonmessage( CScript *s, NUI::CWindow *w, const string &, int idx )
+	{ w->SetEventHandler( lua_tocallinfo( s->GetState(), idx ), s ); return 0; }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // show: get -> unsupported; set -> ShowWindow(SWTYPE_SHOW) (ignores the lua value, like retail).
 ////////////////////////////////////////////////////////////////////////////////////////////////////

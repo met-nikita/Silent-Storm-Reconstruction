@@ -52,6 +52,18 @@ LUA_API void luaA_pushobject (lua_State *L, const TObject *o) {
   incr_top;
 }
 
+// Retail v1.2 0x81a180 / 0x81a3e0: these handles are closure indices,
+// not VM activation records (LUA_TMARK) or registry references.
+LUA_API int lua_tocallinfo (lua_State *L, int index) {
+  StkId o = luaA_indexAcceptable( L, index );
+  return o != STK_NULL && LObj(L, o)->GetType() == LUA_TFUNCTION ? LObj(L, o)->GetCL() : 0;
+}
+
+LUA_API void lua_pushcallinfo (lua_State *L, int callinfo) {
+  LObj(L, L->pCT->top)->SetCL( callinfo );
+  api_incr_top( L );
+}
+
 /*
 ** basic stack manipulation
 */
@@ -589,6 +601,5 @@ LUA_API void lua_concat (lua_State *L, int n) {
   L->pCT->top = top-(n-1);
   luaC_checkGC(L);
 }
-
 
 

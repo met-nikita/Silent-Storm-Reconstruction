@@ -81,7 +81,7 @@ public:
 	void SetScriptInterface( NUI::CInterface *pInterface );
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CScript *CreateScript( NWorld::IWorld *pWorld );
+CScript *CreateScript( NWorld::IWorld *pWorld, NUI::CInterface *pInterface = 0 );
 void ScriptWarning( const string &message );
 void ScriptError( const string &message );
 ////////////////////////////////////////////////////////////////////////////////////////////////////

@@ -117,6 +117,7 @@ LUA_API size_t         lua_strlen (lua_State *L, int index);
 LUA_API lua_CFunction  lua_tocfunction (lua_State *L, int index);
 LUA_API CObjectBase   *lua_touserdata (lua_State *L, int index);
 LUA_API const void    *lua_topointer (lua_State *L, int index);
+LUA_API int            lua_tocallinfo (lua_State *L, int index);
 
 
 /*
@@ -128,6 +129,8 @@ LUA_API void  lua_pushlstring (lua_State *L, const char *s, size_t len);
 LUA_API void  lua_pushstring (lua_State *L, const char *s);
 LUA_API void   lua_pushcclosure (lua_State *L, lua_CFunction fn, int n);
 LUA_API void  lua_pushusertag (lua_State *L, CObjectBase *u, int tag);
+LUA_API void  lua_pushcallinfo (lua_State *L, int callinfo);
+LUA_API void  lua_startCall (lua_State *L, int nargs, int nresults);
 
 
 /*
@@ -273,4 +276,3 @@ namespace NScript
 *
 * This implementation contains no third-party code.
 ******************************************************************************/
-

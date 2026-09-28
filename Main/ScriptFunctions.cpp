@@ -291,15 +291,12 @@ Script::SRegFunction pRegList[] =
 	{ 0, 0 } // End
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CScript *CreateScript( NWorld::IWorld *pWorld )
+CScript *CreateScript( NWorld::IWorld *pWorld, NUI::CInterface *pInterface )
 {
-	ASSERT( IsValid( pWorld ) );
-	if ( !IsValid( pWorld ) )
-		return 0;
-	//
 	CScript *pRes = new NScript::CScript();
 	CDynamicCast<NWorld::CWorld> pTmpWorld( pWorld );
 	pRes->pWorld = pTmpWorld;
+	pRes->SetScriptInterface( pInterface );
 	return pRes;
 }
 //

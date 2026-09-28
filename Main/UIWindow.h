@@ -79,8 +79,7 @@ protected:
 	vector<CMObj<CWindow> > listChildren;
 	// retail window-scripting/tooltip tail (@0xd4220 tags 14-17). sToolTipAnchor/eToolTipAnchorType are
 	// copied from the originating NDb::CUIControl on EVENT_TEMPLATECREATE; eventsMap/pScript belong to
-	// the Lua "onmessage" window-scripting layer (this tree's lua build lacks lua_tocallinfo, so the
-	// maps stay empty at runtime -- serialized for save-format parity).
+	// the Lua "onmessage" window-scripting layer.
 	SPoint sToolTipAnchor;
 	NDb::EUIAnchor eToolTipAnchorType;
 	unordered_map<CPtr<NScript::CScript>,int,SPtrHash> eventsMap;
@@ -92,6 +91,7 @@ protected:
 	void ActivateTest( int nX, int nY );
 	void BringWindowToTop( CWindow *pWindow );
 	void FormChildrenList( list<CPtr<CWindow> > *pList );
+	void DispatchScriptEvent( const SEvent &sEvent );
 	
 public:
 	// retail SWindowInfo-ctor (@0x2112d0 family / oracle iMissionUI): bActive=false, bRequireUpdate=true,
@@ -145,6 +145,8 @@ public:
 
 	virtual bool SendMessage( CWindow *pTarget, const SEvent &sEvent );
 	virtual bool ProcessMessage( const SEvent &sEvent );
+	int GetEventHandler( NScript::CScript *pScript ) const;
+	void SetEventHandler( int nCallInfo, NScript::CScript *pScript );
 
 	virtual void Update( const STime &sTime, NGScene::I2DGameView *pView );
 	virtual void Draw( const STime &sTime, NGScene::I2DGameView *pView );

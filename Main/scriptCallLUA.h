@@ -3,11 +3,12 @@
 //
 namespace NScript
 {
+class CScript;
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CLUACallParam: public CObjectBase
 {
 public:
-	enum EParamType { PT_POINTER, PT_INT, PT_FLOAT, PT_STRING, PT_UNDEFINED };
+	enum EParamType { PT_POINTER, PT_INT, PT_FLOAT, PT_STRING, PT_TAGGED_POINTER, PT_UNDEFINED };
 	//
 	OBJECT_BASIC_METHODS( CLUACallParam );
 	ZDATA
@@ -24,10 +25,12 @@ public:
 	CLUACallParam( const string &_szString ): type( PT_STRING ), szString( _szString ) {}
 	CLUACallParam( int _nInt ): type( PT_INT ), nInt( _nInt ) {}
 	CLUACallParam( float _fFloat ): type( PT_FLOAT ), fFloat( _fFloat ) {}
+	CLUACallParam( int nTag, CObjectBase *_pObject ): type( PT_TAGGED_POINTER ), pObject( _pObject ), nInt( nTag ) {}
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void luaCallFunction( string szName, char *szParams, ... );
 void luaCallFunction( string szName, const vector< CObj<CLUACallParam> > &params );
+void luaCallFunction( CScript *pScript, int nCallInfo, const vector< CObj<CLUACallParam> > &params );
 void luaMakeCallParamsVector( char *szParams, va_list *pL, vector< CObj<CLUACallParam> > *pParams );
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 }
