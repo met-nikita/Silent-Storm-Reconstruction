@@ -107,6 +107,7 @@ private:
 	void SetHealedVP( int n ) { pRPGUnit->nHealedVP = Max( 0, n ); }
 	virtual int GetLastActionTimes() const { return nLastActionTimes; }
 	virtual int GetMoveInLastTurn() const { return nMoveInLastTurn; }
+	virtual float GetWeaponSkill( CObjectBase *pItem, int nExtraAP, int nBullet );
 	virtual void AddMoveInLastTurn( int n ) { nMoveInLastTurn += n; }
 	virtual int RollCritical( NAI::EHitLocation eHL, int nCriticalDifficulty, NDb::CRPGCritical **pCritical );
 	void SaveAck( int nAckID, IUnitMissionInfo *pAttacker );
@@ -1373,6 +1374,68 @@ int GetToHit( const NWorld::CUnit *pAttacker, NAI::EPose curPose, int nDistance,
 	if ( pMission->bLogActive )
 		pToHitCalcer->Log();
 	return nToHit;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// Retail v1.2 0x6c0720. Preserve fractional bonuses until the calcer's final int conversion.
+float CUnitMission::GetWeaponSkill( CObjectBase *pItem, int nExtraAP, int nBullet )
+{
+	float fSkill = GetRPGUnit()->Skills( NDb::ST_SHOOTING );
+	float fBonus;
+	CDynamicCast<CWeaponItem> pWeapon( pItem );
+	if ( IsValid( pWeapon ) )
+	{
+		int nPerk = 0;
+		switch ( pWeapon->GetWeaponType() )
+		{
+			case NDb::WT_SUB_MACHINE_GUN: nPerk = 9; break;
+			case NDb::WT_MACHINE_GUN: nPerk = 13; break;
+			case NDb::WT_PISTOL: nPerk = 67; break;
+			case NDb::WT_RIFLE: nPerk = 68; break;
+			case NDb::WT_RLAUNCHER: nPerk = 84; break;
+		}
+		if ( nPerk && HasPerk( nPerk, &fBonus ) )
+			fSkill += fBonus;
+		NDb::EShootMode mode = pWeapon->GetShootMode();
+		float fMove = 0;
+		if ( !IsFirstTurn() )
+			fMove = Min( GetToHitConstants()->nSMaxMove, GetMoveInLastTurn() ) *
+				pWeapon->GetDBWeapon()->pWeaponType->fMovePenalty;
+		if ( mode == NDb::SM_Careful || mode == NDb::SM_Snipe )
+			fSkill += Max( 0, int( nExtraAP + fMove ) ) * ( 1.f / 3.f );
+	}
+	else if ( CDynamicCast<IGrenadeItem>( pItem ) )
+	{
+		fSkill = GetRPGUnit()->Skills( NDb::ST_THROWING );
+		if ( HasPerk( 91, &fBonus ) )
+			fSkill += fBonus;
+	}
+	else if ( CDynamicCast<IMeleeWeaponItem> pMelee = pItem )
+	{
+		bool bThrowing = pMelee->GetDBMeleeWeapon()->bThrowing;
+		fSkill = GetRPGUnit()->Skills( bThrowing ? NDb::ST_THROWING : NDb::ST_MELEE );
+		if ( HasPerk( bThrowing ? 89 : 70, &fBonus ) )
+			fSkill += fBonus;
+	}
+	if ( nBullet > 0 )
+	{
+		int nExponent = nBullet;
+		if ( HasPerk( 30, &fBonus ) )
+			nExponent = int( nBullet / fBonus );
+		int nBurst = GetRPGUnit()->Skills( NDb::ST_BURST );
+		float fUnstabilized = fSkill * pow( double( nBurst ) / N_MAX_SKILL, nExponent );
+		// Retail truncates the stabilization percentage BEFORE multiplying by skill.
+		float fStabilized = ( GetToHitConstants()->nMaxBurstStabilize * nBurst / N_MAX_SKILL ) * fSkill * 0.01f;
+		int nRecoil = 0;
+		if ( IsValid( pWeapon ) )
+		{
+			SWeaponInfo info;
+			pWeapon->GetInfo( &info );
+			nRecoil = info.nRecoil;
+		}
+		fSkill = Max( fUnstabilized, fStabilized ) * nRecoil * 0.01f;
+	}
+	return fSkill * GetVPPenalty( GetRPGUnit()->Skills( NDb::ST_VP ),
+		GetHealedVP(), GetRPGUnit()->Skills( NDb::ST_VP ).GetMaxValue() );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 int GetTileToHit( const NWorld::CUnit *pAttacker, NAI::EPose curPose, int nDistance, const CVec3 &ptAttacker,

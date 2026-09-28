@@ -135,6 +135,7 @@ public:
 	virtual int GetTotalVP() const = 0;
 	virtual int GetLastActionTimes() const = 0;
 	virtual int GetMoveInLastTurn() const = 0;
+	virtual float GetWeaponSkill( CObjectBase *pItem, int nExtraAP, int nBullet ) = 0;
 	virtual void ApplyCritical( const NRPG::SCritical &critical ) = 0;
 	virtual bool RemoveCritical( NDb::ECritical eCritical ) = 0;
 	virtual void SuspendCriticals( int nTurns ) = 0;

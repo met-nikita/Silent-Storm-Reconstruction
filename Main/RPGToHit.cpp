@@ -280,34 +280,16 @@ void CToHitCalcer::Prepare()
 	if ( IsValid( pWeaponItem ) )
 	{
 		pWeaponItem->GetInfo( &sWeaponInfo );
+		float fRangeMultiplier;
+		if ( pUnitMission->HasPerk( 0x56, &fRangeMultiplier ) )
+			sWeaponInfo.nMaxRange = int( sWeaponInfo.nMaxRange * fRangeMultiplier );
 		fMovePenalty = pWeaponItem->GetDBWeapon()->pWeaponType->fMovePenalty;
+		if ( pWeaponItem->GetShootMode() == NDb::SM_Snipe )
+			nExtraAP += nSnipeAP;
 	}
 	else
 		FillWeaponInfo();
-	//
-	nSkill = pUnitMission->GetRPGUnit()->Skills( NDb::ST_SHOOTING );
-	//
-	if ( IsValid( pWeaponItem ) )
-	{
-		NDb::EShootMode shootMode = pWeaponItem->GetShootMode();
-		if ( shootMode == NDb::SM_Snipe )
-			nExtraAP += nSnipeAP;
-		if ( shootMode == NDb::SM_Careful || shootMode == NDb::SM_Snipe )
-			nSkill += max( 0, int( nExtraAP - GetSMove() ) ) / 3;
-	}
-	//
-	if ( nBullet > 0 )
-	{
-		float fBurstNonStab = nSkill * pow( (double)pUnitMission->GetRPGUnit()->Skills(NDb::ST_BURST) / N_MAX_SKILL,
-			nBullet );
-		float fBurstStab = pUnitMission->GetRPGUnit()->Skills(NDb::ST_BURST) *
-			pUnitMission->GetToHitConstants()->nMaxBurstStabilize / N_MAX_SKILL;
-		float fStabilized = fBurstStab * nSkill / 100;
-		nSkill = Max( fBurstNonStab, fStabilized ) * sWeaponInfo.nRecoil / 100;
-	}
-	float fVPPenalty = GetVPPenalty( pUnitMission->GetRPGUnit()->Skills( NDb::ST_VP ),
-		pUnitMission->GetHealedVP(), pUnitMission->GetRPGUnit()->Skills(NDb::ST_VP).GetMaxValue() );
-	nSkill *= fVPPenalty;
+	nSkill = int( pUnitMission->GetWeaponSkill( pWeaponItem, nExtraAP, nBullet ) );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 float CToHitCalcer::GetStance()
@@ -351,7 +333,9 @@ float CToHitCalcer::GetSMove()
 	if ( !bFirstRound )
 		fRes = Min( pUnitMission->GetMoveInLastTurn(),
 			pUnitMission->GetToHitConstants()->nSMaxMove ) * fMovePenalty;
-	//
+	// Retail v1.2 0x6b6ed7: perk 19 cancels the additive movement penalty.
+	if ( pUnitMission->HasPerk( 0x13 ) )
+		return 0;
 	return fRes;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -676,11 +660,11 @@ CGrenadeToHitCalcer::CGrenadeToHitCalcer( CUnitServer *_pUnitServer, NAI::EPose 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CGrenadeToHitCalcer::Prepare()
 {
-	nSkill = GetGrenadeThrowSkill( pUnitMission );
+	CToHitCalcer::Prepare();
+	nSkill = int( pUnitMission->GetWeaponSkill( pGrenade, nExtraAP, nBullet ) );
 	// retail @0x2b88d0 reads the weapon type off whichever record the item carries (regular
 	// grenade OR engineer grenade) -- the bare GetDBGrenade() deref crashed on equipping TNT.
 	fMovePenalty = GetGrenadeRecWeaponType( pGrenade )->fMovePenalty;
-	FillWeaponInfo();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 float CGrenadeToHitCalcer::GetStance()
