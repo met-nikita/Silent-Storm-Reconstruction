@@ -149,13 +149,8 @@ private:
 	void CheckForUpdates();                               // @0x34640: enqueue each unit's pending reaction
 	void OnAISegment();                                   // @0x346f0: per-segment unit tick + reaction pump
 	bool HasUnitWork( IAIUnit *pUnit );                   // @0x34b60
-	// retail ownership domain: a commander operates ONLY its own player's units (retail CWorld::AddUnit
-	// @0x369580 -> CPlayerBase::AddUnit @0x374a10 routes each unit to its OWNING commander alone, so the
-	// retail `units` list never holds foreign units). The dev tree keeps the every-commander broadcast
-	// (SAIState::Synchronize builds the ally/enemy rosters from this list), so every operational loop
-	// must filter to the owner. This replaces the old isolation-by-frozen-bUnderAIControl (each commander
-	// used to hold its own duplicate wrappers, foreign ones flagged false; with the retail SHARED wrapper
-	// the flag is true on every commander's copy and can no longer isolate).
+	// Retail ownership domain: only this player's units are registered here.
+	// Keep the current-owner guard for player transfers.
 	bool IsOwnUnit( IAIUnit *pUnit ) const;
 	bool IsSomebodyNeedUpdate();                          // @0x33990
 	bool IsSomebodyThinking();                            // @0x33f50

@@ -65,6 +65,8 @@ struct SAIState
 	ZEND int operator&( CStructureSaver &f );
 	//
 	void MakeEnemyGroups();
+	void GetUnits( vector< CPtr<IAIUnit> > *pUnits, bool bAllies, bool bIncludeNonAI ) const;
+	IAIUnit *GetNearestUnit( const CVec3 &pos, bool bAllies, bool bIncludeNonAI, IAIUnit *pExclude ) const;
 	//
 public:
 	SAIState();

@@ -28,7 +28,7 @@ namespace NAI
 {
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CountActiveAllies (release GetUnits(allies, active).size()): the alarming unit's garrison size -- how many fightable
-// side-units it could rally. The ally AI-player roster substitutes the absent SAIState::GetUnits.
+// non-enemy AI units it could rally (retail GetUnits(true,false)).
 static int CountActiveAllies( IAIUnit *u )
 {
 	if ( !IsValid( u ) )
@@ -36,18 +36,9 @@ static int CountActiveAllies( IAIUnit *u )
 	SAIState *pSt = u->GetAIState();
 	if ( pSt == 0 )
 		return 0;
-	IAIPlayer *p = pSt->GetAllyAIPlayer();
-	if ( p == 0 )
-		return 0;
-	vector< CPtr<IAIUnit> > &units = *p->GetUnits();
-	int n = 0;
-	for ( int i = 0; i < (int)units.size(); ++i )
-	{
-		IAIUnit *a = units[i].GetPtr();
-		if ( IsValid( a ) && !a->IsDead() && IsValid( a->GetUnitServer() ) )
-			++n;
-	}
-	return n;
+	vector< CPtr<IAIUnit> > units;
+	pSt->GetUnits( &units, true, false );
+	return units.size();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CAINormalReaction::Update()
@@ -80,7 +71,7 @@ void CAINormalReaction::Update()
 				SetLogic( pAlarm );
 				CObj<IAIEvent> e = CreateAIEnemyDiedEvent( pEnemy );
 				if ( IsValid( e ) )
-					e->Modify( us );   // drop own enemy -> disengage and run the alarm route
+						us->Notify( e );   // preserve nested event locks while dropping this contact
 				return;
 			}
 		}
@@ -196,7 +187,7 @@ void CAINormalReaction::Update()
 			SetLogic( pAssist.GetPtr() );
 			CObj<IAIEvent> e = CreateAILostAllyEvent( pAlly );   // consume: RemoveAlly + clear pAlly
 			if ( IsValid( e ) )
-				e->Modify( us );
+				us->Notify( e );
 			return;
 		}
 	}
@@ -216,15 +207,7 @@ void CAINormalReaction::Update()
 // fall-back it becomes a Guard reaction; otherwise it keeps retreating from a live enemy, glances toward a
 // merely suspected one, and (whenever it holds no current logic) keeps moving to the fall-back at a run.
 //
-// ELIDED (build-validation scope, as the other reactions):
-//  * the opening pU->SetRoute(NULL) route-clear (release IAIUnit vtbl+0x5c == NAI::CAIUnit::SetRoute; the decode
-//    hook mislabels it "pfnUnitNotify" -- it is NOT the +0x48 Notify event slot). IAIUnit has no SetRoute slot;
-//    SetLogic replaces the unit's logic in place, so the landed reactions drop it consistently.
-//  * the suspected-enemy AddEvent(CreateAILostPossibleEnemyEvent). The event layer is now active, so this
-//    omitted cleanup is a tracked follow-up divergence.
-//  * the path network is taken from the unit SERVER's world (as Guard/Defence do) rather than the AI state's
-//    pWorld -- the same NWorld::IWorld for an in-world unit; the release's GetAIState()!=NULL gate is folded
-//    into the GetAIUnitState()!=NULL gate (both non-null for a live in-world unit).
+// The route-clear and lock-aware contact-removal event are restored below.
 //
 // LIFETIME: SetReaction can destroy/reset this reaction's contents while the pump's
 // CPtr retains its allocation. The tail must reload GetUnit(), as retail does.

@@ -167,7 +167,7 @@ public:
 	virtual void SetAP( int _nAP, int _nMaxAP );
 	virtual void SpendHP( int _nHP );
 	virtual void SpendAP( int _nAP );
-	virtual void Synchronize();
+	virtual void Synchronize( bool bEnemies = true );
 	virtual bool IsDead() { return skills[1].nValue <= 0; }
 	virtual int GetRemainAP() { return Max( 0, skills[0].nMaxValue - skills[0].nValue ); }
 	virtual int GetToHit( IAIUnit *pTarget, const NAI::SUnitPosition &pos, NAI::EHitLocation hl = NAI::HL_ANY, CAIFireArmsWeapon *pWeapon = 0 );
@@ -715,16 +715,22 @@ void CAIUnit::SavePrevPosition()
 	ptPrevPosition = pos.pos;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CAIUnit::Synchronize()
+void CAIUnit::Synchronize( bool bEnemies )
 {
+	// Retail v1.2 0x4ae380: retire both route slots if the actor cannot fight.
+	if ( !IsValid( pUnitServer ) || !pUnitServer->CanFight() )
+	{
+		SetCurrentLogicInner( 0 );
+		routeSequence() = 0;
+		routeNormal() = 0;
+		return;
+	}
 	GetUnitSkillValues();
 	pos = pUnitServer->GetPosition();   // full SUnitPosition (incl. bRun), like retail
 	pCannon = GetUnitServer()->animator.GetCannon();
-	nTurnStartHP = GetHP();
-	SetHurtHP( 0 );
-	SetMaxToHit( 0 );
-	nAdditionalExpediency = 0;
 	pInventory = CreateAIInventory( this );
+	if ( bEnemies && IsUnderAIControl() )
+		state.Synchronize();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CAIUnit::SetHP( int _nHP, int _nMaxHP )

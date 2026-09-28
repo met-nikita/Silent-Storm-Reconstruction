@@ -91,30 +91,27 @@ int CTaskCommandHide::operator&( CStructureSaver &f )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CTaskCommandAlarm::Do @0x99990 -- raise the garrison: every ALLY within 5 m of the alarming unit learns of the
 // enemy (AddPossibleEnemy via CreateAIPossibleEnemyEvent), and the alarming unit raises its own help flag
-// (CreateAIHelpCalledEvent). IAIUnit has no Notify slot, so each per-unit event is delivered by event->Modify(state)
-// synchronously -- the identical SAIUnitState mutation. With the active Populate-preserve the injected possibleEnemy
-// survives the next think, so the alert sticks across the garrison.
+// (CreateAIHelpCalledEvent). Retail uses OnAIEvent here, NOT the lock-bracketed
+// Notify used by reactions. Only fight-capable AI-controlled recipients accept it.
 void CTaskCommandAlarm::Do()
 {
 	IAIUnit *pU = IsValid( pUnitServer ) ? GetAIUnit( pUnitServer ) : 0;   // base CTaskCommand::pUnitServer = alarming unit
-	if ( !IsValid( pU ) || pU->IsDead() )
+	if ( !IsValid( pU ) || !pUnitServer->CanFight() )
 		return;
 	IAIUnit *pEnemyAI = IsValid( pEnemy ) ? GetAIUnit( pEnemy ) : 0;
-	if ( !IsValid( pEnemyAI ) || pEnemyAI->IsDead() )
+	if ( !IsValid( pEnemyAI ) || !pEnemy->CanFight() )
 		return;
 	SAIState *pSt = pU->GetAIState();
 	if ( pSt == 0 )
 		return;
-	IAIPlayer *pAllyPlayer = pSt->GetAllyAIPlayer();
-	if ( pAllyPlayer == 0 )
-		return;
 	CVec3 pos = pU->GetPosition().GetCP();
-	// release GetUnitsAtRange(pos, 5, allies, exclude=NULL): the ally AI-player roster IS the garrison; self included.
-	vector< CPtr<IAIUnit> > &units = *pAllyPlayer->GetUnits();
+	// Retail GetUnitsAtRange includes self and queries the current world roster.
+	vector< CPtr<IAIUnit> > units;
+	pSt->GetUnits( &units, true, true );
 	for ( int i = 0; i < (int)units.size(); ++i )
 	{
 		IAIUnit *a = units[i].GetPtr();
-		if ( !IsValid( a ) || a->IsDead() || !IsValid( a->GetUnitServer() ) )
+		if ( !IsValid( a ) || !a->IsUnderAIControl() || !IsValid( a->GetUnitServer() ) || !a->GetUnitServer()->CanFight() )
 			continue;
 		if ( fabs( a->GetPosition().GetCP() - pos ) >= 5.0f )   // within 5 m
 			continue;
@@ -123,13 +120,13 @@ void CTaskCommandAlarm::Do()
 			continue;
 		CObj<IAIEvent> e = CreateAIPossibleEnemyEvent( pEnemyAI );   // == ally AddPossibleEnemy(enemy)
 		if ( IsValid( e ) )
-			e->Modify( as );
+			as->OnAIEvent( e );
 	}
 	// the alarming unit itself raises the help flag (release: pU->Notify(CreateAIHelpCalledEvent()))
 	SAIUnitState *my = pU->GetAIUnitState();
 	CObj<IAIEvent> h = CreateAIHelpCalledEvent();
-	if ( my != 0 && IsValid( h ) )
-		h->Modify( my );
+	if ( my != 0 && pU->IsUnderAIControl() && IsValid( h ) )
+		my->OnAIEvent( h );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 int CTaskCommandAlarm::operator&( CStructureSaver &f )
@@ -350,11 +347,7 @@ IAILogic* CreateAIAlarmLogic( IAIUnit *pUnit, IAIUnit *pEnemy )
 	SAIState *pSt = pUnit->GetAIState();
 	if ( pSt == 0 )
 		return 0;
-	IAIPlayer *pAllyPlayer = pSt->GetAllyAIPlayer();
-	if ( pAllyPlayer == 0 )
-		return 0;
-	float fDist = 0.f;
-	IAIUnit *pAlly = pAllyPlayer->GetNearestUnit( pUnit, &fDist );   // release GetNearestUnit(pos,allies,active,exclude=self)
+	IAIUnit *pAlly = pSt->GetNearestUnit( pUnit->GetPosition().GetCP(), true, false, pUnit );
 	if ( !IsValid( pAlly ) || !IsValid( pAlly->GetUnitServer() ) || !IsValid( pAlly->GetUnitServer()->GetWorld() ) )
 		return 0;
 	IPathNetwork *pNet = pAlly->GetUnitServer()->GetWorld()->GetPathNetwork();

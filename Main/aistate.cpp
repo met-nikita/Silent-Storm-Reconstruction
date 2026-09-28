@@ -71,32 +71,66 @@ bool SAIState::IsAITurn()
 	return IsValid( pAICommander ) && pAICommander->IsAITurn();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// AI-convergence Stage 2 -- rebuild the ally/enemy rosters from the owning commander's unit list (every
-// world unit is registered on every commander, so the split is by player + diplomacy), thread the AI
-// state into the own (ally) units so their poll-based SAIUnitState::Populate can reach it, then rebuild
-// the enemy clusters. Called every AI segment (was the tactical commander's AddAllyUnit/AddEnemyUnit
-// incremental build + retail SAIState::Synchronize @0xa9ff0).
+// Retail v1.2 0x4a99f0 queries world units, not the commander's owned roster.
+// "Allies" includes neutrals (any non-enemy); the last flag admits human units.
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void SAIState::GetUnits( vector< CPtr<IAIUnit> > *pUnits, bool bAllies, bool bIncludeNonAI ) const
+{
+	pUnits->clear();
+	if ( !IsValid( pWorld ) )
+		return;
+	list< CPtr<NWorld::CUnitServer> > units;
+	pWorld->GetAllUnits( &units );
+	for ( list< CPtr<NWorld::CUnitServer> >::const_iterator i = units.begin(); i != units.end(); ++i )
+	{
+		if ( !IsValid( *i ) || !(*i)->CanFight() )
+			continue;
+		if ( (pWorld->GetDiplomacyState( pPlayer, (*i)->GetPlayer() ) != NDb::DS_ENEMY) != bAllies )
+			continue;
+		IAIUnit *pAI = NAI::GetAIUnit( *i );
+		if ( IsValid( pAI ) && (pAI->IsUnderAIControl() || bIncludeNonAI) )
+			pUnits->push_back( pAI );
+	}
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+IAIUnit *SAIState::GetNearestUnit( const CVec3 &pos, bool bAllies, bool bIncludeNonAI, IAIUnit *pExclude ) const
+{
+	// Retail v1.1 0x4a9a10: linear distance and strict first-wins tie handling.
+	vector< CPtr<IAIUnit> > units;
+	GetUnits( &units, bAllies, bIncludeNonAI );
+	IAIUnit *pBest = 0;
+	float fBest = 65535.0f;
+	for ( int i = 0; i < units.size(); ++i )
+		if ( units[i] != pExclude )
+		{
+			float fDistance = fabs( pos - units[i]->GetPosition().GetCP() );
+			if ( fDistance < fBest )
+			{
+				fBest = fDistance;
+				pBest = units[i];
+			}
+		}
+	return pBest;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// Keep the legacy roster adapters for their consumers, without registering
+// foreign units on every commander. Only owned units receive this back-pointer.
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void SAIState::Synchronize()
 {
-	pAlly->GetUnits()->clear();
-	pEnemy->GetUnits()->clear();
+	GetUnits( pAlly->GetUnits(), true, true );
+	GetUnits( pEnemy->GetUnits(), false, true );
 	if ( !IsValid( pAICommander ) )
 		return;
 	NWorld::CPlayer *pMyPlayer = pAICommander->GetPlayer();
 	const vector< CObj<IAIUnit> > &units = pAICommander->GetUnitsList();
 	for ( vector< CObj<IAIUnit> >::const_iterator i = units.begin(); i != units.end(); ++i )
 	{
-		if ( !IsValid( *i ) || !IsValid( (*i)->GetUnitServer() ) || !(*i)->GetUnitServer()->CanFight() )
+		if ( !IsValid( *i ) || !IsValid( (*i)->GetUnitServer() ) )
 			continue;
 		NWorld::IPlayer *pUP = (*i)->GetUnitServer()->GetPlayer();
 		if ( pUP == (NWorld::IPlayer*)pMyPlayer )
-		{
-			pAlly->AddUnit( *i );
-			(*i)->SetAIState( this );   // own units read the enemy set through this state (raw, transient back-ref)
-		}
-		else if ( IsValid( pWorld ) && pWorld->GetDiplomacyState( pMyPlayer, pUP ) == NDb::DS_ENEMY )
-			pEnemy->AddUnit( *i );
+			(*i)->SetAIState( this );
 	}
 	MakeEnemyGroups();
 }

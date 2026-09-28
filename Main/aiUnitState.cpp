@@ -59,6 +59,24 @@ SAIUnitState::SAIUnitState(): bHelpCalled( false ), bScared( false )
 	selfModified.data = false;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+void SAIUnitState::Synchronize()
+{
+	// Retail v1.2 0x4b09a0. Do not refresh merely suspected contacts or allies.
+	for ( vector< CPtr<IAIUnit> >::iterator i = enemies.data.units.begin(); i != enemies.data.units.end(); ++i )
+		if ( IsValid( *i ) )
+			(*i)->Synchronize( false );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void SAIUnitState::OnAIEvent( IAIEvent *pEvent )
+{
+	// Retail v1.2 0x4b0dd0: the alarm's immediate-delivery path has no locks.
+	if ( !IsValid( pEvent ) )
+		return;
+	CPtr<IAIEvent> pHold = pEvent;
+	if ( IsValid( pUnit ) && IsValid( pUnit->GetUnitServer() ) && pUnit->GetUnitServer()->CanFight() )
+		pEvent->Modify( this );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 void SAIUnitState::Notify( IAIEvent *pEvent )
 {
 	// Retail v1.2 0x4b0e80: keep the event alive and defer collection-dirty

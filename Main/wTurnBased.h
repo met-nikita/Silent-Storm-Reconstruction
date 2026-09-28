@@ -96,11 +96,11 @@ public:
 		else if ( event == TBS_START_REAL_TIME )
 			bTurnDone = false;
 		//
-		GetCommander()->OnTBSEvent( event );
-		//
+		// Retail v1.2 0x76fa70 sends these events to units, not commanders.
+		// Commander turn work is driven by OnPassControl instead.
 		for ( unsigned int k = 0; k < units.size(); ++k )
 		{
-			if ( !units[k]->IsDead() )
+			if ( IsValid( units[k] ) && !units[k]->IsDead() )
 				units[k]->OnTBSEvent( event );
 		}
 	}

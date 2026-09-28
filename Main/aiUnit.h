@@ -51,7 +51,7 @@ public:
 	virtual NWorld::CUnitServer* GetUnitServer() const = 0;
 	virtual NRPG::IUnitMission* GetUnitMission() const = 0;
 	virtual NRPG::CUnit* GetRPGUnit() const = 0;
-	virtual void Synchronize() = 0;
+	virtual void Synchronize( bool bEnemies = true ) = 0;
 	virtual SPosition GetPosition() = 0;
 	virtual SUnitPosition GetUnitPosition() = 0;
 	virtual void SetPosition( SPosition _pPosition ) = 0;

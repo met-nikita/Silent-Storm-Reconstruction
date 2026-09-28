@@ -1182,21 +1182,11 @@ void CWorld::UpdateVisible( bool bForce )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CWorld::OnUnitAdded( CUnitServer *pUnit )
 {
-	// retail routes a new unit to its OWNING player's commander (CWorld::AddUnit @0x369580 ->
-	// CPlayerBase::AddUnit @0x374a10 -> commander vtbl AddUnit @0x351c0). The dev tree keeps its
-	// every-commander broadcast (the SAIState rosters are built from the commander lists), but the
-	// OWNER must register FIRST: CAICommander::OnUnitAdded now aliases the globally-unique wrapper
-	// via NAI::GetAIUnit (retail @0x351c0 reuse), which resolves through the owner's map -- so the
-	// owner creates the one CAIUnit and everyone else shares it (retail wrapper identity).
-	vector<CPtr<CPlayer> > players;
-	GetPlayersList( &players );
-	IPlayer *pOwner = IsValid( pUnit ) ? pUnit->GetPlayer() : 0;
-	for ( int k = 0; k < players.size(); ++k )
-		if ( (IPlayer*)players[k].GetPtr() == pOwner )
-			players[k]->GetCommander()->OnUnitAdded( pUnit );
-	for ( int k = 0; k < players.size(); ++k )
-		if ( (IPlayer*)players[k].GetPtr() != pOwner )
-			players[k]->GetCommander()->OnUnitAdded( pUnit );
+	// Retail CPlayerBase::AddUnit (v1.2 0x774f20) registers with the owner only.
+	// Keep this at the world seam: ChangeUnitPlayer must first transfer its strong
+	// player-list ownership and set the new player before constructing the AI wrapper.
+	if ( IsValid( pUnit ) && IsValid( pUnit->GetPlayer() ) )
+		pUnit->GetPlayer()->GetCommander()->OnUnitAdded( pUnit );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CWorld::GetAllUnits( vector< CPtr<NWorld::CUnit> > *pUnits )
@@ -1571,7 +1561,7 @@ void CWorld::UpdateAICommander( NAI::CAICommander *pAICommander )
 		return;
 	//
 	for ( list< CObj<CUnitServer> >::iterator u = units.begin(); u != units.end(); ++u )
-		if ( (*u)->CanFight() )
+		if ( (*u)->CanFight() && (*u)->GetPlayer() == pAICommander->GetPlayer() )
 			pAICommander->OnUnitAdded( u->GetPtr() );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////

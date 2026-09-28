@@ -69,6 +69,8 @@ struct SAIUnitState
 	SAIUnitState();
 	void SetUnit( IAIUnit *_pUnit ) { pUnit = _pUnit; }
 	void Notify( IAIEvent *pEvent );
+	void OnAIEvent( IAIEvent *pEvent ); // Immediate delivery (alarm), unlike Notify's collection locks.
+	void Synchronize(); // Refresh known enemies without recursively refreshing their enemies.
 	void Modified();
 	//
 	void AddEnemy( IAIUnit *p );           void RemoveEnemy( IAIUnit *p );
