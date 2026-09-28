@@ -1682,39 +1682,45 @@ void CGScene::DrawSelection( CTransformStack *pTS, NGfx::CRenderContext *pRC, co
 {
 	UpdateSet( &selections, this );
 	NGfx::CRenderContext &rc = *pRC;
-
-	rc.SetCulling( NGfx::CULL_CW );
-	rc.SetAlphaCombine( NGfx::COMBINE_ZERO_ONE );
-	rc.SetColorWrite( NGfx::COLORWRITE_NONE );
-	rc.SetDepth( NGfx::DEPTH_NONE );
-	// Retail v1.2 0x56107a: selection has its own stencil marker. Lighting
-	// passes can leave nonzero values, so zero is not a reliable background test.
+	const bool b16Bit = NGfx::Is16BitMode();
 	const int N_SELECTION_STENCIL = 0x67;
-	rc.SetStencil( NGfx::STENCIL_WRITE, N_SELECTION_STENCIL );
 	NGfx::SEffGlow sGlow;
 	NGfx::SEffConstLight tnlGlow;
-	if ( NGfx::IsTnLDevice() )
-	{
-		tnlGlow.color = CVec4(0,0,0,0);
-		rc.SetEffect( &tnlGlow );
-	}
-	else
-	{
-		sGlow.fScale = 0;
-		sGlow.vColor = CVec4(0,0,0,0);
-		rc.SetEffect( &sGlow );
-	}
-	for ( list< CPtr<CSelection> >::iterator i = selections.begin(); i != selections.end(); ++i )
-		(*i)->Render( pTS, pRC, mask, false );
-	rc.Flush();
 
-	rc.SetCulling( NGfx::CULL_NONE );
+	// Retail v1.2 0x560efd: 16-bit targets draw expanded backfaces only.
+	if ( !b16Bit )
+	{
+		rc.SetCulling( NGfx::CULL_CW );
+		rc.SetAlphaCombine( NGfx::COMBINE_ZERO_ONE );
+		rc.SetColorWrite( NGfx::COLORWRITE_NONE );
+		rc.SetDepth( NGfx::DEPTH_NONE );
+		// Retail v1.2 0x56107a: selection has its own stencil marker. Lighting
+		// passes can leave nonzero values, so zero is not a reliable background test.
+		rc.SetStencil( NGfx::STENCIL_WRITE, N_SELECTION_STENCIL );
+		if ( NGfx::IsTnLDevice() )
+		{
+			tnlGlow.color = CVec4(0,0,0,0);
+			rc.SetEffect( &tnlGlow );
+		}
+		else
+		{
+			sGlow.fScale = 0;
+			sGlow.vColor = CVec4(0,0,0,0);
+			rc.SetEffect( &sGlow );
+		}
+		for ( list< CPtr<CSelection> >::iterator i = selections.begin(); i != selections.end(); ++i )
+			(*i)->Render( pTS, pRC, mask, false );
+		rc.Flush();
+	}
+
+	rc.SetCulling( b16Bit ? NGfx::CULL_CCW : NGfx::CULL_NONE );
 	rc.SetAlphaCombine( NGfx::COMBINE_ADD );
 	rc.SetColorWrite( NGfx::COLORWRITE_ALL );
 	rc.SetDepth( NGfx::DEPTH_NORMAL );
 	// v1.2 0x56117f: exclude the unexpanded silhouette and mark outline pixels
 	// as they are drawn, without rejecting unrelated lighting stencil values.
-	rc.SetStencil( NGfx::STENCIL_TESTNE_WRITE, N_SELECTION_STENCIL );
+	if ( !b16Bit )
+		rc.SetStencil( NGfx::STENCIL_TESTNE_WRITE, N_SELECTION_STENCIL );
 	typedef unordered_map<CVec4, list< CPtr<CSelection> >, SVec4Hash> CColorHash;
 	CColorHash hashSel;
 	for ( list< CPtr<CSelection> >::iterator i = selections.begin(); i != selections.end(); ++i )
