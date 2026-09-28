@@ -212,7 +212,7 @@ public:
 	void BeTaken( CUnit *pCarrier, CUnitAnimator *pTaker, CUnitServer *pServer );
 	void BeDropped( CUnitServer *pServer );
 	// cannons
-	void EnterCannon( const NAI::SUnitPosition &cmdPos, CCannon *pCannon );
+	void EnterCannon( const NAI::SUnitPosition &cmdPos, CCannon *pCannon, const char *pszAnimationName );
 	void LeaveCannon( const NAI::SUnitPosition &cmdPos );
 	// ladders
 	void EnterLadder( const NAI::SUnitPosition &prevPos, const NAI::SUnitPosition &cmdPos, bool bUp );

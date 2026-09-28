@@ -386,6 +386,7 @@ public:
 	virtual EUnitCommandResult CanDoIt( const NAI::SUnitPosition &from, bool bIgnoreTarget = false ) const;
 	virtual int GetStartAP() const;
 	virtual void Run();
+	virtual void AnimationFinished();
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CExecUsePassage

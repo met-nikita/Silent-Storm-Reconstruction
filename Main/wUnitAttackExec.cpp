@@ -2381,23 +2381,39 @@ void CExecCannon::Run()
 	ASSERT( pOS );
 	if ( bEnter )
 	{
-		pUS->DoAction( NRPG::AC_APPROACH_CANNON );
-		pUS->GetUnitRPG()->SetCannonItem( pOS->GetItem() );
 		CDynamicCast<NRPG::CWeaponItem> pWeaponItem( pOS->GetItem() );
 		ASSERT( pWeaponItem );
-		pUS->animator.SetWeaponName( pWeaponItem->GetDBWeapon()->szAnimName.c_str() );
-		pUS->animator.EnterCannon( pUS->GetPosition(), pOS );
-		pOS->SetCurrentUnit( pUS );
-		pUS->SetState( new CUnitStateUsingCannon( pUS, pOS ) );
+		pUS->animator.EnterCannon( pUS->GetPosition(), pOS, pWeaponItem->GetDBWeapon()->szAnimName.c_str() );
 	}
 	else
 	{
 		pUS->GetUnitRPG()->SetCannonItem(0);
-		pUS->animator.LeaveCannon( pUS->GetPosition() );
+		if ( !pUS->GetUnitRPG()->IsUnconscious() && !pUS->GetUnitRPG()->IsDead() )
+			pUS->animator.LeaveCannon( pUS->GetPosition() );
 		pOS->SetCurrentUnit(0);
 		pUS->SetState( new CUnitStateNormal( pUS ) );
 	}
 	StartAction( pUS->GetWorld(), SKIPPABLE );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CExecCannon::AnimationFinished()
+{
+	// Retail v1.2 0x7a6470: commit entry only after the approach clip finishes.
+	Finished();
+	if ( bEnter )
+	{
+		CDynamicCast<CCannon> pOS( pCannon );
+		if ( IsValid( pOS ) )
+		{
+			pUS->DoAction( NRPG::AC_APPROACH_CANNON );
+			pUS->GetUnitRPG()->SetCannonItem( pOS->GetItem() );
+			CDynamicCast<NRPG::CWeaponItem> pWeaponItem( pOS->GetItem() );
+			ASSERT( pWeaponItem );
+			pUS->animator.SetWeaponName( pWeaponItem->GetDBWeapon()->szAnimName.c_str() );
+			pOS->SetCurrentUnit( pUS );
+			pUS->SetState( new CUnitStateUsingCannon( pUS, pOS ) );
+		}
+	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CExecCorpse

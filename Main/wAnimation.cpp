@@ -2123,20 +2123,28 @@ void CUnitAnimator::AttachHandsToCannon()
 	pAnimator->AddSimpleIK( tEnd, "R_Hand", pREff );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CUnitAnimator::EnterCannon( const NAI::SUnitPosition &cmdPos, CCannon *_pCannon )
+void CUnitAnimator::EnterCannon( const NAI::SUnitPosition &cmdPos, CCannon *_pCannon, const char *pszAnimationName )
 {
 	pCannon = _pCannon;
 	ASSERT( IsValid(pCannon) );
 
 	CVec3 cannonPos = pCannon->GetPosition();
 	float fCannonDir = pCannon->GetDirection();
-	NAnimation::CSkeletonAnimator *pCAnimator = pCannon->GetSkeletonAnimator();
-
 	aimDir = CVec3( cos( fCannonDir ), sin( fCannonDir ), 0 );
+	// Retail v1.2 0x73c753: mounting uses stance-only flags, not the
+	// currently held weapon's flags. The mounted name is installed on completion.
+	nAnimFlagsPoseWeapon = 0;
+	switch ( pose )
+	{
+		case NAI::WALK:
+		case NAI::RUN: nAnimFlagsPoseWeapon = NDb::CAnimation::POSE_STAND; break;
+		case NAI::CROUCH: nAnimFlagsPoseWeapon = NDb::CAnimation::POSE_CROUCH; break;
+		case NAI::CRAWL: nAnimFlagsPoseWeapon = NDb::CAnimation::POSE_CRAWL; break;
+	}
 
 	CPtr<NAnimation::CAnimation> pUnitAnim = pAnimator->CreateAnimation(
 		pSkeleton->GetAnimation( NDb::CAnimation::START_ATTACK, nAnimFlagsPoseWeapon, 
-			szWeaponName.c_str(), nAnimFlagsClassSex, pSide ), tEnd );
+			pszAnimationName, nAnimFlagsClassSex, pSide ), tEnd );
 	if ( pUnitAnim )
 	{
 		CVec3 cannonPosHoNeight( cannonPos );
