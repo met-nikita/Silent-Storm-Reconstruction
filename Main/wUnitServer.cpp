@@ -1911,6 +1911,24 @@ void CUnitServer::ProcessCriticalsAndRegenerations()
 			GetWorld()->CreateBloodyMess( GetPosition().GetCP() + CVec3(0,0,1), CVec3(0,0,-1.5f), this, 1 );
 			GetWorld()->GetGlobalAck()->OnSuffersLightDamage( this );
 		}
+		// v1.2 @0x7c2c9d..0x7c2d90: periodic damage has no attacker, so
+		// distribute death XP to the combat-capable roster of each hostile player.
+		// Keep this inside the initial !IsDead() gate, before SyncConscious.
+		if ( GetUnitRPG()->IsDead() )
+		{
+			vector< CPtr<CPlayer> > players;
+			GetWorld()->GetPlayersList( &players );
+			for ( vector< CPtr<CPlayer> >::iterator i = players.begin(); i != players.end(); ++i )
+			{
+				if ( GetWorld()->GetDiplomacyState( static_cast<CUnit*>( this ), *i ) != NDb::DS_ENEMY )
+					continue;
+				list< CPtr<CUnitServer> > units;
+				(*i)->GetUnitsThatCanFight( &units );
+				float fXP = GetUnitRPG()->GetXP( units.size() );
+				for ( list< CPtr<CUnitServer> >::iterator u = units.begin(); u != units.end(); ++u )
+					(*u)->GetUnitRPG()->GetRPGUnit()->AddXP( fXP );
+			}
+		}
 	}
 	SyncConscious();
 }
