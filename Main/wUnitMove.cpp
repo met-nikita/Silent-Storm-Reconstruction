@@ -100,15 +100,23 @@ class CCmdEndMove: public CCmdUnit
 	OBJECT_BASIC_METHODS(CCmdEndMove);
 public:
 	ZDATA_(CCmdUnit)
-	// @0x12541120 tag 2 -- retail replaced the (write-only) Jan03 bool bFreeze with the CCmdMove this
-	// ender terminates, so DoCommand can EndMove( pWhatToEnd->pos ) even after a path-conflict reroute
-	// nulled pCurCmd. A null pWhatToEnd means an end-ROTATE (dev still reuses CCmdEndMove for both;
-	// retail's separate CCmdEndRotate is a later structural step).
+	// Retail v1.2 0x7bb510: a move ender always owns the move it terminates.
+	// Rotation uses CCmdEndRotate, not a null movement reference (retail dereferences tag 2).
 	CObj<CCmdMove> pWhatToEnd;
 	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CCmdUnit*)this); f.Add(2,&pWhatToEnd); return 0; }
 
 	CCmdEndMove() {}
-	CCmdEndMove( CUnit *_pUnit, CCmdMove *_pWhatToEnd = 0 ): CCmdUnit(_pUnit), pWhatToEnd(_pWhatToEnd) {}
+	explicit CCmdEndMove( CCmdMove *_pWhatToEnd ): CCmdUnit(_pWhatToEnd->pUnit), pWhatToEnd(_pWhatToEnd) {}
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
+class CCmdEndRotate: public CCmdUnit
+{
+	OBJECT_BASIC_METHODS(CCmdEndRotate);
+public:
+	ZDATA_(CCmdUnit)
+	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CCmdUnit*)this); return 0; }
+	CCmdEndRotate() {}
+	explicit CCmdEndRotate( CUnit *_pUnit ): CCmdUnit(_pUnit) {}
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CCmdActivateItem: public CCmdUnit
@@ -512,7 +520,10 @@ void CExecMove::DoCommand()
 	// Retail posts its arbitrated movement framing only after TestNextGameMove succeeds below.
 	// process it
 	CDynamicCast<CCmdMove> pMove(pCmd);
-	if (pMove)
+	CDynamicCast<CCmdEndRotate> pEndRotate(pCmd);
+	if (pEndRotate)
+		animator.EndRotate(position);
+	else if (pMove)
 	{
 		CDynamicCast<CCmdMove> pTestPrevMove( pCurCmd );
 		if ( pTestPrevMove == 0 || bAfterWaiting )
@@ -566,12 +577,7 @@ void CExecMove::DoCommand()
 			CDynamicCast<CCmdEndMove> pEndMove(pCmd);
 			if (pEndMove)
 			{
-				// @0x3b86e0 -- terminate the move the ender remembers (pWhatToEnd), robust to a wait/reroute
-				// having nulled pCurCmd. A null pWhatToEnd is an end-rotate.
-				if ( IsValid( pEndMove->pWhatToEnd ) )
-					animator.EndMove( prevPos, pEndMove->pWhatToEnd->pos, false, pEndMove->pWhatToEnd->bInterGrid );
-				else
-					animator.EndRotate( prevPos );
+				animator.EndMove( prevPos, pEndMove->pWhatToEnd->pos, false, pEndMove->pWhatToEnd->bInterGrid );
 			}
 			else
 				ASSERT(0);
@@ -581,15 +587,8 @@ void CExecMove::DoCommand()
 		CDynamicCast<CCmdEndMove> pEndMove(pCmd);
 		if (pEndMove)
 		{
-			// @0x3b86e0 -- the ender remembers the move it terminates (pWhatToEnd), so this survives a
-			// path-conflict reroute that nulled pCurCmd (the Jan03 pCurCmd cast wrongly fell to EndRotate).
-			if ( IsValid( pEndMove->pWhatToEnd ) )
-			{
-				pCurCmd = pCmd;
-				animator.EndMove(prevPos, pEndMove->pWhatToEnd->pos, false, pEndMove->pWhatToEnd->bInterGrid);
-			}
-			else
-				animator.EndRotate(position);
+			pCurCmd = pCmd;
+			animator.EndMove(prevPos, pEndMove->pWhatToEnd->pos, false, pEndMove->pWhatToEnd->bInterGrid);
 		}
 		else {
 			CDynamicCast<CCmdClimb> pClimb(pCmd);
@@ -881,9 +880,10 @@ void CExecMove::Cancel()
 	CDynamicCast<CCmdMove> pWasMove( pCurCmd );
 	CDynamicCast<CCmdRotate> pWasRotate( pCurCmd );
 	commandsQueue.clear();
-	if ( pWasMove || pWasRotate )
-		// @0x3b8cf0 -- the ender remembers the move it terminates (null for a rotate -> end-rotate).
-		commandsQueue.push_back( new CCmdEndMove( pUS, pWasMove.GetPtr() ) );
+	if ( pWasMove )
+		commandsQueue.push_back( new CCmdEndMove( pWasMove ) );
+	else if ( pWasRotate )
+		commandsQueue.push_back( new CCmdEndRotate( pUS ) );
 	bWaiting = false;
 	bAfterWaiting = false;
 	nTimeToWait = 0;   // @0x3b8cf0 -- retail also clears the wait timer here
@@ -905,9 +905,12 @@ void CExecMove::FullCancel()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CExecMove::SetNewPath( NAI::CPath *pPath, NAI::EFindPathParams _eParams, ENeedActiveItem eActive )
 {
+	// Keep the interrupted command alive while a waiting reroute clears pCurCmd.
+	CObj<CCommand> pHoldCur( pCurCmd );
 	CDynamicCast<CCmdMove> pWasMove( pCurCmd );
 	CDynamicCast<CCmdRotate> pWasRotate( pCurCmd );
-	if ( IsWaitingForPath() )
+	bool bWasWaiting = IsWaitingForPath();
+	if ( bWasWaiting )
 	{
 		bWaiting = false;
 		bAfterWaiting = false;
@@ -931,32 +934,23 @@ void CExecMove::SetNewPath( NAI::CPath *pPath, NAI::EFindPathParams _eParams, EN
 	eParams = _eParams;
 	eNeedActive = eActive;   // keep the saved active-item constraint current on re-route
 	ConvertPath( pPath, eActive );
-	if ( !commandsQueue.empty() )
+	if ( commandsQueue.empty() )
+		Cancel();
+	else if ( !bWasWaiting )
 	{
+		// Retail v1.2 0x7bab4a..0x7baccf: a new movement continues directly.
+		// Other transitions terminate the old move, or the old rotation when
+		// the next command is not another rotation. A waiting unit was reseated above.
 		CDynamicCast<CCmdMove> pStartMove(commandsQueue.front());
-		if (pStartMove)
+		if ( !pStartMove )
 		{
-			if ( pWasRotate )
-				commandsQueue.push_front( new CCmdEndMove( pUS ) );
-			if ( pWasMove && (pWasMove->bStrafe || pStartMove->bStrafe) )
-				commandsQueue.push_front( new CCmdEndMove( pUS ) );
-		}
-		else {
 			CDynamicCast<CCmdRotate> pStartRotate(commandsQueue.front());
-			if (pStartRotate)
-			{
-				if (pWasMove)
-					commandsQueue.push_front(new CCmdEndMove(pUS));
-			}
-			else
-			{
-				if (pWasMove || pWasRotate)
-					commandsQueue.push_front(new CCmdEndMove(pUS));
-			}
+			if ( pWasMove )
+				commandsQueue.push_front( new CCmdEndMove( pWasMove ) );
+			else if ( pWasRotate && !pStartRotate )
+				commandsQueue.push_front( new CCmdEndRotate( pUS ) );
 		}
 	}
-	else
-		Cancel();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CExecMove::GetSearchFromPosition( NAI::SPathPlace *pRes )
@@ -1034,7 +1028,7 @@ void CExecMove::ConvertPath( NAI::CPath *pPath, ENeedActiveItem eActive )
 				commandsQueue.push_back( pLastMove );
 				bInterGrid = false;
 			}
-			commandsQueue.push_back( new CCmdEndMove( pUS, pLastMove ) );
+			commandsQueue.push_back( new CCmdEndMove( pLastMove ) );
 			pLastMove = 0;   // retail @0x3b9330: the pending CPtr is released with its ender
 			bMoving = false;
 		}
@@ -1074,7 +1068,7 @@ void CExecMove::ConvertPath( NAI::CPath *pPath, ENeedActiveItem eActive )
 				}
 				if ( pLastMove )
 				{
-					commandsQueue.push_back( new CCmdEndMove( pUS, pLastMove ) );
+					commandsQueue.push_back( new CCmdEndMove( pLastMove ) );
 					pLastMove = 0;
 				}
 				CreateRotate( (NAI::EDirection)cur.GetDirection(), prevPos );
@@ -1150,7 +1144,7 @@ void CExecMove::ConvertPath( NAI::CPath *pPath, ENeedActiveItem eActive )
 			// retail CreateRotateQueue @0x3b9000: a pending (unterminated) move is ended before the turn.
 			if ( pLastMove )
 			{
-				commandsQueue.push_back( new CCmdEndMove( pUS, pLastMove ) );
+				commandsQueue.push_back( new CCmdEndMove( pLastMove ) );
 				pLastMove = 0;
 			}
 			CreateRotate( (NAI::EDirection)cur.GetDirection(), prevPos );
@@ -1176,7 +1170,7 @@ void CExecMove::ConvertPath( NAI::CPath *pPath, ENeedActiveItem eActive )
 		commandsQueue.push_back( pLastMove );
 	}
 	if ( bMoving )
-		commandsQueue.push_back( new CCmdEndMove( pUS, pLastMove ) );
+		commandsQueue.push_back( new CCmdEndMove( pLastMove ) );
 
 	if ( eActive == ITEM_ACTIVE && !bActive && !bInactivePose )
 		commandsQueue.push_back( new CCmdActivateItem( pUS, nSlot ) );
@@ -1204,7 +1198,7 @@ void CExecMove::CreateRotate( NAI::EDirection dir, const NAI::SUnitPosition &cur
 			CCmdRotate *pRotate = new CCmdRotate( pUS, newPos, phase );
 			commandsQueue.push_back( pRotate );
 		}
-		commandsQueue.push_back( new CCmdEndMove( pUS ) );
+		commandsQueue.push_back( new CCmdEndRotate( pUS ) );
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1338,6 +1332,7 @@ REGISTER_SAVELOAD_CLASS( 0x02731143, CCmdRotate )
 REGISTER_SAVELOAD_CLASS( 0x12681160, CCmdClimb )
 REGISTER_SAVELOAD_CLASS( 0x12681161, CCmdJump )
 REGISTER_SAVELOAD_CLASS( 0x12541120, CCmdEndMove )
+REGISTER_SAVELOAD_CLASS( 0x72312170, CCmdEndRotate )
 REGISTER_SAVELOAD_CLASS( 0x13151130, CCmdChangePose )
 REGISTER_SAVELOAD_CLASS( 0x113B1130, CCmdActivateItem )
 REGISTER_SAVELOAD_CLASS( 0x114B1130, CCmdDeactivateItem )
