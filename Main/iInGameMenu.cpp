@@ -140,7 +140,7 @@ private:
 public:
 	CInGameMenuInterface();
 
-	void Initialize( NRPG::CGlobalPlayer *pPlayer, bool bAllowRestart, bool bAllowSave = true );
+	void Initialize( NRPG::CGlobalPlayer *pPlayer, bool bAllowRestart, bool bAllowSave, IMission *pMission );
 
 	void Step();
 	void OnGetFocus();
@@ -154,14 +154,15 @@ CInGameMenuInterface::CInGameMenuInterface():
 {
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CInGameMenuInterface::Initialize( NRPG::CGlobalPlayer *_pPlayer, bool _bAllowRestart, bool _bAllowSave )
+void CInGameMenuInterface::Initialize( NRPG::CGlobalPlayer *_pPlayer, bool _bAllowRestart, bool _bAllowSave, IMission *_pMission )
 {
+	pMission = _pMission;
 	pPlayer = _pPlayer;
 	bAllowRestart = _bAllowRestart;
 	bAllowSave = _bAllowSave;   // retail: forwarded into every CICSaveLoadMenu this screen opens
 
 	pCursor = NUI::ICursor::Create();
-	pInterface = new NUI::CInterface( pCursor );
+	pInterface = new NUI::CInterface( pCursor, 0, IsValid(pMission) ? pMission->GetSoundScene() : 0 );
 
 	pScreenShot = new NUI::CScreenShot( NUI::SWindowInfo( pInterface, NUI::SPoint( 0, 0 ), NUI::SPoint( 1024, 768 ), "clues", NUI::STYLE_ENABLED | NUI::STYLE_VISIBLE | NUI::STYLE_BOTTOMMOST ) );
 	pScreenShot->SetMode( NUI::CScreenShot::BLACKANDWHITE, CVec4( 0.5f, 0.5f, 0.5f, 1 ) );
@@ -203,7 +204,7 @@ bool CInGameMenuInterface::ProcessEvent( const NInput::SEvent &sEvent )
 	}
 	else if ( bindOptions.ProcessEvent( sEvent ) )
 	{
-		NMainLoop::Command( new CICOptions( OS_PROFILE, pScreenShot->GetTexture() ) );
+		NMainLoop::Command( new CICOptions( OS_PROFILE, pScreenShot->GetTexture(), pMission ) );
 		return true;
 	}
 	else if ( bindSaveGame.ProcessEvent( sEvent ) )
@@ -241,15 +242,15 @@ void CInGameMenuInterface::RenderFrame()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CICMission
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CICInGameMenu::CICInGameMenu( NRPG::CGlobalPlayer *_pGlobalPlayer, bool _bAllowRestart, bool _bAllowSave ):
-	pGlobalPlayer( _pGlobalPlayer ), bAllowRestart( _bAllowRestart ), bAllowSave( _bAllowSave )
+CICInGameMenu::CICInGameMenu( NRPG::CGlobalPlayer *_pGlobalPlayer, bool _bAllowRestart, bool _bAllowSave, IMission *_pMission ):
+	pGlobalPlayer( _pGlobalPlayer ), bAllowRestart( _bAllowRestart ), bAllowSave( _bAllowSave ), pMission( _pMission )
 {
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CICInGameMenu::Exec()
 {
 	CInGameMenuInterface *pRes = new CInGameMenuInterface();
-	pRes->Initialize( pGlobalPlayer, bAllowRestart, bAllowSave );
+	pRes->Initialize( pGlobalPlayer, bAllowRestart, bAllowSave, pMission );
 	PushInterface( pRes );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////

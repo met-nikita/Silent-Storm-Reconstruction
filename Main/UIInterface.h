@@ -105,7 +105,7 @@ protected:
 
 public:
 	CInterface();
-	CInterface( ICursor* pCursor, NSound::ISoundScene *pSound = 0 );
+	CInterface( ICursor* pCursor, NSound::ISoundScene *pSound = 0, NSound::ISoundScene *pInheritSound = 0 );
 
 	const SPoint& GetCursorPos() const;
 	STime GetLastTime() const { return sLastTime; }		// UI ms clock, read by NScript::luaGetUITime

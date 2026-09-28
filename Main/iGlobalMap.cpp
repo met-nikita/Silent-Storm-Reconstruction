@@ -171,7 +171,7 @@ bool CGlobalMap::ProcessEvent( const NInput::SEvent &sEvent )
 	// Retail routes CMissionBase's gamemenu bind before cursor/UI events.
 	if ( bindMenu.ProcessEvent( sEvent ) )
 	{
-		NMainLoop::Command( new CICInGameMenu( pGlobalGame->players.front(), false, bCanSave ) );
+		NMainLoop::Command( new CICInGameMenu( pGlobalGame->players.front(), false, bCanSave, this ) );
 		return true;
 	}
 

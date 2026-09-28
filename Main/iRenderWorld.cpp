@@ -82,11 +82,9 @@ void CRenderBaseInterface::Initialize( int nTemplateID )
 	pCamera->SetLock( true );					// @0x62f510, cam vtbl+0x70 (retail Lock)
 
 	pCursor = NUI::ICursor::Create();
-	// Wire the sound scene into the UI interface so CWindow::PlaySound (-> GetInterface()->GetSound()->Add2DSound)
-	// actually plays UI/voice-preview sounds on these 3D-backdrop menus. The dev created pSoundScene (above) but
-	// never connected it to the interface, so GetSound() was null and every menu PlaySound silently dropped. Retail
-	// passes null to the CInterface ctor then wires the scene separately; the dev's single-arg ctor takes it directly.
-	pInterface = new NUI::CInterface( pCursor, pSoundScene );
+	// Retail v1.2 0x62f30d..0x62f314: the UI owns a separate pool-less scene;
+	// the world renderer continues to own and pump backdrop sounds/music.
+	pInterface = new NUI::CInterface( pCursor );
 
 	pWorld->RunPostInit( pPostInfo );
 }

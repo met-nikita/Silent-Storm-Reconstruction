@@ -336,7 +336,7 @@ CInterface::CInterface():
 	pNonPublicDemo = new CTextDraw( SPoint( 0, 32 ), SPoint( 1024, 768 ), L"<font size=18pt face=Courier><right>Work in progress" );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CInterface::CInterface( ICursor* _pCursor, NSound::ISoundScene *_pSound ): 
+CInterface::CInterface( ICursor* _pCursor, NSound::ISoundScene *_pSound, NSound::ISoundScene *_pInheritSound ):
 	CWindow( SWindowInfo( 0, SPoint( 0, 0 ), SPoint( 1024, 768 ), "desktop", STYLE_VISIBLE | STYLE_ENABLED ) ), bShowFPSStats( false ), 
 	cmdLButtonDown( "leftbutton_down" ), cmdLButtonUp( "leftbutton_up" ), cmdRButtonDown( "rightbutton_down" ), cmdRButtonUp( "rightbutton_up" ), 
 	cmdConsole( "console" ), cmdFPSShow( "showfps" ), bindScroll( "scroll" ),
@@ -359,7 +359,8 @@ CInterface::CInterface( ICursor* _pCursor, NSound::ISoundScene *_pSound ):
 	if ( !IsValid( pSound ) )
 	{
 		bOwnSoundScene = true;		// retail @0x31dbd0: the flag is SET before the own scene is created (serialized tag 23)
-		pSound = NSound::CreateSoundScene( 0, 0, sCounter.GetTime() );
+		pSound = IsValid( _pInheritSound ) ? NSound::CreateSoundScene( _pInheritSound, sCounter.GetTime() ) :
+			NSound::CreateSoundScene( 0, 0, sCounter.GetTime() );
 	}
 	pCursor = _pCursor;
 	pConsole = new CConsole( SWindowInfo( this, SPoint( 0, 0 ), SPoint( 0, 0 ), "console", STYLE_ENABLED | STYLE_TOPMOST ) );

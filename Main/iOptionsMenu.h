@@ -12,6 +12,7 @@ namespace NGScene
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 namespace NGame
 {
+class IMission;
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 enum EOptionsScreen
 {
@@ -27,10 +28,11 @@ class CICOptions: public NMainLoop::CInterfaceCommand
 	OBJECT_BASIC_METHODS(CICOptions);
 protected:
 	EOptionsScreen eScreen;
+	CPtr<IMission> pMission;
 	CObj<NGScene::CScreenshotTexture> pScreenShotTexture;
 
 public:
-	CICOptions( EOptionsScreen eScreen = OS_PROFILE, NGScene::CScreenshotTexture *pScreenShotTexture = 0 );
+	CICOptions( EOptionsScreen eScreen = OS_PROFILE, NGScene::CScreenshotTexture *pScreenShotTexture = 0, IMission *pMission = 0 );
 	virtual void Exec();
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////

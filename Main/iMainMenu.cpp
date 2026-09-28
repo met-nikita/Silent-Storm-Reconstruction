@@ -247,7 +247,7 @@ bool CMainMenuInterface::ProcessEvent( const NInput::SEvent &sEvent )
 	}
 	else if ( bindOptions.ProcessEvent( sEvent ) )
 	{
-		NMainLoop::Command( new NGame::CICOptions( NGame::OS_PROFILE ) );
+		NMainLoop::Command( new NGame::CICOptions( NGame::OS_PROFILE, 0, this ) );
 		return true;
 	}
 	else if ( bindCredits.ProcessEvent( sEvent ) )

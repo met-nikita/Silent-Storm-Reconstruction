@@ -53,6 +53,7 @@ public:
 // the ctor (@0x3058c0) stores them and the type machine chooses a weighted track on every launch.
 // The clock is required: retail serializes it with the music deadlines (scene tag 4).
 ISoundScene* CreateSoundScene( NDb::CTMusic *pAmbient, NDb::CTMusic *pCombat, CFuncBase<STime> *pTime );
+ISoundScene* CreateSoundScene( ISoundScene *pSource, CFuncBase<STime> *pTime );
 bool InitSound( HWND hWnd );
 bool SetModeFromConfig();
 void DoneSound();
