@@ -344,7 +344,7 @@ bool CStateTeam::Initialize( IMission *pMission )
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // retail CStateTeam::UpdateToolTipInfo @0x1d8230: refill the hover tooltip from the state target
-// (mission vtbl+0x94) when it is a live unit; a non-unit / dead hover leaves the frame untouched.
+// (mission vtbl+0x94) when it is a valid unit; a non-unit hover leaves the frame untouched.
 void CStateTeam::UpdateToolTipInfo()
 {
 	CDynamicCast<NWorld::CUnit> pUnit( GetMission()->GetStateTarget() );
@@ -391,7 +391,7 @@ bool CStateTeam::OnLButtonUp( int nX, int nY )
 // (format string 19329), and, per available block, either the exact HP "%d/%d" (when a roster perk /
 // own-unit reveals it) or a localized health-CONDITION label (19202..19207 unit, 19208..19213 PK). The
 // frame is positioned ABOVE the unit's projected screen position (raised 3.6 world units, centred), and
-// HIDDEN when the unit is dead/off-screen. Used by every tactical state that hovers a unit.
+// HIDDEN when the object is invalid/off-screen (not when the unit is dead).
 static void MakeUnitStateToolTip( IMission *pMission, NWorld::CUnit *pUnit, NUI::CTextFrame *pFrame )
 {
 	if ( !IsValid( pFrame ) )
@@ -520,7 +520,7 @@ void CStateFriend::Step()
 {
 	CStateBase::Step();
 	// retail: refresh the tooltip each frame (MakeUnitStateToolTip re-projects + re-positions it above
-	// the unit; it also hides itself when the unit dies or leaves the screen).
+	// the unit; it also hides itself when the object is invalid or leaves the screen).
 	UpdateToolTipInfo();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -786,19 +786,15 @@ bool CStateAttack::Initialize( IMission *pMission )
 			return false;
 	}
 
-	UpdateTraceSelection();
+	// v1.2 @0x5dde2e: BOTH automatic hover and forced attack allocate this frame.
+	// Initially hidden (style 0x2c); a valid unit target, including a corpse, shows it.
+	pEnemyToolTip = new NUI::CTextFrame( NUI::SWindowInfo( GetMission()->GetDesktop()->GetClientWindow(),
+		NUI::SPoint( 0, 0 ), NUI::SPoint( 0, 0 ), "enemyToolTip", NUI::STYLE_ENABLED | NUI::STYLE_TRANSPARENT | NUI::STYLE_TOPMOST ) );
 	UpdateInfo();
-	UpdateCursorInfo();
 	UpdateCursor();
-
-	// retail CStateAttack::Initialize @0x1dd240: the "enemyToolTip" CTextFrame over the aimed enemy
-	// (only the non-FORCED aim-at-unit state has a real unit target).
-	if ( GetType() != FORCED )
-	{
-		pEnemyToolTip = new NUI::CTextFrame( NUI::SWindowInfo( GetMission()->GetDesktop()->GetClientWindow(),
-			NUI::SPoint( 0, 0 ), NUI::SPoint( 0, 0 ), "enemyToolTip", NUI::STYLE_ENABLED | NUI::STYLE_VISIBLE | NUI::STYLE_TRANSPARENT | NUI::STYLE_TOPMOST ) );
-		UpdateEnemyStateInfo();
-	}
+	UpdateCursorInfo();
+	UpdateTraceSelection();
+	UpdateEnemyStateInfo();
 	return true;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1198,17 +1194,16 @@ bool CStateUse::Initialize( IMission *pMission )
 	CDynamicCast<NWorld::CUnit> pDeadUnit(pObject);
 	if (pDeadUnit)
 	{
-		bRet = pDeadUnit->IsDead() || pDeadUnit->IsUnconscious();
+		bRet = !pDeadUnit->CanFight();
 		vHilightColor = GetSelectionColor( 3 );	// v1.2 @0x5d90bf: palette(corpse)
 		nCursorID = N_CURSOR_USE;			// carry body -> Use.cur (hand): retail default branch, id 21
 
-		// retail CStateUse::Initialize @0x1d85a0: an UNCONSCIOUS unit under the cursor gets the
-		// "enemyToolTip" name+VP frame (built BEFORE the bRet gate, disasm order); released in
-		// Terminate (@0x1d6fc0).
-		if ( pDeadUnit->IsUnconscious() )
+		// v1.2 @0x5d90e4 calls CUnit vtbl+0x10: IsEmptyPK, NOT IsUnconscious.
+		// Ordinary bodies have no pickup-hover label; empty Panzerkleins do.
+		if ( pDeadUnit->IsEmptyPK() )
 		{
 			pUnitToolTip = new NUI::CTextFrame( NUI::SWindowInfo( GetMission()->GetDesktop()->GetClientWindow(),
-				NUI::SPoint( 0, 0 ), NUI::SPoint( 0, 0 ), "enemyToolTip", NUI::STYLE_ENABLED | NUI::STYLE_VISIBLE | NUI::STYLE_TRANSPARENT | NUI::STYLE_TOPMOST ) );
+				NUI::SPoint( 0, 0 ), NUI::SPoint( 0, 0 ), "enemyToolTip", NUI::STYLE_ENABLED | NUI::STYLE_TRANSPARENT | NUI::STYLE_TOPMOST ) );
 			MakeUnitStateToolTip( GetMission(), pDeadUnit, pUnitToolTip );
 		}
 	}

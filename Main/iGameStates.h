@@ -258,7 +258,7 @@ private:
 	NUI::SCursorInfo sCursorInfo;
 	CObj<CObjectBase> pTraceSelection;
 	// retail CStateUse +0x2c pUnitToolTip (CObj<NUI::CTextFrame>): the "enemyToolTip" frame built in
-	// Initialize (@0x1d85a0) for an UNCONSCIOUS corpse unit under the cursor, released in Terminate
+	// Initialize (v1.2 @0x5d90e4) for an EMPTY PANZERKLEIN under the cursor, released in Terminate
 	// (@0x1d6fc0). SERIALIZED -- retail CStateUse::operator& is COMDAT-folded onto CStateFriend's
 	// @0x1e1be0 (identical layout), tag 4 (wire-audit: UNREAD 4, 4 bytes, all 9 slots).
 	CObj<NUI::CTextFrame> pUnitToolTip;
