@@ -388,10 +388,8 @@ void CPathConflictsRemover::TryToSetNewPath()
 		bWaiting = false;
 	}
 	else
-		// No route: FullCancel latches the exec FAILED but (retail-faithful, oracle s2_execmove.h FullCancel)
-		// leaves bWaiting set, so the unit parks until the cell frees or a new order arrives -- superseding
-		// the Jan03 pump's immediate CancelAction()+pCurrentCmd=0 abandon. CheckCmdExecState reaps the exec
-		// once a later retry clears bWaiting.
+		// No route: FullCancel marks the move finished with a failed result.
+		// It leaves bWaiting set, but v1.2 releases the action token immediately.
 		FullCancel();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -898,8 +896,10 @@ void CExecMove::FullCancel()
 	commandsQueue.clear();
 	result = FAILED;
 	pCurCmd = 0;
-	Finished();   // @0x3b8d50 -- retail latches state=FINISHED unconditionally here
-	              // (disasm `[esi-8]=1`), an addition over Jan03, so the Segment loop reaps us.
+	// Retail v1.2 @0x7b91ec releases pAction even when a queue still owns
+	// this waiting mover. FINISHED alone does not release the world's busy token.
+	StopAction();
+	Finished();
 	//pUS->animator.PlaceUnit( pUS->GetPosition() );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
