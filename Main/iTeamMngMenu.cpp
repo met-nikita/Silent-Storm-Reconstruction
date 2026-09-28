@@ -648,13 +648,12 @@ void CUnitPerksPanel::Generate()
 		CPtr<CUnitPerksPanelItem> pItem = new CUnitPerksPanelItem( SWindowInfo( pList, SPoint( 0, 0 ), SPoint( 0, 0 ), "", STYLE_ENABLED | STYLE_VISIBLE ), pPerk );
 		LoadTemplate( pItem, NDb::GetUIContainer( 394 ) );	// retail 0x18a -- the perk-row template
 
-		// retail attaches a perk-description CToolTip (GetDBString(name)+SetPerkParam substitutions);
-		// the dev CDBPerk carries only pToolTip, so use it -- same idiom as the converged CPerkButton.
+		// Retail supplies the same numeric parameters as the in-mission perk tree.
 		NDb::CDBPerk *pDBPerk = pPerk->GetDBPerk();
 		if ( IsValid( pDBPerk ) )
 		{
 			CPtr<CToolTip> pToolTip = new CToolTip( SWindowInfo( GetInterface(), SPoint( 0, 0 ), SPoint( 0, 0 ), "tooltip", STYLE_ENABLED ) );
-			pToolTip->SetText( GetDBString( pDBPerk->pToolTip ) );
+			SetPerkToolTip( pToolTip, pDBPerk );
 			pItem->SetToolTip( pToolTip );
 		}
 

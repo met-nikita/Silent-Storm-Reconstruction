@@ -12,6 +12,7 @@ namespace NDb
 	class CSequence;
 	class CAnimation;
 	class CSound;
+	class CDBPerk;
 	enum ECameraType;
 }
 namespace NGScene
@@ -52,6 +53,8 @@ float CalcFlashCoeff( float fCoeff, float fTargetCoeff, const STime &sTime, cons
 // (iFaceGen) and advanced (iAdvFaceGen) face editors can play the chosen voice on a voice-button click.
 // Retail NUI::GetPersAck @0x2452c0 resolves the ack holder and condition record 102.
 NDb::CSound* GetPersVoiceAck( NRPG::CUnit *pMerc );
+// Shared numeric substitutions for the perk tree and recruitment tooltips.
+void SetPerkToolTip( CToolTip *pToolTip, NDb::CDBPerk *pPerk );
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CLineBar
 ////////////////////////////////////////////////////////////////////////////////////////////////////

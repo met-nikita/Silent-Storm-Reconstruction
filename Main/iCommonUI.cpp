@@ -30,6 +30,30 @@
 namespace NUI
 {
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+static void SetPerkParam( CToolTip *pToolTip, float fParam, const wstring &szPoint, const wstring &szPercent )
+{
+	// Retail v1.2 @0x62c050: truncate points, but round the percentage.
+	pToolTip->SetVal( szPoint, int( fParam ) );
+	if ( fParam > 1.0f )
+		fParam -= 1.0f;
+	pToolTip->SetVal( szPercent, Float2Int( fParam * 100.0f ) );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void SetPerkToolTip( CToolTip *pToolTip, NDb::CDBPerk *pPerk )
+{
+	// v1.2 perk button @0x62c8f3 and recruitment row tooltip @0x646594.
+	if ( IsValid( pPerk->pToolTip ) )
+	{
+		pToolTip->SetText( GetDBString( pPerk->pToolTip ) );
+		if ( pPerk->params.size() >= 1 )
+			SetPerkParam( pToolTip, pPerk->params[0], L"paramonepoint", L"paramoneperc" );
+		if ( pPerk->params.size() >= 2 )
+			SetPerkParam( pToolTip, pPerk->params[1], L"paramtwopoint", L"paramtwoperc" );
+	}
+	else
+		pToolTip->SetText( NStr::ToUnicode( pPerk->szUserName ) );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 float CalcFlashCoeff( float fCoeff, float fTargetCoeff, const STime &sTime, const STime &sFlashTime, const STime &sMorphTime )
 {
 	float fDelta = float( sTime - sFlashTime ) / sMorphTime;
