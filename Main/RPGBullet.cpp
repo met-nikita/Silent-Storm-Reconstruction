@@ -128,9 +128,8 @@ EAttackResult PerformThrowingAttackPortion( NWorld::IWorld *pWorld, CAttackPorti
 // NRPG::PerformMeleeAttackPortion @0x290f70 -- free-fn form of CGame::ProcessMeleeAttackPortion.
 // The release added explicit IWorld* + IAIMap* + a pFilter object that, when non-null,
 // restricts the ProcessAttack callback to that one hit object.
-// DECOMP-vs-dev divergence (followed the release): the dev CGame version `continue`s on a
-// god-moded unit; the release only withholds it from the ignore list and still runs the
-// armor/damage path.
+// Retail tracks each valid unit once, regardless of its cheat state. Immunity
+// belongs to the unit's damage receiver, not the trace's duplicate-hit filter.
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void PerformMeleeAttackPortion( NWorld::IWorld *pWorld, NAI::IAIMap *pAIMap, const CAttackPortion &a,
 	const CRay &ray, const vector<IAttackable*> &ignores, CObjectBase *pFilter )
@@ -154,7 +153,7 @@ void PerformMeleeAttackPortion( NWorld::IWorld *pWorld, NAI::IAIMap *pAIMap, con
 			if ( find( ignore.begin(), ignore.end(), pCatcher ) != ignore.end() )
 				continue;
 			CDynamicCast<NWorld::CUnit> pUnit( i->pSrc->pUserData );
-			if ( pUnit && !pUnit->IsCheatEnabled( CHEAT_GODMODE ) )
+			if ( IsValid( pUnit ) )
 				ignore.push_back( pCatcher );
 		}
 		NDb::CRPGArmor *pArmor = i->pSrc->pArmor;
@@ -427,24 +426,9 @@ CObjectBase * PerformRangedAttack( NWorld::IWorld *pWorld, const SAttackRayInfo 
 	}
 	else
 	{
-		// HIT branch: if trailPoints already populated, use them; otherwise process attack portion along the ray
-		if ( !rayInfo.trailPoints.empty() )
-		{
-			trail = rayInfo.trailPoints;
-		}
-		else
-		{
-			vector<IAttackable*> ignores;
-			if ( rayInfo.pIgnore )
-			{
-				CDynamicCast<IAttackable> pAtt( rayInfo.pIgnore.GetPtr() );
-				if ( pAtt )
-					ignores.push_back( pAtt );
-			}
-			CRay ray; ray.ptOrigin = rayInfo.vOrigin; ray.ptDir = rayInfo.vDir;
-			float fMaxRange = rayInfo.fMaxRange > 0.0f ? rayInfo.fMaxRange : 30.0f;
-			pCWorld->GetGame()->ProcessRangedAttackPortion( rayInfo.atk, ray, ignores, &trail, fMaxRange );
-		}
+		// Retail v1.2 0x692731..0x692751 consumes the cached hit trail even
+		// when empty. A second trace must not invent contacts or damage.
+		trail = rayInfo.trailPoints;
 	}
 
 	// Retail v1.2 0x69271d..0x69272e suppresses impact particles for shooterless rays.

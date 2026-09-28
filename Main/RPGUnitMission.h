@@ -219,6 +219,7 @@ enum EToHitType
 	TH_THROWING,
 	TH_SHOOT,
 	TH_RLAUNCHER,
+	TH_GRENADE,
 	TH_DEFAULT,
 };
 // NRPG::GetToHitType @0x2b3790: the held-item class of the attacker. NOTE: TH_MELEE means a SWUNG

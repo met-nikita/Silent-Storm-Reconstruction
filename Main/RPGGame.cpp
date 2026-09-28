@@ -7,6 +7,8 @@
 #include "wTSFlags.h"
 #include "wInterface.h"
 #include "RPGUnitMission.h"
+#include "RPGItemInfo.h"
+#include "RPGToHit.h"
 #include "..\DBFormat\DataRPG.h"
 #include "..\DBFormat\DataMap.h"   // NDb::EDiplomacyState / DS_ALLY -- friendly-fire ally check in cover penetration
 #include "..\MiscDll\LogStream.h"
@@ -735,12 +737,14 @@ int GetAttackerToHit( const NWorld::CUnit *pAttacker, NWorld::CUnit *pTarget, in
 int CGame::GetCompositeToHit( NWorld::CUnit *pAttacker, 
 	NWorld::CUnit *pTarget, NAI::EHitLocation eHL, bool bFirstTurn )
 {
+	CVec3 ptTarget(VNULL3);
+	pAIMap->GetUnitHLPos( &ptTarget, pAIMap->GetHull( pTarget ), NAI::HL_ANY );
+	if ( NRPG::GetToHitType( pAttacker ) == NRPG::TH_GRENADE )
+		return GetGrenadeCompositeToHit( pAttacker, ptTarget, bFirstTurn, 0 );
 	// Retail v1.2 0x6b5f4f/0x6b5fa2: test current-pose reach to the hull center,
 	// independently of the called shot. -1 keeps the AP preview but omits ToHit.
 	if ( NRPG::GetToHitType( pAttacker ) == NRPG::TH_MELEE )
 	{
-		CVec3 ptTarget;
-		pAIMap->GetUnitHLPos( &ptTarget, pAIMap->GetHull( pTarget ), NAI::HL_ANY );
 		CDynamicCast<NWorld::CUnitServer> pUS( pAttacker );
 		if ( !NWorld::CanMeleeAttack( pUS, pAttacker->GetPosition(), ptTarget ) )
 			return -1;
@@ -755,6 +759,11 @@ int CGame::GetCompositeToHit( NWorld::CUnit *pAttacker,
 		pRealAttacker->PrintLog( true );
 		return 0;
 	}
+	NAI::SUnitPosition pos = pAttacker->GetPosition();
+	pos.pos.p.SetDirection( GetShootDirection( pos.pos.pNet, pos.pos.p, ptTarget ) );
+	const NAI::EPassable pass = pos.pos.pNet->GetPassability( pos.pos.p );
+	if ( pass == NAI::AIP_NOT_PASSABLE || pass == NAI::AIP_CANNOT_LAY )
+		return -1;
 	CVec3 ptAttackPos;
 	// retail NRPG::GetToHit @0x2b5ee0 and the executor CExecMeleeUnit::OnLabel (wUnitAttackExec.cpp:1645) pass
 	// min-clear 0 for melee -- there is no muzzle to pull the cover-walk origin back from. Using the ranged
@@ -774,33 +783,31 @@ int CGame::GetCompositeToHit( NWorld::CUnit *pAttacker,
 	}
 	else
 	{
-		NAI::SUnitPosition pos = pAttacker->GetPosition();
-		NAI::EDirection dir = GetShootDirection( pos.pos.pNet, pos.pos.p, pTarget->GetPosition().GetCP() );
-		pos.pos.p.SetDirection( dir );
 		ptAttackPos = pAttacker->GetAttackOrigin( pos );
 		fMinClearDistance = pAttacker->GetMinClearDistance();
 	}
+	// Retail RealCalcCovers uses a unit penetration coefficient for rockets.
+	if ( NRPG::GetToHitType( pAttacker ) == NRPG::TH_RLAUNCHER )
+		attack.front().nK = 1;
 	CObj<NRPG::CCoverInfo> pCover = CalcCovers( ptAttackPos, attack.front(), pAttacker, pTarget, eHL, fMinClearDistance );
-	vector<int> accessibleHLs; // needed only for computing Melee ToHit
-	if ( NRPG::GetToHitType( pAttacker ) == NRPG::TH_MELEE )
-	{
-		pAIMap->GetAccessibleUnitHL( &accessibleHLs, pAttacker->GetPosition().GetCenter(), pAIMap->GetHull(pTarget), F_MELEE_DISTANCE );
-		if ( NAI::HL_ANY != eHL && find( accessibleHLs.begin(), accessibleHLs.end(), eHL ) != accessibleHLs.end() )
-		{
-			accessibleHLs.clear();
-			accessibleHLs.push_back( eHL );
-		}
-		if ( accessibleHLs.empty() )
-			return 0;
-	}
+	NRPG::STargetHLInfo hlInfo;
+	CDynamicCast<NWorld::CUnitServer> pUS( pAttacker ), pTargetUS( pTarget );
+	// Preview deliberately ignores selection failure (0x6b61cf), unlike the
+	// executable melee order. Empty reachable sets still reach the calculator.
+	if ( pTargetUS )
+		NRPG::SelectTargetHLs( pUS, pos, &hlInfo, pTargetUS, eHL );
 	int nToHit = 0;
 	int nRof = pRealAttacker->GetBulletsQuantityInShot();
 	// retail @0x2b5ee0: the burst preview passes the LOOP INDEX as the bullet number (no
 	// mission-side StartAttack/NextBullet cursor exists in retail).
 	for ( int i = 0; i < nRof; ++i )
 	{
-		nToHit += GetAttackerToHit( pAttacker, pTarget, pAttacker->GetCarefulShotExtraAP(),
-			eHL, accessibleHLs, pCover, bFirstTurn, i );
+		if ( pTargetUS )
+			nToHit += GetAttackerToHit( pAttacker, pTarget, pAttacker->GetCarefulShotExtraAP(),
+				hlInfo.eHL, hlInfo.accessibleHLs, pCover, bFirstTurn, i );
+		else
+			nToHit += GetAttackerTileToHit( pAttacker, ptTarget, pAttacker->GetCarefulShotExtraAP(),
+				NAI::THL_LOWER, pCover, bFirstTurn, i );
 	}
 	nToHit /= nRof;
 	pRealAttacker->PrintLog( true );

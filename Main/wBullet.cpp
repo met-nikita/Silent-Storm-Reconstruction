@@ -94,7 +94,9 @@ CBulletServer::CBulletServer( CWorld *_pWorld, const vector<NRPG::STrailPoint> &
 
 	bindGlobal.Link( pWorld->GetActive(), this );
 	pAction = pWorld->GetActiveCounter();
-	pShooter = pWorld->GetUnitServer( trailpointsSet[0].sAttack.pAttacker );
+	// Retail v1.2 0x747606: an empty cached hit trail has no shooter.
+	if ( !trailpointsSet.empty() )
+		pShooter = pWorld->GetUnitServer( trailpointsSet[0].sAttack.pAttacker );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CBulletServer::Visit( IRenderVisitor *pVisitor )
@@ -209,7 +211,7 @@ bool CBulletServer::Segment()
 	}
 
 	// Retail v1.2 0x746f5e: an explosive bullet retires after its first reached point.
-	if ( nTrailCount >= trailpointsSet.size() - 1 || ( nTrailCount > 0 && IsValid( pGrenade ) ) )
+	if ( nTrailCount >= int( trailpointsSet.size() ) - 1 || ( nTrailCount > 0 && IsValid( pGrenade ) ) )
 	{
 		if ( IsValid( pShooter ) )
 		{

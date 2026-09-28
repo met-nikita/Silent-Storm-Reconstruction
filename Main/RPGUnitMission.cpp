@@ -782,6 +782,8 @@ EToHitType CUnitMission::GetToHitWeaponType() const
 			return TH_THROWING;
 		return TH_MELEE;
 	}
+	if ( CDynamicCast<IGrenadeItem>( pRPGUnit->GetInventory()->GetActive() ) )
+		return TH_GRENADE;
 	return TH_DEFAULT;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1111,12 +1113,8 @@ CReceivedDmg CUnitMission::ProcessAttack( NWorld::IWorld *pWorld, int nUserID, C
 	if ( pAttack->CanDealDmg(pArmor) && pAttack->nK > 0 )
 	{
 		csRPG << "<font size=16pt>";
-		// Maybe I dodged?
-		if ( this != pAttack->pTarget && !GetPanzerklein() && CheckIC() && pAttack->atkType != NRPG::AT_CLICK_OF_DEATH )
-		{
-			csRPG << CC_RED << " damage avoided!" << endl;
-			return CReceivedDmg();
-		}
+		// Retail v1.2 0x6c4067: contact accuracy was resolved by the ray path.
+		// Do not roll a second dodge (or award IC practice) for incidental victims.
 		int nDmg = pAttack->CalcStructDmg( pWorld, pArmor, 0 );
 		//	Get
 		float fDmgModifier = 0;
