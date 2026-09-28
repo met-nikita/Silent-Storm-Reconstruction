@@ -1123,7 +1123,7 @@ CReceivedDmg CUnitMission::ProcessAttack( NWorld::IWorld *pWorld, int nUserID, C
 		switch ( nUserID )
 		{
 		case NAI::HL_HEAD:
-			fDmgModifier = 1.2f;
+			fDmgModifier = 1.5f; // Retail v1.2 0x6c4092.
 			break;
 		case NAI::HL_RHAND:
 		case NAI::HL_LHAND:
@@ -1152,6 +1152,14 @@ CReceivedDmg CUnitMission::ProcessAttack( NWorld::IWorld *pWorld, int nUserID, C
 		}
 		int nCriticalProbability = pAttack->nCrtical;
 		int nCriticalDifficulty = pAttack->nCrticalDifficulty;
+		// Retail v1.2 0x6c40ee..0x6c4123: roll once per attacker level
+		// for this hit, before called-shot bonuses and the severity cap.
+		// Get's upper bound is exclusive, so each roll contributes 1..19.
+		if ( IsValid( pAttack->pAttacker ) )
+		{
+			for ( int i = 0; i < pAttack->pAttacker->GetSkillValue( NDb::ST_LEVEL ); ++i )
+				nCriticalDifficulty += random.Get( 1, 20 );
+		}
 		// Retail v1.2 0x6c4139..0x6c41a4: reward a called shot only when
 		// the ray hits the requested part. v1.1's head bonuses were only 50/100.
 		if ( pWorld->GetGlobalGame()->pDifficulty->bHeadshotShouldKill && pAttack->eWantedHL == nUserID )
