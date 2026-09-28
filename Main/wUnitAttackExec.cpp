@@ -117,17 +117,6 @@ static bool HasBazookaAndRockets( CUnitServer *pUS )
 	return false;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-static EUnitCommandResult HasActiveUsableFirstAid( CUnitServer *pUS )
-{
-	CDynamicCast<NRPG::CFirstAidItem> pFA( pUS->GetUnitRPG()->GetInventory()->GetActive() );
-	if ( !IsValid( pFA ) )
-		return UCR_UNAVAILABLE;
-	if ( pFA->IsEmpty() )
-		return UCR_NO_EQUIPMENT;
-
-	return UCR_OK;
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
 EUnitCommandResult CanAttackWithCannon( CCannon *pCannon, const CVec3 &ptTarget )
 {
 	ASSERT(pCannon);
@@ -183,23 +172,55 @@ static bool CanHeal( CUnitServer *pUS, CUnitServer *pTarget, NRPG::CFirstAidItem
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-EUnitCommandResult CanDoFirstAid( CUnitServer *pUS, const NAI::SUnitPosition &from, CUnitServer *pTarget )
+// Retail v1.2 0x7a2040: prone patients have a wider reach; repairs use an outer ring.
+float GetHealOrRepairPKDistance( CUnitServer *pTarget )
 {
-	EUnitCommandResult eResult = HasActiveUsableFirstAid( pUS );
-	if ( eResult != UCR_OK )
-		return eResult;
+	if ( IsValid( pTarget->GetWearingPK() ) || pTarget->IsEmptyPK() )
+		return 1.8f;
+	return pTarget->GetPosition().pos.p.GetPose() == NAI::CM_LAY ? 1.2f : F_HEAL_DISTANCE;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+EUnitCommandResult CanDoFirstAid( CUnitServer *pUS, const NAI::SUnitPosition &from,
+	CUnitServer *pTarget, const NAI::SUnitPosition &targetPosition, NRPG::CFirstAidItem *pItem )
+{
+	// Retail v1.2 0x7a3180: AI may probe an unequipped kit at a planned position.
+	CPtr<NRPG::CFirstAidItem> pFirstAid = pItem;
+	if ( !pFirstAid )
+		pFirstAid = CDynamicCast<NRPG::CFirstAidItem>( pUS->GetUnitRPG()->GetInventory()->GetActive() );
+	if ( !IsValid( pFirstAid ) )
+		return UCR_UNAVAILABLE;
+	if ( pFirstAid->IsEmpty() )
+		return UCR_NO_EQUIPMENT;
+
+	NDb::CRPGFirstAid *pDB = pFirstAid->GetDBFirstAid();
+	const bool bRepair = pDB->effect == NDb::FAE_REPAIR_PK;
+	// Perk 58 bypasses medical skill AND item-perk requirements, but never repair requirements.
+	if ( bRepair || !pUS->GetUnitRPG()->HasPerk( 58 ) )
+	{
+		const int nSkill = pUS->GetUnitRPG()->GetRPGUnit()->Skills( bRepair ? NDb::ST_ENGINEERING : NDb::ST_MEDICINE );
+		if ( nSkill + pDB->nSkillModifier < pDB->nRequiedSkill )
+			return UCR_NEED_HIGHER_SKILL;
+		if ( pDB->nRequiredPerkID > 0 && !pUS->GetUnitRPG()->HasPerk( pDB->nRequiredPerkID ) )
+			return UCR_NO_EQUIPMENT;
+	}
+	// Packed-place flags checked at 0x7a337f: final, nonintegral or inactive.
+	if ( from.pos.p.IsFinal() || !from.pos.p.IsIntegral() || from.pos.p.GetPose() == NAI::CM_INACTIVE )
+		return UCR_GENERAL_FAILURE;
 
 	if ( IsValid( pTarget ) )
 	{
-		if ( pTarget->IsDead() || pTarget->IsUnconscious() )
+		if ( !pTarget->IsEmptyPK() && ( pTarget->IsDead() || pTarget->IsUnconscious() ) )
+			return UCR_INVALID_COMMAND;
+		const bool bTargetPK = pTarget->IsWearingPK() || pTarget->IsEmptyPK();
+		if ( bTargetPK != bRepair )
 			return UCR_INVALID_COMMAND;
 
-		CVec3 ptTarget = pTarget->GetPosition().GetCP();
-		if ( !IsWithinHumanReach( from.GetCP(), ptTarget, F_HEAL_DISTANCE ) )
+		const CVec3 ptTarget = targetPosition.GetCP();
+		if ( !IsWithinHumanReach( from.GetCP(), ptTarget, GetHealOrRepairPKDistance( pTarget ) ) ||
+			( bTargetPK && IsWithinHumanReach( from.GetCP(), ptTarget, F_HEAL_DISTANCE ) ) )
 			return UCR_TARGET_OUT_OF_RANGE;
 
-		CDynamicCast<NRPG::CFirstAidItem> pItem( pUS->GetUnitRPG()->GetInventory()->GetActive() );
-		if ( !CanHeal( pUS, pTarget, pItem ) )
+		if ( !CanHeal( pUS, pTarget, pFirstAid ) )
 			return UCR_CANT_HEAL;
 	}
 
@@ -2661,7 +2682,7 @@ EUnitCommandResult CExecHeal::CanDoIt( const NAI::SUnitPosition &from, bool bIgn
 	     pTarget->GetDiplomacyState( pUS ) == NDb::DS_ENEMY )
 		return UCR_GENERAL_FAILURE;
 
-	return CanDoFirstAid( pUS, from, pTarget );
+	return CanDoFirstAid( pUS, from, pTarget, IsValid( pTarget ) ? pTarget->GetPosition() : from );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 int CExecHeal::GetStartAP() const
