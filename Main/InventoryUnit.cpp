@@ -179,7 +179,9 @@ void GetItemsBindPlaces( vector<IRenderVisitor::SBoundMesh> *pRes, NRPG::IUnitMi
 	NDb::CRPGItem *pActiveItem = 0;
 	if ( pActiveIItem )
 		pActiveItem = pActiveIItem->GetDBItem();
-	if ( pActiveItem )
+	// Retail v1.2 0x61e3f6 gates the visible mesh, not the active inventory item.
+	// Medical items may animate as empty hands and must not attach their icon model.
+	if ( pActiveItem && pActiveItem->bPlaceInHand )
 	{
 		if ( bIsPK )
 		{
@@ -227,7 +229,8 @@ void GetItemsBindPlaces( vector<IRenderVisitor::SBoundMesh> *pRes, NRPG::IUnitMi
 			continue;
 		if ( pItem->subType == NDb::SUBTYPE_HEAVY && !bHeavy )
 		{
-			if ( !bNoHeavyWeapon )
+			// Retail v1.2 0x61e491 applies the same flag to off-hand heavy meshes.
+			if ( pItem->bPlaceInHand && !bNoHeavyWeapon )
 				AttachItem( pRes, &rnd, UIT_WEAPON_HEAVY, pItem->pModel, bIsPK, pIItem );
 			bHeavy = true;
 		}

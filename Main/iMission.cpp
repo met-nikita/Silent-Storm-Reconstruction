@@ -1852,6 +1852,14 @@ bool CMission::ProcessEvent( const NInput::SEvent &sEvent )
 	// when this action is unavailable (e.g. A is also bound to setmine).
 	else if ( bindAttack.ProcessEvent( sEvent ) && CanPerformAction( UA_ATTACK ) )
 		CommandState( new CStateAttack( true ) );
+	// Retail v1.2 0x603dd6..0x603eaf: A is shared by firstaid, usetool,
+	// dropcorpse and setmine. Skip unavailable actions, in retail priority order.
+	else if ( bindFirstAid.ProcessEvent( sEvent ) && CanPerformAction( UA_HEAL ) )
+		CommandState( new CStateFirstAid() );
+	else if ( bindUseTool.ProcessEvent( sEvent ) && CanPerformAction( UA_USETOOL ) )
+		CommandState( new CStateUntrap( true ) );
+	else if ( bindDropCorpse.ProcessEvent( sEvent ) && CanPerformAction( UA_DROPCORPSE ) )
+		CommandState( new CStateDropCorpse() );
 	else if ( bindSetMine.ProcessEvent( sEvent ) )
 	{
 		// Retail 0x603606..0x603665: the shared setmine button dispatches
@@ -1867,14 +1875,8 @@ bool CMission::ProcessEvent( const NInput::SEvent &sEvent )
 				CommandState( new CStateSetTrap() );
 		}
 	}
-	else if ( bindUseTool.ProcessEvent( sEvent ) )
-		CommandState( new CStateUntrap( true ) );	// use the held tool on a target (disassemble/disarm/mount) -- retail @0x202600 constructs the FORCED untrap here
 	else if ( bindSetTrap.ProcessEvent( sEvent ) )
 		CommandState( new CStateSetTrap() );
-	else if ( bindFirstAid.ProcessEvent( sEvent ) )
-		CommandState( new CStateFirstAid() );
-	else if ( bindDropCorpse.ProcessEvent( sEvent ) )
-		CommandState( new CStateDropCorpse() );
 	else if ( bindExitPK.ProcessEvent( sEvent ) ) //// CRAP
 	{
 		vector< CPtr<NGame::IUnitTracker> > unitsSet;
