@@ -12,7 +12,7 @@ namespace	NGScene
 {
 static float fRandomShifts[12] = { 0.02f, -0.05f, 0.07f, -0.12f, 0, 0.03f, 0.08f, -0.04f };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void GetTransparentTexturePlace( STransparentTexturePlace *pRes, NGfx::CTexture *pTex )
+void GetTransparentTexturePlace( STransparentTexturePlace *pRes, NGfx::CTexture *pTex, float fMargin )
 {
 	NGfx::STexturePlaceInfo place;
 	CObj<NGfx::CTexture> pHolder = NGfx::GetTextureContainer( pTex, &place );
@@ -24,10 +24,10 @@ void GetTransparentTexturePlace( STransparentTexturePlace *pRes, NGfx::CTexture 
 	}
 	float fU1 = 1.0f / place.size.x;
 	float fV1 = 1.0f / place.size.y;
-	float fUStart = place.place.x1 * fU1;
-	float fVStart = place.place.y1 * fV1;
-	float fUFinish = place.place.x2 * fU1;
-	float fVFinish = place.place.y2 * fV1;
+	float fUStart = ( place.place.x1 + fMargin ) * fU1;
+	float fVStart = ( place.place.y1 + fMargin ) * fV1;
+	float fUFinish = ( place.place.x2 - fMargin ) * fU1;
+	float fVFinish = ( place.place.y2 - fMargin ) * fV1;
 	NGfx::CalcTexCoords( &pRes->vUVs[0], fUStart, fVStart );//fVFinish );
 	NGfx::CalcTexCoords( &pRes->vUVs[1], fUFinish, fVStart );//fVFinish );
 	NGfx::CalcTexCoords( &pRes->vUVs[2], fUFinish, fVFinish );//fVStart );
@@ -37,7 +37,11 @@ void GetTransparentTexturePlace( STransparentTexturePlace *pRes, NGfx::CTexture 
 static void GetGrassTexturePlace( vector<STransparentTexturePlace> *pRes, int nGrass, NGfx::CTexture *pTex )
 {
 	STransparentTexturePlace toSplit;
-	GetTransparentTexturePlace( &toSplit, pTex );
+	GetTransparentTexturePlace( &toSplit, pTex, 0 );
+	NGfx::STexturePlaceInfo place;
+	CObj<NGfx::CTexture> pHolder = NGfx::GetTextureContainer( pTex, &place );
+	NGfx::SShortTextureUV margin;
+	NGfx::CalcTexCoords( &margin, 0.5f / place.size.x, 0.5f / place.size.y );
 	int nUStart = toSplit.vUVs[0].nU;
 	int nUSize = toSplit.vUVs[1].nU - nUStart;
 	int nVStart = toSplit.vUVs[0].nV;
@@ -46,10 +50,10 @@ static void GetGrassTexturePlace( vector<STransparentTexturePlace> *pRes, int nG
 	ASSERT( nGrass > 0 );
 	int nElSizeU = nUSize / nGrass;
 	int nElSizeV = nVSize / nGrass;
-	uvShift[0] = CTPoint<int>( 0, nElSizeV );
-	uvShift[1] = CTPoint<int>( nElSizeU, nElSizeV );
-	uvShift[2] = CTPoint<int>( nElSizeU, 0 );
-	uvShift[3] = CTPoint<int>( 0, 0 );
+	uvShift[0] = CTPoint<int>( margin.nU, nElSizeV - margin.nV );
+	uvShift[1] = CTPoint<int>( nElSizeU - margin.nU, nElSizeV - margin.nV );
+	uvShift[2] = CTPoint<int>( nElSizeU - margin.nU, margin.nV );
+	uvShift[3] = CTPoint<int>( margin.nU, margin.nV );
 	pRes->resize( nGrass * nGrass );
 	for ( int k = 0; k < pRes->size(); ++k )
 	{
