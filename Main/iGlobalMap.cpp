@@ -298,6 +298,9 @@ CICContinueGlobal::CICContinueGlobal( NRPG::CGlobalGame *_pGame ):
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CICContinueGlobal::Exec()
 {
+	// Retail v1.2 0x5e385c: leaving the chapter clears its return destination.
+	// CICShowGlobal is only a modal overview and deliberately preserves this flag.
+	pGame->bChapterMapSet = false;
 	if ( !pGame->bGlobalMapSet )
 	{
 		csSystem << CC_RED << L"ERROR: Can't continue global! No global set!" << endl;
