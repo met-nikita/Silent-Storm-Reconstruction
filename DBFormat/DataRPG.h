@@ -1069,6 +1069,7 @@ CRPGPers* GetPers( int nID );
 CRPGArmor* GetArmor( int nID );
 CRPGDmgToArmor* GetDBDmg2Armor( int nID );
 CRPGGrenade *GetRPGGrenade( int nID );
+CRPGBaseValue *GetRPGBaseValue( int nID );
 CRPGCritical *GetDBCritical( int nID );
 CRPGMaterial *GetRPGMaterial( int nID );
 CScript *GetDBScript( int nID );

@@ -516,18 +516,51 @@ void CUnit::AddXP( float fXPToAdd )
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-bool CUnit::UseSkill( int eSkill, const int nAddValue )
+// Retail v1.2 0x6bbff0: use the fractional XP cap and DB-defined training rate.
+bool CSkilledObject::UseSkill( int eSkill, float fLearningFactor )
 {
+	if ( eSkill == NDb::ST_LEVEL )
+		return false;
+	NDb::CRPGBaseValue *pRates = NDb::GetRPGBaseValue( 63 );
 	CDynamicSkill &skill = Skills(eSkill);
-	float fCap = GetSkillCap( NDb::ESkillType(eSkill), fXP );
-	float sSkillDiff = fCap - ( skill.GetXPPart() - nAddValue );
-	float fAdd = Clamp( (1.f - skill.GetProgress()) * sSkillDiff / 20.f, 0.005f, 0.1f );
-	// retail CSkilledObject::UseSkill @0x2bbf40 passes the XP cap into Upgrade (the amount
-	// formula there divides by the GetRPGBaseValue(0x3f) per-skill rate -- follow-up).
+	// Unlike GetSkillByCap (used by integer initialization), training keeps the fraction.
+	const float fCap = fXP <= 0 ? 0.f : log( 1.f + 0.02f * fXP ) * ( 1.f / (20.f * LN161 / float(cap[eSkill])) );
+	const float fRemaining = fCap - ( float(skill.GetXPPart()) + skill.GetProgress() );
+	const float fAdd = Max( 0.00001f, Min( fRemaining * fLearningFactor / pRates->skills[eSkill], 0.1f ) );
 	bool bRes = skill.Upgrade( fAdd, fCap );
 	if ( eSkill >= NDb::ST_STR )
 		UpdateSkills();
 	return bRes;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// Retail v1.2 0x6bc690: practice also trains the associated primary attribute.
+bool CUnit::UseSkill( int eSkill )
+{
+	bool bAttributeUpgraded = false;
+	switch ( eSkill )
+	{
+	case NDb::ST_MELEE:
+	case NDb::ST_THROWING:
+	case NDb::ST_BURST:
+		bAttributeUpgraded = UseSkill( NDb::ST_STR );
+		break;
+	case NDb::ST_SHOOTING:
+	case NDb::ST_SNIPE:
+	case NDb::ST_STEALTH:
+		bAttributeUpgraded = UseSkill( NDb::ST_DEX );
+		break;
+	case NDb::ST_SPOT:
+	case NDb::ST_MEDICINE:
+	case NDb::ST_ENGINEERING:
+		bAttributeUpgraded = UseSkill( NDb::ST_INT );
+		break;
+	}
+	float fLearningFactor = 1.f;
+	float fPerkFactor;
+	if ( IsValid( pPerksTree ) && pPerksTree->HasPerk( eSkill < NDb::ST_STR ? 0x3c : 0x0b, &fPerkFactor, 0, 0 ) )
+		fLearningFactor = fPerkFactor;
+	const bool bSkillUpgraded = CSkilledObject::UseSkill( eSkill, fLearningFactor );
+	return bSkillUpgraded || bAttributeUpgraded;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 NDb::CRPGPers* CUnit::GetPers() const

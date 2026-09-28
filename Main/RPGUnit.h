@@ -161,6 +161,7 @@ public:
 
 	CDynamicSkill& Skills( const int eSkill ) { return *skills[eSkill]; }
 	void AddXP( float fXPToAdd );                         // retail @0x2bbde0
+	bool UseSkill( int eSkill, float fLearningFactor );
 	void UpdateSkills();                                  // retail @0x2bbcc0
 	int GetSkillBaseStatValue( const int eSkill );         // retail @0x2ba7b0
 };
@@ -297,7 +298,7 @@ public:
 		NDb::CRPGItem *pInHandItem = 0, NDb::CRPGChestReal *pBackpack = 0, bool bMedalsDisabled = false );
 
 	void AddXP( float nXPToAdd );
-	bool UseSkill( const int eSkill, const int nAddValue );
+	bool UseSkill( int eSkill );
 
 	NDb::CRPGPers* GetPers() const;
 	NDb::CComplexHead* GetHead() const;          // the head TEMPLATE (resolved via pHeadInfo)
