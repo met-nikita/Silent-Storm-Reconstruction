@@ -509,6 +509,10 @@ void CUnitMission::RegisterAction( EAction action )
 		case AC_BURST:
 			pRPGUnit->UseSkill( NDb::ST_BURST );
 			break;
+		case AC_HIDE:
+			// Retail v1.2 0x6c218f: entering Hide practices Stealth, with upgrade ack/log.
+			UseSkill( NDb::ST_STEALTH );
+			break;
 		case AC_MOVE_DIAGONAL:
 		case AC_MOVE_SIDE:
 			// retail @0x34edb0: the nMoveInLastTurn accounting moved to DoAction (gated on RUN pose); here we
