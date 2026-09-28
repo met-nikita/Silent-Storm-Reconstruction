@@ -301,14 +301,10 @@ public:
 	CExecShootMode( CUnitServer *_pUS, CCmdShootMode *_pCmd ): CCommandExecute(_pUS), pCmd( _pCmd ) {}
 	virtual void Run()
 	{
-		CPtr<NRPG::IInventoryItem> pItem = pUS->GetUnitRPG()->GetInventory()->GetActive();
-		ASSERT( IsValid( pItem ) );
-		if ( IsValid( pItem ) )
-		{
-			CDynamicCast<NRPG::IWeaponItem> pWeapon(pItem);
-			if (pWeapon)
-				pWeapon->SetShootMode( pCmd->eMode );
-		}
+		// Retail v1.2 0x7b4e76: change the effective weapon, including a mounted gun.
+		CPtr<NRPG::IWeaponItem> pWeapon = pUS->GetUnitRPG()->GetWeaponItem();
+		if ( IsValid( pWeapon ) )
+			pWeapon->SetShootMode( pCmd->eMode );
 
 		Finished();
 	}
