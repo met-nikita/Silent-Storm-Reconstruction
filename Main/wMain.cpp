@@ -1263,7 +1263,7 @@ void CWorld::ClickOfDeath( const CRay &ray, int nMaxFloor )
 	int nUserID;
 	CVec3 ptPoint;
 	if ( TraceRay( this, ray, nMaxFloor, &pUserData, &nUserID, &ptPoint ) )
-		miscObjects.push_back( CreateClickOfDeath( GetActiveCounter(), pUserData, nUserID, ray ) );
+		miscObjects.push_back( CreateClickOfDeath( this, GetActiveCounter(), pUserData, nUserID, ray ) );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CUnit* CWorld::GetUnit( const NAI::SUnitPosition &pos )

@@ -15,6 +15,7 @@ namespace NWorld
 {
 class IDynamicObject;
 class CWorld;
+class IWorld;
 class CActionCounter;
 class CUnitServer;
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -26,7 +27,7 @@ IDynamicObject *CreateGrenadeServer( CWorld *pWorld, const CVec3 &vFrom, const C
 		STime tThrow, float fTFly, NDb::CModel *pModel, NDb::CRPGEngGrenade *_pRPGEngGrenade,
 		CUnitServer *_pUnitServer, int _nThrowerEngSkill );
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-IDynamicObject *CreateClickOfDeath( CActionCounter *pC, CObjectBase *pTarget, int _nUserID, const CRay &ray );
+IDynamicObject *CreateClickOfDeath( IWorld *pWorld, CActionCounter *pC, CObjectBase *pTarget, int _nUserID, const CRay &ray );
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 }
 #endif

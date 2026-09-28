@@ -65,7 +65,7 @@ class CClickOfDeath : public IDynamicObject
 	int operator&( CStructureSaver &f ) { f.Add(2,&pAction); f.Add(3,&pTarget); f.Add(4,&nUserID); f.Add(5,&ray); f.Add(6,&pWorld); return 0; }
 public:
 	CClickOfDeath() {}
-	CClickOfDeath( CActionCounter *pC, CObjectBase *pTarget, int _nUserID, const CRay &ray );
+	CClickOfDeath( IWorld *pWorld, CActionCounter *pC, CObjectBase *pTarget, int _nUserID, const CRay &ray );
 	bool Segment();
 	virtual void Visit( IRenderVisitor *p ) {}
 };
@@ -179,8 +179,9 @@ bool CGrenadeServer::Segment()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CClickOfDeath
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CClickOfDeath::CClickOfDeath( CActionCounter *_pAction, CObjectBase *_pTarget, int _nUserID, const CRay &_ray )
-: pAction(_pAction), pTarget(_pTarget), nUserID(_nUserID), ray(_ray)
+// Retail v1.2 0x75c880: retain the creating world for deferred damage processing.
+CClickOfDeath::CClickOfDeath( IWorld *_pWorld, CActionCounter *_pAction, CObjectBase *_pTarget, int _nUserID, const CRay &_ray )
+: pAction(_pAction), pTarget(_pTarget), nUserID(_nUserID), ray(_ray), pWorld(_pWorld)
 {
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -213,9 +214,9 @@ IDynamicObject *CreateGrenadeServer( CWorld *pWorld, const CVec3 &vFrom, const C
 	return new CGrenadeServer( pWorld, vFrom, vSpeed, tThrow, fTFly, pModel, _pRPGEngGrenade, _pUnitServer, _nThrowerEngSkill );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-IDynamicObject *CreateClickOfDeath( CActionCounter *pC, CObjectBase *pTarget, int _nUserID, const CRay &ray )
+IDynamicObject *CreateClickOfDeath( IWorld *pWorld, CActionCounter *pC, CObjectBase *pTarget, int _nUserID, const CRay &ray )
 {
-	return new CClickOfDeath( pC, pTarget, _nUserID, ray );
+	return new CClickOfDeath( pWorld, pC, pTarget, _nUserID, ray );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 }
