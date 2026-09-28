@@ -32,12 +32,6 @@ enum ELineDispos
 	NOTINTERSECT
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-struct SPoint
-{
-	int nIndex;
-	float fDepth;
-};
-////////////////////////////////////////////////////////////////////////////////////////////////////
 static CVec3 vCamDirs[6] = 
 {
 	CVec3( 1, 0, 0 ),
@@ -52,10 +46,12 @@ static vector< CObj<CObjectBase> > nodes;
 class CHZBuffer : public IHZBuffer
 {
 	OBJECT_BASIC_METHODS(CHZBuffer);
-	vector<CArray2D<float> > depthBuffer;
+	vector<CArray2D<unsigned short> > depthBuffer;
+	float fZBufScale;
 public:
-	void Initialize( int nXSize, int nYSize )
+	void Initialize( int nXSize, int nYSize, float fScale )
 	{
+		fZBufScale = fScale;
 		int nSize = Max( nXSize, nYSize );
 		int nLevels = 0;
 		while ( (nSize>>nLevels) > 4 )
@@ -73,8 +69,8 @@ public:
 	{
 		for ( int k = 1; k < depthBuffer.size(); ++k )
 		{
-			const CArray2D<float> &src = depthBuffer[ k - 1 ];
-			CArray2D<float> &dst = depthBuffer[ k ];
+			const CArray2D<unsigned short> &src = depthBuffer[ k - 1 ];
+			CArray2D<unsigned short> &dst = depthBuffer[ k ];
 			int nXSize = Min( src.GetXSize() / 2, dst.GetXSize() );
 			int nYSize = Min( src.GetYSize() / 2, dst.GetYSize() );
 			for ( int y = 0; y < nYSize; ++y )
@@ -104,7 +100,7 @@ public:
 				for ( int y = nYSize; y < dst.GetYSize(); ++y )
 				{
 					for ( int x = 0; x < nXSize; ++x )
-						dst[y][x] = 1e38f;
+						dst[y][x] = 0xffff;
 				}
 			}
 			if ( nXSize * 2 < src.GetXSize() )
@@ -123,17 +119,17 @@ public:
 				for ( int x = nXSize; x < dst.GetXSize(); ++x )
 				{
 					for ( int y = 0; y < nYSize; ++y )
-						dst[y][x] = 1e38f;
+						dst[y][x] = 0xffff;
 				}
 			}
 			for ( int x = nXSize; x < dst.GetXSize(); ++x )
 			{
 				for ( int y = nYSize; y < dst.GetYSize(); ++y )
-					dst[y][x] = 1e38f;
+					dst[y][x] = 0xffff;
 			}
 		}
 	}
-	bool IsVisible( const CTRect<float> &r, float fCheck ) const
+	bool IsVisible( const CTRect<float> &r, unsigned short nCheck ) const
 	{
 		int nX1 = Float2Int( ( r.x1 + 1 ) * 0.5f * depthBuffer[0].GetXSize() - 0.5f );
 		int nX2 = Float2Int( ( r.x2 + 1 ) * 0.5f * depthBuffer[0].GetXSize() - 0.5f );
@@ -142,7 +138,7 @@ public:
 		int nMax = Max( nX2 - nX1, nY2 - nY1 ), nLevel = 0;
 		while ( (nMax>>nLevel) > 3 && nLevel < depthBuffer.size() - 1 )
 			++nLevel;
-		const CArray2D<float> &l = depthBuffer[nLevel];
+		const CArray2D<unsigned short> &l = depthBuffer[nLevel];
 		nX1 = Max( (nX1 >> nLevel)-0, 0 );
 		nX2 = Min( (nX2 >> nLevel)+0, l.GetXSize() - 1 );
 		nY1 = Max( (nY1 >> nLevel)-0, 0 );
@@ -151,7 +147,7 @@ public:
 		{
 			for ( int x = nX1; x <= nX2; ++x )
 			{
-				if ( fCheck > l[y][x] )
+				if ( nCheck > l[y][x] )
 					return true;
 			}
 		}
@@ -167,104 +163,122 @@ public:
 		float fDist = m.wx * v.x + m.wy * v.y + m.wz * v.z + m.ww;
 		if ( fDist < s.fRadius )
 			return true;
-		return IsVisible( r, 1 / ( fDist - s.fRadius ) );
+		const float fCheck = fZBufScale / ( fDist - s.fRadius );
+		if ( fCheck > 65535.0f )
+			return true;
+		return IsVisible( r, (unsigned short)int( fCheck ) );
 	}
-	void SetBaseZ( int x, int y, float f ) { depthBuffer[0][y][x] = f; }
+	CArray2D<unsigned short>& GetBase() { return depthBuffer[0]; }
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // Visible part generator
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-class CPartsRender;
-class CPartsRender: public CRasterizer<CPartsRender>
+struct SFixedZIterator
 {
-	CArray2D<SPoint> depthBuffer;
+	int nZ0, nZ, nDZx, nDZy;
+	template<class T> void Init( T *pRender, const CVec3 &vA, float fZx, float fZy )
+	{
+		// Retail v1.2 0x5753e0: 8 fractional bits, anchored at a nearby pixel
+		// before subtracting integer gradients (avoids distant-origin rounding).
+		const float fScale = pRender->GetZBufferScale() * 256.0f;
+		nDZx = Float2Int( fZx * fScale );
+		nDZy = Float2Int( fZy * fScale );
+		const int nX = Float2Int( vA.x - 0.5f ), nY = Float2Int( vA.y - 0.5f );
+		const float fZ = vA.z - ( vA.x - 0.5f - nX ) * fZx - ( vA.y - 0.5f - nY ) * fZy;
+		nZ0 = int( unsigned( Float2Int( fZ * fScale ) ) - unsigned( nDZx ) * nX - unsigned( nDZy ) * nY );
+	}
+	void Start( int nY ) { nZ = int( unsigned( nZ0 ) + unsigned( nDZy ) * nY ); }
+	void Step() { nZ = int( unsigned( nZ ) + unsigned( nDZy ) ); }
+	int GetZ( int nX ) const { return int( unsigned( nZ ) + unsigned( nDZx ) * nX ) >> 8; }
+	int GetDZ() const { return nDZx >> 8; }
+};
+class CPartsRender: public CRasterizer<CPartsRender, SFixedZIterator>
+{
+	CObj<CHZBuffer> pHZBuffer;
+	CArray2D<unsigned short> indexBuffer;
 	vector<int> refCount;
 	int nWidth, nHeight;
 	int nCurrentID;
-	
+	float fZBufScale;
+
 	bool DoRenderBackface() const { return false; }
 	void ClipVertical( int *pnSY, int *pnFY2, int *pnFY )
 	{
-		(*pnSY) = Max( *pnSY, 0 );
-		(*pnFY2) = Min( *pnFY2, nHeight );//N_OCCLUDE_BUFFER_HEIGHT );
-		(*pnFY) = Min( *pnFY, nHeight );//N_OCCLUDE_BUFFER_HEIGHT );
+		*pnSY = Max( *pnSY, 0 );
+		*pnFY2 = Min( *pnFY2, nHeight );
+		*pnFY = Min( *pnFY, nHeight );
 	}
 	void ClipHorizontal( int *pnSX, int *pnFX )
 	{
-		(*pnSX) = Max( *pnSX, 0 );
-		(*pnFX) = Min( *pnFX, nWidth );//N_OCCLUDE_BUFFER_WIDTH );
+		*pnSX = Max( *pnSX, 0 );
+		*pnFX = Min( *pnFX, nWidth );
 	}
-	void RasterSpan( int nY, int nLeft, int nRight, float fZ, float fDZ, int nBackface )
+	void RasterSpan( int nY, int nLeft, int nRight, int nZ, int nDZ, int nBackface )
 	{
-		ASSERT( nY >= 0 && nY < depthBuffer.GetYSize() );
-		ASSERT( nLeft >= 0 && nRight <= depthBuffer.GetXSize() );
-		SPoint *pRow = &depthBuffer[nY][0], *pElem = pRow + nLeft, *pFinal = pRow + nRight;
-		for ( ; pElem < pFinal; ++pElem )
+		CArray2D<unsigned short> &depth = pHZBuffer->GetBase();
+		for ( int x = nLeft; x < nRight; ++x, nZ = int( unsigned( nZ ) + unsigned( nDZ ) ) )
 		{
-			ASSERT( fZ >= 0 );
-			SPoint &p = *pElem;
-			if ( fZ > p.fDepth )
+			// Raw 0x5782a5: signed depth comparison, word store; zero depth has
+			// no previous owner to debit. Do not clamp spans to the init limit.
+			if ( nZ > depth[nY][x] )
 			{
-				refCount[nCurrentID]++;
-				refCount[p.nIndex]--;
-				p.nIndex = nCurrentID;
-				p.fDepth = fZ;
+				if ( depth[nY][x] != 0 )
+					--refCount[indexBuffer[nY][x]];
+				++refCount[nCurrentID];
+				indexBuffer[nY][x] = (unsigned short)nCurrentID;
+				depth[nY][x] = (unsigned short)nZ;
 			}
-			fZ += fDZ;
 		}
 	}
 public:
-	CPartsRender( int _nWidth, int _nHeight ): nWidth(_nWidth), nHeight(_nHeight) {}
+	CPartsRender( int _nWidth, int _nHeight, float fScale ):
+		nWidth( _nWidth ), nHeight( _nHeight ), fZBufScale( fScale )
+	{
+		pHZBuffer = new CHZBuffer;
+		pHZBuffer->Initialize( nWidth, nHeight, fZBufScale );
+		indexBuffer.SetSizes( nWidth, nHeight );
+	}
 	int GetWidth() const { return nWidth; }
 	int GetHeight() const { return nHeight; }
+	float GetZBufferScale() const { return fZBufScale; }
 	void InitZBuffer( const SHMatrix &proj, float fRadius )
 	{
-		depthBuffer.SetSizes( nWidth, nHeight );
-		//float fZMul = proj._33, fZAdd = proj._34;
-		//float fWMul = proj._43, fWAdd = proj._44;
-		for ( int nY = 0; nY < nHeight; ++nY )
+		CArray2D<unsigned short> &depth = pHZBuffer->GetBase();
+		const float fScale = ( 1.0f / fRadius ) * fZBufScale;
+		for ( int y = 0; y < nHeight; ++y )
 		{
-			float fY = ( nY + 0.5f - nHeight * 0.5f ) * (2.0f / nHeight);
-			for ( int nX = 0; nX < nWidth; ++nX )
+			const float fY = ( y + 0.5f - nHeight * 0.5f ) * ( 2.0f / nHeight );
+			const float fDX = 2.0f / nWidth;
+			float fX = ( 0.5f - nWidth * 0.5f ) * fDX;
+			const float fY2 = fY * fY + 1.0f;
+			for ( int x = 0; x < nWidth; ++x, fX += fDX )
 			{
-				float fX = ( nX + 0.5f - nWidth * 0.5f ) * (2.0f / nWidth);
-				float fLeng = sqrt( sqr(fX) + sqr(fY) + 1 );
-				float fZ = fRadius / fLeng;
-				float fZt = 1 / fZ;//( fZAdd + fZMul * fZ ) / ( fWAdd + fWMul * fZ );
-				SPoint &p = depthBuffer[nY][nX];
-				p.fDepth = fZt;
-				p.nIndex = 0;
+				const float fLeng = sqrt( fX * fX + fY2 );
+				depth[y][x] = (unsigned short)Min( Float2Int( fLeng * fScale ), 65535 );
+				indexBuffer[y][x] = 0;
 			}
 		}
 	}
 	void FastInitZBuffer()
 	{
-		depthBuffer.SetSizes( nWidth, nHeight );
-		for ( int nY = 0; nY < nHeight; ++nY )
-		{
-			for ( int nX = 0; nX < nWidth; ++nX )
+		CArray2D<unsigned short> &depth = pHZBuffer->GetBase();
+		for ( int y = 0; y < nHeight; ++y )
+			for ( int x = 0; x < nWidth; ++x )
 			{
-				SPoint &p = depthBuffer[nY][nX];
-				p.fDepth = 0;//1;
-				p.nIndex = 0;
+				depth[y][x] = 0;
+				indexBuffer[y][x] = 0;
 			}
-		}
 	}
 	void SetCurrentID( int n ) { nCurrentID = n; }
-	void SetRefsNumber( int n ) { refCount.resize( n ); }
+	void SetRefsNumber( int n ) { refCount.assign( n, 0 ); }
 	void SetRefs( int n, int nVal ) { refCount[n] = nVal; }
 	int GetRefs( int n ) { return refCount[n]; }
-	void BuildHZ( CHZBuffer *pRes )
+	CHZBuffer* BuildHZ()
 	{
-		pRes->Initialize( nWidth, nHeight );
-		for ( int y = 0; y < nHeight; ++y )
-		{
-			for ( int x = 0; x < nWidth; ++x )
-				pRes->SetBaseZ( x, y, depthBuffer[y][x].fDepth );
-		}
-		pRes->BuildHZ();
+		pHZBuffer->BuildHZ();
+		return pHZBuffer;
 	}
-	friend class CRasterizer<CPartsRender>;
+	friend class CRasterizer<CPartsRender, SFixedZIterator>;
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 static int CountParts( const list<SRenderPartSet> &l )
@@ -328,7 +342,7 @@ static void RenderStuff( CPartsRender &pr, IRender *pRender, CTransformStack *pT
 void GeneratePartList( IRender *pRender, const CVec3 &vCenter, float fRadius, 
 	list<SRenderPartSet> *pRes, IRender::EDepthType eType, const SGroupSelect &mask )
 {
-	CPartsRender pr( N_OCCLUDE_BUFFER_WIDTH, N_OCCLUDE_BUFFER_HEIGHT );
+	CPartsRender pr( N_OCCLUDE_BUFFER_WIDTH, N_OCCLUDE_BUFFER_HEIGHT, 10000.0f );
 	nodes.clear();
 
 	for ( int nTemp = 0; nTemp < 6; nTemp++ )
@@ -345,8 +359,7 @@ void GeneratePartList( IRender *pRender, const CVec3 &vCenter, float fRadius,
 		pr.InitZBuffer( sTransform.GetProjection().forward, fRadius );
 		RenderStuff( pr, pRender, &sTransform, listParts );
 
-		CObj<CHZBuffer> pHZ = new CHZBuffer;
-		pr.BuildHZ( pHZ );
+		CObj<CHZBuffer> pHZ = pr.BuildHZ();
 
 		int nID = 0;
 		for ( list<SRenderPartSet>::iterator i = listParts.begin(); i != listParts.end(); i++ )
@@ -414,15 +427,14 @@ void MakeInvisibleElementsList( IRender *pRender, CTransformStack *pTS,
 	CObj<IHZBuffer> *pHZBuffer )
 {
 	// retail @0x176d50: width x/2 clamped [4,400], height y/2 clamped [4,300]
-	CPartsRender pr( Min( 400, Max( 4, (int)screenSize.x / 2 ) ), Min( 300, Max( 4, (int)screenSize.y / 2 ) ) );
+	CPartsRender pr( Min( 400, Max( 4, (int)screenSize.x / 2 ) ), Min( 300, Max( 4, (int)screenSize.y / 2 ) ), 40000.0f );
 	list<SRenderPartSet> listParts;
 	pRender->FormPartList( pTS, &listParts,IRender::DT_STATIC, _mask );
 	pr.FastInitZBuffer();
 	RenderStuff( pr, pRender, pTS, listParts );
 	
-	CHZBuffer *pHZ = new CHZBuffer;
+	CHZBuffer *pHZ = pr.BuildHZ();
 	*pHZBuffer = pHZ;
-	pr.BuildHZ( pHZ );
 
 	int nID = 0;
 	for ( list<SRenderPartSet>::iterator i = listParts.begin(); i != listParts.end(); i++ )
@@ -463,18 +475,14 @@ void MakeInvisibleElementsListFast( IRender *pRender, CTransformStack *pTS,
 	const SGroupSelect &_mask, const CVec2 &screenSize, CIgnorePartsHash *pIgnore,
 	CObj<IHZBuffer> *pHZBuffer )
 {
-	static CPartsRender pr( 400, 300 );
-	static CObj<CHZBuffer> pPersistentHZ;
+	static CPartsRender pr( 400, 300, 40000.0f );
 	list<SRenderPartSet> listParts;
 	pRender->FormPartList( pTS, &listParts, IRender::DT_STATIC, _mask );
 	pr.FastInitZBuffer();
 	RenderStuff( pr, pRender, pTS, listParts );
 
-	if ( !pPersistentHZ )
-		pPersistentHZ = new CHZBuffer;
-	CHZBuffer *pHZ = pPersistentHZ;
+	CHZBuffer *pHZ = pr.BuildHZ();
 	*pHZBuffer = pHZ;
-	pr.BuildHZ( pHZ );
 
 	int nID = 0;
 	for ( list<SRenderPartSet>::iterator i = listParts.begin(); i != listParts.end(); i++ )
