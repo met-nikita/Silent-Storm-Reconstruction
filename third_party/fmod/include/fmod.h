@@ -87,6 +87,7 @@ signed char    __stdcall FSOUND_SetSpeakerMode( unsigned int speakermode );
 FSOUND_SAMPLE *__stdcall FSOUND_Sample_Load( int index, const char *name_or_data, unsigned int mode, int offset, int length );
 void           __stdcall FSOUND_Sample_Free( FSOUND_SAMPLE *sptr );
 unsigned int   __stdcall FSOUND_Sample_GetLength( FSOUND_SAMPLE *sptr );
+signed char    __stdcall FSOUND_Sample_GetLoopPoints( FSOUND_SAMPLE *sptr, int *loopstart, int *loopend );
 signed char    __stdcall FSOUND_Sample_SetMode( FSOUND_SAMPLE *sptr, unsigned int mode );
 signed char    __stdcall FSOUND_Sample_SetDefaults( FSOUND_SAMPLE *sptr, int deffreq, int defvol, int defpan, int defpri );
 signed char    __stdcall FSOUND_Sample_SetMinMaxDistance( FSOUND_SAMPLE *sptr, float min, float max );

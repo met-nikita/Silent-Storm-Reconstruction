@@ -28,6 +28,7 @@ EXPORTS
     _FSOUND_Sample_Load@20
     _FSOUND_Sample_Free@4
     _FSOUND_Sample_GetLength@4
+    _FSOUND_Sample_GetLoopPoints@12
     _FSOUND_Sample_SetMode@8
     _FSOUND_Sample_SetDefaults@20
     _FSOUND_Sample_SetMinMaxDistance@12

@@ -68,21 +68,49 @@ public:
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CChannel: public CObjectBase
 {
+protected:
+	bool bStopSoundOnDelete;
 public:
+	CChannel( bool bStopOnDelete = true ): bStopSoundOnDelete(bStopOnDelete), nChannel(-1) {}
 	virtual ~CChannel()
 	{
-		FSOUND_StopSound( nChannel );
+		if ( bStopSoundOnDelete && nChannel != -1 )
+			FSOUND_StopSound( nChannel );
 	}
 	int nChannel;
+	virtual void SetChannel( int nNewChannel ) { nChannel = nNewChannel; }
 	virtual void Update( double dInterval ) = 0;
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
+struct SEndSound
+{
+	int nChannel;
+	FSOUND_SAMPLE *pSample;
+	SEndSound( FSOUND_SAMPLE *_pSample = 0 ): nChannel(-1), pSample(_pSample) {}
+	~SEndSound();
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// Retail keeps the channel alive after its scene sound releases the loop.
+class CSound3DHolder: public CChannel
+{
+	OBJECT_BASIC_METHODS(CSound3DHolder);
+public:
+	virtual void Update( double dInterval ) {}
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CSound2D: public CChannel
 {
 	OBJECT_BASIC_METHODS(CSound2D);
+	SEndSound endSound;
 	CObj<CSample2D> pSample;
 public:
-	CSound2D( CSample2D *_pSample = 0 ): pSample(_pSample) {}
+	CSound2D( CSample2D *_pSample = 0, bool bHasEnding = false ):
+		CChannel(!bHasEnding), endSound(bHasEnding ? (FSOUND_SAMPLE*)*_pSample : 0), pSample(_pSample) {}
+	virtual void SetChannel( int nNewChannel )
+	{
+		CChannel::SetChannel( nNewChannel );
+		endSound.nChannel = nNewChannel;
+	}
 	//void SetPan();
 	virtual void Update( double dInterval ) {}
 };
@@ -406,6 +434,24 @@ static CStreamList streams;
 typedef unordered_map< int, CMObj<CChannel> > CChannels;
 CChannels hashChannel;
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+SEndSound::~SEndSound()
+{
+	// Retail v1.2 0x82aa20: extend the loop to the sample end and let it finish
+	// on the existing channel. The holder replaces the released scene owner.
+	if ( pSample && nChannel != -1 )
+	{
+		int nStart, nEnd;
+		const unsigned int nLength = FSOUND_Sample_GetLength( pSample );
+		FSOUND_Sample_GetLoopPoints( pSample, &nStart, &nEnd );
+		FSOUND_Sample_SetLoopPoints( pSample, nStart, nLength - 1 );
+		FSOUND_SetLoopMode( nChannel, FSOUND_LOOP_OFF );
+		CSound3DHolder *pHolder = new CSound3DHolder;
+		pHolder->SetChannel( nChannel );
+		pSample = 0;
+		hashChannel[nChannel] = pHolder;
+	}
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool SearchDevices()
 {
@@ -596,8 +642,8 @@ CSound2D *PlaySound( CSample2D *pSample, int nStartMs, int nStartSamples, int nE
 	}
 	FSOUND_SetCurrentPosition( nChannel, nOffset );
 	FSOUND_SetLoopMode( nChannel, bLoop ? FSOUND_LOOP_NORMAL : FSOUND_LOOP_OFF );
-	CSound2D *pSound = new CSound2D( pSample );
-	pSound->nChannel = nChannel;
+	CSound2D *pSound = new CSound2D( pSample, nEndingSamples > 0 );
+	pSound->SetChannel( nChannel );
 	hashChannel[nChannel] = pSound;
 	FSOUND_SetPaused( nChannel, false );
 	return pSound;
@@ -879,9 +925,7 @@ void Update( const SListener &listener )
 	vector<int> aToDel;
 	for ( CChannels::iterator i = hashChannel.begin(); i != hashChannel.end(); ++i )
 	{
-		if ( !IsValid( i->second ) )
-			FSOUND_StopSound( i->first );
-		else if ( !FSOUND_IsPlaying( i->first ) )
+		if ( !IsValid( i->second ) || !FSOUND_IsPlaying( i->first ) )
 		{
 			FSOUND_StopSound( i->first );
 			aToDel.push_back( i->first );
