@@ -19,6 +19,8 @@
 #include "iInGameMenu.h"
 #include "Interface.h"
 #include "iGlobalMapUI.h"
+#include "iCommonUI.h"
+#include "iSpecialView.h"
 #include "..\Misc\StrProc.h"
 #include "..\MiscDll\Commands.h"
 #include "..\Misc\BasicShare.h"
@@ -29,6 +31,7 @@
 #include "scScenarioTracker.h"
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 static CBasicShare<int, CGlobalInfoLoader> shareGlobalInfo(141);
+static bool bXComMode = false;
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 namespace NGame
 {
@@ -49,7 +52,7 @@ private:
 	CDBPtr<NDb::CGlobalMap> pGlobalMap;
 	CDGPtr<CPtrFuncBase<CGlobalInfo> > pGlobalInfo;
 	//// interface
-	CObj<NUI::CGlobalMapUI> pGlobalMapUI;
+	CObj<NUI::CDesktopWindow> pGlobalMapUI;
 	// Retail NGame::CGlobalMap::operator& @0x1e4180: tag 1 is the COMPLETE 34-tag
 	// CMissionBase chunk. The former four-member SBaseChunk silently discarded the other 30 tags
 	// whenever a campaign was saved on the global map.
@@ -70,7 +73,7 @@ protected:
 public:
 	CGlobalMap();
 
-	void Initialize( NRPG::CGlobalGame* pGame, bool bShowMode = false );
+	bool Initialize( NRPG::CGlobalGame* pGame, bool bShowMode = false );
 
 	bool IsGlobalMapShowMode() const;
 	NDb::CGlobalMap* GetGlobalMap() const;
@@ -90,13 +93,15 @@ CGlobalMap::CGlobalMap():
 	bRenderWorld = false;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CGlobalMap::Initialize( NRPG::CGlobalGame *_pGame, bool _bShowMode )
+bool CGlobalMap::Initialize( NRPG::CGlobalGame *_pGame, bool _bShowMode )
 {
 	bShowMode = _bShowMode;
 	pGlobalGame = _pGame;
 
 	pGlobalMap = NDb::GetGlobalMap( pGlobalGame->nGlobalMapID );
 	pGlobalInfo = shareGlobalInfo.Get( pGlobalGame->nGlobalMapID );
+	if ( !IsValid( pGlobalMap ) || !IsValid( pGlobalInfo ) )
+		return false;
 
 	// Retail CGlobalMap::Initialize: the 2D map still owns a world and players
 	// so its database script can Sleep, show hints and receive UI completion events.
@@ -128,11 +133,15 @@ void CGlobalMap::Initialize( NRPG::CGlobalGame *_pGame, bool _bShowMode )
 
 	pInterface = new NUI::CInterface( pCursor, pSoundScene );
 
-	pGlobalMapUI = new NUI::CGlobalMapUI( NUI::SWindowInfo( pInterface, NUI::SPoint( 0, 0 ), NUI::SPoint( 1024, 768 ), "globalmapUI" ), this );
-	NUI::LoadTemplate( pGlobalMapUI, NDb::GetUIContainer( 175 ) );
-	pGlobalMapUI->ShowWindow( NUI::SWTYPE_SHOW );
+	if ( bXComMode )
+		pGlobalMapUI = new NUI::CXComMapUI( NUI::SWindowInfo( pInterface, NUI::SPoint( 0, 0 ), NUI::SPoint( 1024, 768 ), "globalmapUI" ), this );
+	else
+		pGlobalMapUI = new NUI::CGlobalMapUI( NUI::SWindowInfo( pInterface, NUI::SPoint( 0, 0 ), NUI::SPoint( 1024, 768 ), "globalmapUI" ), this );
+	NUI::LoadTemplate( pGlobalMapUI, NDb::GetUIContainer( bXComMode ? 446 : 175 ) );
+	PushDesktop( pGlobalMapUI );
 	pWorld->RunPostInitScript( pGlobalMap->pScript );
 	sMinFrameTime = 5;
+	return true;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CGlobalMap::IsGlobalMapShowMode() const
@@ -366,4 +375,5 @@ static void CommandStartGlobal( const string &szID, const vector<wstring> &param
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 START_REGISTER(iGlobalMap)
 	REGISTER_CMD( "global", CommandStartGlobal )
+	REGISTER_VAR_EX( "cheat_global_xcom", NGlobal::VarBoolHandler, &bXComMode, 0, false )
 FINISH_REGISTER

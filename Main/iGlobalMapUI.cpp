@@ -219,7 +219,7 @@ void CZoneGlobalSector::Update( const STime &sTime )
 // CGlobalMapUI
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CGlobalMapUI::CGlobalMapUI( const SWindowInfo &sInfo, NGame::IMission *_pGlobal ):
-	CWindow( sInfo ), pGlobal( _pGlobal )
+	CDesktopWindow( sInfo ), pGlobal( _pGlobal )
 {
 	// retail CGlobalMapUI ctor @0x1e4b20: disasm @0x5e4bfb `mov ecx,1` -> NDb::GetUICursor(1) =
 	// UICursors row 1 "xz" (UITexture 295, NormalPen.cur) -- the global-map default cursor.
@@ -287,7 +287,7 @@ bool CGlobalMapUI::ProcessMessage( const SEvent &sEvent )
 		}
 	}
 
-	if ( CWindow::ProcessMessage( sEvent ) )
+	if ( CDesktopWindow::ProcessMessage( sEvent ) )
 		return true;
 
 	switch( sEvent.nEvent )
@@ -321,7 +321,7 @@ bool CGlobalMapUI::ProcessMessage( const SEvent &sEvent )
 	return false;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-bool CGlobalMapUI::Update( const STime &sTime, NGScene::I2DGameView *pView )
+void CGlobalMapUI::Draw( const STime &sTime, NGScene::I2DGameView *pView )
 {
 	const SPoint &sCursorPos = GetInterface()->GetCursorPos();
 	for ( int nTemp = 0; nTemp < sectorsSet.size(); nTemp++ )
@@ -334,8 +334,11 @@ bool CGlobalMapUI::Update( const STime &sTime, NGScene::I2DGameView *pView )
 		pSector->Update( sTime );
 	}
 
-	CWindow::Update( sTime, pView );
-	return true;
+	// Retail v1.2 0x5e51d0: hover and recommendation refresh belong to Draw.
+	CPtr<NRPG::CGlobalGame> pGame = pGlobal->GetRPGGame();
+	CPtr<NScenario::CScenarioZone> pBase = pGame->pScenarioTracker->GetZoneByDBZone( pGlobal->GetGlobalMap()->pBaseZone );
+	pBaseZone->SetFlashMode( pGame->pScenarioTracker->GetRecommendedZone( pGame->players.front() ) == pBase );
+	CDesktopWindow::Draw( sTime, pView );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CGlobalMapUI::GetGlobalSectorInfo( const SGlobalSector &sSector, bool *pbVisible, bool *pRecommended )
