@@ -201,7 +201,9 @@ bool CBulletServer::Segment()
 		if ( pArmor->pShotMaterial && IsValid( sCurrent.pObject ) )
 		{
 			CDynamicCast<IBuilding> pBuilding( sCurrent.pObject );
-			CObjectBase *pDecalTarget = pBuilding ? pBuilding->GetSceneHandle() : sCurrent.pObject.GetPtr();
+			CDynamicCast<CUnitServer> pUnit( sCurrent.pObject );
+			CObjectBase *pDecalTarget = pBuilding ? pBuilding->GetSceneHandle() :
+				pUnit ? pUnit->GetDecalsRef() : sCurrent.pObject.GetPtr();
 			new CDecal( pWorld, vPlace, vNormal, pArmor->fShotRadius, pArmor->pShotMaterial->GetMaterial(&rnd), pDecalTarget );
 		}
 		else if ( pArmor->pShotMaterial && sCurrent.pObject == 0 )

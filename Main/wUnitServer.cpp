@@ -1496,6 +1496,12 @@ const CObjectBase* CUnitServer::GetAttackIgnore() const
 	return this;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+CObjectBase* CUnitServer::GetDecalsRef()
+{
+	// Retail v1.2 0x7c6e90: impacts on a wearer belong to its Panzerklein.
+	return pWearingPK ? pWearingPK.GetPtr() : this;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 void CUnitServer::UpdateCriticalsState()
 { 
 	pState->FilterCriticals(); 

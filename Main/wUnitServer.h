@@ -253,6 +253,7 @@ public:
 	virtual CVec3 GetAttackOrigin( const NAI::SUnitPosition &from, bool bLeftHand = false ) const;
 	virtual float GetMinClearDistance() const;
 	virtual const CObjectBase* GetAttackIgnore() const;
+	virtual CObjectBase* GetDecalsRef();
 	virtual EUnitCommandResult CanDo( CCmd *p, int *pnStartAP = 0, int *pnFullAP = 0 );
 	virtual bool HasEnoughAP();
 	virtual EState GetState();
