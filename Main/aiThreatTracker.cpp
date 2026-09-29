@@ -114,7 +114,11 @@ void CAIEventTrackerImpl::ThrowAIEvent( IAIEvent *pEvent )
 	{
 		SAIUnitState *pState = pIface->GetAIUnitState();
 		if ( IsValid( ev ) && pState != 0 )
-			pState->Notify( pEvent );
+			// Retail CAIUnit's tracker-base slot is OnAIEvent, not Notify:
+			// v1.2 0x8b4a60 -> 0x4af2a0 -> 0x4add20 -> 0x4b0dd0.
+			// Notify locks contact collections for reaction-side edits; using it
+			// for new sightings suppresses their dirty flags and leaves pEnemy null.
+			pState->OnAIEvent( pEvent );
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
