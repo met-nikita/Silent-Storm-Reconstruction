@@ -473,7 +473,7 @@ private:
 	void LoadWaypoints( const list< CObj<CMapWaypoint> > &_waypoints );
 	virtual STime GetWorldTime() { return GetTime()->GetValue(); }
 	void RunAutoLoadScripts();
-	CUnitServer* AddUnit( const NAI::SPathPlace &aiPos, NRPG::IUnitMission *_pRPG, CPlayer *pPlayer, const string &szName = "" );
+	CUnitServer* AddUnit( const NAI::SPathPlace &aiPos, NRPG::IUnitMission *_pRPG, CPlayer *pPlayer, const string &szName = "", bool bClueUnit = false );
 	void AddAIPlayer( const wstring &wsName, int nScenarioPlayerID );
 	void CreateAIUnits( const SMapInfo &mapInfo, const ClueToSlot &personClueToSlot, 
 		int nMobsLevel, unordered_map< int, CPtr<CUnitServer> > *pIDToUnit, CVec3 ptDeltaPos = VNULL3 );

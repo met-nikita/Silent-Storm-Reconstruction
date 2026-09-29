@@ -651,7 +651,7 @@ CObjectServerBase *CWorld::AddObject( const SObjectPlace &pos,
 	return pResult;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CUnitServer* CWorld::AddUnit( const NAI::SPathPlace &aiPos,	NRPG::IUnitMission *_pRPG, CPlayer *pPlayer, const string &szName )
+CUnitServer* CWorld::AddUnit( const NAI::SPathPlace &aiPos,	NRPG::IUnitMission *_pRPG, CPlayer *pPlayer, const string &szName, bool bClueUnit )
 {
 	CUnitServer *pUS = 0;
 	NAI::SUnitPosition p;
@@ -661,7 +661,7 @@ CUnitServer* CWorld::AddUnit( const NAI::SPathPlace &aiPos,	NRPG::IUnitMission *
 	if ( !p.IsValid() )
 		return 0;
 	//
-	pUS = AddUnit( new CUnitServer( this, _pRPG, _pRPG->GetModel(), pPlayer, p ) );
+	pUS = AddUnit( new CUnitServer( this, _pRPG, _pRPG->GetModel(), pPlayer, p, bClueUnit ) );
 	if ( !IsValid( pUS ) )
 		return 0;
 	//
@@ -1531,7 +1531,8 @@ void CWorld::CreateAIUnits( const SMapInfo &mapInfo, const ClueToSlot &personClu
 		if ( !IsValid( pPlayer ) )
 			continue;
 		//
-		CPtr<CUnitServer> pUnitServer = AddUnit( pos.p, pRPG, pPlayer, i->szName );
+		// Retail v1.2 0x76bb3b: occupied person-clue slots mark their spawned unit.
+		CPtr<CUnitServer> pUnitServer = AddUnit( pos.p, pRPG, pPlayer, i->szName, i->bSlot );
 		(*pIDToUnit)[ i->nUnitID ] = pUnitServer;
 
 		ASSERT( IsValid( pUnitServer ) );
