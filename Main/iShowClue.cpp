@@ -9,6 +9,7 @@
 #include "Interface.h"
 #include "iCommonUI.h"
 #include "iMission.h"
+#include "wInterface.h"
 #include "iShowClue.h"
 #include "RPGGlobal.h"
 #include "..\DBFormat\DataRPG.h"
@@ -187,7 +188,7 @@ private:
 public:
 	CShowClueInterface();
 
-	void Initialize( NRPG::CGlobalGame *pGame, NRPG::CGlobalPlayer *pPlayer, NScenario::CScenarioClue *pClue, NUI::CScreenShot *pScreenShot );
+	void Initialize( IMission *pMission, int nEventID, NRPG::CGlobalGame *pGame, NRPG::CGlobalPlayer *pPlayer, NScenario::CScenarioClue *pClue, NUI::CScreenShot *pScreenShot );
 
 	void Step();
 	void OnGetFocus();
@@ -200,8 +201,10 @@ CShowClueInterface::CShowClueInterface():
 {
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CShowClueInterface::Initialize( NRPG::CGlobalGame *_pGame, NRPG::CGlobalPlayer *_pPlayer, NScenario::CScenarioClue *_pClue, NUI::CScreenShot *_pScreenShot )
+void CShowClueInterface::Initialize( IMission *_pMission, int _nEventID, NRPG::CGlobalGame *_pGame, NRPG::CGlobalPlayer *_pPlayer, NScenario::CScenarioClue *_pClue, NUI::CScreenShot *_pScreenShot )
 {
+	pMission = _pMission;
+	nEventID = _nEventID;
 	pGame = _pGame;
 	pPlayer = _pPlayer;
 	pClue = _pClue;
@@ -249,6 +252,10 @@ bool CShowClueInterface::ProcessEvent( const NInput::SEvent &sEvent )
 
 	if ( bindClose.ProcessEvent( sEvent ) )
 	{
+		// Retail v1.2 0x63899b..0x6389d4: release the originating UI wait
+		// before leaving the modal. Chapter-map clues have no mission to notify.
+		if ( IsValid( pMission ) )
+			pMission->DoEvent( new NWorld::CCmdInterfaceEvent( nEventID ) );
 		NMainLoop::Command( new NMainLoop::CICExitModal() );
 		return true;
 	}
@@ -265,15 +272,15 @@ void CShowClueInterface::RenderFrame()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CICShowClue
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CICShowClue::CICShowClue( NRPG::CGlobalGame *_pGame, NRPG::CGlobalPlayer *_pPlayer, NScenario::CScenarioClue *_pClue, NUI::CScreenShot *_pScreenShot ):
-	pGame( _pGame ), pPlayer( _pPlayer ), pClue( _pClue ), pScreenShot( _pScreenShot )
+CICShowClue::CICShowClue( IMission *_pMission, int _nEventID, NRPG::CGlobalGame *_pGame, NRPG::CGlobalPlayer *_pPlayer, NScenario::CScenarioClue *_pClue, NUI::CScreenShot *_pScreenShot ):
+	nEventID( _nEventID ), pMission( _pMission ), pGame( _pGame ), pPlayer( _pPlayer ), pClue( _pClue ), pScreenShot( _pScreenShot )
 {
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CICShowClue::Exec()
 {
 	CShowClueInterface *pRes = new CShowClueInterface();
-	pRes->Initialize( pGame, pPlayer, pClue, pScreenShot );
+	pRes->Initialize( pMission, nEventID, pGame, pPlayer, pClue, pScreenShot );
 	PushInterface( pRes );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
