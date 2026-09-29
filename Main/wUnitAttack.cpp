@@ -207,7 +207,9 @@ static EUnitCommandResult GetActionValidPlaces( CUnitServer *pUS, CCmdShootTile 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 static EUnitCommandResult GetActionValidPlaces( CUnitServer *pUS, CCmdShootObject *pCmd, vector<NAI::SPathPlace> *pRes )
 {
-	CDynamicCast<CUnitServer> pTarget( pCmd->pTarget );
+	// Retail v1.2 0x793ae0: doors and other object targets also need facing/item
+	// preparation. A unit-only cast incorrectly leaves the queue at UCR_NO_TARGET.
+	CPtr<CObjectBase> pTarget = pCmd->pTarget;
 	if ( !IsValid( pTarget ) )
 		return UCR_NO_TARGET;
 
