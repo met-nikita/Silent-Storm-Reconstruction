@@ -90,7 +90,7 @@ public:
 		info.geometry.polys.resize( 1 );
 		info.geometry.polys[0] = 0;
 	}
-	~CShadowBuilder() { pRes->Assign( info ); }
+	~CShadowBuilder() { pRes->Assign( info, false ); }
 	void Setup( const CVec3 &vOrigin, const CVec3 &vNormal, const CVec2 &vSize, float fRotation, const CVec2 &_vShift, int nShift );
 	void AddObject( const CObjectInfo &info, const SDiscretePos &_srcPos );
 };
@@ -294,7 +294,7 @@ void CPerPolyDecal::Recalc()
 		pPart = 0;
 		data = CObjectInfo::SData();//.Clear();
 		pValue = new CObjectInfo;
-		pValue->Assign( data );
+		pValue->Assign( data, false );
 		return;
 	}
 	if ( !pPart->HasLoadedObjectInfo() )
@@ -313,7 +313,7 @@ void CPerPolyDecal::Recalc()
 	Recalc( &data, *pSource->GetValue(), srcPositions );
 
 	pValue = new CObjectInfo;
-	pValue->Assign( data );
+	pValue->Assign( data, false );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CExplosionDecalGeometry

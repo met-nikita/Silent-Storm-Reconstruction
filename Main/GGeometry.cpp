@@ -359,33 +359,42 @@ void CObjectInfo::AssignLM( const SData &data )
 	EstablishRefs();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CObjectInfo::Assign( const SData &data )
+void CObjectInfo::Assign( const SData &data, bool bOptimize )
 {
-	SData optimizedData;
-	if ( data.geometry.GetTrianglesCount() > 0  )
-	{
-		// optimize for vertex cache
-		vector<STriangle> tris;
-		data.geometry.GetTriangles( &tris );
-		CTriVertexCacheOptimizer vxOptimize;
-		vector<WORD> vxReorder;
-		vxOptimize.Optimize( &tris, &vxReorder, NGfx::nVCacheSize );
-		FilterTrinagles( &tris, vxReorder );
-		optimizedData.geometry.SetTriangles( tris );
-		optimizedData.verts.resize( data.verts.size() );
-		for ( int k = 0; k < data.verts.size(); ++k )
-			optimizedData.verts[ vxReorder[k] ] = data.verts[k];
-		if ( !data.weights.empty() )
-		{
-			ASSERT( data.weights.size() == data.verts.size() );
-			optimizedData.weights.resize( data.weights.size() );
-			for ( int k = 0; k < data.weights.size(); ++k )
-				optimizedData.weights[ vxReorder[k] ] = data.weights[k];
-		}
-	}
 	lmaps.clear();
 	lmLODs.clear();
-	AssignGeometry( optimizedData );
+	if ( bOptimize )
+	{
+		SData optimizedData;
+		if ( data.geometry.GetTrianglesCount() > 0 )
+		{
+			// Optimize only the referenced vertices, as retail does. Keeping
+			// the original size leaves zero-filled unused slots in the merge.
+			vector<STriangle> tris;
+			data.geometry.GetTriangles( &tris );
+			CTriVertexCacheOptimizer vxOptimize;
+			vector<WORD> vxReorder;
+			int nUsedVertices;
+			vxOptimize.Optimize( &tris, &vxReorder, &nUsedVertices, NGfx::nVCacheSize );
+			FilterTrinagles( &tris, vxReorder );
+			optimizedData.geometry.SetTriangles( tris );
+			optimizedData.verts.resize( nUsedVertices );
+			for ( int k = 0; k < vxReorder.size(); ++k )
+				if ( vxReorder[k] < nUsedVertices )
+					optimizedData.verts[ vxReorder[k] ] = data.verts[k];
+			if ( !data.weights.empty() )
+			{
+				ASSERT( data.weights.size() == data.verts.size() );
+				optimizedData.weights.resize( nUsedVertices );
+				for ( int k = 0; k < vxReorder.size(); ++k )
+					if ( vxReorder[k] < nUsedVertices )
+						optimizedData.weights[ vxReorder[k] ] = data.weights[k];
+			}
+		}
+		AssignGeometry( optimizedData );
+	}
+	else
+		AssignGeometry( data );
 	MergePositions();
 	nTris = geometry.GetTrianglesCount();
 	EstablishRefs();

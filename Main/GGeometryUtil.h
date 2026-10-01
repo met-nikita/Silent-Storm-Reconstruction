@@ -172,9 +172,9 @@ private:
 	bool OutputVertex( int n );
 	void ReverseVertex();
 	int CountNotCachedFL( const vector<STriangle> &tris, int nVertex );
-	void OptimizeVertexOrder( vector<STriangle> &tris, vector<WORD> *pVertexReorder );
+	void OptimizeVertexOrder( vector<STriangle> &tris, int *pnUsedVertices, vector<WORD> *pVertexReorder );
 public:
-	void Optimize( vector<STriangle> *pTris, vector<WORD> *pVertexReorder, int nVCacheSize );
+	void Optimize( vector<STriangle> *pTris, vector<WORD> *pVertexReorder, int *pnUsedVertices, int nVCacheSize );
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 struct SEdgeInfo

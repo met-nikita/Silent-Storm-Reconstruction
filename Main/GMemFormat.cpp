@@ -72,7 +72,7 @@ void CMemObjectInfo::Recalc()
 		CalcDU( &resData.verts[i], normals[i] );
 	//
 	resData.geometry.SetTriangles( tris );
-	pValue->Assign( resData );
+	pValue->Assign( resData, false );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 } // namespace

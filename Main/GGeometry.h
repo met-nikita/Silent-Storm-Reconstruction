@@ -119,7 +119,7 @@ private:
 public:
 	CObjectInfo() : nTris(0), fAverageTriArea(0) {}
 	float GetAverageTriArea() const { return fAverageTriArea; }
-	void Assign( const SData &data );
+	void Assign( const SData &data, bool bOptimize = true );
 	void AssignLM( const SData &data );
 	void AssignFast( const SData &data );
 	const vector<CVec3>& GetPositions() const { return positions; }

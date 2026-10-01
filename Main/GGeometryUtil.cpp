@@ -303,7 +303,7 @@ int CTriVertexCacheOptimizer::CountNotCachedFL( const vector<STriangle> &tris, i
 	return nRes;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CTriVertexCacheOptimizer::OptimizeVertexOrder( vector<STriangle> &tris, vector<WORD> *pVertexReorder )
+void CTriVertexCacheOptimizer::OptimizeVertexOrder( vector<STriangle> &tris, int *pnUsedVertices, vector<WORD> *pVertexReorder )
 {
 	vector<WORD> &position = *pVertexReorder;
 	position.resize(0);
@@ -319,16 +319,18 @@ void CTriVertexCacheOptimizer::OptimizeVertexOrder( vector<STriangle> &tris, vec
 		if ( position[q.i3] == 0xffff )
 			position[q.i3] = nPos++;
 	}
+	// Retail reports the referenced prefix before numbering unused vertices.
+	*pnUsedVertices = nPos;
 	// clean up to avoid crashes
 	for ( int k = 0; k < position.size(); ++k )
 	{
 		if ( position[k] == 0xffff )
-			position[k] = nPos;
+			position[k] = nPos++;
 	}
 	ASSERT( nPos <= position.size() );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CTriVertexCacheOptimizer::Optimize( vector<STriangle> *pTris, vector<WORD> *pVertexReorder, int _nVCacheSize )
+void CTriVertexCacheOptimizer::Optimize( vector<STriangle> *pTris, vector<WORD> *pVertexReorder, int *pnUsedVertices, int _nVCacheSize )
 {
 	nVCacheSize = _nVCacheSize;
 	/*vector<STriangle> tt;
@@ -344,7 +346,7 @@ void CTriVertexCacheOptimizer::Optimize( vector<STriangle> *pTris, vector<WORD> 
 	if ( pTris->size() <= nVCacheSize / 3 )
 	{
 		CountVertices( *pTris );
-		OptimizeVertexOrder( *pTris, pVertexReorder );
+		OptimizeVertexOrder( *pTris, pnUsedVertices, pVertexReorder );
 		return;
 	}
 //	DebugTrace( "%d tris\n", pTris->size() );
@@ -397,7 +399,7 @@ void CTriVertexCacheOptimizer::Optimize( vector<STriangle> *pTris, vector<WORD> 
 	{
 		*pTris = res;
 //		MeasureEfficiency( *pTris );
-		OptimizeVertexOrder( *pTris, pVertexReorder );
+		OptimizeVertexOrder( *pTris, pnUsedVertices, pVertexReorder );
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
