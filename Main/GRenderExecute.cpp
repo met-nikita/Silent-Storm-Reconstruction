@@ -1049,16 +1049,12 @@ static void ExecOps( NGfx::CRenderContext *pRC, const vector<CRenderCmdList::SOp
 			triListType = TLT_POSITION;
 			break;
 		case RO_CL_TEST_PREV_FRAME:
-		case RO_CL_STORE_DEPTH:
-			pRC->SetPixelShader( op.op == RO_CL_STORE_DEPTH ? psDiffuse : psCLTestPrevFrame );
+			pRC->SetPixelShader( psCLTestPrevFrame );
 			pRC->SetVertexShader( vsCLTestPrevFrame );
 			pRC->SetVSConst( 16, *op.p1.pVec4 );
 			pRC->SetVSConst( 25, op.p2.pVec4, 4 );
-			if ( op.op == RO_CL_TEST_PREV_FRAME )
-			{
-				pRC->SetAlphaRef( 1 );
-				pRC->SetTexture( 0, NGfx::GetRegisterTexture( Float2Int( op.p3.f ) ) );
-			}
+			pRC->SetAlphaRef( 1 );
+			pRC->SetTexture( 0, NGfx::GetRegisterTexture( Float2Int( op.p3.f ) ) );
 			triListType = TLT_POSITION;
 			break;
 		case RO_REGISTER:

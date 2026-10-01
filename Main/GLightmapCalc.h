@@ -20,8 +20,8 @@ class CPerMaterialCombiner;
 struct SLightInfo;
 const int N_CL_TEMP_REGISTER = 2;
 const int N_CL_TARGET_REGISTER = 3;
-// Register 4 belongs to the legacy sun-shadow and specular scratch passes.
-const int N_CL_DEPTH_REGISTER = 5;
+// Retail retains the unblurred sun pass's surface depth in register 4 alpha.
+const int N_CL_DEPTH_REGISTER = 4;
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 struct SGlobalIlluminationInfo
 {
@@ -174,6 +174,8 @@ private:
 	bool bLightStateUpdated;
 	typedef unordered_map<SPointLightPos,CObj<CCubeTextureChannel>, SPointLightPosHash> CPointDepthHash;
 	CPointDepthHash pointDepths;
+	// Transient, like the cube leases; retail does not serialize point HSR.
+	unordered_map<SPointLightPos,CPointHSRParts,SPointLightPosHash> pointHSR;
 	CCubeTextureChannel *GetPointDepth( const CVec3 &vCenter, float fRadius );
 	void SortLights( vector<int> *pOrder );
 private:
@@ -210,7 +212,8 @@ private:
 public:
 	CLightmapTracker();
 	void CatchUp( NGfx::CRenderContext *pRC, IRender *_pRender, CTransformStack *pTS, CSceneFragments *pScene,
-		bool bHasNewLightmaps, const SGroupSelect &groupSelect, const CVec4 &vDepth, bool bReuseLight, int nScratchRegister );
+		bool bHasNewLightmaps, const SGroupSelect &groupSelect, bool bFirstCatch,
+		const CVec4 &vDepth, bool bReuseLight, int nScratchRegister );
 	void SetNewIllumination( const SGlobalIlluminationInfo &gl );
 	const CLightState& GetLightState() const { return lightState; }
 };

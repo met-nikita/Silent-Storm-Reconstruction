@@ -2,9 +2,11 @@
 #include "GfxBuffers.h"
 #include "GLightmapCalc.h"
 #include "GGeometry.h"
+#include "GCombiner.h"
 #include "..\Misc\RandomGen.h"
 #include "GRenderExecute.h"
 #include "GShadowMap.h"
+#include "GShadowVolume.h"
 #include "GfxUtils.h"
 #include "Transform.h"
 #include "GfxEffects.h"
@@ -415,7 +417,7 @@ void CLightmapTracker::RenderLight(
 		if ( pTarget->pGeom->IsFilteredFragment( i ) )
 			continue;
 		const SRenderFragmentInfo &frag = *fragments[i];
-		if ( (op == RO_CL_COPY_LAST || op == RO_CL_TEST_PREV_FRAME || op == RO_CL_STORE_DEPTH) &&
+		if ( (op == RO_CL_COPY_LAST || op == RO_CL_TEST_PREV_FRAME) &&
 			!frag.pMaterial->GetMaterialInfo().IsSolid() )
 			continue;
 		SOpGenContext fi( &res.ops, &frag );
@@ -446,7 +448,18 @@ void CLightmapTracker::RenderCubeMapDepth(
 	NGfx::CCubeTexture *pDepth = pChannel ? pChannel->pTexture.GetPtr() : shadowMapsShare.GetCubeDepth();
 	if ( !IsValid(pDepth) )
 		return;
-	const int nResolution = pChannel ? GetCLCubeResolution() : shadowMapsShare.GetCubeDepthResolution();
+	if ( nDir == 0 )
+	{
+		// Retail v1.2 0x52e4e3..0x52e5fe builds receiver visibility once
+		// per cube, independent of the viewing camera and active floor.
+		CPointHSRParts &receivers = pointHSR[SPointLightPos(_vCenter, fRadius)];
+		list<SRenderPartSet> parts;
+		GeneratePartList( pRender, _vCenter, fRadius, &parts, IRender::DT_STATIC, SGroupSelect(0xfff, 0) );
+		for ( list<SRenderPartSet>::const_iterator i = parts.begin(); i != parts.end(); ++i )
+			receivers[i->pNode].Init( i->parts, *i->pParts );
+	}
+	CDynamicCast<NGfx::ICubeBuffer> pDepthBuffer( pDepth );
+	const int nResolution = pDepthBuffer->GetSize();
 	if ( pChannel )
 		shadowMapsShare.TouchCubeChannel(pChannel);
 	//for ( int k = 0; k < 6; ++k )
@@ -477,7 +490,10 @@ void CLightmapTracker::RenderCubeMapDepth(
 		SHMatrix mCubeCenter;
 		MakeMatrix( &mCubeCenter, _vCenter, vDir );
 		tsFrustrum.SetCamera( mCubeCenter );
-		pRender->FormDirOccludersList( &tsFrustrum, vDir, &geom, MakeSelectAll(), false );
+		// Retail v1.2 0x52eb54 calls IRender::FormDepthList (vtbl +4), not
+		// FormDirOccludersList. The latter substitutes simplified occluders for
+		// off-camera nodes, making cached lamp shadows depend on camera history.
+		pRender->FormDepthList( &tsFrustrum, vDir, &geom, IRender::DT_STATIC );
 		
 		// form transform stack for render
 		camera.y = -camera.y;
@@ -521,7 +537,10 @@ void CLightmapTracker::DownsampleCubeMapDepth( const CVec3 &_vCenter, float _fRa
 	Identity( &id.backward );
 	rc.SetTransform( id );
 	NGfx::STriangleList quad;
-	NGfx::MakeQuadTriList( 2, &quad );
+	// Retail v1.2 0x52d679 passes one RECT (two triangles), not two rects.
+	// There are only four vertices below; a second quad reads unrelated pooled
+	// vertices and corrupts the coarse cache with camera-dependent shapes.
+	NGfx::MakeQuadTriList( 1, &quad );
 	NGfx::SGeomVecFull v;
 	Zero( v );
 	CVec3 vX(1,0,0), vY(0,1,0), vZ(0,0,1);
@@ -558,10 +577,17 @@ void CLightmapTracker::DownsampleCubeMapDepth( const CVec3 &_vCenter, float _fRa
 			geom[3] = v;
 		}
 		rc.SetCubeTextureRT( pDepth, face, 0 );
-		rc.ClearZBuffer();
 		rc.SetColorWrite( (NGfx::EColorWriteMask)pChannel->GetWriteMask() );
-		rc.SetDepth( NGfx::DEPTH_NONE );
-		rc.SetAlphaCombine( NGfx::COMBINE_NONE );
+		{
+			// Retail 0x52de5b clears only this channel, including its depth,
+			// before copying. D3D Clear would overwrite the other three lights.
+			const int nResolution = GetCLCubeResolution();
+			CRectLayout black;
+			black.AddRect( 0, 0, nResolution, nResolution,
+				CTRect<float>(0, 0, nResolution, nResolution), NGfx::SPixel8888(0,0,0,0) );
+			NGfx::C2DQuadsRenderer qr( rc, CVec2(nResolution, nResolution), NGfx::QRM_OVERWRITE|NGfx::QRM_SOLID );
+			RenderRectLayout( &qr, 0, black );
+		}
 		NGfx::SEffRenderCubemap effScale;
 		effScale.pTex = pSrc;
 		rc.SetEffect( &effScale );
@@ -583,7 +609,9 @@ void CLightmapTracker::RenderPointLightShadowed(
 	}
 	SBound bTarget;
 	bTarget.SphereInit( _vCenter, fRadius );
-	CSelectGeometries selector( pTarget->pGeom, SBoundIntersectFilter( bTarget ) );
+	auto receivers = pointHSR.find(SPointLightPos(_vCenter, fRadius));
+	CSelectGeometries selector( pTarget->pGeom,
+		SIgnoredSphereFilter(receivers == pointHSR.end() ? 0 : &receivers->second, bTarget.s) );
 	if ( !pTarget->pGeom->HasSelectedFragments() )
 		return;
 	SLightInfo lightInfo;
@@ -1092,13 +1120,13 @@ void CLightmapTracker::RecalcStep( NGfx::CRenderContext *pRC, CSceneFragments *p
 // The screen registers belong to the most recently rendered scene, not to its tracker.
 static CPtr<CLightmapTracker> pPreviousCLTracker;
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-static void PrepareCLHistory( NGfx::CRenderContext *pRC )
+static void PrepareCLHistory( NGfx::CRenderContext *pRC, int nHistoryRegister )
 {
 	NGfx::CRenderContext rc( *pRC );
 	CTRect<float> size;
 	NGfx::GetRegisterSize( &size );
 	rc.SetVirtualRT();
-	rc.SetRegister( N_CL_DEPTH_REGISTER );
+	rc.SetRegister( nHistoryRegister );
 	rc.SetColorWrite( NGfx::COLORWRITE_ALL );
 	rc.SetStencil( NGfx::STENCIL_NONE );
 	rc.SetAlphaCombine( NGfx::COMBINE_NONE );
@@ -1119,7 +1147,8 @@ static void PrepareCLHistory( NGfx::CRenderContext *pRC )
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CLightmapTracker::CatchUp( NGfx::CRenderContext *_pRC, IRender *_pRender, CTransformStack *pTS, CSceneFragments *pScene,
-	bool bHasNewLightmaps, const SGroupSelect &_gs, const CVec4 &vDepth, bool bReuseLight, int nScratchRegister )
+	bool bHasNewLightmaps, const SGroupSelect &_gs, bool bFirstCatch,
+	const CVec4 &vDepth, bool bReuseLight, int nScratchRegister )
 {
 	shadowMapsShare.NextCubeFrame();
 	NGfx::CRenderContext rc( *_pRC );
@@ -1177,6 +1206,22 @@ void CLightmapTracker::CatchUp( NGfx::CRenderContext *_pRC, IRender *_pRender, C
 			RecalcDepthChannel( k, N_ALL_DEPTH_CHANNELS, true );
 	}
 
+	// Retail v1.2 0x52fad3: the first catch builds every coarse cube face, even
+	// while the camera moves. Later stationary frames refine these cached maps.
+	if ( bFirstCatch )
+	{
+		SLightmapTargetGeom target( pScene, &rc, pTS, N_CL_TEMP_REGISTER );
+		for ( int i = 0; i < lightState.points.size(); ++i )
+		{
+			const CLightState::SPointLight &p = lightState.points[i];
+			if ( !p.bCastShadow )
+				continue;
+			CCubeTextureChannel *pChannel = GetPointDepth( p.vCenter, p.fRadius );
+			for ( int nFace = 0; nFace < 6; ++nFace )
+				RenderCubeMapDepth( &target, p.vCenter, p.fRadius, nFace, pChannel );
+		}
+	}
+
 	// calc lightmap for new stuff
 	//CalcCorrectZBuffer( &rc, _pRender, pTS, pScene );
 	if ( bHasNewLightmaps )
@@ -1186,10 +1231,10 @@ void CLightmapTracker::CatchUp( NGfx::CRenderContext *_pRC, IRender *_pRender, C
 		{
 			// Retail v1.2 CatchUp @0x52fb90: reproject last light onto the current
 			// geometry; only matching previous surface depths set stencil bit 0x40.
-			PrepareCLHistory( &rc );
+			PrepareCLHistory( &rc, nScratchRegister );
 			rc.SetColorWrite( NGfx::COLORWRITE_NONE );
 			RenderLight( &lmTarget, SLightInfo(), RO_CL_TEST_PREV_FRAME, &vDepth, &mPrevView.x,
-				DPM_EQUAL | STM_MARK_2, float(N_CL_DEPTH_REGISTER) );
+				DPM_EQUAL | STM_MARK_2, float(nScratchRegister) );
 			rc.SetColorWrite( NGfx::COLORWRITE_ALL );
 			RenderLight( &lmTarget, SLightInfo(), RO_CL_COPY_LAST, &mPrevView.x,
 				float(N_CL_TARGET_REGISTER), DPM_EQUAL );
@@ -1237,16 +1282,8 @@ void CLightmapTracker::CatchUp( NGfx::CRenderContext *_pRC, IRender *_pRender, C
 		RecalcStep( &rc, pScene, pTS, bReuseLight, nScratchRegister );
 	if ( bReuseLight )
 	{
-		if ( bHasNewLightmaps )
-		{
-			// This renderer predates retail's combined sun/depth output. Save the
-			// same biased surface height in a separate depth-equal pass instead.
-			SLightmapTargetGeom target( pScene, &rc, pTS, N_CL_DEPTH_REGISTER );
-			rc.SetRegister( N_CL_DEPTH_REGISTER );
-			rc.ClearTarget( 0xffffffff );
-			rc.SetColorWrite( NGfx::COLORWRITE_ALPHA );
-			RenderLight( &target, SLightInfo(), RO_CL_STORE_DEPTH, &vDepth, &pTS->Get().forward.x, DPM_EQUAL );
-		}
+		// The existing sun pass emits this depth together with shadow RGB.
+		// RenderPPShadowOps preserves the old alpha until reuse has finished.
 		pHistoryDepth = NGfx::GetRegisterTexture( N_CL_DEPTH_REGISTER );
 		pHistoryLight = NGfx::GetRegisterTexture( N_CL_TARGET_REGISTER );
 	}

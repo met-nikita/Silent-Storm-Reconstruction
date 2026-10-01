@@ -401,6 +401,18 @@ public:
 		pRC->SetPSConst( 3, CVec4( 0, 0, 0, 3.0f / 4 ) );
 	}
 };
+void CopyRegister( int nDestRegister, int nSrcRegister )
+{
+	// Retail v1.2 0x51f920: a full-register copy with independent render state.
+	CRenderContext rc;
+	rc.SetDepth( DEPTH_NONE );
+	rc.SetVirtualRT();
+	rc.SetRegister( nDestRegister );
+	CTRect<float> size;
+	GetRegisterSize( &size );
+	CopyTexture( rc, CVec2(size.Width(), size.Height()), size, GetRegisterTexture(nSrcRegister), size );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 void BlurLight( NGfx::CRenderContext *pRC, int nSrcRegister, int nDestRegister, float fBlurStrength )
 {
 	CTRect<float> rDest;

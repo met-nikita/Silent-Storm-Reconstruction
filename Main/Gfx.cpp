@@ -24,6 +24,8 @@ struct SVideoModeInfo
 NWin32Helper::com_ptr<IDirect3D9> pD3D;
 NWin32Helper::com_ptr<IDirect3DDevice9> pDevice;
 SRenderStats renderStats;
+static int nDeviceCreationID = 0;
+int GetDeviceCreationID() { return nDeviceCreationID; }
 bool bHardwareVP, bHardwarePixelShaders, bHardwarePixelShaders14;
 bool bTnLDevice = false;
 // Render-config flag: when set, dynamic 2D textures (e.g. the Bink movie surface) use a
@@ -126,6 +128,7 @@ static void DestroyManagedDXObjects()
 }
 static HRESULT InitDXObjects()
 {
+	++nDeviceCreationID;
 	// init itself
 	b16BitTexturesNow = b16BitTextures; // retail v1.2 0x50d08e
 	if ( !InitZBuffer( GetZBufferFormat( pp.BackBufferFormat ) ) )

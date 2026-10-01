@@ -1799,10 +1799,19 @@ void CGScene::DrawLines( NGfx::CRenderContext *pRC )
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+static CPtr<CGScene> pPreviousCLScene;
 void CGScene::RenderCL( NGfx::CRenderContext *pRC, IRender *pRender, CTransformStack *pTS, 
 	CSceneFragments *pGeom, bool bSceneHasChanged, const CVec4 &vDepth, bool bReuseLight, int nScratchRegister )
 {
-	GetLMTracker()->CatchUp( pRC, pRender, pTS, pGeom, bSceneHasChanged, lastMask, vDepth, bReuseLight, nScratchRegister );
+	// Retail v1.2 0x55b0e0: shared lighting registers may belong to another scene.
+	if ( pPreviousCLScene != this )
+	{
+		pPreviousCLScene = this;
+		bSceneHasChanged = true;
+		bFirstLMCatch = true;
+	}
+	GetLMTracker()->CatchUp( pRC, pRender, pTS, pGeom, bSceneHasChanged, lastMask,
+		bFirstLMCatch, vDepth, bReuseLight && !bFirstLMCatch, nScratchRegister );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CObjectBase* CGScene::CreateStaticDecal( CNonePart *pTarget, CPtrFuncBase<CObjectInfo> *pDecal, IMaterial *pMaterial, const SFullGroupInfo &fg )
@@ -1970,7 +1979,15 @@ void CGScene::Draw( CTransformStack *pTS, CTransformStack *pClipTS, NGfx::CRende
 	ERenderPath renderPath, EFogMode fogMode, const SFogParams &_fog, EHSRMode hsrMode, ETransparentMode trMode, 
 	NGfx::CCubeTexture *pSky )
 {
+	// Retail Draw 0x561309: recreate transient shadow resources after a device reset.
+	if ( nGfxDeviceCreationID != NGfx::GetDeviceCreationID() )
+	{
+		nGfxDeviceCreationID = NGfx::GetDeviceCreationID();
+		trackers.pSolidTracker->Updated();
+		bWaitForLoad = true;
+	}
 	WalkNotLoadedObjects();
+	bFirstLMCatch = bWaitForLoad;
 	while ( bWaitForLoad )
 	{
 		WalkNotLoadedObjects();

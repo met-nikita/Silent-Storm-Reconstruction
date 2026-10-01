@@ -506,6 +506,9 @@ OBJECT_BASIC_METHODS(CGScene);
 	SGroupSelect lastMask;
 	CObj<IHZBuffer> pHZBuffer;
 	bool bWaitForLoad;
+	// Retail's first displayed frame builds coarse lamp shadows synchronously.
+	bool bFirstLMCatch = true;
+	int nGfxDeviceCreationID = -1;
 	// retail +0x1b8, not serialized: HSR_DYNAMIC frame counter -- reuse the ignore list while
 	// moving, recalc via MakeInvisibleElementsListFast every 2nd frame (or on a big change)
 	int nReuseIgnoreList;

@@ -47,6 +47,7 @@ struct SRenderTargetsInfo
 bool Init3D( HWND hWnd );
 void Done3D();
 bool Is3DActive();
+int GetDeviceCreationID();
 HWND GetHWND();
 bool Is16BitTextures();   // @0x10ce10 -- selects 16-bit (SPixel1555) vs 32-bit (SPixel8888) dynamic 2D textures
 bool Is16BitMode();       // @0x10cde0

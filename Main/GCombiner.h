@@ -176,6 +176,7 @@ public:
 	void SetLMMappingTracker( CVersioningBase *pLMChange ) { pLMMapping = pLMChange; }
 	virtual const SBound& GetBound() { if ( NeedXForm() ) XFormPosition(); return bound; }
 	virtual const vector<SSphere>& GetBounds() { if ( NeedXForm() ) XFormPosition(); return partBVs; }
+	virtual CFuncBase<vector<CPtr<IPart> > >* GetCombiner() { return pCombiner; }
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CIBCombiner

@@ -135,6 +135,7 @@ public:
 	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&bound); f.Add(3,&partBVs); return 0; }
 	virtual const SBound& GetBound() { ASSERT( IsFrameMatch() ); return bound; }
 	virtual const vector<SSphere>& GetBounds() { ASSERT( IsFrameMatch() ); return partBVs; }
+	virtual CFuncBase<vector<CPtr<IPart> > >* GetCombiner() { return 0; }
 	int GetPartsNum() const { return partBVs.size(); }
 };
 struct SRenderGeometryInfo
@@ -312,8 +313,7 @@ enum ERenderOperation
 	RO_EXPLOSION_DECAL,
 	RO_REGISTER,
 	RO_CL_COPY_LAST,
-	RO_CL_TEST_PREV_FRAME,
-	RO_CL_STORE_DEPTH
+	RO_CL_TEST_PREV_FRAME
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 const int N_DYNAMIC_AMBIENT_INFO_COMPONENTS = 6;
@@ -537,6 +537,24 @@ struct SSphereFilter
 {
 	const SSphere &sph;
 	SSphereFilter( const SSphere &_sph ) : sph(_sph) {}
+	EFragmentsSplit operator()( SRenderStaticInfo *pStatic, SRenderGeometryInfo *pGeom, CPartFlags *pRes ) const;
+};
+// Retail point-light HSR retains identities, not indices: combining/rebuilding
+// geometry can move a part to another slot while a cached cube remains in use.
+struct SIgnorePartsInfo
+{
+	CPartFlags flags;
+	CDGPtr<CFuncBase<vector<CPtr<IPart> > > > pTrackCombiner;
+	vector<CPtr<IPart> > ignore;
+	void Init( const CPartFlags &accepted, const vector<CPtr<IPart> > &parts );
+};
+typedef unordered_map<CPtr<CObjectBase>,SIgnorePartsInfo,SPtrHash> CPointHSRParts;
+struct SIgnoredSphereFilter
+{
+	CPointHSRParts *pIgnoreList;
+	SSphereFilter sph;
+	SIgnoredSphereFilter( CPointHSRParts *_pIgnoreList, const SSphere &_sph )
+		: pIgnoreList(_pIgnoreList), sph(_sph) {}
 	EFragmentsSplit operator()( SRenderStaticInfo *pStatic, SRenderGeometryInfo *pGeom, CPartFlags *pRes ) const;
 };
 /*struct SSphereAndIgnoredFilter

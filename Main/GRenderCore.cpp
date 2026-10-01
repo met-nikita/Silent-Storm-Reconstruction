@@ -1,5 +1,6 @@
 #include "StdAfx.h"
 #include "GRenderCore.h"
+#include "GCombiner.h"
 #include "GfxBuffers.h"
 #include "Transform.h"
 namespace NGScene
@@ -249,6 +250,56 @@ EFragmentsSplit SSphereFilter::operator()( SRenderStaticInfo *pStatic, SRenderGe
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // SSphereAndIgnoredFilter
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void SIgnorePartsInfo::Init( const CPartFlags &accepted, const vector<CPtr<IPart> > &parts )
+{
+	// Retail v1.2 counterpart of v1.1 0x548f40.
+	flags = accepted;
+	ignore.clear();
+	for ( int i = 0; i < parts.size(); ++i )
+		if ( !accepted.IsSet(i) )
+			ignore.push_back(parts[i]);
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+EFragmentsSplit SIgnoredSphereFilter::operator()( SRenderStaticInfo *pStatic, SRenderGeometryInfo *pGeom, CPartFlags *pRes ) const
+{
+	// Retail v1.1 0x5493d0: no cache means sphere-only selection. A cache
+	// excludes absent handles and intersects the existing per-part selection.
+	if ( !pIgnoreList )
+		return sph( pStatic, pGeom, pRes );
+	CPointHSRParts::iterator i = pIgnoreList->find( pStatic->pHandle );
+	if ( i == pIgnoreList->end() )
+		return FST_REJECT;
+	SIgnorePartsInfo &info = i->second;
+	if ( !info.pTrackCombiner )
+		info.pTrackCombiner = pGeom->pVertices->GetCombiner();
+	if ( !info.pTrackCombiner )
+	{
+		pIgnoreList->erase(i);
+		return FST_ACCEPT;
+	}
+	if ( info.pTrackCombiner.Refresh() )
+	{
+		info.flags.TakeAll();
+		unordered_map<IPart*,bool> ignored;
+		int nAlive = 0;
+		for ( int k = 0; k < info.ignore.size(); ++k )
+		{
+			if ( !IsValid(info.ignore[k]) )
+				continue;
+			ignored[info.ignore[k].GetPtr()] = true;
+			info.ignore[nAlive++] = info.ignore[k];
+		}
+		info.ignore.resize(nAlive);
+		const vector<SSphere> &bounds = pGeom->pVertices->GetBounds();
+		const vector<CPtr<IPart> > &parts = info.pTrackCombiner->GetValue();
+		for ( int k = 0; k < parts.size(); ++k )
+			if ( ignored.find(parts[k].GetPtr()) != ignored.end() || !DoesIntersect(bounds[k], sph.sph) )
+				info.flags.Reset(k);
+	}
+	*pRes &= info.flags;
+	return FST_SPLIT;
+}
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 /*EFragmentsSplit SSphereAndIgnoredFilter::operator()( SRenderFragmentInfo *pF, const SSelectFragments &selector ) const
 {

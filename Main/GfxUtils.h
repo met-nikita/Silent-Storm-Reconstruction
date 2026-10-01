@@ -85,6 +85,7 @@ void ShowTexture( NGfx::CRenderContext *pRC, NGfx::CTexture *pTex, const CVec2 &
 // direct transofrm should be setup
 void CopyTexture( const NGfx::CRenderContext &_rc, const CVec2 &vTargetViewport, const CTRect<float> &rTarget, 
 	NGfx::CTexture *pTex, const CTRect<float> &rSrc, const CVec4 &vColor = CVec4(1,1,1,1), I2DEffect *pEffect = 0 );
+void CopyRegister( int nDestRegister, int nSrcRegister );
 void BlurLight( NGfx::CRenderContext *pRC, int nSrcRegister, int nDestRegister, float fBlurStrength = 1.5f );
 void ModulateRegister( NGfx::CRenderContext *pRC, int nDestRegister, const CVec4 &vColor );
 void AlphaSqrtModulateRegister( NGfx::CRenderContext *pRC, int nDestRegister, int nSrcRegister, float fMul );
