@@ -274,6 +274,8 @@ class CExecMove: public CPathConflictsRemover
 	}
 
 	void CreateRotate( NAI::EDirection dir, const NAI::SUnitPosition &curPos );
+	bool ProcessFirstMove( CCmdMove *pMove );
+	void ProcessMoveCommand( CCmdMove *pMove, const NAI::SUnitPosition &prevPos );
 	void DoCommand();
 	void ConvertPath( NAI::CPath *pPath, ENeedActiveItem eActive );
 public:
@@ -487,8 +489,90 @@ void CPathConflictsRemover::Segment()
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// Retail v1.2 0x7b86f0: starting a step can cancel/reroute the remaining commands.
+bool CExecMove::ProcessFirstMove( CCmdMove *pMove )
+{
+	CheckDoors( pUS->GetPosition() );
+	if ( commandsQueue.empty() )
+		return false;
+	if ( !TestSingleGameMove( pMove ) )
+	{
+		commandsQueue.push_front( pMove );
+		return false;
+	}
+	bWaiting = false;
+	bAfterWaiting = false;
+	nTimeToWait = 0;
+	pUS->animator.StartMove( pMove->bStrafe );
+	pCurCmd = pMove;
+	DoGameMove( pMove->pos );
+	return true;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// Retail v1.2 0x7b8800: retain both commands across callbacks and check the
+// queue again AFTER starting the first step, before fetching its continuation.
+void CExecMove::ProcessMoveCommand( CCmdMove *pMove, const NAI::SUnitPosition &prevPos )
+{
+	CObj<CCommand> pCmd( pMove );
+	CUnitAnimator &animator = pUS->animator;
+	CDynamicCast<CCmdMove> pTestPrevMove( pCurCmd );
+	if ( !pTestPrevMove || bAfterWaiting )
+	{
+		if ( !ProcessFirstMove( pMove ) )
+			return;
+		// 0x7b8872..0x7b889b: collision/visibility can empty the queue here.
+		if ( commandsQueue.empty() )
+		{
+			pCurCmd = 0;
+			if ( result == FINISHED )
+				Finished();
+			else
+				Failed();
+			return;
+		}
+		pCmd = commandsQueue.front();
+		commandsQueue.pop_front();
+	}
+	CObj<CCommand> pHoldPrev( pCurCmd ); // 0x7b8917, before replacing pCurCmd
+	CDynamicCast<CCmdMove> pPrevMove( pHoldPrev );
+	pCurCmd = pCmd;
+	CDynamicCast<CCmdMove> pNextMove( pCmd );
+	if ( pNextMove )
+	{
+		if ( !TestNextGameMove( pNextMove ) )
+		{
+			commandsQueue.push_front( pCmd );
+			animator.EndMove( prevPos, pPrevMove->pos, true, pPrevMove->bInterGrid );
+		}
+		else
+		{
+			pUS->GetWorld()->AddUICommand( new CUICmdUnitCamera( pUS, PR_UNIT_ACTION, false, 1.0f, 0 ) );
+			animator.Move( prevPos, pPrevMove->pos, pNextMove->pos, pPrevMove->bInterGrid );
+			pUS->LockNextPlace( pNextMove->pos );
+		}
+	}
+	else
+	{
+		CDynamicCast<CCmdEndMove> pEndMove( pCmd );
+		if ( pEndMove )
+		{
+			animator.EndMove( prevPos, pEndMove->pWhatToEnd->pos, false, pEndMove->pWhatToEnd->bInterGrid );
+			// 0x7b8ad7..0x7b8aea: latch completion after the last ender.
+			if ( commandsQueue.empty() )
+			{
+				if ( result == FINISHED )
+					Finished();
+				else
+					Failed();
+			}
+		}
+	}
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 void CExecMove::DoCommand()
 {
+	// Retail v1.2 0x7b8b66: callbacks may drop the unit's executor ownership.
+	CPtr<CExecMove> pHoldSelf( this );
 	if ( commandsQueue.empty() )
 	{
 		pCurCmd = 0;
@@ -520,6 +604,10 @@ void CExecMove::DoCommand()
 	CDynamicCast<CCmdJump> pJumpCur(pCurCmd);
 	if (pJumpCur)
 		pUS->FallFromHigh( pJumpCur->processPos.GetCP().z - pJumpCur->pos.GetCP().z );
+	// Retail v1.2 0x7b8cac..0x7b8ccb: the movement/visibility or fall callbacks
+	// may invalidate this mover or empty its queue. Never pop the list sentinel.
+	if ( !IsValid( this ) || commandsQueue.empty() )
+		return;
 	// fetch command
 	CObj<CCommand> pCmd = commandsQueue.front(), pHoldCmd(pCurCmd);
 	commandsQueue.pop_front();
@@ -530,65 +618,7 @@ void CExecMove::DoCommand()
 	if (pEndRotate)
 		animator.EndRotate(position);
 	else if (pMove)
-	{
-		CDynamicCast<CCmdMove> pTestPrevMove( pCurCmd );
-		if ( pTestPrevMove == 0 || bAfterWaiting )
-		{
-			// first move
-			CheckDoors( pUS->GetPosition() );
-			if ( commandsQueue.empty() )
-			{
-				ASSERT( result == FAILED );
-				return;
-			}
-			if ( !TestSingleGameMove( pMove ) )
-			{
-				commandsQueue.push_front( pCmd );
-				return;
-			}
-			bAfterWaiting = false;
-			animator.StartMove( pMove->bStrafe );
-			pCurCmd = pCmd; // for correct Cancel() (possible in DoGameMove()) pCurCmd should be valid before DoGameMove
-			pHoldCmd = pCurCmd;
-			DoGameMove( pMove->pos );
-			// fetch next cmd
-			ASSERT( !commandsQueue.empty() );
-			pCmd = commandsQueue.front();
-			commandsQueue.pop_front();
-		}
-		CDynamicCast<CCmdMove> pPrevMove( pCurCmd );
-		ASSERT( IsValid( pPrevMove ) );
-		pCurCmd = pCmd;
-		// need to check second time because of first move case
-		CDynamicCast<CCmdMove> pNextMove(pCmd);
-		if (pNextMove)
-		{
-			if ( !TestNextGameMove( pNextMove ) )
-			{
-				// unit should freeze in strange pose
-				commandsQueue.push_front( pCmd );
-				animator.EndMove( prevPos, pPrevMove->pos, true, pPrevMove->bInterGrid );
-				return;
-			}
-			else
-			{
-				// v1.2 ProcessMoveCommand 0x7b8a1f..0x7b8a70, before the animation/next-tile lock.
-				pUS->GetWorld()->AddUICommand( new CUICmdUnitCamera( pUS, PR_UNIT_ACTION, false, 1.0f, 0 ) );
-				animator.Move( prevPos, pPrevMove->pos, pNextMove->pos, pPrevMove->bInterGrid );
-				// lock next tile on the way
-				pUS->LockNextPlace( pNextMove->pos );
-			}
-		}
-		else {
-			CDynamicCast<CCmdEndMove> pEndMove(pCmd);
-			if (pEndMove)
-			{
-				animator.EndMove( prevPos, pEndMove->pWhatToEnd->pos, false, pEndMove->pWhatToEnd->bInterGrid );
-			}
-			else
-				ASSERT(0);
-		}
-	}
+		ProcessMoveCommand( pMove, prevPos );
 	else {
 		CDynamicCast<CCmdEndMove> pEndMove(pCmd);
 		if (pEndMove)
@@ -854,6 +884,7 @@ bool CExecMove::TimeLabelReached()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CExecMove::AnimationFinished()
 {
+	CPtr<CExecMove> pHoldSelf( this ); // retail v1.2 0x7b9096
 	pUS->UpdateCriticalsState();
 	//ASSERT( pCurCmd->IsValid() );
 	if ( IsValid( pCurCmd ) || !commandsQueue.empty() )
@@ -867,6 +898,8 @@ void CExecMove::AnimationFinished()
 		else
 			DoCommand();
 	}
+	if ( !IsValid( this ) ) // retail v1.2 0x7b90f7, before locking/completion
+		return;
 	pUS->DynamicallyLockWay( GetCurrentPath() );
 	if ( !commandsQueue.empty() || IsValid( pCurCmd ) )
 		return;
