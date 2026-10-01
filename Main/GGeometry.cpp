@@ -28,6 +28,27 @@ void FilterTrinagles( vector<STriangle> *pRes, const vector<WORD> &filter )
 	pRes->resize( nTarget );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+struct SGeometryPosHash
+{
+	int operator()( const CVec3 &v ) const
+	{
+		// Retail's position XOR feeds a prime-sized table. MSVC unordered_map
+		// masks low bits instead, collapsing grid-aligned geometry into one
+		// bucket. Mix the existing hash, preserving its full-hash collisions
+		// and the compound key comparison used by weighted geometry.
+		// +0 and -0 compare equal. Their XOR differs only in the sign bit,
+		// which the old masked buckets already ignored for these WORD-indexed
+		// meshes. Do not turn it into a significant bucket bit when mixing.
+		unsigned int h = static_cast<unsigned int>( SVec3Hash()( v ) ) & 0x7fffffffU;
+		h ^= h >> 16;
+		h *= 0x7feb352dU;
+		h ^= h >> 15;
+		h *= 0x846ca68bU;
+		h ^= h >> 16;
+		return static_cast<int>( h );
+	}
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
 void MergePositions( vector<WORD> *pMatches, vector<CVec3> *pPositions )
 {
 	vector<CVec3> mergedPositions;
@@ -35,7 +56,7 @@ void MergePositions( vector<WORD> *pMatches, vector<CVec3> *pPositions )
 	vector<WORD> &posIndices = *pMatches;
 	posIndices.resize( positions.size() );
 	mergedPositions.reserve( pPositions->size() );
-	typedef unordered_map<CVec3,int,SVec3Hash> CPosHash;
+	typedef unordered_map<CVec3,int,SGeometryPosHash> CPosHash;
 	CPosHash posHash;
 	for ( int k = 0; k < positions.size(); ++k )
 	{
@@ -215,7 +236,7 @@ struct SCompoundPosKey
 };
 struct CalcCompoundKeyHash
 {
-	int operator()( const SCompoundPosKey &k ) const { SVec3Hash v; return v(k.v); }
+	int operator()( const SCompoundPosKey &k ) const { SGeometryPosHash v; return v(k.v); }
 };
 void CObjectInfo::MergePositions()
 {
