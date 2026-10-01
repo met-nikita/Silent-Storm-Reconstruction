@@ -2,6 +2,7 @@
 //
 #include "aiUnit.h"
 #include "aiState.h"
+#include "aiUnitState.h"      // SAIUnitState::pEnemy
 #include "aiActionBase.h"      // SPlaceWithAP, CAIAction (new substrate base - phase 3)
 #include "aiMoveAction.h"      // GetUnitPos, GetPos
 #include "aiPosition.h"        // IPathNetwork (complete), SPathPlace, SUnitPosition
@@ -161,8 +162,9 @@ SAIState* CAIActionPlaceSource::GetAIState() const                       // @0x0
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 IAIUnit* CAIActionPlaceSource::GetEnemy() const                         // @0x00490510
 {
-	if ( IsValid( pUnit ) && IsValid( pUnit->GetAIState() ) )
-		return pUnit->GetAIState()->GetCurrentAIEnemy();   // release reads GetAIUnitState()+0x88
+	// Retail v1.2 0x490910: same per-unit target as CAIAction::GetEnemy.
+	if ( IsValid( pUnit ) )
+		return pUnit->GetAIUnitState()->pEnemy;
 	return 0;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////

@@ -53,6 +53,7 @@ public:
 	virtual NRPG::IUnitMission* GetUnitMission() const = 0;
 	virtual NRPG::CUnit* GetRPGUnit() const = 0;
 	virtual void Synchronize( bool bEnemies = true ) = 0;
+	// Live world position (retail v1.2 0x4af230), not the logged planning snapshot.
 	virtual SPosition GetPosition() = 0;
 	virtual SUnitPosition GetUnitPosition() = 0;
 	virtual NDb::EDiplomacyState GetDiplomacyState( IAIUnit *pUnit ) = 0;

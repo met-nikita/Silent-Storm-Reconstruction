@@ -1,13 +1,13 @@
 #include "StdAfx.h"
 //
 #include "aiUnit.h"
-#include "aiState.h"          // SAIState::GetCurrentAIEnemy
+#include "aiState.h"
+#include "aiUnitState.h"      // SAIUnitState::pEnemy
 //
 #include "aiActionBase.h"
 //
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// Release CAICombatLogic substrate - CAIAction base helpers. WIP - reconstructed; the release reads the
-// enemy from GetAIUnitState()+0x88, reconciled here to the dev SAIState::GetCurrentAIEnemy().
+// Release CAICombatLogic substrate - CAIAction base helpers.
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 namespace NAI
 {
@@ -23,8 +23,10 @@ SAIState* CAIAction::GetAIState() const
 //
 IAIUnit* CAIAction::GetEnemy() const
 {
-	if ( IsValid( pUnit ) && IsValid( pUnit->GetAIState() ) )
-		return pUnit->GetAIState()->GetCurrentAIEnemy();
+	// Retail v1.2 0x414260: use the acting unit's own selected contact.
+	// The shared commander context can change between place-chooser job ticks.
+	if ( IsValid( pUnit ) )
+		return pUnit->GetAIUnitState()->pEnemy;
 	return 0;
 }
 //

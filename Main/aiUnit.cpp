@@ -57,8 +57,8 @@ class CAIUnit: public IAIUnit
 {
 	OBJECT_BASIC_METHODS( CAIUnit );
 	ZDATA
-	// retail CAIUnit+0xc: the unit position is a full SUnitPosition (pos+bRun), serialized at
-	// tag 4; the Jan03 bare SPosition + the GetUnitPosition() bRun=false stub are gone.
+	// The serialized tag-4 SUnitPosition is the planning snapshot, NOT the public
+	// position accessor. Retail v1.2 0x4af230 forwards that accessor to the server.
 	SUnitPosition pos;
 	// retail CAIUnit skills vector (tag 5): exactly two SAIUnitSkill cells, [0]=AP, [1]=HP
 	// (s2_aiunit.h oracle); replaces the four Jan03 scalar AP/HP members.
@@ -151,7 +151,7 @@ public:
 	virtual NWorld::CUnitServer *GetUnitServer() const { return pUnitServer; }
 	virtual NRPG::IUnitMission* GetUnitMission() const { return pUnitServer->GetUnitRPG(); }
 	virtual NRPG::CUnit* GetRPGUnit() const { return pUnitServer->GetUnitRPG()->GetRPGUnit(); }
-	virtual SPosition GetPosition() { return pos.pos; } 
+	virtual SPosition GetPosition();
 	virtual SUnitPosition GetUnitPosition();
 	virtual NDb::EDiplomacyState GetDiplomacyState( IAIUnit *pUnit )
 	{
@@ -694,9 +694,17 @@ bool CAIUnit::HasInactivePose()
 	return pos.pos.p.GetPose() == NAI::CM_INACTIVE;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+SPosition CAIUnit::GetPosition()
+{
+	return pUnitServer->GetPosition().pos;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 SUnitPosition CAIUnit::GetUnitPosition()
 {
-	return pos;   // retail: the member IS the full SUnitPosition (the Jan03 bRun=false stub is gone)
+	// Retail v1.2 IAIUnit vtable+0xc -> 0x4af230 -> CUnit::GetPosition.
+	// SetPosition/log records still mutate the separate serialized planning snapshot.
+	// Reactions and contact/ally range probes must not use its speculative location.
+	return pUnitServer->GetPosition();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CAIUnit::SetPosition( SPosition _ptPosition ) 

@@ -1,8 +1,6 @@
 #include "StdAfx.h"
 //
 #include "aiUnit.h"
-#include "aiState.h"
-#include "aiUnitState.h"   // SAIUnitState (the PS_THINK state re-pin reads pEnemy)
 #include "aiGrid.h"           // IsSamePlace
 #include "AILog.h"            // dev records (CAILogPosition/CAILogSpendAP)
 #include "wMain.h"
@@ -91,7 +89,7 @@ void CAICombatLogic::GenerateCommand()
 	pLog->Clear();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// @0x00432aa0 -- the retail 5-stage/one-tick DoJob machine (switch on prepareState). Instead of pumping the
+// @0x00432aa0 -- the retail five-stage DoJob machine (one stage per tick). Instead of pumping the
 // choose-place job inline, PS_ACTION queues it on the WORLD job manager (Add-before-WaitForJob) and yields;
 // the manager re-DoJob()s this logic across Segments until the chooser finishes, then PS_THINK decides.
 // Top guard is retail IsIdleJob() (@0x004331c0): a logic that is invalid, or has nothing queued while not in a
@@ -133,23 +131,6 @@ void CAICombatLogic::DoJob()
 		prepareState = PS_THINK;
 		return;
 	case PS_THINK:
-		// Re-pin the shared tactical state to THIS unit before deciding. Retail's DoJob @0x432aa0 runs
-		// the whole 5-stage machine in ONE tick, so the state set for the unit stays valid through
-		// MakeDecision; the dev pipeline yields across segments waiting on the world job manager, and
-		// the commander round-robin repoints state.pCurrentUnit/pCurrentEnemy at OTHER units meanwhile.
-		// Every action reads the enemy through that shared state (CAIAction::GetEnemy @0x13ac0), so a
-		// decision landing after a repoint saw a foreign unit's enemy -- an IDLE unit's NULL made
-		// GetInfoInner bail out (weapon=0/toHit=0, DEF-DECIDE best=NONE forever: the GFirst car-guy
-		// standing at his attack spot doing nothing).
-		{
-			SAIState *pState = GetUnit()->GetAIState();
-			if ( pState != 0 )
-			{
-				pState->SetCurrentAIUnit( GetUnit() );
-				SAIUnitState *pUState = GetUnit()->GetAIUnitState();
-				pState->SetCurrentAIEnemy( pUState != 0 ? pUState->pEnemy.GetPtr() : 0 );
-			}
-		}
 		// the chooser has finished; decide, then the job is done this same tick
 		MakeDecision();
 		prepareState = PS_FINISHED;
@@ -719,12 +700,13 @@ void CAIRetreatLogic::MakeDecision()
 {
 	// arrival gate: |selfCP - retreatCP| < 0.5 (float @0x008b19ec) -> done. Path net from the unit
 	// server's world (== the AI state's world for an in-world unit), as Guard/Defence/Retreat-reaction.
-	IAIUnit *u = GetUnit();
 	IPathNetwork *pNet = GetUnitServer()->GetWorld()->GetPathNetwork();
 	CVec3 cpRetreat = GetUnitPos( pos, pNet ).pos.GetCP();
-	CVec3 cpCur     = u->GetPosition().GetCP();
+	// Retail v1.2 0x494ea1..0x494ed1 reads the live server position,
+	// not the speculative position advanced while logging queued movement.
+	CVec3 cpCur     = GetUnitServer()->GetPosition().GetCP();
 	float du = cpCur.u - cpRetreat.u, dv = cpCur.v - cpRetreat.v, dq = cpCur.q - cpRetreat.q;
-	if ( sqrtf( du * du + dv * dv + dq * dq ) < 0.5f ) { CAIJob::Finish(); return; }
+	if ( sqrtf( du * du + dv * dv + dq * dq ) < 0.5f ) { CAILogic::Finish(); return; }
 
 	CAIShootAction::SInfo shoot; GetInfo( pShoot.GetPtr(), &shoot );
 	CAIThrowGrenadeAction::SInfo grenade; GetInfo( pThrowGrenade.GetPtr(), &grenade );

@@ -81,7 +81,7 @@ struct SAIUnitState
 	bool IsKnownCorpse( IAIUnit *p ) const;
 	void AddKnownCorpse( IAIUnit *p );
 	//
-	void PrepareEnemies(); // @0x004b17a0: begin-turn visible-enemy refresh
+	void PrepareEnemies(); // v1.2 @0x004b1bb0: begin-turn visible-enemy refresh
 	void Update();        // recompute pEnemy/pPossibleEnemy/pAlly when lists changed, then CheckScared
 	void Reset();
 	// AI-convergence Stage 2: the commander's reaction pump reads this dirty flag. IsModified @0xb0550

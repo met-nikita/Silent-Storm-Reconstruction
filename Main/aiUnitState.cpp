@@ -20,7 +20,6 @@
 namespace NAI
 {
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-static bool IsAlive( IAIUnit *p ) { return IsValid( p ) && !p->IsDead(); }
 static bool IsFightable( IAIUnit *p ) { return IsValid( p ) && IsValid( p->GetUnitServer() ) && p->GetUnitServer()->CanFight(); }
 static void RemoveFrom( vector< CPtr<IAIUnit> > *pv, IAIUnit *p )
 {
@@ -202,15 +201,17 @@ void SAIUnitState::Modified()
 	selfModified.data = true;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// Retail SAIUnitState::PrepareEnemies @0x004b17a0.  At the start of a turn, promote every
+// Retail v1.2 SAIUnitState::PrepareEnemies @0x004b1bb0. At the start of a turn, promote every
 // live hostile in this unit's own CTBSUnitVision list to a confirmed enemy.  Confirmed enemies
 // that vanished from that list become possible enemies.  This deliberately does not depend on
 // SAIState's commander rosters: StartGame raises the begin-turn event before those transient
 // back-pointers have necessarily been synchronized.
+// Retail's AI-wrapper tests are object validity, not IAIUnit::IsDead(): planning HP can be zero
+// while the live server can still fight. Filtering that cache strands visible targets as suspects.
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void SAIUnitState::PrepareEnemies()
 {
-	if ( !IsAlive( pUnit ) )
+	if ( !IsValid( pUnit ) )
 		return;
 	NWorld::CUnitServer *pUS = pUnit->GetUnitServer();
 	if ( !IsValid( pUS ) )
@@ -224,7 +225,7 @@ void SAIUnitState::PrepareEnemies()
 		if ( !IsValid( pSeen ) || !pSeen->CanFight() )
 			continue;
 		IAIUnit *pAI = GetAIUnit( pSeen );
-		if ( !IsAlive( pAI ) || pUS->GetDiplomacyState( pSeen ) != NDb::DS_ENEMY )
+		if ( !IsValid( pAI ) || pUnit->GetDiplomacyState( pAI ) != NDb::DS_ENEMY )
 			continue;
 		RemoveFrom( &vanished, pAI );
 		RemovePossibleEnemy( pAI );
