@@ -55,9 +55,10 @@ public:
 	{
 		if ( !IsValid( pUS ) )
 			return;   // saveload path: operator& restores pItem
-		// retail CExecReloadWeapon ctor @0x394710: -1 = active weapon, else that slot's item
+		// Retail v1.2 0x794a89..0x794a96: -1 resolves the weapon in use,
+		// including a mounted cannon, not the unrelated active inventory slot.
 		if ( nSlot == -1 )
-			pItem = pUS->GetUnitRPG()->GetInventory()->GetActive();
+			pItem = pUS->GetUnitRPG()->GetWeaponItem();
 		else
 			pItem = pUS->GetUnitRPG()->GetInventory()->Get( NDb::ESlot( nSlot ) );
 	}

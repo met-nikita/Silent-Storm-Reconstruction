@@ -514,6 +514,19 @@ void CUnitMission::RegisterAction( EAction action )
 			// Retail v1.2 0x6c218f: entering Hide practices Stealth, with upgrade ack/log.
 			UseSkill( NDb::ST_STEALTH );
 			break;
+		case AC_FIRSTAID:
+			// Retail v1.2 0x6c217d: practice when first aid is initiated.
+			UseSkill( NDb::ST_MEDICINE );
+			break;
+		case AC_TRAP_OBJECT:
+		case AC_DISARM_TRAP:
+		case AC_SET_MINE:
+		case AC_DISARM_MINE:
+		case AC_PICK_LOCK:
+		case AC_REPAIR_PK:
+			// Retail v1.2 0x6c21a1: all six engineering actions share this handler.
+			UseSkill( NDb::ST_ENGINEERING );
+			break;
 		case AC_MOVE_DIAGONAL:
 		case AC_MOVE_SIDE:
 			// retail @0x34edb0: the nMoveInLastTurn accounting moved to DoAction (gated on RUN pose); here we
