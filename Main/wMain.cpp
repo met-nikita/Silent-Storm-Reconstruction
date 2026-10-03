@@ -1532,6 +1532,11 @@ void CWorld::CreateAIUnits( const SMapInfo &mapInfo, const ClueToSlot &personClu
 		// Retail v1.2 0x76bb3b: occupied person-clue slots mark their spawned unit.
 		CPtr<CUnitServer> pUnitServer = AddUnit( pos.p, pRPG, pPlayer, i->szName, i->bSlot );
 		(*pIDToUnit)[ i->nUnitID ] = pUnitServer;
+		// Retail v1.2 0x76bbb0..0x76bbd3: person-clue slots use the
+		// difficulty's separate death reserve. Ordinary enemies keep zero.
+		// Seed it after level/VP initialization, not while loading a save.
+		if ( i->bSlot )
+			pRPG->GetRPGUnit()->CalcDeathVP( pGlobalGame->pDifficulty->fClueDeathCoeff );
 
 		ASSERT( IsValid( pUnitServer ) );
 		// create routes
