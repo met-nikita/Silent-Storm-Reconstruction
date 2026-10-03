@@ -7,6 +7,7 @@
 #include "..\DBFormat\DataMisc.h"   // NDb::CRPGPicklock (CPicklockItem ctor + the CreateItem cascade)
 #include "..\DBFormat\DataPerk.h"
 #include "rpgUnit.h"
+#include "rpgPerkConstants.h"
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 namespace NRPG
 {
@@ -579,11 +580,16 @@ int CToolItem::GetMaxIncQuantity() const
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CToolItem::CanBeUsed( NRPG::CUnit *pUnit ) const
 {
+	// Retail 0x6a0c70: even perfect engineering needs a charge in the container.
+	if ( GetIncQuantity() < 1 )
+		return false;
 	CDBPtr<NDb::CRPGTool> pTool = GetDBItemInfo();
 	ASSERT( IsValid( pTool ) );
 	ASSERT( IsValid( pUnit ) );
 	if ( IsValid( pTool ) && IsValid( pUnit ) )
 	{
+		if ( pUnit->HasPerk( N_PERK_PERFECT_ENGINEERING ) )
+			return true;
 		bool bHasPerk = true;
 		if ( IsValid( pTool->pNeededPerk ) && !pUnit->HasPerk( pTool->pNeededPerk->GetRecordID() ) )
 			bHasPerk = false;

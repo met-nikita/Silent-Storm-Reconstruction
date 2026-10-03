@@ -27,6 +27,7 @@ class IInventoryItem;
 class IGrenadeItem;
 class IMeleeWeaponItem;
 class IUnitMission;
+void GetAuraAdd( float *pToHit, float *pEvasion, NWorld::CUnitServer *pUnit );
 float GetGrenadeThrowSkill( IUnitMission *pMission );
 float GetMaxThrowVelocity( IUnitMission *pMission, IGrenadeItem *pItem, bool bFirstRound );
 float GetMaxThrowVelocity( IUnitMission *pMission, IMeleeWeaponItem *pItem, bool bFirstRound );

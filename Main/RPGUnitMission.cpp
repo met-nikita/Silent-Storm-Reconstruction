@@ -209,7 +209,7 @@ public:
 	// retail @0x2c5b40/@0x2c5b50/@0x2c5b90/@0x2c5ba0/@0x2c5bb0 -- plain setters/getters.
 	bool IsAIPlayer() const { return bIsAIUnit; }
 	void SetIsAIPlayer( bool b ) { bIsAIUnit = b; }
-	void SetAuraPerkICModifier( float f ) { fAuraPerkICModifier = f; }
+	virtual void SetAuraPerkICModifier( float f ) { fAuraPerkICModifier = f; }
 	void SetScenarioPlayerID( int n ) { nScenarioPlayerID = n; }
 	int GetScenarioPlayerID() const { return nScenarioPlayerID; }
 	// retail AddVPBoost @0x2c3400: install a temporary VP modifier (fAdd = 1% of the VP base per
@@ -251,7 +251,9 @@ public:
 	virtual void AddBleedingStopper( int nAmount ) { nBleedingStopAmount += nAmount; }
 	virtual void AddPostponedModifier( CDynamicSkill *pSkill, const SSkillModifyInfo &info, int nTurns );
 	virtual int  GetIC() const;
-	virtual bool CheckIC();
+	int GetPerkModifiedIC( EAttackType attackType ) const;
+	virtual bool CheckIC( EAttackType attackType );
+	virtual float GetWeaponAdaptation() const;
 	virtual int CheckInterrupt( const IUnitMission *pEnemy, bool bIsMutual, bool bWasShot );
 	virtual int  GetInterrupt() const { return pRPGUnit->Skills(NDb::ST_INTERRUPT); }
 	virtual NDb::CRPGArmor* GetRPGArmor() const;
@@ -426,12 +428,18 @@ bool CUnitMission::GetAck( int *pAckID, IUnitMissionInfo **ppAttacker )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 int CUnitMission::GetUnhideProbability( IUnitMission *pTarget, float fDistance ) const
 {
-	int n0 = 45; // probability at distance 0 tiles
-	int n30 = 1; // probability at distance 30 tiles
-	int nBase = ( int )( ( n30 - n0 ) / 30.f * fDistance + n0 );
-	int nProbability = 
-		GetRPGUnit()->Skills( NDb::ST_SPOT ) -	pTarget->GetRPGUnit()->Skills( NDb::ST_STEALTH ) + nBase;
-	return Clamp( nProbability, 0, 100 );
+	// Retail v1.2 0x6bf7a0: preserve x87 precision until each truncating skill conversion.
+	int nSpot = GetRPGUnit()->Skills( NDb::ST_SPOT );
+	float fParam;
+	if ( HasPerk( N_PERK_BETTER_SPOTTING, &fParam ) )
+		nSpot = int( ( 1.0 + double( fParam ) ) * nSpot );
+	int nBase = int( 45.0 - double( 44.f / 30.f ) * fDistance );
+	int nStealth = pTarget->GetRPGUnit()->Skills( NDb::ST_STEALTH );
+	// Retail's quirk: perk 75 belongs to the OBSERVER and scales the target's stealth;
+	// the retail night argument is unused. Do not move this check onto the target.
+	if ( HasPerk( N_PERK_HIDE_IN_NIGHT, &fParam ) )
+		nStealth = int( ( 1.0 + double( fParam ) ) * nStealth );
+	return Clamp( nBase + nSpot - nStealth, 0, 100 );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CUnitMission::UseSkill( NDb::ESkillType eSkill )
@@ -672,16 +680,24 @@ int CUnitMission::GetActionAP( NAI::EPose curPose, EAction action ) const
 				if ( !pMelee )
 					return 0;
 				NDb::CRPGMeleeWeapon *pW = pMelee->GetDBMeleeWeapon();
-				int nAP = pW->nMaxAP - (pW->nMaxAP - pW->nMinAP) * pRPGUnit->Skills(NDb::ST_MELEE) / N_MAX_SKILL;
+				NDb::ESkillType skill = action == AC_THROW_KNIFE ? NDb::ST_THROWING : NDb::ST_MELEE;
+				int nAP = pW->nMaxAP - (pW->nMaxAP - pW->nMinAP) * pRPGUnit->Skills( skill ) / N_MAX_SKILL;
 				float fParam;
-				if ( action == AC_THROW_KNIFE && HasPerk( N_PERK_CHEAP_THROW, &fParam ) )
+				if ( HasPerk( action == AC_THROW_KNIFE ? N_PERK_CHEAP_THROW : N_PERK_CHEAP_MELEE, &fParam ) )
 					nAP = int( ( 1.0 - double( fParam ) ) * nAP );
 				return nAP;
 			}
 		case AC_BURST:
 			return pRPGUnit->GetWeaponBurstAP();
 		case AC_RELOAD:
-			return pRPGUnit->GetWeaponReloadAP();
+		{
+			int nAP = pRPGUnit->GetWeaponReloadAP();
+			float fParam;
+			// Retail 0x6c1443 multiplies by Param1 itself, not by (1 - Param1).
+			if ( HasPerk( N_PERK_CHEAP_RELOAD, &fParam ) )
+				nAP = int( double( nAP ) * fParam );
+			return nAP;
+		}
 		case AC_OPEN_CLOSE:
 			return 4;
 		case AC_APPROACH_CANNON:
@@ -756,6 +772,15 @@ int CUnitMission::GetActionAP( NAI::EPose curPose, EAction action ) const
 	}
 
 	// actions whose cost depends on the pose
+	// Retail 0x6c1680/0x6c1732: substitutions recurse (34 and 35 can combine).
+	if ( curPose == NAI::CRAWL && HasPerk( N_PERK_PRONE_COSTS_CROUCH ) )
+		return GetActionAP( NAI::CROUCH, action );
+	if ( curPose == NAI::CROUCH && HasPerk( N_PERK_CROUCH_COSTS_WALK ) )
+		return GetActionAP( NAI::WALK, action );
+	float fCorpseAP;
+	if ( ( action == AC_MOVE_CORPSE_SIDE || action == AC_MOVE_CORPSE_DIAGONAL ) &&
+		HasPerk( N_PERK_CORPSE_TRACKER, &fCorpseAP ) )
+		return int( action == AC_MOVE_CORPSE_SIDE ? double( fCorpseAP ) : double( fCorpseAP ) * 1.5 );
 	int nAddedAP = 0;
 	if ( pPanzerklein )
 		nAddedAP = pPanzerklein->nAddMoveAP;
@@ -1141,7 +1166,7 @@ CReceivedDmg CUnitMission::ProcessAttack( NWorld::IWorld *pWorld, int nUserID, C
 	{
 		csRPG << "<font size=16pt>";
 		// Retail v1.2 0x6c4067: contact accuracy was resolved by the ray path.
-		// Do not roll a second dodge (or award IC practice) for incidental victims.
+		// There is no early accuracy reroll; incidental-hit evasion reduces damage below.
 		int nDmg = pAttack->CalcStructDmg( pWorld, pArmor, 0 );
 		//	Get
 		float fDmgModifier = 0;
@@ -1207,6 +1232,11 @@ CReceivedDmg CUnitMission::ProcessAttack( NWorld::IWorld *pWorld, int nUserID, C
 		csRPG << CC_GREY << "\tHL=" << GetHLName( (NAI::EHitLocation)nUserID );
 		csRPG << CC_GREY << " \tDmgModifier=" << fDmgModifier;
 		int nDamage = Max( 0.f, fDmgModifier * nDmg );
+		// Retail v1.2 0x6c4274..0x6c430e: only incidental victims may evade damage.
+		// Intended targets, Panzerklein wearers and click-of-death skip both the roll and practice.
+		if ( pAttack->atkType != AT_CLICK_OF_DEATH && this != pAttack->pTarget &&
+			!GetPanzerklein() && CheckIC( pAttack->atkType ) )
+			nDamage = Max( 0, nDamage - int( double( GetPerkModifiedIC( pAttack->atkType ) ) * nDamage * double( 0.01f ) ) );
 		// Retail v1.2 0x6c4310..0x6c4368 clamps the converted healed share
 		// to zero. A death critical can already have reduced total VP to zero:
 		// retail's x87 conversion then yields INT_MIN, which that clamp discards.
@@ -1681,18 +1711,42 @@ int CUnitMission::GetMeleeToHit( const CVec3 &ptAttacker, const NAI::SPosition &
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 int CUnitMission::GetIC() const
 {
-	//const float fMoveCoeff = 0.65f;
-	//return ( 100 - pRPGUnit->Skills(NDb::ST_IC) ) * int( 100 - float(nMoveInLastTurn) * fMoveCoeff ) / 100;
-	return pRPGUnit->Skills(NDb::ST_IC);
+	float fIC = pRPGUnit->Skills( NDb::ST_IC );
+	float fParam;
+	if ( HasPerk( N_PERK_BETTER_EVASION, &fParam ) )
+		fIC = ( 1.0 + double( fParam ) ) * fIC;
+	return Float2Int( fIC ); // Retail 0x6bff40 rounds the stored float, rather than truncating.
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-bool CUnitMission::CheckIC()
+int CUnitMission::GetPerkModifiedIC( EAttackType attackType ) const
+{
+	float fIC = GetIC();
+	float fParam;
+	if ( ( attackType == AT_BLAST_WAVE || attackType == AT_FRAGMENT ) &&
+		HasPerk( N_PERK_EXPLOSION_EVASION, &fParam ) )
+		fIC = ( 1.0 + double( fParam ) ) * fIC;
+	fIC += fAuraPerkICModifier;
+	return Float2Int( fIC ); // Retail 0x6becf0.
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+bool CUnitMission::CheckIC( EAttackType attackType )
 {
 	UseSkill(NDb::ST_IC);
-	// Target movement???
-	bool isCheck = random.Check(GetIC());
+	bool isCheck = random.Check( GetPerkModifiedIC( attackType ) );
 	csRPG << "\t" << GetName() << " Dodge:" << isCheck << endl;
 	return isCheck;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+float CUnitMission::GetWeaponAdaptation() const
+{
+	// Retail 0x6c0cf0 reads the live CUnit counter, not the mission's serialized mirror.
+	IWeaponItem *pWeapon = pRPGUnit->GetWeaponItem();
+	IMeleeWeaponItem *pMelee = pRPGUnit->GetMeleeWeaponItem();
+	if ( IsValid( pWeapon ) )
+		return pRPGUnit->GetWeaponAdaptation( pWeapon );
+	if ( IsValid( pMelee ) )
+		return pRPGUnit->GetWeaponAdaptation( pMelee );
+	return 0;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 int CUnitMission::CalcInterruptProbability( const IUnitMission *pEnemy,
@@ -2363,12 +2417,20 @@ void CUnitMission::SetHiding( bool _bHiding )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 int CUnitMission::GetGrenadeTrapDC( NDb::CRPGGrenade *pGrenade )
 {
-	return GetRPGUnit()->Skills( NDb::ST_ENGINEERING );
+	int nEngineering = GetRPGUnit()->Skills( NDb::ST_ENGINEERING );
+	float fParam;
+	if ( HasPerk( N_PERK_DIFFICULT_TRAPS, &fParam ) )
+		nEngineering = int( ( 1.0 + double( fParam ) ) * nEngineering );
+	return nEngineering;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 int CUnitMission::GetMineDC( NDb::CRPGMine *pMine )
 {
-	return GetRPGUnit()->Skills( NDb::ST_ENGINEERING );
+	int nEngineering = GetRPGUnit()->Skills( NDb::ST_ENGINEERING );
+	float fParam;
+	if ( HasPerk( N_PERK_DIFFICULT_TRAPS, &fParam ) )
+		nEngineering = int( ( 1.0 + double( fParam ) ) * nEngineering );
+	return nEngineering;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // retail CUnitMission::GetMineSpotRange @0x2c0340 (disasm-verified): the Jan03 CanSeeMine formula
@@ -2400,6 +2462,9 @@ bool CUnitMission::CanSeeMine( float fDistance, int nDC )
 bool CUnitMission::CanClear( int nDC, int nSkillModif )
 {
 	int nEngSkill = GetRPGUnit()->Skills( NDb::ST_ENGINEERING );
+	float fParam;
+	if ( HasPerk( N_PERK_DISARM_TRAPS, &fParam ) )
+		nEngSkill = int( nEngSkill + double( fParam ) );
 	int nProb = Min( pMinesConstants->nBaseDisarmProb + nEngSkill - nDC, 95 );
 	return random.Get( 0, 100 ) < nProb;
 }

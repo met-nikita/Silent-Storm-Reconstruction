@@ -850,6 +850,9 @@ bool CUnit::CanHeal( CUnit *pTarget, IFirstAidItem *pItem ) const
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CUnit::HasPerk( int nPerkID, float *pParam1, float *pParam2, float *pParam3 ) const
 {
+	// Retail 0x6ba690: classless map units need not have a perk tree.
+	if ( !GetPerksTree() )
+		return false;
 	return GetPerksTree()->HasPerk( nPerkID, pParam1, pParam2, pParam3 );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////

@@ -9,6 +9,7 @@
 #include "RPGItem.h"
 #include "RPGUnit.h"
 #include "RPGUnitMission.h"
+#include "RPGToHit.h"
 #include "..\misc\RandomGen.h"
 #include "GAnimation.h"
 #include "InventoryUnit.h"
@@ -679,7 +680,12 @@ int CDumbUnitServer::ProcessAttack( NWorld::IWorld *_pWorld, int nUserID, NRPG::
 	// CGame::nMaxCriticalSeverity (luaSetMaxCriticalSeverity). Retail cached the game in the mission ctor;
 	// this dev fork dropped that ctor arg, so we (re)bind it here at the attack entry.
 	pRPG->SetGame( pWorld->GetGame() );
+	// Retail 0x7511fe..0x75123b: scope the victim's aura modifier to this damage calculation.
+	float fAuraToHit, fAuraEvasion;
+	NRPG::GetAuraAdd( &fAuraToHit, &fAuraEvasion, CDynamicCast<CUnitServer>( this ) );
+	pRPG->SetAuraPerkICModifier( fAuraEvasion );
 	const NRPG::CReceivedDmg damage = pRPG->ProcessAttack( _pWorld, nUserID, pAttack, pArmor );
+	pRPG->SetAuraPerkICModifier( 0 );
 	int nRes = damage.nDmg;
 	// retail gib gate @0x750ef1..0x750f4c: bShowBlood && nRes > 120 && CanBlowUp() (unit
 	// vtbl+0x28, @0x3c0420) && !pAttack->bNoBlowUp -- and a still-living unit DIES first

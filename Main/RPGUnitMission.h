@@ -40,6 +40,7 @@ namespace NRPG
 {
 struct SUnitInfo; // data about any unit that can be shown in interface
 class CAttackPortion;
+enum EAttackType;
 struct CReceivedDmg;
 class IInventory;
 class IInventoryInfo;
@@ -91,7 +92,7 @@ public:
 	virtual void SaveAP( const SSnipeAP &ap ) = 0;
 	virtual void StartNewTurn( const CVec3 &ptCP ) = 0;
 	virtual bool IsFirstTurn() const = 0;
-	virtual bool CheckIC() = 0;	// Return true if he managed to dodge
+	virtual bool CheckIC( EAttackType attackType ) = 0;	// Return true if he managed to dodge
 	virtual void Kill() = 0;
 	virtual bool IsDead() const = 0;
 	virtual IInventory* GetInventory() const = 0;
@@ -203,6 +204,9 @@ public:
 	// (wUnitStates.cpp) dispatches through IUnitMission. Appended NON-PURE at the vtable tail like the
 	// two above; CUnitMission overrides it.
 	virtual void AddVPBoost( float fStrength, int nDuration ) {}
+	// Retail 0x6c0cf0 / 0x6c5e30: live weapon familiarity and attack-scoped aura evasion.
+	virtual float GetWeaponAdaptation() const { return 0; }
+	virtual void SetAuraPerkICModifier( float f ) {}
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 float GetCubesArea( const CVec3 &ptPos, vector<CVec3> *pCubes );

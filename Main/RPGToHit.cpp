@@ -1,4 +1,5 @@
 #include "StdAfx.h"
+#include "rpgPerkConstants.h"
 
 #include "aiUnit.h"
 #include "aiPosition.h"
@@ -297,9 +298,12 @@ float CToHitCalcer::GetStance()
 	CPtr<CWeaponItem> pWeaponItem = pUnitMission->GetRPGUnit()->GetWeaponItem();
 	if ( IsValid( pWeaponItem ) )
 	{
-		if ( NAI::CROUCH == eCurPose )
+		NAI::EPose pose = eCurPose;
+		if ( pUnitMission->HasPerk( N_PERK_BEST_SHOOTING_POSE ) )
+			pose = GetBestPose( *pWeaponItem->GetDBWeapon()->pWeaponType );
+		if ( NAI::CROUCH == pose )
 			nStance = int( pWeaponItem->GetDBWeapon()->pWeaponType->fCrouchBonus );
-		else if ( NAI::CRAWL == eCurPose )
+		else if ( NAI::CRAWL == pose )
 			nStance = int( pWeaponItem->GetDBWeapon()->pWeaponType->fCrawlBonus );
 	}
 	return nStance;
@@ -322,7 +326,11 @@ float CToHitCalcer::GetD2()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 float CToHitCalcer::GetRS()
 {
-	return Min( pUnitMission->GetLastActionTimes(), pUnitMission->GetToHitConstants()->nMaxShotsRepeat ) * 2;
+	int nRepeats = pUnitMission->GetLastActionTimes();
+	float fParam;
+	if ( pUnitMission->HasPerk( N_PERK_ZEROING_BONUS, &fParam ) )
+		nRepeats = int( nRepeats + double( fParam ) );
+	return Min( nRepeats, pUnitMission->GetToHitConstants()->nMaxShotsRepeat ) * 2;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 float CToHitCalcer::GetSMove()
@@ -352,6 +360,8 @@ float CToHitCalcer::GetLight()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 float CToHitCalcer::GetFRMult()
 {
+	if ( pUnitMission->HasPerk( N_PERK_NO_FIRST_TURN_PENALTY ) )
+		return Max( pUnitMission->GetToHitConstants()->fFirstRoundCoeff, 1.f );
 	return bFirstRound ? pUnitMission->GetToHitConstants()->fFirstRoundCoeff : 1;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -387,16 +397,23 @@ float CToHitCalcer::GetCA()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 float CToHitCalcer::GetAllAdd()
 {
-	float fRes = sWeaponInfo.nQuality + GetD2() +
-		GetStance() + GetSMove() + GetRS();
+	// Retail 0x6b8410: keep the stored-float sums and the familiarity/quality tail in order.
+	float fRes = GetSMove() + GetRS();
+	fRes += GetStance();
+	fRes += GetD2();
+	fRes = double( fRes ) + pUnitMission->GetWeaponAdaptation() + sWeaponInfo.nQuality;
 	//
 	if ( IsValid( pWeaponItem ) )
 	{
 		NDb::EShootMode ShotMode = pWeaponItem->GetShootMode();
+		float fTargeting = 1;
+		if ( ShotMode == NDb::SM_Snipe )
+			pUnitMission->HasPerk( N_PERK_FASTER_TARGETING, &fTargeting );
 		if ( ShotMode == NDb::SM_Aimed || ShotMode == NDb::SM_Careful )
 			fRes += sWeaponInfo.nTargetingAP;
 		if ( ShotMode == NDb::SM_Careful || ShotMode == NDb::SM_Snipe )
-			fRes += max( nExtraAP, int( GetSMove() ) );
+			// Retail 0x6b8410: two separate truncations; perk 73 scales sniper targeting only.
+			fRes += int( GetSMove() ) - int( double( nExtraAP ) * fTargeting * -1.5 );
 	}
 	//
 	return fRes;
@@ -415,9 +432,9 @@ static void CheckAuraPerk( IUnitMission *pUnit, int nPerkID, float *pToHit, floa
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // Retail GetAuraAdd @0x289f00. Allied units within 3.125 metres contribute perk 0x1c. The owner's
-// final aura perk depends on whether at least one nearby ally belongs to the same scenario player:
+// final aura perk depends on whether at least one nearby unit has the same player pointer:
 // 0x42 when it does, 0x5d otherwise. Both the attack and evasion terms are accumulated.
-static void GetAuraAdd( float *pToHit, float *pEvasion, CUnitServer *pUnit )
+void GetAuraAdd( float *pToHit, float *pEvasion, CUnitServer *pUnit )
 {
 	*pToHit = 0;
 	*pEvasion = 0;
@@ -430,19 +447,18 @@ static void GetAuraAdd( float *pToHit, float *pEvasion, CUnitServer *pUnit )
 
 	list<CPtr<CUnitServer> > units;
 	pWorld->GetUnitsNear( pUnit->GetPosition().GetCP(), &units, 3.125f );
-	bool bSamePlayerAlly = false;
+	bool bSamePlayer = false;
 	for ( list<CPtr<CUnitServer> >::iterator i = units.begin(); i != units.end(); ++i )
 	{
 		CUnitServer *pOther = *i;
 		if ( !IsValid( pOther ) || pOther == pUnit )
 			continue;
-		if ( pUnit->GetDiplomacyState( pOther ) != NDb::DS_ALLY )
-			continue;
-		CheckAuraPerk( pOther->GetUnitRPG(), 0x1c, pToHit, pEvasion );
+		if ( pUnit->GetDiplomacyState( pOther ) == NDb::DS_ALLY )
+			CheckAuraPerk( pOther->GetUnitRPG(), 0x1c, pToHit, pEvasion );
 		if ( pOther->GetPlayer() == pUnit->GetPlayer() )
-			bSamePlayerAlly = true;
+			bSamePlayer = true;
 	}
-	CheckAuraPerk( pUnit->GetUnitRPG(), bSamePlayerAlly ? 0x42 : 0x5d, pToHit, pEvasion );
+	CheckAuraPerk( pUnit->GetUnitRPG(), bSamePlayer ? 0x42 : 0x5d, pToHit, pEvasion );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // Retail v1.2 0x6b85b0: any non-clear weather applies the same penalty.
