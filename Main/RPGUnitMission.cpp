@@ -777,13 +777,15 @@ int CUnitMission::GetActionAP( NAI::EPose curPose, EAction action ) const
 		return GetActionAP( NAI::CROUCH, action );
 	if ( curPose == NAI::CROUCH && HasPerk( N_PERK_CROUCH_COSTS_WALK ) )
 		return GetActionAP( NAI::WALK, action );
-	float fCorpseAP;
-	if ( ( action == AC_MOVE_CORPSE_SIDE || action == AC_MOVE_CORPSE_DIAGONAL ) &&
-		HasPerk( N_PERK_CORPSE_TRACKER, &fCorpseAP ) )
-		return int( action == AC_MOVE_CORPSE_SIDE ? double( fCorpseAP ) : double( fCorpseAP ) * 1.5 );
 	int nAddedAP = 0;
 	if ( pPanzerklein )
+	{
+		// Retail 0x6c1746..0x6c1830: after pose-perk substitutions, unsupported
+		// prone/crouched PK movement returns 1 before any corpse-cost perk is queried.
+		if ( curPose == NAI::CRAWL || curPose == NAI::CROUCH )
+			return 1;
 		nAddedAP = pPanzerklein->nAddMoveAP;
+	}
 	switch ( curPose )
 	{
 		case NAI::CRAWL:
@@ -792,6 +794,10 @@ int CUnitMission::GetActionAP( NAI::EPose curPose, EAction action ) const
 		case NAI::RUN:
 		{
 			int nPose = ( NAI::RUN - curPose + 1 ) * 2;
+			float fCorpseAP;
+			if ( ( action == AC_MOVE_CORPSE_SIDE || action == AC_MOVE_CORPSE_DIAGONAL ) &&
+				HasPerk( N_PERK_CORPSE_TRACKER, &fCorpseAP ) )
+				return int( action == AC_MOVE_CORPSE_SIDE ? double( fCorpseAP ) : double( fCorpseAP ) * 1.5 );
 			switch ( action )
 			{
 				case AC_MOVE_SIDE:		return nPose + nAddedAP;
