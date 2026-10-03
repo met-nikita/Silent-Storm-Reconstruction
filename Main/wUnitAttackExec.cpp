@@ -1843,6 +1843,45 @@ void CExecMeleeTile::OnLabel()
 	bAttackCanceled = true;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// CExecMeleeObject -- v1.2 0x7a56f0/0x7a9b70, Sentinels 0x7e7ac0/0x7eb980.
+////////////////////////////////////////////////////////////////////////////////////////////////////
+CExecMeleeObject::CExecMeleeObject( CUnitServer *_pUS, CObjectBase *_pTarget, int _nExtraAttackAP ):
+	CExecMelee( _pUS, _nExtraAttackAP ), pTarget( _pTarget )
+{
+	NAI::IAIMap *pMap = pUS->GetWorld()->GetAIMap();
+	pMap->GetUnitHLPos( &ptTarget, pMap->GetHull( pTarget ), -1 );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CExecMeleeObject::OnLabel()
+{
+	CWorld *pWorld = pUS->GetWorld();
+	csRPG << CC_WHITE << "Melee " << pUS->GetUnitRPG()->GetName() << "\n{\n";
+	vector<NRPG::CAttackPortion> attack;
+	if ( CreateAttack( &attack, 0 ) && !attack.empty() )
+	{
+		// The common AttackObjectRanged helper resolves the current hull and uses
+		// tile accuracy with object covers. A broken window's centre can be air:
+		// select a hitting ray from the remaining frame instead of tracing to it.
+		CVec3 ptCurrent;
+		bool bObject = IsValid( pTarget ) && pWorld->GetAIMap()->GetUnitHLPos(
+			&ptCurrent, pWorld->GetAIMap()->GetHull( pTarget ), -1 );
+		const CVec3 &ptAim = bObject ? ptCurrent : ptTarget;
+		CVec3 ptAttackPos = NRPG::GetMeleeAttackPos( pUS, ptAim );
+		CObj<NRPG::CCoverInfo> pCover = bObject
+			? pWorld->GetGame()->CalcCovers( ptAttackPos, attack[0], pUS, pTarget, -1, 0 )
+			: pWorld->GetGame()->CalcCoversForTile( ptAttackPos, attack[0], pUS, ptTarget, 0 );
+		int nToHit;
+		float fHit = NRPG::CheckTileToHit( pUS, ptAim, GetExtraAP(), NAI::THL_LOWER,
+			pCover, pWorld->IsFirstTurn(), &nToHit );
+		CRay ray;
+		bool bMissed;
+		if ( NRPG::PeekRay( pCover, &ray, fHit, &bMissed ) && !bMissed )
+			PerformAttack( attack, ray, pTarget );
+	}
+	csRPG << "}\n";
+	bAttackCanceled = true;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 // CExecMeleeUnit
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // retail @0x3a51b0: base chain + hlInfo = {_eHL, empty set} (SelectTargetHLs fills the set at
@@ -3841,6 +3880,7 @@ REGISTER_SAVELOAD_CLASS( 0x00222190, CExecThrowGrenade )
 REGISTER_SAVELOAD_CLASS( 0x00422170, CExecShootUnit )
 REGISTER_SAVELOAD_CLASS( 0x00422171, CExecMeleeTile )
 REGISTER_SAVELOAD_CLASS( 0x00422172, CExecMeleeUnit )
+REGISTER_SAVELOAD_CLASS( 0x01353130, CExecMeleeObject )
 REGISTER_SAVELOAD_CLASS( 0x10422130, CExecOpenClose )
 REGISTER_SAVELOAD_CLASS( 0x00422110, CExecCorpse )
 REGISTER_SAVELOAD_CLASS( 0x00622140, CExecHeal )

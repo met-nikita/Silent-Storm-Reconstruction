@@ -1329,7 +1329,11 @@ void CAIMap::GetAccessibleUnitHL( vector<int> *pRes, const CVec3 &ptFrom, CObjec
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CObjectBase* CAIMap::GetHull( CObjectBase *pUser )
 {
-	return GetHull( pUser, 0 );
+	// Retail GetUnitHLPos (v1.2 0x466420) takes the first registered ACTIVE
+	// hull, not the first octree match (which can be a door's inactive pose).
+	vector<CConvexHull*> hulls;
+	pUserHullsTracker->GetHulls( pUser, &hulls, true );
+	return hulls.empty() ? 0 : hulls.front();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 struct SSphereSphere

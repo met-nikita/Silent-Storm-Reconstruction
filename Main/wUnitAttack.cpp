@@ -789,6 +789,17 @@ CCommandExecute* CreateActionExecutor( CUnitServer *pUS, CCmd *pCmd, EUnitComman
 						return CreateSimpleActionOrReload( pUS, pAttackObject.GetPtr(), pShot, pError );
 					return CreateActionQueueOrReload( pUS, pAttackObject.GetPtr(), pShot, pError );
 				}
+				if ( IsValid( pAttackObject->pTarget ) && (eType == AT_MELEE || eType == AT_KNIFE) )
+				{
+					// Sentinels keeps the object target for melee too: do not reduce
+					// doors/windows to an unfiltered swing at their (possibly empty) centre.
+					// 0x7fe14d..0x7fe157 supplies the object; SS v1.2 0x79db52
+					// instead passes null to its otherwise matching object executor.
+					ENeedActiveItem eActive = pUS->GetUnitRPG()->GetWeaponType() == NDb::WT_DEFAULT
+						? ITEM_INACTIVE : ITEM_ACTIVE;
+					return CreateActionQueue( pUS, pAttackObject.GetPtr(),
+						new CExecMeleeObject( pUS, pAttackObject->pTarget, pAttackObject->nExtraAttackAP ), eActive, pError );
+				}
 				// Explosives and other point-target actions still use a tile executor.
 				if (!IsValid(pAttackObject->pTarget))
 				{
