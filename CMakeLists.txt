@@ -196,6 +196,7 @@ s2_module(Game win32 WHOLE Main
                      LINK ADOImport DBFormat FileIO FModSound Input MiscDll Misc Script
                           fmod_shim lifestudio_shim bink_shim
                           dxguid dinput8 odbc32 odbccp32 d3d9 user32 Gdi32)
+target_link_options(Game PRIVATE /LARGEADDRESSAWARE)
 add_dependencies(Game ls_implibs)   # the lib/def import libs must exist before Game links
 # tools
 s2_module(DataImport     console LINK DBFormat FileIO Misc odbc32 odbccp32 DEFINES _CONSOLE)
