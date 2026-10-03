@@ -124,6 +124,7 @@ public:
 	void OnScenarioClueDestroyed( int nID, bool bUnit );
 	void OnUpdateVisible( NWorld::CPlayer *pPlayer, CScenarioZone *pZone );
 	void OnUnitDestroyed( NWorld::CUnit *pUnit );
+	void OnMakeUnconscious( NWorld::CUnit *pUnit );
 	void ProcessScenario( const vector< CPtr<NRPG::CUnit> > &units );
 	// retail @0x3030b0: may the squad leave pZone without making the scenario unwinnable? Writes the
 	// scenario-unwinnable flag (destroyed clues considered) into *pbGameOver.

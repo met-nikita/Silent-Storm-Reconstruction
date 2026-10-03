@@ -486,7 +486,9 @@ void CSetRender::AddGrass( CTerrainInfoHolder *pInfo )
 					pGrassTracker->GetSectorBound( nLayer, nX, nY, &bound );
 					pGrassTracker->GetBoundTransform( nX, nY, &transform );
 					NGScene::CCFBTransform *pPlace = new NGScene::CCFBTransform( transform );
-					Register( pScene->CreateGrassSector( pAnimator, NDb::GetTexture( nTexID ), pPlace, bound ) );
+					// Retail v1.2 0x6cdacf: terrain grass belongs to floor zero,
+					// not the default (-100), which remains visible on basement floors.
+					Register( pScene->CreateGrassSector( pAnimator, NDb::GetTexture( nTexID ), pPlace, bound, NGScene::SRoomInfo( 0 ) ) );
 				}
 			}
 		}

@@ -638,6 +638,20 @@ void CScenarioTracker::OnUnitDestroyed( NWorld::CUnit *pUnit )
 		CompleteTasks( *i, NDb::TT_DESTROY_ITEM_CARRIER );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// Retail v1.2 0x7042e0: a new knockout completes an already-discovered person's stun task.
+void CScenarioTracker::OnMakeUnconscious( NWorld::CUnit *pUnit )
+{
+	InvalidateLeaveZoneCache();
+	OnUnitDestroyed( pUnit );
+	int nPersID = pUnit->GetRPG()->GetRPGPers()->GetRecordID();
+	if ( bScenarioAvailable )
+	{
+		CScenarioClue *pClue = pScenarioFlowChart->GetClueByPersID( nPersID );
+		if ( IsValid( pClue ) )
+			CompleteTasks( pClue, NDb::TT_STUN_PERSON );
+	}
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 void CScenarioTracker::ProcessCluesList( const list< CPtr<CScenarioClue> > &clues,
 	NDb::EScenarioObjectiveType type )
 {

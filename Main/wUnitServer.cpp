@@ -1623,6 +1623,10 @@ int CUnitServer::ProcessAttack( NWorld::IWorld *pWorld, int nUserID, NRPG::CAtta
 				(*i)->GetUnitRPG()->GetRPGUnit()->AddXP(fXP);
 		}
 	}
+	// Retail v1.2 0x7c3e2d..0x7c3e64: notify the scenario on a new knockout,
+	// even when discovery already ran before the attack.
+	if ( !isUnconscious && IsUnconscious() )
+		GetWorld()->GetGlobalGame()->pScenarioTracker->OnMakeUnconscious( this );
 	// Retail v1.2 0x7c3e69: remember who first incapacitated a conscious unit.
 	// Further hits on an unconscious/dead body must not replace its killer/time.
 	if ( !isDead && !isUnconscious && ( GetUnitRPG()->IsDead() || IsUnconscious() ) )

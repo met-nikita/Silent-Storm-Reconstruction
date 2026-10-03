@@ -2945,7 +2945,10 @@ CObjectBase *CWorld::PerformRangedAttack( const NRPG::SAttackRayInfo &rayInfo, S
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CObjectBase *CWorld::PerformRangedAttack( const NRPG::CAttackPortion &ap, const CRay &ray, const vector<NRPG::IAttackable*> &ignores, STime sCast, NDb::CModel *pTrailModel, float fTrailSpeed, float fMaxRange )
 {
-	NRPG::SAttackRayInfo rayInfo( ap, ray.ptOrigin, ray.ptDir, true, 0.0f, fMaxRange, 0 );
+	// Retail v1.2 ExplodeFragments calls MakeSplinter (0x691c40), whose
+	// bTargetIsHit is false. These rays need a fresh world trace, not an empty
+	// cached-hit trail (0x692731..0x692776).
+	NRPG::SAttackRayInfo rayInfo( ap, ray.ptOrigin, ray.ptDir, false, 0.0f, fMaxRange, 0 );
 	if ( !ignores.empty() )
 	{
 		CDynamicCast<CObjectBase> pObj( ignores[0] );

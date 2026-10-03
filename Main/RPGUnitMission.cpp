@@ -627,14 +627,23 @@ int CUnitMission::GetActionAP( NAI::EPose curPose, EAction action ) const
 		case AC_SHOOT:   return pRPGUnit->GetWeaponAP();
 		case AC_PREPARE_AND_SHOOT:	return GetActionAP( curPose, AC_PREPARE ) + GetActionAP( curPose, AC_SHOOT );
 		case AC_EXPLODE: return 2;
-		case AC_THROW_GRENADE: return 20; // CRAP
+		case AC_THROW_GRENADE:
+		{
+			// Retail v1.2 0x6c10f8: RPGAP record 5, reduced by perk 0x2b.
+			// Keep x87 intermediate precision until the final truncating conversion.
+			NDb::CRPGAP *pAP = NDb::GetRPGAP( 5 );
+			int nAP = pAP ? pAP->nAP : 0;
+			float fParam;
+			if ( HasPerk( N_PERK_CHEAP_THROW, &fParam ) )
+				nAP = int( ( 1.0 - double( fParam ) ) * nAP );
+			return nAP;
+		}
 		case AC_CLIMB_1: return 10;
 		case AC_CLIMB_2: return 12;
 		case AC_CLIMB_3: return 14;
 		case AC_CLIMB_4: return 15;
 		case AC_JUMP: return 10;
 		case AC_TAKE_CORPSE: return 12;
-		case AC_THROW_KNIFE: return 16; // CRAP
 		case AC_TRAP_OBJECT: return 30;
 		case AC_DISARM_TRAP: return 30;
 		case AC_SET_MINE: 
@@ -656,13 +665,18 @@ int CUnitMission::GetActionAP( NAI::EPose curPose, EAction action ) const
 				ASSERT( 0 && "manual therapist?" );
 				return 15;
 			}
+		case AC_THROW_KNIFE:
 		case AC_MELEE:
 			{
 				CMeleeWeaponItem *pMelee = pRPGUnit->GetMeleeWeaponItem();
 				if ( !pMelee )
 					return 0;
 				NDb::CRPGMeleeWeapon *pW = pMelee->GetDBMeleeWeapon();
-				return pW->nMaxAP - (pW->nMaxAP - pW->nMinAP) * pRPGUnit->Skills(NDb::ST_MELEE) / N_MAX_SKILL;
+				int nAP = pW->nMaxAP - (pW->nMaxAP - pW->nMinAP) * pRPGUnit->Skills(NDb::ST_MELEE) / N_MAX_SKILL;
+				float fParam;
+				if ( action == AC_THROW_KNIFE && HasPerk( N_PERK_CHEAP_THROW, &fParam ) )
+					nAP = int( ( 1.0 - double( fParam ) ) * nAP );
+				return nAP;
 			}
 		case AC_BURST:
 			return pRPGUnit->GetWeaponBurstAP();

@@ -1927,7 +1927,9 @@ void CExecMeleeUnit::OnLabel()
 			GetExtraAP(), hlInfo.eHL, hlInfo.accessibleHLs, pCover, pWorld->IsFirstTurn(), &nToHit );
 		CRay ray;
 		bool bIsMiss;
-		if ( NRPG::PeekRay( pCover, &ray, fHit, &bIsMiss ) )
+		// Retail v1.2 0x6b677c/0x6b6875 returns !miss from AttackObjectRanged;
+		// 0x7a9a6d gates both the melee damage trace and its successful-hit ack.
+		if ( NRPG::PeekRay( pCover, &ray, fHit, &bIsMiss ) && !bIsMiss )
 		{
 			PerformAttack( attack, ray, pTarget );
 			// @0x3a9677 -- retail's ONLY throw here is CEventOnUnitSuccessfulMelee( attacker ) (typeid
