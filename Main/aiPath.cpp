@@ -840,13 +840,18 @@ CPath* FindSimplePath( const SPathPlace &ptSrc, const vector<SPathPlace> &ptDst,
 {
 	// when src and dst points are in one move, do not construct big data structures etc.
 	// just return the way
-	int nBestCost = N_PF_MAXWEIGHT, nCurCost;
+	// Retail v1.2 0x48a8b0 ranks direct transitions below the sentinel 16.
+	const int nSimplePathLimit = 16;
+	int nBestCost = nSimplePathLimit, nCurCost;
 	SPathPlace a( ptSrc );
 	a.SetMoving( 0 );
 	
 	SPathPlace bestDest;
 
-	if ( ptSrc.GetPose() == CM_INACTIVE || ptSrc.GetPose() == CM_LAY )
+	// A prone source may change pose directly, preserving its facing. Rejecting
+	// it unconditionally sends the command through the direction-0 wave cells.
+	if ( ptDst.empty() || ptSrc.GetPose() == CM_INACTIVE ||
+		( ptSrc.GetPose() == CM_LAY && ptDst.front().GetPose() == CM_LAY ) )
 		return 0;
 	for ( vector<SPathPlace>::const_iterator i = ptDst.begin(); i != ptDst.end(); ++i )
 	{
@@ -877,23 +882,26 @@ CPath* FindSimplePath( const SPathPlace &ptSrc, const vector<SPathPlace> &ptDst,
 				where.SetDirection( dir );
 				where.SetPose( pose );
 				ETransitionType tt = GetTransitionType( pPathNetwork, a, where );
-				nCurCost = N_PF_MAXWEIGHT;
+				nCurCost = nSimplePathLimit;
 				switch ( tt )
 				{
 				case TT_SAME:
 					nCurCost = 0; break;
 				case TT_TURN:
 					if ( !bPKCroucher )
-						nCurCost = 1; 
+						nCurCost = 0;
 					break;
 				case TT_POSE:
-					nCurCost = bIsCarryingCorpse ? N_PF_MAXWEIGHT : 2; break;
+					nCurCost = bIsCarryingCorpse ? nSimplePathLimit : 2; break;
 				case TT_INTERGRID_SAME:
 					nCurCost = 0; break;
 				}
-				if ( ( nCurCost < nBestCost ) && ( pPathNetwork->IsPassable( where ) ) )
+				if ( where.GetDirection() != a.GetDirection() )
+					++nCurCost;
+				if ( ( nCurCost < nBestCost ) && ( pPathNetwork->GetPassability( where ) == AIP_YES ) )
 				{
-					if ( bIsWearingPK && ( !IsBigLockerPassable( pPathNetwork, where ) ) )
+					if ( ( bIsWearingPK || where.GetPose() == CM_LAY ) &&
+						BigLockerPassableState( pPathNetwork, where ) != AIP_YES )
 						continue;
 					nBestCost = nCurCost;
 					bestDest = where;		
@@ -903,11 +911,17 @@ CPath* FindSimplePath( const SPathPlace &ptSrc, const vector<SPathPlace> &ptDst,
 	}
 
 	CPath *pRes = 0;
-	if ( nBestCost < N_PF_MAXWEIGHT )
+	if ( nBestCost < nSimplePathLimit )
 	{
 		pRes = new CPath;
 		pRes->pNet = pPathNetwork;
 		pRes->points.push_back( a );
+		if ( a.GetPose() != bestDest.GetPose() && a.GetLayer() != bestDest.GetLayer() )
+		{
+			// Change only the layer first; retain the source pose and all other flags.
+			SPathPlace onLayer( ( a.GetData() & ~0x01fe0000 ) | ( bestDest.GetData() & 0x01fe0000 ) );
+			pRes->points.push_back( onLayer );
+		}
 		pRes->points.push_back( bestDest );
 	}
 	return pRes;
