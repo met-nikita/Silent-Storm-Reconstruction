@@ -148,9 +148,8 @@ inline float GetThrowToHitPenalty( NAI::EHitLocation hl )
 // NRPG::GetBestPose  @0x2b6bd0 (RVA) -- release-new free helper, fully recovered (no hooks). Picks the
 // firing pose with the larger positive per-weapon bonus, defaulting to WALK when neither crouch nor
 // crawl is favoured. Reads NDb::CRPGWeaponType::fCrouchBonus (+0x1c) / fCrawlBonus (+0x18); confirmed
-// from Game.exe @0x6b6bd0 (fcomp 0.0 / test ah,0x41 strictly-greater guards). STANDALONE: it has no
-// caller in this tree, so landing it is a pure, behaviour-neutral parity addition. It is NOT
-// CToHitCalcer::GetStance (which reads the bonus by eCurPose -- different semantics).
+// from v1.2 Game.exe @0x6b6be0 (fcomp 0.0 / test ah,0x41 strictly-greater guards).
+// Grenade stance perk 0x5c uses this bonus without changing the unit's actual pose.
 NAI::EPose GetBestPose( const NDb::CRPGWeaponType &wt )
 {
 	if ( wt.fCrouchBonus > 0.f && wt.fCrawlBonus < wt.fCrouchBonus )
@@ -668,11 +667,17 @@ void CGrenadeToHitCalcer::Prepare()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 float CGrenadeToHitCalcer::GetStance()
 {
+	const NDb::CRPGWeaponType &wt = *GetGrenadeRecWeaponType( pGrenade );
+	NAI::EPose pose = eCurPose;
+	// Retail v1.2 0x6b7a29..0x6b7a49: perk 92 grants the best stance's
+	// throwing bonus regardless of the thrower's current pose.
+	if ( pUnitMission->HasPerk( 0x5c ) )
+		pose = GetBestPose( wt );
 	int nStance = 0;
-	if ( eCurPose == NAI::CROUCH  )
-		nStance = int( GetGrenadeRecWeaponType( pGrenade )->fCrouchBonus );
-	else if ( eCurPose == NAI::CRAWL )
-		nStance = int( GetGrenadeRecWeaponType( pGrenade )->fCrawlBonus );
+	if ( pose == NAI::CROUCH )
+		nStance = int( wt.fCrouchBonus );
+	else if ( pose == NAI::CRAWL )
+		nStance = int( wt.fCrawlBonus );
 	return nStance;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -681,7 +686,9 @@ void CGrenadeToHitCalcer::FillWeaponInfo()
 	CToHitCalcer::FillWeaponInfo();
 	sWeaponInfo.nQuality = GetGrenadeRecQuality( pGrenade );
 	sWeaponInfo.nMinRange = GetGrenadeMaxDistance();
-	sWeaponInfo.nMaxRange = sWeaponInfo.nMinRange;
+	// Retail v1.2 0x6b7d7e..0x6b7da0: GetD1 interpolates between the
+	// ballistic range and 1.5 times that range using the derived throwing skill.
+	sWeaponInfo.nMaxRange = int( sWeaponInfo.nMinRange * 1.5f );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 float CGrenadeToHitCalcer::GetMaxImp()
@@ -722,7 +729,7 @@ int CGrenadeToHitCalcer::GetToHit()
 	Prepare();
 	fToHit = GetAllMult() + ( GetAuraToHitAdd() + GetCarefulShootPerk() ) - GetWeatherPenalty();
 	fToHit = Clamp( fToHit, 2.0f, 100.0f );
-	return int( fToHit + 0.5f );  // release rounds the result (fistp), unlike the dev's truncation
+	return int( fToHit );  // v1.2 0x6b8a44..0x6b8a58 explicitly selects x87 truncation.
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CGrenadeToHitCalcer::Log()
