@@ -204,6 +204,7 @@ public:
 	virtual bool IsWaitingForPath( NAI::SUnitPosition *p = 0 ) { if ( p ) *p = posToWait; return bWaiting; }
 	virtual void Segment();
 	virtual CPathConflictsRemover* GetPathConflictsRemover() { return this; }
+	virtual bool IsRotating() = 0;
 
 	bool CheckCanDoMove( NAI::SUnitPosition *reqPos );
 	CUnitServer* GetWhoLocks();
@@ -285,6 +286,7 @@ public:
 	virtual bool TimeLabelReached();
 	virtual void AnimationFinished();
 	virtual void Cancel();
+	virtual bool IsRotating();
 	virtual NAI::CPath* GetCurrentPath() const;
 	virtual int GetActionAP( int nAlreadyReservedAP = 0 ) const;
 	// IExecMove
@@ -329,6 +331,14 @@ void CExecMove::DoGameMove( const NAI::SUnitPosition &dst )
 	pUS->DoGameMove( dst );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// Retail v1.2 0x7bc8e0: interrupt rotation only while the current command is
+// CCmdRotate, not merely because StartMove set bStandIfRecalcCommand.
+bool CExecMove::IsRotating()
+{
+	CDynamicCast<CCmdRotate> pRotate( pCurCmd );
+	return pRotate != 0;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 // @0x3cc570 -- may this move proceed now? On CMR_YES clear the wait and report "go". Otherwise park the
 // unit and recover per the ECanMoveRes verdict: CMR_LOCKED -> walk the locker chain + wait 10 ticks;
 // CMR_DOOR -> reroute; else (a pathed cell that isn't passable -- shouldn't happen) abort the move.
@@ -340,8 +350,9 @@ bool CPathConflictsRemover::CheckCanDoMove( NAI::SUnitPosition *reqPos )
 		bWaiting = false;
 		return true;
 	}
-	// blocked: stop any in-progress turn-in-place, then enter the waiting state
-	if ( pUS->animator.bStandIfRecalcCommand )
+	// 0x7cc973..0x7cc9a4: a blocked walking step must retain its trajectory.
+	// EndRotate/Stand here would reseat it before EndMove finishes that step.
+	if ( IsRotating() && pUS->animator.bStandIfRecalcCommand )
 		pUS->animator.EndRotate( pUS->GetPosition() );
 	bWaiting = true;
 	posToWait = *reqPos;
