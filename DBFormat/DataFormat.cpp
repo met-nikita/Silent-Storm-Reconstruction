@@ -600,7 +600,11 @@ void CRndModel::Import()
 	}
 
 	if ( !IsValid( pGeometry ) )
-		pGeometry = GetGeometry( N_SPHERE_GEOMETRY_ID );
+	{
+		// Retail v1.2 0x7dbf67: empty variants use the non-blocking default cube.
+		const int N_DEFAULT_GEOMETRY_ID = 4299;
+		pGeometry = GetGeometry( N_DEFAULT_GEOMETRY_ID );
+	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 int CRndModel::operator&( CStructureSaver &f )
