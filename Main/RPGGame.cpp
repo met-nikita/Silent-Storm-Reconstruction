@@ -101,11 +101,11 @@ public:
 	virtual void ProcessMeleeAttackPortion( const CAttackPortion &a, const CRay &ray, const vector<IAttackable*> &ignores );
 	virtual void ProcessRangedAttackPortion( const CAttackPortion &a, const CRay &ray, const vector<IAttackable*> &ignores, vector<STrailPoint> *pTrail, float fMaxRange );
 	virtual EAttackResult ProcessThrowingAttackPortion( CAttackPortion *pA, IAttackable *pTarget, NDb::CRPGArmor *pArmor, int nUserID );
-	virtual int GetCompositeToHit( NWorld::CUnit *pAttacker, NWorld::CUnit *pTarget, NAI::EHitLocation eHL, bool bFirstTurn );
+	virtual int GetCompositeToHit( NWorld::CUnit *pAttacker, CObjectBase *pTarget, NAI::EHitLocation eHL, bool bLog );
 	virtual int GetGrenadeCompositeToHit( NWorld::CUnit *pAttacker, 
 		CVec3 ptTarget, bool bFirstTurn, NDb::CRPGGrenade *pGrenade );
 	virtual int GetTileCompositeToHit(  NWorld::CUnit *pAttacker, CVec3 ptTilePos, 
-		NAI::ETileHitLocation eHitLocation, bool bFirstTurn );
+		NAI::ETileHitLocation eHitLocation, bool bLog );
 	virtual int GetBazookaToHit(  NWorld::CUnit *pAttacker, CVec3 ptTilePos, 
 		NAI::ETileHitLocation eHitLocation, bool bFirstTurn );
 	virtual bool CheckVisibility( const NWorld::CUnit *pObserver, const NWorld::CUnit *pDest, bool bUseFOV );   // retail @0x298cb0
@@ -706,8 +706,10 @@ int GetAttackerTileToHit( const NWorld::CUnit *pAttacker, const CVec3 ptTarget, 
 	NAI::ETileHitLocation eHitLocation, CCoverInfo *pCover, bool bFirstRound, int nBullet )
 {
 	int nHitCover = GetHitCover( pAttacker, pCover );
-	int nDistance = fabs(pAttacker->GetPosition().GetCP() - ptTarget ) / FP_GRID_STEP;
-	CVec3 ptAttacker = pAttacker->GetPosition().GetCenter();
+	// Retail v1.2 0x6b532d..0x6b53e5 uses the cover solver's actual attack
+	// origin for both distance and the calculator, not the unit's feet/center.
+	int nDistance = fabs( pCover->src - ptTarget ) * FP_INV_GRID_STEP;
+	CVec3 ptAttacker = pCover->src;
 	//
 	return NRPG::GetTileToHit( pAttacker, pAttacker->GetPose(), nDistance, ptAttacker,
 		ptTarget, eHitLocation, nExtraAP, nHitCover, bFirstRound, CVec3(1,1,1), nBullet );
@@ -735,12 +737,12 @@ int GetAttackerToHit( const NWorld::CUnit *pAttacker, NWorld::CUnit *pTarget, in
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // Used only for inteface tasks. Returns not exactly correct value.
 int CGame::GetCompositeToHit( NWorld::CUnit *pAttacker, 
-	NWorld::CUnit *pTarget, NAI::EHitLocation eHL, bool bFirstTurn )
+	CObjectBase *pTarget, NAI::EHitLocation eHL, bool bLog )
 {
 	CVec3 ptTarget(VNULL3);
 	pAIMap->GetUnitHLPos( &ptTarget, pAIMap->GetHull( pTarget ), NAI::HL_ANY );
 	if ( NRPG::GetToHitType( pAttacker ) == NRPG::TH_GRENADE )
-		return GetGrenadeCompositeToHit( pAttacker, ptTarget, bFirstTurn, 0 );
+		return GetTileCompositeToHit( pAttacker, ptTarget, NAI::THL_MIDDLE, bLog );
 	// Retail v1.2 0x6b5f4f/0x6b5fa2: test current-pose reach to the hull center,
 	// independently of the called shot. -1 keeps the AP preview but omits ToHit.
 	if ( NRPG::GetToHitType( pAttacker ) == NRPG::TH_MELEE )
@@ -752,7 +754,10 @@ int CGame::GetCompositeToHit( NWorld::CUnit *pAttacker,
 	vector<NRPG::CAttackPortion> attack;
 	CDynamicCast<NRPG::IUnitMission> pRealAttacker( pAttacker->GetRPG() );
 	ASSERT( pRealAttacker );
-	pRealAttacker->PrintLog( false );
+	// Retail 0x6b5feb / 0x6b5fff: first-turn state belongs to the RPG unit;
+	// the last argument controls logging, not the first-round modifier.
+	const bool bFirstTurn = pRealAttacker->IsFirstTurn();
+	pRealAttacker->PrintLog( bLog );
 	pRealAttacker->CreateAttack( &attack, false );
 	if ( attack.empty() )
 	{
@@ -803,7 +808,7 @@ int CGame::GetCompositeToHit( NWorld::CUnit *pAttacker,
 	for ( int i = 0; i < nRof; ++i )
 	{
 		if ( pTargetUS )
-			nToHit += GetAttackerToHit( pAttacker, pTarget, pAttacker->GetCarefulShotExtraAP(),
+			nToHit += GetAttackerToHit( pAttacker, pTargetUS, pAttacker->GetCarefulShotExtraAP(),
 				hlInfo.eHL, hlInfo.accessibleHLs, pCover, bFirstTurn, i );
 		else
 			nToHit += GetAttackerTileToHit( pAttacker, ptTarget, pAttacker->GetCarefulShotExtraAP(),
@@ -827,46 +832,73 @@ int CGame::GetGrenadeCompositeToHit( NWorld::CUnit *pAttacker,
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 int CGame::GetTileCompositeToHit(  NWorld::CUnit *pAttacker, CVec3 ptTilePos, 
-		NAI::ETileHitLocation eHitLocation, bool bFirstTurn )
+		NAI::ETileHitLocation eHitLocation, bool bLog )
 {
-	int nDistance = fabs( pAttacker->GetPosition().GetCP() - ptTilePos ) / FP_GRID_STEP;
-	//
 	CDynamicCast<NRPG::IUnitMission> pRPG( pAttacker->GetRPG() );
+	const bool bFirstTurn = pRPG->IsFirstTurn();
+	pRPG->PrintLog( bLog );
+	// Retail v1.2 0x6b5559..0x6b5676: the same tile dispatcher handles all
+	// attack types, including grenades and rockets aimed at a heard position.
+	EToHitType eType = GetToHitType( pAttacker );
+	if ( eType == TH_GRENADE )
+	{
+		int nToHit = GetGrenadeCompositeToHit( pAttacker, ptTilePos, bFirstTurn, 0 );
+		pRPG->PrintLog( true );
+		return nToHit;
+	}
+	if ( eType != TH_MELEE && eType != TH_THROWING && eType != TH_SHOOT && eType != TH_RLAUNCHER )
+	{
+		pRPG->PrintLog( true );
+		return 0;
+	}
+	if ( eType == TH_MELEE )
+	{
+		CDynamicCast<NWorld::CUnitServer> pUS( pAttacker );
+		if ( !NWorld::CanMeleeAttack( pUS, pAttacker->GetPosition(), ptTilePos ) )
+			return -1;
+	}
 	vector<NRPG::CAttackPortion> attack;
 	pRPG->CreateAttack( &attack, false );
 	if ( attack.empty() )
+	{
+		pRPG->PrintLog( true );
 		return 0;
-	//
-	// retail composite tile to-hit @0x2b54a0 + RealCalcTileCovers @0x2b4700: a SWUNG melee weapon
-	// (TH_MELEE) first gates on NWorld::CanMeleeAttack -- out of arm's reach returns the -1
-	// sentinel (the retail cursor @0x1da200 SKIPS -1 results instead of printing them) -- and its
-	// cover walk starts at the blow-height melee attack pos (GetMeleeAttackPos) with NO min-clear
-	// pullback. Only ranged types (and thrown knives, TH_THROWING) cast from GetAttackOrigin with
-	// GetMinClearDistance. The previous unconditional muzzle-origin+min-clear walk produced no
-	// usable hit rays at melee range, so GetHitCover fed a constant 0 into the TH_MELEE 0/100
-	// rule of GetTileToHit (@0x2b4df0) -> melee at ground/walls/objects always displayed 0%.
+	}
+	// 0x6b56e3..0x6b5766: preview the pose facing the commanded point, as
+	// execution will, and keep the impossible-direction sentinel out of the UI.
+	NAI::SUnitPosition pos = pAttacker->GetPosition();
+	pos.pos.p.SetDirection( GetShootDirection( pos.pos.pNet, pos.pos.p, ptTilePos ) );
+	const NAI::EPassable pass = pos.pos.pNet->GetPassability( pos.pos.p );
+	if ( pass == NAI::AIP_NOT_PASSABLE || pass == NAI::AIP_CANNOT_LAY )
+		return -1;
 	CVec3 ptFrom;
 	float fMinClearDistance;
-	if ( GetToHitType( pAttacker ) == TH_MELEE )
+	if ( eType == TH_MELEE )
 	{
-		CDynamicCast<NWorld::CUnitServer> pUS( pAttacker );
-		if ( pUS && !NWorld::CanMeleeAttack( pUS, pAttacker->GetPosition(), ptTilePos ) )
-			return -1;
 		ptFrom = GetMeleeAttackPos( pAttacker, ptTilePos );
 		fMinClearDistance = 0;
 	}
 	else
 	{
-		ptFrom = pAttacker->GetAttackOrigin( pAttacker->GetPosition() );
+		ptFrom = pAttacker->GetAttackOrigin( pos );
 		fMinClearDistance = pAttacker->GetMinClearDistance();
 	}
 	//
+	// RealCalcTileCovers 0x6b4826 gives rockets the same unit penetration
+	// coefficient as the object-target cover solver.
+	if ( eType == TH_RLAUNCHER )
+		attack.front().nK = 1;
 	CObj<NRPG::CCoverInfo> pCover = CalcCoversForTile( ptFrom, attack[0], pAttacker,
 		ptTilePos, fMinClearDistance );
-	int nHitCover = GetHitCover( pAttacker, pCover );
-	//
-	return NRPG::GetTileToHit( pAttacker, pAttacker->GetPose(), nDistance, pAttacker->GetPosition().GetCP(),
-		ptTilePos, eHitLocation, pAttacker->GetCarefulShotExtraAP(), nHitCover, bFirstTurn );
+	// 0x6b579b..0x6b5801: use each bullet's recoil/skill adjustment, then
+	// integer-average the burst. The previous path always showed bullet zero.
+	int nToHit = 0;
+	int nRof = pRPG->GetBulletsQuantityInShot();
+	for ( int i = 0; i < nRof; ++i )
+		nToHit += GetAttackerTileToHit( pAttacker, ptTilePos, pAttacker->GetCarefulShotExtraAP(),
+			eHitLocation, pCover, bFirstTurn, i );
+	pRPG->PrintLog( true );
+	return nToHit / nRof;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 int CGame::GetBazookaToHit(  NWorld::CUnit *pAttacker, CVec3 ptTilePos, 

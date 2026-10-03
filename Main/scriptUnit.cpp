@@ -1252,7 +1252,7 @@ END_SCRIPT_COMMAND
 // target (HL_HEAD = GetHitLocation(0)) and calls the heavy 4-arg NRPG::GetToHit convenience (which builds
 // cover + accessible-HLs + the weapon-type dispatch internally) -- mapped here to the dev's purpose-built
 // CGame::GetCompositeToHit (same "interface-grade to-hit" intent: it CreateAttack's, CalcCovers, and averages
-// over the rate of fire). arg2 (default -1) is the bFirstTurn flag.
+// over the rate of fire). arg2 (default -1) controls logging; first-turn state is read from the unit.
 BEGIN_SCRIPT_COMMAND( UnitGetToHitUnit, "uun[-1]" )
 	CDynamicCast<NWorld::CUnitServer> pShooter( luaParams[ 0 ].p );
 	CDynamicCast<NWorld::CUnit> pTarget( luaParams[ 1 ].p );
@@ -1269,7 +1269,7 @@ END_SCRIPT_COMMAND
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // retail @0x2fb610 ("usn[0]"): the unit's chance to hit the tile at a named waypoint; warn on a bad waypoint
 // name. The retail aims at the waypoint CP and calls GetToHit -- mapped to the dev's CGame::GetTileCompositeToHit
-// (THL_MIDDLE = the waypoint centre). arg2 (default 0) is the bFirstTurn flag.
+// (THL_MIDDLE = the waypoint centre). arg2 (default 0) controls logging, not first-turn state.
 BEGIN_SCRIPT_COMMAND( UnitGetToHitWaypoint, "usn[0]" )
 	CDynamicCast<NWorld::CUnitServer> pUS( luaParams[ 0 ].p );
 	int nToHit = 0;
