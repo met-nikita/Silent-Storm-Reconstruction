@@ -371,7 +371,9 @@ CScenarioZone *CScenarioTracker::GetRecommendedZone( NRPG::CGlobalPlayer *pPlaye
 	list< CPtr<CScenarioZone> >::const_iterator i;
 	for ( i = availableZones.begin(); i != availableZones.end(); ++i )
 	{
-		if ( !IsZoneBlocked( *i) && IsZoneContainsSomeClue( *i ) )
+		// Retail v1.2 0x7012a8..0x7012af skips passed missions before checking
+		// blockers/clues; a leftover clue must not recommend a completed zone.
+		if ( !(*i)->IsPassed() && !IsZoneBlocked( *i ) && IsZoneContainsSomeClue( *i ) )
 		{
 			float fTmpDistance = (*i)->GetDifficulty() - fAvrLevel + 0.001;
 			if ( fTmpDistance < fMinDistance )
