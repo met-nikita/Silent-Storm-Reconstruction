@@ -60,6 +60,7 @@ public:
 	void TraceEntity( const vector<SConvexHull> &e, bool bTerrain );
 	void TraceEntity( const SConvexHull &e, bool bTerrain );
 	void SortIntervals();
+	void ReduceTerrain();
 
 private:
 	CTRect<int> region; // with exclusive borders

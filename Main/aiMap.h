@@ -65,7 +65,8 @@ public:
 	enum ESort
 	{
 		STH_NOSORT,
-		STH_SORT_INTERVALS
+		STH_SORT_INTERVALS,
+		STH_SORT_AND_REDUCE_TERRAIN
 	};
 	enum ESyncType
 	{

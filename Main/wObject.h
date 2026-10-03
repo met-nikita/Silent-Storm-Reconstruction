@@ -72,8 +72,8 @@ class CWindowDoor: public CAnimObjectServerBase, public IWindowDoor, public IMin
 	SAttachedGrenade trap;
 	bool bIsLocked;
 	int nKeyID, nLockHardness;       // retail @220/@224: required-key id + lockpick difficulty (set when locking)
-	bool bIsChest;                   // retail @228 (tag 8): chest-style container door (behavior port deferred)
-	bool bIsTransparentIfOpen;       // retail @229 (tag 9): open door doesn't block vision (behavior port deferred)
+	bool bIsChest;                   // retail @228 (tag 8): chest-style container door
+	bool bIsTransparentIfOpen;       // retail @229 (tag 9): open door doesn't block vision
 	// retail @0x383790: {1 base, 2 bIsOpen, 3 pUser, 4 trap, 5 bIsLocked, 6 nKeyID, 7 nLockHardness,
 	// 8 bIsChest, 9 bIsTransparentIfOpen}. The Jan03 wire put pAIHull@5, shifting the lock fields ->
 	// loading a retail save read garbage into bIsLocked/nKeyID (18/21 doors on the base map came up
@@ -88,10 +88,10 @@ public:
 	// only the tags present in the save, so the new lock fields MUST default here too -- an old save (no tags 7/8)
 	// would otherwise re-serialize indeterminate nKeyID/nLockHardness.
 	CWindowDoor(): bIsLocked( false ), nKeyID( 0 ), nLockHardness( 0 ), bIsChest( false ), bIsTransparentIfOpen( false ) {}
-	// retail ctor @0x3823f0: (..., vCreateFlags, eTimeOfDay, bOpen, bIsChest, bTransparentIfOpen) -- the two
-	// trailing chest bools are a documented dev deferral (see CWorld::AddObject), eTimeOfDay ported per retail.
+	// retail ctor @0x3823f0: (..., vCreateFlags, eTimeOfDay, bOpen, bIsChest, bTransparentIfOpen).
 	CWindowDoor( CWorld *pWorld, const SObjectPlace &pos, bool bLightMap,
-		NDb::CObject *pO, NRPG::IObject *pRPG, CFuncBase<STime> *_pTime, const vector<int> &vCreateFlags, ETimeOfDay eTimeOfDay, bool bOpen = false );
+		NDb::CObject *pO, NRPG::IObject *pRPG, CFuncBase<STime> *_pTime, const vector<int> &vCreateFlags, ETimeOfDay eTimeOfDay,
+		bool bOpen = false, bool _bIsChest = false, bool _bIsTransparentIfOpen = false );
 
 	void GoBoom( CUnitServer *pWho = 0 );
 	// IMine

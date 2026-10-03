@@ -30,8 +30,10 @@ namespace NWorld
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // retail ctor @0x3823f0: eTimeOfDay sits between vCreateFlags and bOpen
 CWindowDoor::CWindowDoor( CWorld *pWorld, const SObjectPlace &pos, bool bLightMap,
-	NDb::CObject *pO, NRPG::IObject *pRPG, CFuncBase<STime> *_pTime, const vector<int> &vCreateFlags, ETimeOfDay eTimeOfDay, bool bOpen )
-	: CAnimObjectServerBase( pWorld, pos, bLightMap, pO, pRPG, _pTime, vCreateFlags, eTimeOfDay )
+	NDb::CObject *pO, NRPG::IObject *pRPG, CFuncBase<STime> *_pTime, const vector<int> &vCreateFlags, ETimeOfDay eTimeOfDay,
+	bool bOpen, bool _bIsChest, bool _bIsTransparentIfOpen )
+	: CAnimObjectServerBase( pWorld, pos, bLightMap, pO, pRPG, _pTime, vCreateFlags, eTimeOfDay ),
+	  bIsChest( _bIsChest ), bIsTransparentIfOpen( _bIsTransparentIfOpen )
 {
 	bIsOpen = bOpen;
 	bIsLocked = false;
@@ -271,7 +273,7 @@ void CWindowDoor::Visit( IAIVisitor *p )
 					pAn2->AddAnimator( current, pAnim2 );
 				}
 				pAIHull = p->AddFlippingHull( pModel->pGeometry->pAIGeometry, pSkeleton, rv, pAn1, pAn2, pModel->pRPGArmor, 
-					position.nFloor, nMask, bIsOpen, pDbObject->pDoor->GetRecordID(), nDestroyStage );
+					position.nFloor, nMask, bIsOpen, pDbObject->pDoor->GetRecordID(), nDestroyStage, bIsTransparentIfOpen );
 			}
 			else
 				pAIHull = p->AddHull( pModel->pGeometry->pAIGeometry, rv, pModel->pRPGArmor, position.nFloor, nMask );

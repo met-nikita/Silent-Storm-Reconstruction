@@ -128,7 +128,7 @@ struct IAIVisitor
 		NDb::CRPGArmor *pArmor, int nFloor, int nMask ) = 0;
 	virtual CObjectBase* AddFlippingHull( NDb::CAIGeometry *pAIGeom, NDb::CSkeleton *pSkeleton, const SFBTransform &pos,
 		CFuncBase<NAnimation::SSkeletonPose> *pAn1, CFuncBase<NAnimation::SSkeletonPose> *pAn2, 
-		NDb::CRPGArmor *pArmor, int nFloor, int nMask, bool bOpen, int nDoorID, int nDestroyStage ) = 0;
+		NDb::CRPGArmor *pArmor, int nFloor, int nMask, bool bOpen, int nDoorID, int nDestroyStage, bool bTransparentIfOpen ) = 0;
 	virtual void AddPieces( NDb::CAIGeometry *pAIGeom, const vector<SPieceMap> &parts,
 		const SFBTransform &pos, 
 		NDb::CRPGArmor *pArmor, int nFloor, int nMask ) = 0;

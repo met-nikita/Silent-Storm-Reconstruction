@@ -397,6 +397,21 @@ void CFastRenderer::SortIntervals()
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// Retail v1.2 0x492200: terrain blocks at its surface, not throughout the
+// underground volume. This must run before sorting the passability intervals.
+void CFastRenderer::ReduceTerrain()
+{
+	for ( int y = 0; y < resGrid.GetYSize(); ++y )
+	{
+		for ( int x = 0; x < resGrid.GetXSize(); ++x )
+		{
+			for ( SResult *p = resGrid[y][x]; p; p = p->pNext )
+				if ( p->pSrc->pSrc->pUserData == 0 )
+					p->fEnter = p->fExit - 0.01f;
+		}
+	}
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 void CFastRenderer::TraceEntity( const vector<SConvexHull> &hulls, bool bTerrain )
 {
 	if ( hulls.empty() )

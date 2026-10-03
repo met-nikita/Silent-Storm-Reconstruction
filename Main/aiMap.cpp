@@ -424,7 +424,7 @@ class CAIMap: public IAIMap, public COrdinarySyncDst<NWorld::IVisObj,CAIMap>, pu
 		NDb::CRPGArmor *pArmor, int nFloor, int nMask );
 	CObjectBase* AddFlippingHull( NDb::CAIGeometry *pAIGeom, NDb::CSkeleton *pSkeleton, const SFBTransform &pos,
 		CFuncBase<NAnimation::SSkeletonPose> *pAn1, CFuncBase<NAnimation::SSkeletonPose> *pAn2, 
-		NDb::CRPGArmor *pArmor, int nFloor, int nMask, bool bOpen, int nDoorID, int nDestroyStage );
+		NDb::CRPGArmor *pArmor, int nFloor, int nMask, bool bOpen, int nDoorID, int nDestroyStage, bool bTransparentIfOpen );
 	void AddPieces( NDb::CAIGeometry *pAIGeom, const vector<SPieceMap> &parts,
 		const SFBTransform &pos, 
 		NDb::CRPGArmor *pArmor, int nFloor, int nMask );
@@ -965,7 +965,7 @@ CObjectBase* CAIMap::AddAnimatedHull( NDb::CAIGeometry *pAIGeom, NDb::CSkeleton 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CObjectBase* CAIMap::AddFlippingHull( NDb::CAIGeometry *pAIGeom, NDb::CSkeleton *pSkeleton, const SFBTransform &pos,
 		CFuncBase<NAnimation::SSkeletonPose> *pAn1, CFuncBase<NAnimation::SSkeletonPose> *pAn2, 
-		NDb::CRPGArmor *pArmor, int nFloor, int nMask, bool bOpen, int nDoorID, int _nDestroyStage )
+		NDb::CRPGArmor *pArmor, int nFloor, int nMask, bool bOpen, int nDoorID, int _nDestroyStage, bool bTransparentIfOpen )
 {
 	if ( !IsValid( pAIGeom ) )
 		return 0;
@@ -1028,6 +1028,9 @@ CObjectBase* CAIMap::AddFlippingHull( NDb::CAIGeometry *pAIGeom, NDb::CSkeleton 
 	nMaskCur = nMask | NWorld::TS_STATE_OPEN;
 	if ( bOpen )
 		nMaskCur |= NWorld::TS_DOOR_HULL_VALID;
+	// Retail v1.2 0x468ebe: only the open hull becomes transparent.
+	if ( bTransparentIfOpen )
+		nMaskCur &= ~NWorld::TS_VISION;
 	pRes = new CStaticConvexHull( pUserHullsTracker, pSkin2, pos,	pArmor, GetCurrentSrcObject(), nMaskCur, nFloor ); 
 	InsertHull( pRes );
 	Register( pRes );
@@ -1204,7 +1207,10 @@ void CAIMap::TraceGrid( CFastRenderer *pRes, int nMask, ESort sort, const CFloor
 		sort( res.
 	}*/
 	TraceEntities( res, pRes, shg );
-	if ( sort == STH_SORT_INTERVALS )
+	// Retail v1.2 0x466bde: reduce first, then sort by the changed interval start.
+	if ( sort == STH_SORT_AND_REDUCE_TERRAIN )
+		pRes->ReduceTerrain();
+	if ( sort == STH_SORT_INTERVALS || sort == STH_SORT_AND_REDUCE_TERRAIN )
 		pRes->SortIntervals();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////

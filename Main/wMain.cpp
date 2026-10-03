@@ -548,7 +548,8 @@ CObjectServerBase *CWorld::AddObject( const SObjectPlace &pos,
 	if ( pDBObject->pDoor )
 	{
 		CWindowDoor *pWD = new CWindowDoor( this, pos,
-			mapElement.bLightmap, pDBObject, pRPGObject, GetTime(), mapElement.flags, mapElement.eTimeOfDay, mapElement.bOpen );
+			mapElement.bLightmap, pDBObject, pRPGObject, GetTime(), mapElement.flags, mapElement.eTimeOfDay,
+			mapElement.bOpen, mapElement.bIsChest, mapElement.bIsTransparentIfOpen );
 		if ( IsValid( mapElement.pGrenade ) )
 			if ( pPostInfo )
 				pPostInfo->traps.push_back( SDoorTrap( pWD, mapElement.pGrenade, mapElement.nDC ) );
@@ -556,10 +557,7 @@ CObjectServerBase *CWorld::AddObject( const SObjectPlace &pos,
 				pWD->SetTrap( mapElement.pGrenade, mapElement.nDC );
 		// retail AddObject @0x365ee0: after the door/chest CWindowDoor is built, a set
 		// doorParams.bIsLocked applies the lock (virtual +0x10 = LockDoor) with the map builder's
-		// key id + hardness (chests: lvl*7+16; plain locked doors: rolled). Retail also threads
-		// bIsChest/bIsTransparentIfOpen into the CWindowDoor ctor (chest containers turn
-		// transparent when open) -- dev CWindowDoor lacks those members; loot placement is already
-		// done at map build (the items are spilled as world items), so that visual is deferred.
+		// key id + hardness (chests: lvl*7+16; plain locked doors: rolled).
 		if ( mapElement.bIsLocked )
 			pWD->LockDoor( true, mapElement.nKeyID, mapElement.nLockHardness );
 		pResult = pWD;

@@ -1062,7 +1062,7 @@ void CPassCalcer::Calc()
 		render.InitParallel( ptOrigin, fAngle, FP_GRID_STEP, region );
 	}
 	pMap->TraceGrid( &render, NWorld::TS_PASS_BLOCKER, 
-		IAIMap::STH_SORT_INTERVALS, CFloorsSet(), IAIMap::STH_SPLIT_TERR_HG, true );
+		IAIMap::STH_SORT_AND_REDUCE_TERRAIN, CFloorsSet(), IAIMap::STH_SPLIT_TERR_HG, true );
 	sphereHeights.region = tempArrays.region;
 	tempFlags.region.SetRect( 0, 0, render.resGrid.GetXSize(), render.resGrid.GetYSize() );
 	tempHeights.region.SetRect( 0, 0, render.resGrid.GetXSize(), render.resGrid.GetYSize() );
