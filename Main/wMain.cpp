@@ -1392,14 +1392,14 @@ void CWorld::PlaceItemSlotsToMap( const ClueToSlot &clueToSlot )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CWorld::PlaceItemSlotsToInventory( const ClueToSlot &clueToSlot )
 {
-	char szStr[128];
-	//
 	for ( ClueToSlot::const_iterator i = clueToSlot.begin();
 		i != clueToSlot.end(); ++i )
 	{
 		if ( i->second.bInventorySlot )
 		{
-			CPtr<NRPG::IInventoryItem> pItem = NRPG::CreateItem( NDb::GetRPGItem( i->first->GetDBClue()->nItemID )->pSuccessor );
+			// Retail v1.2 0x748ab0..0x748aba wraps the clue record itself;
+			// quest items need not have an ordinary-item successor.
+			CPtr<NRPG::IInventoryItem> pItem = NRPG::CreateClueItem( NDb::GetRPGItem( i->first->GetDBClue()->nItemID ) );
 			if ( IsValid( pItem ) )
 			{
 				// place into inventory
@@ -1408,12 +1408,20 @@ void CWorld::PlaceItemSlotsToInventory( const ClueToSlot &clueToSlot )
 				{
 					CPtr<NRPG::IInventory> pInventory = pUnitServer->GetUnitRPG()->GetInventory();
 					CTPoint<int> position;
-					pInventory->FindPlace( pItem, &position );
-					pInventory->Place( position, pItem );
-					sprintf( szStr, "[SCENARIO TRACKER] item %d was placed in an inventory\n", i->first->GetDBClue()->nItemID );
-					OutputDebugString( szStr );
+					if ( pInventory->FindPlace( pItem, &position ) )
+					{
+						pInventory->Place( position, pItem );
+						++pUnitServer->nClueCount; // retail 0x748b88..0x748b8d
+						csSystem << CC_RED << "Item clue " << i->first->GetDBClue()->sSmallDescription << " was placed in an inventory" << endl;
+					}
+					else
+						csSystem << CC_RED << "error: can't find place in inventory for item clue " << CC_YELLOW << i->first->GetDBClue()->sSmallDescription << endl;
 				}
+				else
+					csSystem << CC_RED << "error: person ( PersID = " << i->second.pPers->nRPGPersID << " ) slot for item clue " << CC_YELLOW << i->first->GetDBClue()->sSmallDescription << " not found" << endl;
 			}
+			else
+				csSystem << CC_RED << "error: can't create item for clue " << CC_YELLOW << i->first->GetDBClue()->sSmallDescription << endl;
 		}
 	}
 }
