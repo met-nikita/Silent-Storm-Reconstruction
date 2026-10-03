@@ -1571,9 +1571,25 @@ int CUnitServer::ProcessAttack( NWorld::IWorld *pWorld, int nUserID, NRPG::CAtta
 	bool isUnconscious = IsUnconscious();
 	CUnitServer *pAttacker = IsValid( pAttack->pAttacker ) ?
 		GetWorld()->GetUnitServer( pAttack->pAttacker ) : 0;
+	// Retail v1.2 0x7c3845..0x7c3892: snapshot the hostile attacker's
+	// eligible squad and reward before damage can change the units or diplomacy.
+	list< CPtr<CUnitServer> > xpUnits;
+	float fXP = 0;
+	if ( IsValid( pAttacker ) && pAttacker->GetDiplomacyState( this ) == NDb::DS_ENEMY &&
+		pAttacker->GetTBSPlayer() )
+	{
+		pAttacker->GetTBSPlayer()->GetUnitsThatCanFight( &xpUnits );
+		fXP = GetUnitRPG()->GetXP( xpUnits.size() );
+	}
 	int nRet = CDumbUnitServer::ProcessAttack( pWorld, nUserID, pAttack, vDir, pArmor );
 	if ( !IsValid( this ) )
+	{
+		// Retail 0x7c3a93..0x7c3abc also pays the prepared reward if damage
+		// removes the target entirely; do not access the invalid target here.
+		for ( list< CPtr<CUnitServer> >::iterator i = xpUnits.begin(); i != xpUnits.end(); ++i )
+			(*i)->GetUnitRPG()->GetRPGUnit()->AddXP( fXP );
 		return nRet;
+	}
 	CUnitServer *pPKUnit = 0;
 	if ( IsWearingPK() )
 		pPKUnit = pWearingPK;
@@ -1613,15 +1629,6 @@ int CUnitServer::ProcessAttack( NWorld::IWorld *pWorld, int nUserID, NRPG::CAtta
 					pGlobalPlayer->deployData.unitsDeployData[ GetUnitRPG()->GetRPGUnit() ].bCorpseAlive = false;
 		}
 		GetWorld()->GetGlobalGame()->pScenarioTracker->OnScenarioClueDestroyed( this->GetUnitRPG()->GetRPGPersID(), true );
-		//
-		if ( IsValid( pAttack->pAttacker ) )
-		{
-			list< CPtr<CUnitServer> > units;
-			GetWorld()->GetUnitServer(pAttack->pAttacker)->GetTBSPlayer()->GetUnitsThatCanFight( &units );
-			float fXP = GetUnitRPG()->GetXP( units.size() );
-			for ( list< CPtr<CUnitServer> >::iterator i = units.begin(); i != units.end(); ++i )
-				(*i)->GetUnitRPG()->GetRPGUnit()->AddXP(fXP);
-		}
 	}
 	// Retail v1.2 0x7c3e2d..0x7c3e64: notify the scenario on a new knockout,
 	// even when discovery already ran before the attack.
@@ -1633,6 +1640,10 @@ int CUnitServer::ProcessAttack( NWorld::IWorld *pWorld, int nUserID, NRPG::CAtta
 	{
 		pKiller = pAttacker;
 		tDeathTime = GetWorld()->GetTime()->GetValue();
+		// Retail 0x7c3ebd..0x7c3eec rewards the first incapacitation only,
+		// not subsequent attacks that kill an already-unconscious body.
+		for ( list< CPtr<CUnitServer> >::iterator i = xpUnits.begin(); i != xpUnits.end(); ++i )
+			(*i)->GetUnitRPG()->GetRPGUnit()->AddXP( fXP );
 	}
 	return nRet;
 }
