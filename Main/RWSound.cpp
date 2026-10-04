@@ -71,7 +71,12 @@ void CRenderSound::AddEffect( STime tStart, NDb::CSoundEffect *pEffect, CFuncBas
 	if ( !pEffect )
 		CPtr< CFuncBase<CVec3> > pHold( pPosition );
 	else
-		Register( pScene->AddEffect( pEffect, timer.GetTime()->GetValue(), timer.GetTime(), pPosition, flags ) );
+	{
+		// v1.2 0x6d5f12 and Sentinels 0x821f52: effects take an elapsed offset too,
+		// not an absolute begin time. CSoundInstance applies its per-instance start delay.
+		const int nDelay = Max( 0, (int)( timer.GetTime()->GetValue() - tStart ) - 50 );
+		Register( pScene->AddEffect( pEffect, (STime)nDelay, timer.GetTime(), pPosition, flags ) );
+	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // Retail v1.2 0x6d5eb0: use the same saved-event age as positional sounds.
@@ -86,23 +91,20 @@ void CRenderSound::Add2DSound( STime tStart, NDb::CSound *pSound )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CRenderSound::Update( bool bAdvanceTime, CTransformStack *pTS, STime currentTime )
 {
-	// retail @0x2d5740: accumulate the raw main-loop clock (150ms-clamped) on top of the ctor aim
-	// seed; the advance flag freezes 'now' while the game is paused. Valid because the mission's
-	// GetTime() no longer folds nDeltaTime in (the CTimeCounter revive) -- the skip fast-forward now
-	// rides the world clock only, and aim (= world - tHiddenDelta) stays on the real-time epoch this
-	// timer accumulates.
-	//
-	// KNOWN RETAIL BUG (user-verified in retail v1.2): a heard-but-unseen sound whose emitter
-	// enters the visible set REPLAYS on the sight edge (e.g. shots fired behind your back burst
-	// when you turn around). Cause: this raw clock and the aim-stamped tStart are two
-	// independently-accumulated CTimeCounters; whenever aim slips vs raw (skip fast-forwards,
-	// clamp/baseline races), nDelay = now - tStart - 50 under-ages the old sound and Add3DSound
-	// replays it instead of seeking past its end. DELIBERATE-DEVIATION FIX if ever wanted
-	// (better than retail): pin 'now' to the SAME axis that stamps tStart -- keep a ctor-cached weak
-	// `NWorld::IWorld *pWorld` and replace the Advance below with
-	//   timer.SetCurrent( pWorld->GetAimTime()->GetValue() );   // (Advance(true,...) when pWorld==0: save-restore mixer)
-	// so nDelay is always the sound's true aim-age.
-	timer.Advance( bAdvanceTime, currentTime );
+	// ORIGINAL RETAIL BUG FIXED: v1.2 0x6d5d40 advances only once, losing all but
+	// 150ms of a skipped turn. Sentinels 0x821d40..0x821d89 consumes the elapsed
+	// GAME-clock delta in <=150ms steps before Sync, so old revealed/restored events
+	// seek past their end rather than replay. CMissionBase supplies GetGameTime().
+	// Reset/first-update still establishes a baseline; pause still freezes playback.
+	// Bound the increment before adding, avoiding overflow in Sentinels' t + 150.
+	STime t = timer.GetPrevTime();
+	if ( t == 0 )
+		t = currentTime;
+	do
+	{
+		t = t < currentTime ? t + Min( (STime)150, currentTime - t ) : currentTime;
+		timer.Advance( bAdvanceTime, t );
+	} while ( t < currentTime );
 	Sync();
 	pScene->Draw( pTS );
 }

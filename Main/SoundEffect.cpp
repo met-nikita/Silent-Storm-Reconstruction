@@ -12,10 +12,15 @@ namespace NSound
 extern CBasicShare<int, CFileSample3D> share3DSamples;
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CSoundInstance::CSoundInstance( NDb::CSoundInstance *_pInstance, STime t, CFuncBase<STime> *_pTime, CFuncBase<CVec3> *pPos, const vector<int> &_flags )
-	: pInstance(_pInstance), stBeginTime(t), pTime(_pTime), pPlacement(pPos), flags(_flags) 
+	: pInstance(_pInstance), pTime(_pTime), pPlacement(pPos), flags(_flags)
 {
 	value = false;
-	stBeginTime += pInstance->nStartTime;
+	// Retail v1.2 0x7092d5..0x709335 / Sentinels 0x4085e0..0x408640:
+	// t is elapsed effect age, not an absolute clock value (Jan03 semantics).
+	pTime.Refresh();
+	const int nWait = (int)( pInstance->nStartTime - t );
+	tStartTime = nWait < 0 ? (STime)-( (__int64)nWait ) : 0;
+	stBeginTime = pTime->GetValue() + (STime)Max( 0, nWait );
 	tLastSound = stBeginTime - 1000 * pInstance->fSoundAvgInterval;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -70,13 +75,14 @@ void CSoundInstance::Recalc()
 	{
 		NFMSound::SPlayParams p;
 		p.pSample = pData;
-		p.bLoop = pSVar->pSound->bLoop;
+		p.bLoop = pInstance->nCycleCount == -1 ? true : pSVar->pSound->bLoop;
 		p.nVolume = pInstance->nVolume;
 		p.position = pPlacement->GetValue();
 		p.nLoops = pInstance->nCycleCount;
 		p.bFadeIn = pInstance->bFadeIn;
 		p.bFadeOut = pInstance->bFadeOut;
 		p.nFadeSamples = pInstance->nFadeSamples;
+		p.nStartMs = (int)tStartTime; // v1.2 0x70965c..0x709672 / Sentinels 0x40896c
 		pSound = NFMSound::Play3DSound( p );
 		tLastSound = pTime->GetValue();
 	}

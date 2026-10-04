@@ -81,8 +81,8 @@ public:
 	virtual void FastUpdate( STime currentTime ) = 0;
 	virtual void ResetTiming() = 0;
 	// retail IRenderGame vtbl+0x30 @0x2cb1c0: advance BOTH sound mixers (world pSound + fog-gated
-	// pUnitSounds). Retail threads a bAdvanceTime bool; dev CRenderSound::Update advances
-	// unconditionally, so the bool is folded (matches the old dev pRenderSound->Update call sites).
+	// pUnitSounds). The advance flag freezes both clocks while paused. CMissionBase now
+	// supplies GetGameTime(), following the intentional Sentinels sound-clock correction.
 	virtual void UpdateSound( bool bAdvanceTime, CTransformStack *pTS, STime currentTime ) = 0;	// retail @0x2cb1c0: (bool,...)
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////

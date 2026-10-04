@@ -719,13 +719,16 @@ CSound3D *Play3DSound( const SPlayParams &params )
 	{
 		FSOUND_3D_SetAttributes( nChannel, &vFPos.x, 0 );
 		FSOUND_SetVolume( nChannel, params.bFadeIn ? 0 : params.nVolume );
-		// retail tStartTime semantics: seek nStartMs into the sample; a start past the sample end
-		// means the sound already finished in world time -- keep it silent (stop the channel).
-		if ( params.nStartMs > 0 && !bLoop )
+		// Retail v1.2 SetStartTime 0x829810: seek late starts, wrapping loops at the
+		// sample length. Non-looping old events must remain silent, not restart.
+		if ( params.nStartMs > 0 )
 		{
 			int nFreq = FSOUND_GetFrequency( nChannel );
 			unsigned int nOffsetSamples = (unsigned int)( (__int64)nFreq * params.nStartMs / 1000 );
-			if ( nOffsetSamples >= FSOUND_Sample_GetLength( *params.pSample ) )
+			const unsigned int nLength = FSOUND_Sample_GetLength( *params.pSample );
+			if ( bLoop && nLength != 0 )
+				nOffsetSamples %= nLength;
+			if ( nOffsetSamples >= nLength )
 			{
 				FSOUND_StopSound( nChannel );
 				nChannel = -1;
@@ -739,7 +742,10 @@ CSound3D *Play3DSound( const SPlayParams &params )
 	CSound3D *pSound = new CSound3D( params.pSample, params.position, vFPos, params.nVolume, params.nLoops );
 	pSound->SetFadeOut( params.bFadeIn, params.bFadeOut, params.nFadeSamples );
 	pSound->nChannel = nChannel;
-	hashChannel[nChannel] = pSound;
+	// Failed/expired starts have no live channel. Do not track the -1 sentinel:
+	// a later channel-allocation retry would otherwise issue StopSound(-1).
+	if ( nChannel != -1 )
+		hashChannel[nChannel] = pSound;
 //	DebugTrace( "Playing channels: %d (max channels: %d, hw:%d)\n", FSOUND_GetChannelsPlaying(), FSOUND_GetMaxChannels(), FSOUND_GetNumHardwareChannels() );
 	return pSound;
 }

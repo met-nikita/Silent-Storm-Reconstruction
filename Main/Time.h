@@ -23,6 +23,7 @@ public:
 	void Advance( bool bAdvanceTime, STime currentTime );
 	void SetCurrent( STime currentTime );   // retail @0x30f560: stamp value (bumps CCTime counter), prevTime untouched
 	CCTime* GetTime() const { return pTime; }
+	STime GetPrevTime() const { return prevTime; } // Sentinels 0x694930; no new saved state
 	int operator&( CStructureSaver &f );
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
