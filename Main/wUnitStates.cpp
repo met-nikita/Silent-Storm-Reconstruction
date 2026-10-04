@@ -58,10 +58,19 @@ bool CUnitState::IsCriticalsFailCommand( CCmd *pCmd, EUnitCommandResult *pResult
 	const list<NDb::ECritical> &criticals = GetCriticalsBan().GetCommandBans( pUS, pCmd );
 	for ( list<NDb::ECritical>::const_iterator i = criticals.begin(); i != criticals.end(); ++i )
 		if ( pUS->GetUnitRPG()->HasCritical( *i ) )
+		{
+			// Retail v1.2 0x7cb133..0x7cb149: PK-type command bans
+			// have their own feedback, rather than the ordinary injury message.
+			if ( *i >= NDb::C_PANZERKLEIN_AXIS && *i <= NDb::C_PANZERKLEIN_TERRORS_HWG )
+				*pResult = UCR_PK_BAN;
 			return true;
+		}
 	//
 	if ( pUS->IsWearingPK() ) // has Panzerklein critical - special bans
 	{
+		// Retail v1.2 0x7cafff: all of the pose/path restrictions
+		// below report PK feedback. Successful probes restore res at the end.
+		*pResult = UCR_PK_BAN;
 		CDynamicCast<CCmdPath> pPath(pCmd);
 		if (pPath)
 		{
