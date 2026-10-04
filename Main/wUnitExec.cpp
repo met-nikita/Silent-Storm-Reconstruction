@@ -41,75 +41,71 @@ static int nTestModel = 0;
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CExecReload
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-class CExecReload: public CCommandExecute
+CExecReload::CExecReload( CUnitServer *_pUS, int nSlot ): CCommandExecute(_pUS)
 {
-	OBJECT_BASIC_METHODS(CExecReload);
-private:
-	ZDATA_(CCommandExecute)
-	CPtr<NRPG::IInventoryItem> pItem;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CCommandExecute*)this); f.Add(2,&pItem); return 0; }
+	if ( !IsValid( pUS ) )
+		return;   // saveload path: operator& restores pItem
+	// Retail v1.2 0x794a89..0x794a96: -1 resolves the weapon in use,
+	// including a mounted cannon, not the unrelated active inventory slot.
+	if ( nSlot == -1 )
+		pItem = pUS->GetUnitRPG()->GetWeaponItem();
+	else
+		pItem = pUS->GetUnitRPG()->GetInventory()->Get( NDb::ESlot( nSlot ) );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+int CExecReload::GetStartAP() const
+{ return pUS->GetActionAP( NRPG::AC_RELOAD ); }
+////////////////////////////////////////////////////////////////////////////////////////////////////
+int CExecReload::GetActionAP( int nAlreadyReservedAP ) const
+{ return pUS->GetActionAP( NRPG::AC_RELOAD ); }
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CExecReload::Run()
+{
+	/*
+	// TEST{ for testing purposes only - do not remove
+	for ( int i = 0; i < 16; ++i )
+	{
+		pUS->GetWorld()->AddDebris( NDb::GetModel( nTestModelIDs[nTestModel] ), pUS->GetWorld()->GetAIMap(),
+			pUS->GetPosition().GetCP() + CVec3(0,0,1), QNULL, CVec3(1,0,20), pUS->GetWorld()->GetTime(), false, 0, 0, -2 );
+		nTestModel = (nTestModel + 1) % N_TEST_MODELS;
+	}
+	// TEST}
+	return;
+	*/
+	pUS->DoAction( NRPG::AC_RELOAD );
+	pUS->animator.Reload( pUS->GetPosition() );
+	StartAction( pUS->GetWorld(), SKIPPABLE );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+bool CExecReload::TimeLabelReached()
+{
+	//return false;
+	pUS->GetUnitRPG()->Reload();
+	CDynamicCast<NRPG::IWeaponItem> pW(pItem);
+	if (pW)
+	{
+		NDb::CSound *pSound = pW->GetDBWeapon()->pSoundReload;
+		NDb::SAISound sound = { NDb::GetAISound( 26 ), 0, 1.0f };   // retail @0x394b70: no silencer on reload
+		pUS->GetWorld()->MakeAISound( sound, pUS, pSound );
+	}
+	pUS->Update();
+	return false;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+EUnitCommandResult CExecReload::CanDoIt()
+{
+	CDynamicCast<NRPG::IWeaponItem> pW(pItem);
+	if (pW)
+	{
+		if ( !pW->CanReload( pUS->GetUnitRPG()->GetInventory() ) )
+			return UCR_NO_EQUIPMENT;
 
-public:
-	CExecReload( CUnitServer *_pUS = 0, int nSlot = -1 ):
-		CCommandExecute(_pUS)
-	{
-		if ( !IsValid( pUS ) )
-			return;   // saveload path: operator& restores pItem
-		// Retail v1.2 0x794a89..0x794a96: -1 resolves the weapon in use,
-		// including a mounted cannon, not the unrelated active inventory slot.
-		if ( nSlot == -1 )
-			pItem = pUS->GetUnitRPG()->GetWeaponItem();
-		else
-			pItem = pUS->GetUnitRPG()->GetInventory()->Get( NDb::ESlot( nSlot ) );
+		return UCR_OK;
 	}
-	int GetStartAP() const { return pUS->GetActionAP( NRPG::AC_RELOAD ); }
-	int GetActionAP( int nAlreadyReservedAP = 0 ) const { return pUS->GetActionAP( NRPG::AC_RELOAD ); }
-	virtual void Run()
-	{
-		/*
-		// TEST{ for testing purposes only - do not remove
-		for ( int i = 0; i < 16; ++i )
-		{
-			pUS->GetWorld()->AddDebris( NDb::GetModel( nTestModelIDs[nTestModel] ), pUS->GetWorld()->GetAIMap(),
-				pUS->GetPosition().GetCP() + CVec3(0,0,1), QNULL, CVec3(1,0,20), pUS->GetWorld()->GetTime(), false, 0, 0, -2 );
-			nTestModel = (nTestModel + 1) % N_TEST_MODELS;
-		}
-		// TEST}
-		return;
-		*/
-		pUS->DoAction( NRPG::AC_RELOAD );
-		pUS->animator.Reload( pUS->GetPosition() );
-		StartAction( pUS->GetWorld(), SKIPPABLE );
-	}
-	virtual bool TimeLabelReached()
-	{
-		//return false;
-		pUS->GetUnitRPG()->Reload();
-		CDynamicCast<NRPG::IWeaponItem> pW(pItem);
-		if (pW)
-		{
-			NDb::CSound *pSound = pW->GetDBWeapon()->pSoundReload;
-			NDb::SAISound sound = { NDb::GetAISound( 26 ), 0, 1.0f };   // retail @0x394b70: no silencer on reload
-			pUS->GetWorld()->MakeAISound( sound, pUS, pSound );
-		}
-		pUS->Update();
-		return false;
-	}
-	EUnitCommandResult CanDoIt()
-	{
-		CDynamicCast<NRPG::IWeaponItem> pW(pItem);
-		if (pW)
-		{
-			if ( !pW->CanReload( pUS->GetUnitRPG()->GetInventory() ) )
-				return UCR_NO_EQUIPMENT;
 
-			return UCR_OK;
-		}
-
-		// retail CExecReloadWeapon::CanDoIt @0x394970: no weapon resolved -> NO_EQUIPMENT
-		return UCR_NO_EQUIPMENT;
-	}
-};
+	// retail CExecReloadWeapon::CanDoIt @0x394970: no weapon resolved -> NO_EQUIPMENT
+	return UCR_NO_EQUIPMENT;
+}
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CExecCriticalLostWeapon
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -937,7 +933,7 @@ CCommandExecute* CreateExecutor( CUnitServer *pUS, CCmd *pCmd, EUnitCommandResul
 										else {
 											CDynamicCast<CCmdReload> pReload(pCmd);
 											if (pReload)
-												return CreateSimpleExec(new CExecReload(pUS, pReload->nSlot), pError);
+												return CreateActionExecutor( pUS, pReload.GetPtr(), pError );
 											else {
 												CDynamicCast<CCmdLoadWeapon> pLoadWeapon(pCmd);
 												if (pLoadWeapon)

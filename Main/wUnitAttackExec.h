@@ -47,6 +47,24 @@ EUnitCommandResult CanDoFirstAid( CUnitServer *pUS, const NAI::SUnitPosition &fr
 // calls this straight and maps a miss to the -1 "no percentage" sentinel.
 bool CanMeleeAttack( CUnitServer *pUS, const NAI::SUnitPosition &from, const CVec3 &ptTarget );
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// CExecReload -- the existing save identity and item field are unchanged.
+////////////////////////////////////////////////////////////////////////////////////////////////////
+class CExecReload: public CCommandExecute
+{
+	OBJECT_BASIC_METHODS(CExecReload);
+	ZDATA_(CCommandExecute)
+	CPtr<NRPG::IInventoryItem> pItem;
+public:
+	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CCommandExecute*)this); f.Add(2,&pItem); return 0; }
+	CExecReload( CUnitServer *_pUS = 0, int nSlot = -1 );
+	int GetStartAP() const;
+	int GetActionAP( int nAlreadyReservedAP = 0 ) const;
+	void Run();
+	bool TimeLabelReached();
+	EUnitCommandResult CanDoIt();
+	EUnitCommandResult CanDoIt( const NAI::SUnitPosition &from ) { return CanDoIt(); }
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
 // CExecAttack
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CExecAttack: public CCommandExecute
