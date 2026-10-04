@@ -1332,7 +1332,12 @@ void CWorld::DistributeClues( const SMapInfo &mapInfo,
 				SClueSlot &slot = personSlots[n];
 				(*personClueToSlot)[ *clue ] = slot;
 				if ( slot.bInventorySlot )
+				{
+					// The clue replaces the authored person (often a placeholder).
+					// Inventory placement must find that replacement, not the old person.
+					slot.pPers = NDb::GetPers( (*clue)->GetDBClue()->nPersID );
 					itemSlots.push_back( slot );
+				}
 				personSlots.erase( personSlots.begin() + n );
 			}
 	// place item clues

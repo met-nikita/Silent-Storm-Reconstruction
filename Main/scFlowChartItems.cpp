@@ -162,6 +162,10 @@ int CScenarioZone::GetTemplateIDForClue( CScenarioClue *pClue )
 		return 0;
 	//
 	vector<int> &templatesIDs = GetDBZone()->templatesIDs;
+	// Retail assigns a single-template zone directly. Its admission limits are
+	// handled by CanPlaceClue; permanent clues must not lose their map here.
+	if ( templatesIDs[1] == 0 )
+		return templatesIDs[0];
 	//
 	NDb::EScenarioClueType type = pClue->GetDBClue()->clueType;
 	int nMax = 0;
