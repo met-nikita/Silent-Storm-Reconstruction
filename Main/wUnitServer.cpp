@@ -923,10 +923,12 @@ void CUnitServer::GetVisible( vector<CPtr<CUnit> > *pTarget ) const
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CUnitServer::GetInfo( NRPG::SUnitInfo *pInfo ) const
 {
-	// retail @0x3bfd50: base CUnitMission fill, then overlay the PK-HP bar.
+	// Retail v1.2 0x7c0110: only non-shell units expose character VP.
+	GetUnitRPG()->GetInfo( GetPose(), pInfo );
+	// The dev RPG fill also writes these additive HUD flags; reset them
+	// AFTER it so an empty PK cannot inherit bUnitInfo=true.
 	pInfo->bPKInfo = false;
 	pInfo->bUnitInfo = false;
-	GetUnitRPG()->GetInfo( GetPose(), pInfo );
 	if ( IsEmptyPK() )
 	{
 		// the unit's body literally IS a Panzerklein -> PK-HP == the unit's own HP.
