@@ -421,6 +421,17 @@ void CMovesCalcer::MarkSame( CArray2D<STile> *pRes )
 					int nDiff = t1.nHeight - t2.nHeight;
 					if ( nDiff > GetIHeight( 0.05f ) || nDiff < -GetIHeight( 0.05f ) )
 						continue;
+					// Retail v1.2 0x47b05c..0x47b07b (v1.1 minus 0x90): merge only
+					// passable, connected cells. An empty upper-layer cell at height zero
+					// otherwise flattens a basement surface within 5cm of zero; cursor
+					// picking then prefers the empty cell and rejects the basement floor.
+					if ( !t1.nPassable || !t2.nPassable )
+						continue;
+					if ( !( t1.nMoveCrouch || t1.nMoveLay || t1.nMoveHC ) ||
+						!( t2.nMoveCrouch || t2.nMoveLay || t1.nMoveHC ) )
+						continue;
+					// The second connectivity check deliberately uses t1.nMoveHC too:
+					// both retail versions reuse the first cell's HC byte here.
 					if ( t1.nDisplacement == t2.nDisplacement ) // match found
 					{
 						t1.nFlags |= TF_HAS_SAME;
