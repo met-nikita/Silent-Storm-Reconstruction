@@ -105,8 +105,8 @@ public:
 	const CTPoint<float>& GetPosition() const;
 	void SetPosition( const CTPoint<float> &sPosition );
 
-	void Render( list<SRect> *pRender, const SPoint &sGlobalPosition, const SRect &sWindow );
-	void Render( NGScene::I2DGameView *pView, const SPoint &sPosition, const SRect &sWindow );
+	void Render( list<CTRect<float> > *pRender, const CTPoint<float> &sGlobalPosition, const CTRect<float> &sWindow );
+	void Render( NGScene::I2DGameView *pView, const CTPoint<float> &sPosition, const CTRect<float> &sWindow );
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CMLTextObject::CMLTextObject( CMLStream *_pStream, int _nStrStart, int _nStrSize ):
@@ -226,9 +226,8 @@ void CMLTextObject::SetPosition( const CTPoint<float> &_sPosition )
 	sPosition = _sPosition;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// retail @0x320ac0 builds float rects (list<CTRect<float>>); dev's pRender list is int SRect (see
-// the UIML.h boundary note) -- the float sums narrow only at the push_back.
-void CMLTextObject::Render( list<SRect> *pRender, const SPoint &sGlobalPosition, const SRect &sWindow )
+// retail @0x320ac0: character bounds preserve the fractional layout offsets.
+void CMLTextObject::Render( list<CTRect<float> > *pRender, const CTPoint<float> &sGlobalPosition, const CTRect<float> &sWindow )
 {
 	const float fPosX = sGlobalPosition.x + sPosition.x;
 	const float fPosY = sGlobalPosition.y + sPosition.y;
@@ -236,16 +235,15 @@ void CMLTextObject::Render( list<SRect> *pRender, const SPoint &sGlobalPosition,
 	float fLastX = 0;
 	for ( list<float>::const_iterator iTemp = edges.begin(); iTemp != edges.end(); iTemp++ )
 	{
-		pRender->push_back( SRect( fLastX + fPosX, fPosY, *iTemp + fPosX, sSize.y + fPosY ) );
+		pRender->push_back( CTRect<float>( fLastX + fPosX, fPosY, *iTemp + fPosX, sSize.y + fPosY ) );
 		fLastX = *iTemp;
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// retail @0x3207c0 passes the float position straight into CreateDynamicRects (float in retail);
-// dev's CreateDynamicRects is int -- narrow with the engine's fistp idiom at the boundary.
-void CMLTextObject::Render( NGScene::I2DGameView *pView, const SPoint &sGlobalPosition, const SRect &sWindow )
+// retail @0x3207c0: keep the fractional layout offset through quad submission.
+void CMLTextObject::Render( NGScene::I2DGameView *pView, const CTPoint<float> &sGlobalPosition, const CTRect<float> &sWindow )
 {
-	SPoint sPos( Float2Int( sGlobalPosition.x + sPosition.x ), Float2Int( sGlobalPosition.y + sPosition.y ) );
+	CTPoint<float> sPos( sGlobalPosition.x + sPosition.x, sGlobalPosition.y + sPosition.y );
 	if ( !sOutline.rects.empty() )
 		pView->CreateDynamicRects( pTexture, sOutline, sPos, sWindow );
 
@@ -287,8 +285,8 @@ public:
 	const CTPoint<float>& GetPosition() const;
 	void SetPosition( const CTPoint<float> &sPosition );
 
-	void Render( list<SRect> *pRender, const SPoint &sGlobalPosition, const SRect &sWindow );
-	void Render( NGScene::I2DGameView *pView, const SPoint &sPosition, const SRect &sWindow );
+	void Render( list<CTRect<float> > *pRender, const CTPoint<float> &sGlobalPosition, const CTRect<float> &sWindow );
+	void Render( NGScene::I2DGameView *pView, const CTPoint<float> &sPosition, const CTRect<float> &sWindow );
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 IMLObject* CreateIMLImageObject( NDb::CUITexture *pUITexture, SState::EHORAlign eAlign, int nBorder, int nWidth, int nHeight )
@@ -390,16 +388,16 @@ void CMLImageObject::SetPosition( const CTPoint<float> &_sPosition )
 	sPosition = _sPosition;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// retail @0x320b50 (float rect list in retail; narrows at the int push_back boundary here)
-void CMLImageObject::Render( list<SRect> *pRender, const SPoint &sGlobalPosition, const SRect &sWindow )
+// retail @0x320b50: character/image bounds remain fractional too.
+void CMLImageObject::Render( list<CTRect<float> > *pRender, const CTPoint<float> &sGlobalPosition, const CTRect<float> &sWindow )
 {
-	pRender->push_back( SRect( sGlobalPosition.x, sGlobalPosition.y, sSize.x + sGlobalPosition.x, sSize.y + sGlobalPosition.y ) );
+	pRender->push_back( CTRect<float>( sGlobalPosition.x, sGlobalPosition.y, sSize.x + sGlobalPosition.x, sSize.y + sGlobalPosition.y ) );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// retail @0x320840 (float position in retail; fistp-narrowed at the dev int CreateDynamicRects boundary)
-void CMLImageObject::Render( NGScene::I2DGameView *pView, const SPoint &sGlobalPosition, const SRect &sWindow )
+// retail @0x320840: image layout offsets are not rounded before rendering.
+void CMLImageObject::Render( NGScene::I2DGameView *pView, const CTPoint<float> &sGlobalPosition, const CTRect<float> &sWindow )
 {
-	SPoint sPos( Float2Int( sGlobalPosition.x + sPosition.x ), Float2Int( sGlobalPosition.y + sPosition.y ) );
+	CTPoint<float> sPos( sGlobalPosition.x + sPosition.x, sGlobalPosition.y + sPosition.y );
 	pView->CreateDynamicRects( pTexture, sLayout, sPos, sWindow );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -449,8 +447,8 @@ public:
 	const CTPoint<float>& GetPosition() const { return sPosition; }
 	void SetPosition( const CTPoint<float> &_sPosition ) { sPosition = _sPosition; }
 
-	void Render( list<SRect> *pRender, const SPoint &sGlobalPosition, const SRect &sWindow ) {}
-	void Render( NGScene::I2DGameView *pView, const SPoint &sPosition, const SRect &sWindow ) {}
+	void Render( list<CTRect<float> > *pRender, const CTPoint<float> &sGlobalPosition, const CTRect<float> &sWindow ) {}
+	void Render( NGScene::I2DGameView *pView, const CTPoint<float> &sPosition, const CTRect<float> &sWindow ) {}
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 IMLObject* CreateIMLTabObject()
@@ -504,8 +502,8 @@ public:
 
 	void Generate( NGScene::I2DGameView *pView, float fWidth );
 
-	void Render( list<SRect> *pRender, const SPoint &sPosition, const SRect &sWindow );
-	void Render( NGScene::I2DGameView *pView, const SPoint &sPosition, const SRect &sWindow );
+	void Render( list<CTRect<float> > *pRender, const CTPoint<float> &sPosition, const CTRect<float> &sWindow );
+	void Render( NGScene::I2DGameView *pView, const CTPoint<float> &sPosition, const CTRect<float> &sWindow );
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CMLLayout::CMLLayout():
@@ -626,7 +624,7 @@ void CMLLayout::Generate( NGScene::I2DGameView *pView, float fWidth )
 	sSize.y = sInfo.fY;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CMLLayout::Render( list<SRect> *pRender, const SPoint &sPosition, const SRect &sWindow )
+void CMLLayout::Render( list<CTRect<float> > *pRender, const CTPoint<float> &sPosition, const CTRect<float> &sWindow )
 {
 	for( list<SCmdPair>::iterator iTemp = itemsList.begin(); iTemp != itemsList.end(); iTemp++ )
 	{
@@ -637,7 +635,7 @@ void CMLLayout::Render( list<SRect> *pRender, const SPoint &sPosition, const SRe
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CMLLayout::Render( NGScene::I2DGameView *pView, const SPoint &sPosition, const SRect &sWindow )
+void CMLLayout::Render( NGScene::I2DGameView *pView, const CTPoint<float> &sPosition, const CTRect<float> &sWindow )
 {
 	for( list<SCmdPair>::iterator iTemp = itemsList.begin(); iTemp != itemsList.end(); iTemp++ )
 	{
@@ -780,8 +778,8 @@ public:
 
 	void Generate( NGScene::I2DGameView *pView, int nWidth );
 
-	void Render( list<SRect> *pRender, const SPoint &sPosition, const SRect &sWindow );
-	void Render( NGScene::I2DGameView *pView, const SPoint &sPosition, const SRect &sWindow );
+	void Render( list<CTRect<float> > *pRender, const CTPoint<float> &sPosition, const CTRect<float> &sWindow );
+	void Render( NGScene::I2DGameView *pView, const CTPoint<float> &sPosition, const CTRect<float> &sWindow );
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CML::CML()
@@ -936,12 +934,12 @@ void CML::Generate( NGScene::I2DGameView *pView, int nWidth )
 	pLayout->Generate( pView, float( nWidth ) );   // retail @0x322320: int width -> FLOAT layout width
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CML::Render( list<SRect> *pRender, const SPoint &sPosition, const SRect &sWindow )
+void CML::Render( list<CTRect<float> > *pRender, const CTPoint<float> &sPosition, const CTRect<float> &sWindow )
 {
 	pLayout->Render( pRender, sPosition, sWindow );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CML::Render( NGScene::I2DGameView *pView, const SPoint &sPosition, const SRect &sWindow )
+void CML::Render( NGScene::I2DGameView *pView, const CTPoint<float> &sPosition, const CTRect<float> &sWindow )
 {
 	pLayout->Render( pView, sPosition, sWindow );
 }

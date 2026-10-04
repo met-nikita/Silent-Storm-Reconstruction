@@ -122,7 +122,8 @@ public:
 	bool HitTest( int nX, int nY ) const;
 	bool ClientToScreen( SPoint *pPosition, SRect *pWindow, bool bSelf = true ) const;
 	void ScreenToClient( const SPoint &sScreenPos, SPoint *pPosition ) const;
-	void VirtualToScreen( SPoint *pPosition, SRect *pRes );
+	void VirtualToScreen( const SPoint *pPosition, CTPoint<float> *pRes );
+	void VirtualToScreen( const SRect *pWindow, CTRect<float> *pRes );
 	// retail @0x3275c0: full-window depth-clear quad (fZ=1 punches the 3D hole, fZ=0 restores)
 	void CreateClearRect( NGScene::I2DGameView *pView, float fZ );
 

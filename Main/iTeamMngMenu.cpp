@@ -391,11 +391,11 @@ void CUnitInventoryPanelItem::Draw( const STime &sTime, NGScene::I2DGameView *pV
 	if ( !ClientToScreen( &sScrPosition, &sScrWindow ) )
 		return;
 
-	VirtualToScreen( &sScrPosition, &sScrWindow );
-
-	SRect sDummyRect;
-	SPoint sSize( GetSize() );
-	VirtualToScreen( &sSize, &sDummyRect );
+	CTPoint<float> sScreenPosition, sSize;
+	CTRect<float> sScreenWindow;
+	VirtualToScreen( &sScrPosition, &sScreenPosition );
+	VirtualToScreen( &sScrWindow, &sScreenWindow );
+	VirtualToScreen( &GetSize(), &sSize );
 
 	CRectLayout sLayout;
 	sLayout.AddRect( 0, 0, sSize.x, sSize.y, CTRect<float>( 0, 0, sSize.x, sSize.y ) );
@@ -467,16 +467,16 @@ void CUnitInventoryPanel::Draw( const STime &sTime, NGScene::I2DGameView *pView 
 	if ( !ClientToScreen( &sScrPosition, &sScrWindow ) )
 		return;
 
-	VirtualToScreen( &sScrPosition, &sScrWindow );
-
-	SRect sDummyRect;
-	SPoint sSize( GetSize() );
-	VirtualToScreen( &sSize, &sDummyRect );
+	CTPoint<float> sScreenPosition, sSize;
+	CTRect<float> sScreenWindow;
+	VirtualToScreen( &sScrPosition, &sScreenPosition );
+	VirtualToScreen( &sScrWindow, &sScreenWindow );
+	VirtualToScreen( &GetSize(), &sSize );
 
 	CRectLayout sLayout;
 	sLayout.AddRect( 0, 0, sSize.x, sSize.y, CTRect<float>( 0, 0, sSize.x, sSize.y ) );
 
-	pView->CreateDynamicClearRects( sLayout, sScrPosition, sScrWindow, 0 );
+	pView->CreateDynamicClearRects( sLayout, sScreenPosition, sScreenWindow, 0 );
 
 	CWindow::Draw( sTime, pView );
 }
@@ -1196,16 +1196,16 @@ void CTeamMngUI::Draw( const STime &sTime, NGScene::I2DGameView *pView )
 	if ( !ClientToScreen( &sScrPosition, &sScrWindow ) )
 		return;
 
-	VirtualToScreen( &sScrPosition, &sScrWindow );
-
-	SRect sDummyRect;
-	SPoint sSize( GetSize() );
-	VirtualToScreen( &sSize, &sDummyRect );
+	CTPoint<float> sScreenPosition, sSize;
+	CTRect<float> sScreenWindow;
+	VirtualToScreen( &sScrPosition, &sScreenPosition );
+	VirtualToScreen( &sScrWindow, &sScreenWindow );
+	VirtualToScreen( &GetSize(), &sSize );
 
 	CRectLayout sLayout;
 	sLayout.AddRect( 0, 0, sSize.x, sSize.y, CTRect<float>( 0, 0, sSize.x, sSize.y ) );
 
-	pView->CreateDynamicClearRects( sLayout, sScrPosition, sScrWindow, 0 );
+	pView->CreateDynamicClearRects( sLayout, sScreenPosition, sScreenWindow, 0 );
 
 	CWindow::Draw( sTime, pView );
 }

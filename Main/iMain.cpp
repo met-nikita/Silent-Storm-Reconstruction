@@ -40,14 +40,14 @@ void ShowLogo()
 	if ( pLogo )
 	{
 		CVec2 vSize = p2DScene->GetViewportSize();
-		CTRect<int> window( 0, 0, Float2Int(vSize.x), Float2Int(vSize.y) );
+		CTRect<float> window( 0, 0, vSize.x, vSize.y );
 		CRectLayout rl;
 
 		p2DScene->StartNewFrame();
 		// quad size = logo dims * (vp/1024, vp/768) = the full viewport (baked; no layout scale)
 		rl.AddRect( 0, 0, pLogo->nWidth * vSize.x / 1024.0f, pLogo->nHeight * vSize.y / 768.0f,
 			CRectLayout::STextureCoord( CTRect<float>( 0, pLogo->nHeight, pLogo->nWidth, 0 ) ) );
-		p2DScene->CreateDynamicRects( pLogo,  rl, CTPoint<int>( 0, 0 ), window );
+		p2DScene->CreateDynamicRects( pLogo,  rl, CTPoint<float>( 0, 0 ), window );
 		p2DScene->Flush();
 	}
 	NGScene::Flip();

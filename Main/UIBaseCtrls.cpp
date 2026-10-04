@@ -150,9 +150,12 @@ void CText::Draw( const STime &sTime, NGScene::I2DGameView *pView )
 	SPoint sScrPosition;
 	if ( !ClientToScreen( &sScrPosition, &sScrWindow ) )
 		return;
-	VirtualToScreen( &sScrPosition, &sScrWindow );
+	CTPoint<float> sScreenPosition;
+	CTRect<float> sScreenWindow;
+	VirtualToScreen( &sScrPosition, &sScreenPosition );
+	VirtualToScreen( &sScrWindow, &sScreenWindow );
 
-	pText->Render( pView, sScrPosition, sScrWindow );
+	pText->Render( pView, sScreenPosition, sScreenWindow );
 
 	CWindow::Draw( sTime, pView );
 }

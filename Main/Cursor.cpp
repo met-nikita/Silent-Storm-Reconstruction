@@ -233,9 +233,9 @@ void CCursor::Draw( const STime &sTime, NGScene::I2DGameView *pView )
 			{
 				CVec2 vScr = pView->GetViewportSize();
 				SPoint sTextVirt( sPos.x + pTex->nWidth, sPos.y );
-				SPoint sScrPos( (int)( sTextVirt.x * vScr.x / 1024.0f ), (int)( sTextVirt.y * vScr.y / 768.0f ) );
+				CTPoint<float> sScrPos( sTextVirt.x * vScr.x / 1024.0f, sTextVirt.y * vScr.y / 768.0f );
 				pTextML->Generate( pView, (int)vScr.x );
-				SRect sScrWindow( sScrPos.x, sScrPos.y, (int)vScr.x, (int)vScr.y );
+				CTRect<float> sScrWindow( sScrPos.x, sScrPos.y, vScr.x, vScr.y );
 				pTextML->Render( pView, sScrPos, sScrWindow );
 			}
 		}

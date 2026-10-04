@@ -100,13 +100,16 @@ void CTextDraw::SetText( const wstring &_wsText )
 void CTextDraw::Draw( CWindow *pWindow, const STime &sTime, NGScene::I2DGameView *pView )
 {
 	SPoint sTextSize = GetSize( pView );
-	SRect sScrWindow( sPosition.x, sPosition.y, sPosition.x + sTextSize.x, sPosition.y + sTextSize.y );
-	SPoint sScrPosition( sPosition );
+	SRect sVirtualWindow( sPosition.x, sPosition.y, sPosition.x + sTextSize.x, sPosition.y + sTextSize.y );
+	SPoint sVirtualPosition( sPosition );
+	CTRect<float> sScrWindow;
+	CTPoint<float> sScrPosition;
 	if ( pWindow )
 	{
-		if ( !pWindow->ClientToScreen( &sScrPosition, &sScrWindow, false ) )
+		if ( !pWindow->ClientToScreen( &sVirtualPosition, &sVirtualWindow, false ) )
 			return;
-		pWindow->VirtualToScreen( &sScrPosition, &sScrWindow );
+		pWindow->VirtualToScreen( &sVirtualPosition, &sScrPosition );
+		pWindow->VirtualToScreen( &sVirtualWindow, &sScrWindow );
 	}
 	else
 	{
@@ -114,12 +117,12 @@ void CTextDraw::Draw( CWindow *pWindow, const STime &sTime, NGScene::I2DGameView
 
 		float fXCoef = vScreenRect.x / 1024.0f;
 		float fYCoef = vScreenRect.y / 768.0f;
-		sScrPosition.x *= fXCoef;
-		sScrPosition.y *= fYCoef;
-		sScrWindow.x1 *= fXCoef;
-		sScrWindow.y1 *= fYCoef;
-		sScrWindow.x2 *= fXCoef;
-		sScrWindow.y2 *= fYCoef;
+		sScrPosition.x = sVirtualPosition.x * fXCoef;
+		sScrPosition.y = sVirtualPosition.y * fYCoef;
+		sScrWindow.x1 = sVirtualWindow.x1 * fXCoef;
+		sScrWindow.y1 = sVirtualWindow.y1 * fYCoef;
+		sScrWindow.x2 = sVirtualWindow.x2 * fXCoef;
+		sScrWindow.y2 = sVirtualWindow.y2 * fYCoef;
 	}
 
 	pML->Render( pView, sScrPosition, sScrWindow );
@@ -183,24 +186,27 @@ void CImageDraw::Draw( CWindow *pWindow, const STime &sTime, NGScene::I2DGameVie
 	NGfx::SPixel8888 sDrawColor;
 	MakeColor( &sDrawColor, sColor );
 
-	SRect sScrWindow( sWindow );
-	SPoint sScrPosition( sWindow.x1, sWindow.y1 );
+	SRect sVirtualWindow( sWindow );
+	SPoint sVirtualPosition( sWindow.x1, sWindow.y1 );
+	CTRect<float> sScrWindow;
+	CTPoint<float> sScrPosition;
 	if ( pWindow )
 	{
-		if ( !pWindow->ClientToScreen( &sScrPosition, &sScrWindow, false ) )
+		if ( !pWindow->ClientToScreen( &sVirtualPosition, &sVirtualWindow, false ) )
 			return;
-		pWindow->VirtualToScreen( &sScrPosition, &sScrWindow );
+		pWindow->VirtualToScreen( &sVirtualPosition, &sScrPosition );
+		pWindow->VirtualToScreen( &sVirtualWindow, &sScrWindow );
 	}
 	else
 	{
 		float fXCoef = vScreenRect.x / 1024.0f;
 		float fYCoef = vScreenRect.y / 768.0f;
-		sScrPosition.x *= fXCoef;
-		sScrPosition.y *= fYCoef;
-		sScrWindow.x1 *= fXCoef;
-		sScrWindow.y1 *= fYCoef;
-		sScrWindow.x2 *= fXCoef;
-		sScrWindow.y2 *= fYCoef;
+		sScrPosition.x = sVirtualPosition.x * fXCoef;
+		sScrPosition.y = sVirtualPosition.y * fYCoef;
+		sScrWindow.x1 = sVirtualWindow.x1 * fXCoef;
+		sScrWindow.y1 = sVirtualWindow.y1 * fYCoef;
+		sScrWindow.x2 = sVirtualWindow.x2 * fXCoef;
+		sScrWindow.y2 = sVirtualWindow.y2 * fYCoef;
 	}
 
 	if ( IsValid( pUITexture ) )
@@ -438,13 +444,14 @@ void CModelDraw::Draw( CWindow *pWindow, const STime &sTime, NGScene::I2DGameVie
 	if ( bParentScene )
 		return;
 
-	SRect s2DScrWindow( sScrWindow );
-	SPoint s2DScrPosition( sScrPosition );
-	SPoint sRealSize( sWindow.Width(), sWindow.Height() );
+	CTRect<float> s2DScrWindow;
+	CTPoint<float> s2DScrPosition, sRealSize;
+	const SPoint sVirtualSize( sWindow.Width(), sWindow.Height() );
 	if ( pWindow )
 	{
-		pWindow->VirtualToScreen( &s2DScrPosition, &s2DScrWindow );
-		pWindow->VirtualToScreen( &sRealSize, 0 );
+		pWindow->VirtualToScreen( &sScrPosition, &s2DScrPosition );
+		pWindow->VirtualToScreen( &sScrWindow, &s2DScrWindow );
+		pWindow->VirtualToScreen( &sVirtualSize, &sRealSize );
 	}
 	else
 	{
@@ -452,14 +459,14 @@ void CModelDraw::Draw( CWindow *pWindow, const STime &sTime, NGScene::I2DGameVie
 
 		float fXCoef = vScreenRect.x / 1024.0f;
 		float fYCoef = vScreenRect.y / 768.0f;
-		sRealSize.x *= fXCoef;
-		sRealSize.y *= fYCoef;
-		s2DScrPosition.x *= fXCoef;
-		s2DScrPosition.y *= fYCoef;
-		s2DScrWindow.x1 *= fXCoef;
-		s2DScrWindow.y1 *= fYCoef;
-		s2DScrWindow.x2 *= fXCoef;
-		s2DScrWindow.y2 *= fYCoef;
+		sRealSize.x = sVirtualSize.x * fXCoef;
+		sRealSize.y = sVirtualSize.y * fYCoef;
+		s2DScrPosition.x = sScrPosition.x * fXCoef;
+		s2DScrPosition.y = sScrPosition.y * fYCoef;
+		s2DScrWindow.x1 = sScrWindow.x1 * fXCoef;
+		s2DScrWindow.y1 = sScrWindow.y1 * fYCoef;
+		s2DScrWindow.x2 = sScrWindow.x2 * fXCoef;
+		s2DScrWindow.y2 = sScrWindow.y2 * fYCoef;
 	}
 
 	CRectLayout sLayout;

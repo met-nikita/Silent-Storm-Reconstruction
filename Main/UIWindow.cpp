@@ -254,23 +254,22 @@ void CWindow::ScreenToClient( const SPoint &sScreenPos, SPoint *pPosition ) cons
 	pPosition->y = sScreenPos.y - sPosition.y;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CWindow::VirtualToScreen( SPoint *pPosition, SRect *pWindow )
+// Retail v1.2 0x7276e0/0x727680: virtual coordinates are integral, but screen
+// positions and clipping edges stay fractional until the renderer snaps them.
+void CWindow::VirtualToScreen( const SPoint *pPosition, CTPoint<float> *pRes )
 {
-	SRect sRect;
 	const CVec2 &vScreenRect = GetInterface()->GetView()->GetViewportSize();
-
-	if ( pPosition )
-	{
-		pPosition->x = pPosition->x * vScreenRect.x / 1024;
-		pPosition->y = pPosition->y * vScreenRect.y / 768;
-	}
-	if ( pWindow )
-	{
-		pWindow->x1 = pWindow->x1 * vScreenRect.x / 1024;
-		pWindow->x2 = pWindow->x2 * vScreenRect.x / 1024;
-		pWindow->y1 = pWindow->y1 * vScreenRect.y / 768;
-		pWindow->y2 = pWindow->y2 * vScreenRect.y / 768;
-	}
+	pRes->x = pPosition->x * ( vScreenRect.x / 1024.0f );
+	pRes->y = pPosition->y * ( vScreenRect.y / 768.0f );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CWindow::VirtualToScreen( const SRect *pWindow, CTRect<float> *pRes )
+{
+	const CVec2 &vScreenRect = GetInterface()->GetView()->GetViewportSize();
+	pRes->x1 = pWindow->x1 * ( vScreenRect.x / 1024.0f );
+	pRes->x2 = pWindow->x2 * ( vScreenRect.x / 1024.0f );
+	pRes->y1 = pWindow->y1 * ( vScreenRect.y / 768.0f );
+	pRes->y2 = pWindow->y2 * ( vScreenRect.y / 768.0f );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // retail @0x3275c0
@@ -281,12 +280,11 @@ void CWindow::CreateClearRect( NGScene::I2DGameView *pView, float fZ )
 	if ( !ClientToScreen( &sPosition, &sWindow ) )
 		return;
 
-	SRect s2DWindow( sWindow );
-	SPoint s2DPosition( sPosition );
-	VirtualToScreen( &s2DPosition, &s2DWindow );
-
-	SPoint sRealSize( GetSize() );
-	VirtualToScreen( &sRealSize, 0 );
+	CTRect<float> s2DWindow;
+	CTPoint<float> s2DPosition, sRealSize;
+	VirtualToScreen( &sPosition, &s2DPosition );
+	VirtualToScreen( &sWindow, &s2DWindow );
+	VirtualToScreen( &GetSize(), &sRealSize );
 
 	CRectLayout sLayout;
 	sLayout.AddRect( 0, 0, sRealSize.x, sRealSize.y, CTRect<float>( 0, 0, 0, 0 ) );

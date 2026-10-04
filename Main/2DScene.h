@@ -22,8 +22,8 @@ namespace NGScene
 class I2DScene: public CObjectBase
 {
 public:
-	virtual void CreateDynamicRects( CPtrFuncBase<NGfx::CTexture> *pTexture, const CRectLayout &sLayout, const CTPoint<int> &sPosition, const CTRect<int> &sClipWindow ) = 0;
-	virtual void CreateDynamicClearRects( const CRectLayout &sLayout, const CTPoint<int> &sPosition, const CTRect<int> &sClipWindow, float fZ = 1.0f ) = 0;
+	virtual void CreateDynamicRects( CPtrFuncBase<NGfx::CTexture> *pTexture, const CRectLayout &sLayout, const CTPoint<float> &sPosition, const CTRect<float> &sClipWindow ) = 0;
+	virtual void CreateDynamicClearRects( const CRectLayout &sLayout, const CTPoint<float> &sPosition, const CTRect<float> &sClipWindow, float fZ = 1.0f ) = 0;
 
 	virtual void StartNewFrame( NGfx::CTexture *pTarget, const CVec2 &vSize ) = 0;
 	virtual void Flush() = 0;

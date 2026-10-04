@@ -39,11 +39,11 @@ private:
 public:
 	C2DGameView();
 
-	void CreateDynamicRects( CFuncBase<SText> *pText, const CTPoint<int> &sPosition, const CTRect<int> &sWindow );
-	void CreateDynamicRects( NDb::CTexture *pTexture, const CRectLayout &sLayout, const CTPoint<int> &sPosition, const CTRect<int> &sWindow );
-	void CreateDynamicRects( CPtrFuncBase<NGfx::CTexture> *pTexture, const CRectLayout &sLayout, const CTPoint<int> &sPosition, const CTRect<int> &sWindow );
+	void CreateDynamicRects( CFuncBase<SText> *pText, const CTPoint<float> &sPosition, const CTRect<float> &sWindow );
+	void CreateDynamicRects( NDb::CTexture *pTexture, const CRectLayout &sLayout, const CTPoint<float> &sPosition, const CTRect<float> &sWindow );
+	void CreateDynamicRects( CPtrFuncBase<NGfx::CTexture> *pTexture, const CRectLayout &sLayout, const CTPoint<float> &sPosition, const CTRect<float> &sWindow );
 	CFuncBase<SText>* CreateText( CFuncBase<wstring> *pText, CFuncBase< CTPoint<int> > *pSize, bool bProcessTAGs = true );
-	void CreateDynamicClearRects( const CRectLayout &sLayout, const CTPoint<int> &sPosition, const CTRect<int> &sClipWindow, float fZ = 1.0f );
+	void CreateDynamicClearRects( const CRectLayout &sLayout, const CTPoint<float> &sPosition, const CTRect<float> &sClipWindow, float fZ = 1.0f );
 
 	virtual const CVec2& GetViewportSize() { return pScreenRect->GetValue(); }
 	CTextLocaleInfo* GetLocaleInfo() const { return pLocale; }
@@ -62,7 +62,7 @@ C2DGameView::C2DGameView()
 	pLocale->Setup( NGfx::GetScreenRect() );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void C2DGameView::CreateDynamicRects( CFuncBase<SText> *pText, const CTPoint<int> &sPosition, const CTRect<int> &sWindow )
+void C2DGameView::CreateDynamicRects( CFuncBase<SText> *pText, const CTPoint<float> &sPosition, const CTRect<float> &sWindow )
 {
 	CDGPtr< CFuncBase<SText> > pFormater( pText );
 
@@ -77,7 +77,7 @@ void C2DGameView::CreateDynamicRects( CFuncBase<SText> *pText, const CTPoint<int
 	return;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void C2DGameView::CreateDynamicRects( NDb::CTexture *pTexture, const CRectLayout &sLayout, const CTPoint<int> &sPosition, const CTRect<int> &sWindow )
+void C2DGameView::CreateDynamicRects( NDb::CTexture *pTexture, const CRectLayout &sLayout, const CTPoint<float> &sPosition, const CTRect<float> &sWindow )
 {
 	if ( !pTexture )
 		pScene->CreateDynamicRects( 0, sLayout, sPosition, sWindow );
@@ -85,7 +85,7 @@ void C2DGameView::CreateDynamicRects( NDb::CTexture *pTexture, const CRectLayout
 		pScene->CreateDynamicRects( shareTextures.Get( pTexture->GetRecordID() ), sLayout, sPosition, sWindow );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void C2DGameView::CreateDynamicRects( CPtrFuncBase<NGfx::CTexture> *pTexture, const CRectLayout &sLayout, const CTPoint<int> &sPosition, const CTRect<int> &sWindow )
+void C2DGameView::CreateDynamicRects( CPtrFuncBase<NGfx::CTexture> *pTexture, const CRectLayout &sLayout, const CTPoint<float> &sPosition, const CTRect<float> &sWindow )
 {
 	pScene->CreateDynamicRects( pTexture, sLayout, sPosition, sWindow );
 }
@@ -95,7 +95,7 @@ CFuncBase<SText>* C2DGameView::CreateText( CFuncBase<wstring> *pText, CFuncBase<
 	return CreateTextFormater( pLocale, pScreenRect, pText, pSize, bProcessTAGs );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void C2DGameView::CreateDynamicClearRects( const CRectLayout &sLayout, const CTPoint<int> &sPosition, const CTRect<int> &sClipWindow, float fZ )
+void C2DGameView::CreateDynamicClearRects( const CRectLayout &sLayout, const CTPoint<float> &sPosition, const CTRect<float> &sClipWindow, float fZ )
 {
 	pScene->CreateDynamicClearRects( sLayout, sPosition, sClipWindow, fZ );
 }

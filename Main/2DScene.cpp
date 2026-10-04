@@ -22,15 +22,15 @@ class C2DScene: public I2DScene
 	NGfx::C2DQuadsRenderer quadRender;
 
 public:
-	void CreateDynamicRects( CPtrFuncBase<NGfx::CTexture> *pTexture, const CRectLayout &sLayout, const CTPoint<int> &sPosition, const CTRect<int> &sClipWindow );
-	void CreateDynamicClearRects( const CRectLayout &sLayout, const CTPoint<int> &sPosition, const CTRect<int> &sClipWindow, float fZ = 1.0f );
+	void CreateDynamicRects( CPtrFuncBase<NGfx::CTexture> *pTexture, const CRectLayout &sLayout, const CTPoint<float> &sPosition, const CTRect<float> &sClipWindow );
+	void CreateDynamicClearRects( const CRectLayout &sLayout, const CTPoint<float> &sPosition, const CTRect<float> &sClipWindow, float fZ = 1.0f );
 
 	void StartNewFrame( NGfx::CTexture *pTarget, const CVec2 &vSize );
 	void Flush();
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 static CRectLayout clippedTemp;
-void C2DScene::CreateDynamicRects( CPtrFuncBase<NGfx::CTexture> *pTexture, const CRectLayout &sLayout, const CTPoint<int> &sPosition, const CTRect<int> &sWindow )
+void C2DScene::CreateDynamicRects( CPtrFuncBase<NGfx::CTexture> *pTexture, const CRectLayout &sLayout, const CTPoint<float> &sPosition, const CTRect<float> &sWindow )
 {
 //	ClipRects( &clippedTemp, sLayout, sWindow, CVec2(sPosition.x, sPosition.y) );
 	if ( pTexture )
@@ -43,7 +43,7 @@ void C2DScene::CreateDynamicRects( CPtrFuncBase<NGfx::CTexture> *pTexture, const
 		RenderRectLayoutClipped( &quadRender, 0, sLayout, sPosition, sWindow, 0.0f, LRM_NORMAL );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void C2DScene::CreateDynamicClearRects( const CRectLayout &sLayout, const CTPoint<int> &sPosition, const CTRect<int> &sWindow, float fZ )
+void C2DScene::CreateDynamicClearRects( const CRectLayout &sLayout, const CTPoint<float> &sPosition, const CTRect<float> &sWindow, float fZ )
 {
 //	ClipRects( &clippedTemp, sLayout, sWindow, CVec2(sPosition.x, sPosition.y) );
 	RenderRectLayoutClipped( &quadRender, 0, sLayout, sPosition, sWindow, fZ, LRM_CLEAR_RECT );

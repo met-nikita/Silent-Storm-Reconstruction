@@ -32,11 +32,11 @@ class CTextLocaleInfo;
 class I2DGameView: public CObjectBase
 {
 public:
-	virtual void CreateDynamicRects( CFuncBase<SText> *pText, const CTPoint<int> &sPosition, const CTRect<int> &sWindow ) = 0;
-	virtual void CreateDynamicRects( NDb::CTexture *pTexture, const CRectLayout &sLayout, const CTPoint<int> &sPosition, const CTRect<int> &sWindow ) = 0;
-	virtual void CreateDynamicRects( CPtrFuncBase<NGfx::CTexture> *pTexture, const CRectLayout &sLayout, const CTPoint<int> &sPosition, const CTRect<int> &sWindow ) = 0;
+	virtual void CreateDynamicRects( CFuncBase<SText> *pText, const CTPoint<float> &sPosition, const CTRect<float> &sWindow ) = 0;
+	virtual void CreateDynamicRects( NDb::CTexture *pTexture, const CRectLayout &sLayout, const CTPoint<float> &sPosition, const CTRect<float> &sWindow ) = 0;
+	virtual void CreateDynamicRects( CPtrFuncBase<NGfx::CTexture> *pTexture, const CRectLayout &sLayout, const CTPoint<float> &sPosition, const CTRect<float> &sWindow ) = 0;
 	virtual CFuncBase<SText>* CreateText( CFuncBase<wstring> *pText, CFuncBase< CTPoint<int> > *pSize, bool bProcessTAGs = true ) = 0;
-	virtual void CreateDynamicClearRects( const CRectLayout &sLayout, const CTPoint<int> &sPosition, const CTRect<int> &sClipWindow, float fZ = 1.0f ) = 0;
+	virtual void CreateDynamicClearRects( const CRectLayout &sLayout, const CTPoint<float> &sPosition, const CTRect<float> &sClipWindow, float fZ = 1.0f ) = 0;
 
 	virtual CTextLocaleInfo* GetLocaleInfo() const = 0;
 	virtual const CVec2& GetViewportSize() = 0;

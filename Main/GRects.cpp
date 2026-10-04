@@ -22,14 +22,12 @@ void RenderRectLayout( NGfx::C2DQuadsRenderer *pRes, NGfx::CTexture *pTex, const
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// retail @0x148190. Retail's signature carries CTPoint<float>/CTRect<float> position+window (the
-// whole retail 2D pipeline is float); the int params are kept here because the dev I2DGameView /
-// CreateDynamicRects chain (G2DView.h -- outside this rework) is still int. The math below is the
-// retail float math verbatim (the ints promote on first use).
+// retail @0x148190: keep fractional screen positions and clipping edges through
+// the 2D pipeline. AddRect alone snaps the final quad to screen pixels.
 // Per rect: the source corners are Min/Max-normalized over (fX, fX+fSizeX) so a negative baked size
 // still yields a well-formed quad; the texture rect is remapped by the ratio
 // (tex extent / source extent) from the respective corner (no Sign()/scale division -- retail).
-void RenderRectLayoutClipped( NGfx::C2DQuadsRenderer *pRes, NGfx::CTexture *pTex, const CRectLayout &sLayout, const CTPoint<int> &sPosition, const CTRect<int> &sWindow, float fZ, ELayoutRenderMode lrm )
+void RenderRectLayoutClipped( NGfx::C2DQuadsRenderer *pRes, NGfx::CTexture *pTex, const CRectLayout &sLayout, const CTPoint<float> &sPosition, const CTRect<float> &sWindow, float fZ, ELayoutRenderMode lrm )
 {
 	for ( int nTemp = 0; nTemp < sLayout.rects.size(); nTemp++ )
 	{

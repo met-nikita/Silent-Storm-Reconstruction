@@ -21,7 +21,7 @@ enum ELayoutRenderMode
 	LRM_CLEAR_RECT
 };
 void RenderRectLayout( NGfx::C2DQuadsRenderer *pRes, NGfx::CTexture *pTex, const CRectLayout &sLayout, float fZ = 1.0f, ELayoutRenderMode lrm = LRM_NORMAL );
-void RenderRectLayoutClipped( NGfx::C2DQuadsRenderer *pRes, NGfx::CTexture *pTex, const CRectLayout &sLayout, const CTPoint<int> &sPosition, const CTRect<int> &sWindow, float fZ = 1.0f, ELayoutRenderMode lrm = LRM_NORMAL );
+void RenderRectLayoutClipped( NGfx::C2DQuadsRenderer *pRes, NGfx::CTexture *pTex, const CRectLayout &sLayout, const CTPoint<float> &sPosition, const CTRect<float> &sWindow, float fZ = 1.0f, ELayoutRenderMode lrm = LRM_NORMAL );
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////

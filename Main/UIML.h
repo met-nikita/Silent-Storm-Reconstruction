@@ -150,13 +150,10 @@ public:
 	virtual const CTPoint<float>& GetPosition() const = 0;
 	virtual void SetPosition( const CTPoint<float> &sPosition ) = 0;
 
-	// NOTE: retail's Render signatures are float too (list<CTRect<float>>, CTPoint<float>,
-	// CTRect<float> -- PDB @0x3207c0/@0x320ac0), because retail's whole 2D pipeline down through
-	// I2DGameView::CreateDynamicRects (@0xd8b20) is float. Dev's I2DGameView chain is still
-	// int-based, so the int SPoint/SRect boundary is kept HERE; the implementations do the float
-	// math internally and narrow only at the CreateDynamicRects / pRender->push_back boundary.
-	virtual void Render( list<SRect> *pRender, const SPoint &sGlobalPosition, const SRect &sWindow ) = 0;
-	virtual void Render( NGScene::I2DGameView *pView, const SPoint &sPosition, const SRect &sWindow ) = 0;
+	// Retail @0x3207c0/@0x320ac0: preserve fractional positions, clips and
+	// character bounds through the 2D rendering pipeline.
+	virtual void Render( list<CTRect<float> > *pRender, const CTPoint<float> &sGlobalPosition, const CTRect<float> &sWindow ) = 0;
+	virtual void Render( NGScene::I2DGameView *pView, const CTPoint<float> &sPosition, const CTRect<float> &sWindow ) = 0;
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // (dev-legacy CreateIMLTextObject(wstring) REMOVED: retail CMLTextObject is stream-based -- text
@@ -183,9 +180,9 @@ public:
 	// NGScene__M_Z); IML::Generate keeps the int width and CML::Generate converts (@0x322320).
 	virtual void Generate( NGScene::I2DGameView *pView, float fWidth ) = 0;
 
-	// (int boundary kept, see IMLObject::Render note)
-	virtual void Render( list<SRect> *pRender, const SPoint &sPosition, const SRect &sWindow ) = 0;
-	virtual void Render( NGScene::I2DGameView *pView, const SPoint &sPosition, const SRect &sWindow ) = 0;
+	// Rendering coordinates are screen pixels, not logical UI integers.
+	virtual void Render( list<CTRect<float> > *pRender, const CTPoint<float> &sPosition, const CTRect<float> &sWindow ) = 0;
+	virtual void Render( NGScene::I2DGameView *pView, const CTPoint<float> &sPosition, const CTRect<float> &sWindow ) = 0;
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // IMLHandler
@@ -214,8 +211,8 @@ public:
 
 	virtual void Generate( NGScene::I2DGameView *pView, int nWidth ) = 0;
 
-	virtual void Render( list<SRect> *pRender, const SPoint &sPosition, const SRect &sWindow ) = 0;
-	virtual void Render( NGScene::I2DGameView *pView, const SPoint &sPosition, const SRect &sWindow ) = 0;
+	virtual void Render( list<CTRect<float> > *pRender, const CTPoint<float> &sPosition, const CTRect<float> &sWindow ) = 0;
+	virtual void Render( NGScene::I2DGameView *pView, const CTPoint<float> &sPosition, const CTRect<float> &sWindow ) = 0;
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 IML* CreateML();
