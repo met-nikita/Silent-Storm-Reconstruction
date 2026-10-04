@@ -183,7 +183,9 @@ int CScenarioZone::GetTemplateIDForClue( CScenarioClue *pClue )
 	//
 	int k = 0;
 	int n = random.Get( 0, nMax );
-	while ( n > 0 )
+	// Retail v1.1 0x6dfa60 / v1.2 0x6e0020: consume weights until n is negative.
+	// Zero is a valid draw/boundary, not a selected map; skip zero-capacity maps.
+	while ( n >= 0 )
 	{
 		if ( templatesIDs[k] > 0 )
 		{
