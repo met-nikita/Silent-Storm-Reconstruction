@@ -862,7 +862,13 @@ bool CUnit::HasPerk( int nPerkID, float *pParam1, float *pParam2, float *pParam3
 float CUnit::GetWeaponAdaptation( IInventoryItem *pItem ) const
 {
 	if ( IsValid( pItem ) && pItem == pAdaptatedWeapon )
-		return fCurrentAdaptation;
+	{
+		// ORIGINAL RETAIL BUG FIXED (perk 71): effect and learning rate are
+		// independent. Double the bonus, not the counter's training threshold.
+		float fEffect = 1.0f;
+		HasPerk( N_PERK_SLOW_ADAPTATION_BONUS, &fEffect );
+		return fCurrentAdaptation * fEffect;
+	}
 	return 0.f;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -873,7 +879,10 @@ void CUnit::UseWeapon( IInventoryItem *pItem, float fRate, int nMaxAdaptation, f
 	if ( pItem == pAdaptatedWeapon )
 	{
 		fAdaptationCounter = Min( (float)nMaxAdaptation, fAdaptationCounter + fRate );
-		fCurrentAdaptation = fRate * fAdaptationCounter;
+		// ORIGINAL RETAIL BUG FIXED (perks 6/71): rate changes how quickly the
+		// counter grows/decays, not its combat bonus. Perk 71's effect is read
+		// separately by GetWeaponAdaptation, including immediately after learning it.
+		fCurrentAdaptation = fAdaptationCounter;
 		return;
 	}
 	fAdaptationCounter -= fRate;

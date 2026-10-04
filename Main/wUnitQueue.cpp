@@ -592,6 +592,11 @@ bool CExecOpenClose::TimeLabelReached()
 				return false;               // retail: nothing happens -- no sound, door stays locked
 			pPick->SpendCharge();           // retail: the charge is spent BEFORE the roll
 			int nSkill = pRPG->GetSkillValue( NDb::ST_ENGINEERING );
+			// ORIGINAL RETAIL BUG FIXED (perk 52): the description grants +20
+			// engineering for the entire picklock roll, not +20 to its final score.
+			float fBonus = 0;
+			if ( pRPG->HasPerk( 52, &fBonus ) )
+				nSkill = int( nSkill + fBonus );
 			SRand rnd;                      // retail: a fresh tick-seeded LOCAL rng, not the synced game rng
 			int nTry = ( rnd.Get( 100 ) * nSkill ) / 100 + pPick->GetDBPicklock()->nAddToEngSkill + nSkill / 2;
 			csSystem << CC_GREEN << L"Picklock used: skill " << nSkill << L", item bonus " << pPick->GetDBPicklock()->nAddToEngSkill << endl;
@@ -601,12 +606,6 @@ bool CExecOpenClose::TimeLabelReached()
 				// + animator active-item clear; dev's Update() refreshes the same visuals)
 				CObj<NRPG::IInventoryItem> pErase = pInventory->TakeOff( (NDb::ESlot)pInventory->GetActiveSlot() );
 				pUS->Update();
-			}
-			float fBonus = 0;
-			if ( pRPG->HasPerk( 52, &fBonus ) )   // the burglar perk (DB id 52)
-			{
-				csSystem << CC_GREEN << L"Unit has perk burglar, added " << fBonus << L" to try number" << endl;
-				nTry = (int)( nTry + fBonus );    // retail truncates (fldcw RC=CHOP)
 			}
 			csSystem << CC_WHITE << L"Total try number " << nTry << endl;
 			csSystem << CC_GREEN << L"Lock hardness " << pOS->GetLockHardness() << endl;

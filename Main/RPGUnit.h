@@ -355,9 +355,9 @@ public:
 	NDb::CString* GetBiography() const { return pBiography; }
 	bool HasPerk( int nPerkID, float *pParam1 = 0, float *pParam2 = 0, float *pParam3 = 0 ) const;
 	float GetWeaponAdaptation( IInventoryItem *pItem ) const;   // retail @0x2bb4a0: live familiarity of pItem (0 unless adapted to it)
-	// retail @0x2bba60: per-shot familiarity update. Same weapon: counter=Min(nMaxAdaptation,counter+fRate),
-	// bonus=fRate*counter. Other weapon: counter-=fRate; drained (<=0) -> switch pAdaptatedWeapon to pItem,
-	// counter=0; bonus=fOtherRate*counter. Called from CreateAttack's adaptation tail.
+	// Based on retail @0x2bba60, with original perk-6/71 bugs fixed: training
+	// rate affects counter growth/decay only; GetWeaponAdaptation applies the
+	// separate perk-71 effect. Other-weapon decay/switch behavior is unchanged.
 	void UseWeapon( IInventoryItem *pItem, float fRate, int nMaxAdaptation, float fOtherRate );
 	bool IsHero() const { return bHero; }
 	// retail CUnit::GetSightDistance @0x2ba680: a FLAT 20.0 world units, scaled by perk 0x53's param when

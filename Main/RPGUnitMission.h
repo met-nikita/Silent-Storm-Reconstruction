@@ -179,7 +179,8 @@ public:
 	// overrides with the retail formula.
 	virtual float GetMineSpotRange( int nDC ) { return 0; }
 	virtual bool CanClear( int nDC, int nSkillModif ) = 0;
-	virtual int GetUnhideProbability( IUnitMission *pTarget, float fDistance ) const = 0;
+	// Pass the live lighting condition; pGame can still be unbound before the first hit.
+	virtual int GetUnhideProbability( IUnitMission *pTarget, float fDistance, bool bNight ) const = 0;
 	// release-new (RVA 0x2bff30): the percent chance this unit HEARS pSource at distance fDist for `sound` --
 	// the probability-returning sibling of CanHearSound. Appended NON-PURE at the END of the vtable (the sess19
 	// IAIUnit::GetHideProbability pattern) so the dev<->release vtable order is irrelevant and other IUnitMission

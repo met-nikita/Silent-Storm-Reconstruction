@@ -263,7 +263,7 @@ public:
 	virtual IInventory* GetInventory() const { return pRPGUnit->GetInventory(); };
 	virtual IInventoryInfo* GetInventoryInfo() const { return pRPGUnit->GetInventory(); };
 	virtual int GetMaxExtraAP() const;
-	virtual int GetSkillValue( NDb::ESkillType skill ) const { return pRPGUnit->Skills( skill ); }
+	virtual int GetSkillValue( NDb::ESkillType skill ) const;
 	virtual int GetSkillMaxValue( NDb::ESkillType skill ) const { return pRPGUnit->Skills( skill ).GetMaxValue(); }
 	virtual float GetSkillProgress( NDb::ESkillType skill ) const { return pRPGUnit->Skills( skill ).GetProgress(); }
 	virtual void DumpStats() const;
@@ -327,7 +327,7 @@ public:
 	virtual bool CanSeeMine( float fDistance, int nDC );
 	virtual float GetMineSpotRange( int nDC );
 	virtual bool CanClear( int nDC, int nSkillModif );
-	virtual int GetUnhideProbability( IUnitMission *pTarget, float fDistance ) const;
+	virtual int GetUnhideProbability( IUnitMission *pTarget, float fDistance, bool bNight ) const;
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 inline bool DBCriticalCmp( const SCriticalType &a, const SCriticalType &b )
@@ -426,7 +426,7 @@ bool CUnitMission::GetAck( int *pAckID, IUnitMissionInfo **ppAttacker )
 	return true;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-int CUnitMission::GetUnhideProbability( IUnitMission *pTarget, float fDistance ) const
+int CUnitMission::GetUnhideProbability( IUnitMission *pTarget, float fDistance, bool bNight ) const
 {
 	// Retail v1.2 0x6bf7a0: preserve x87 precision until each truncating skill conversion.
 	int nSpot = GetRPGUnit()->Skills( NDb::ST_SPOT );
@@ -435,11 +435,24 @@ int CUnitMission::GetUnhideProbability( IUnitMission *pTarget, float fDistance )
 		nSpot = int( ( 1.0 + double( fParam ) ) * nSpot );
 	int nBase = int( 45.0 - double( 44.f / 30.f ) * fDistance );
 	int nStealth = pTarget->GetRPGUnit()->Skills( NDb::ST_STEALTH );
-	// Retail's quirk: perk 75 belongs to the OBSERVER and scales the target's stealth;
-	// the retail night argument is unused. Do not move this check onto the target.
-	if ( HasPerk( N_PERK_HIDE_IN_NIGHT, &fParam ) )
+	// ORIGINAL RETAIL BUG FIXED (perk 75): night camouflage belongs to the
+	// hidden target and improves its stealth only at night, not the observer's
+	// detection in both day and night.
+	if ( bNight && pTarget->HasPerk( N_PERK_HIDE_IN_NIGHT, &fParam ) )
 		nStealth = int( ( 1.0 + double( fParam ) ) * nStealth );
 	return Clamp( nBase + nSpot - nStealth, 0, 100 );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+int CUnitMission::GetSkillValue( NDb::ESkillType skill ) const
+{
+	int nSkill = pRPGUnit->Skills( skill );
+	// ORIGINAL RETAIL BUG FIXED (perk 70): actual melee accuracy/defence,
+	// damage and AP costs must use the advertised +10, not just the unused
+	// derived GetWeaponSkill branch. Do not modify or serialize the base skill.
+	float fBonus;
+	if ( skill == NDb::ST_MELEE && HasPerk( 70, &fBonus ) )
+		nSkill = int( nSkill + fBonus );
+	return nSkill;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CUnitMission::UseSkill( NDb::ESkillType eSkill )
@@ -621,15 +634,19 @@ int CUnitMission::GetActionAP( NAI::EPose curPose, EAction action ) const
 		case AC_HIDE: return 14;
 		case AC_PREPARE: 
 		{
-			// Retail v1.2 0x6c0f81..0x6c1010: preparation depends on the
-			// weapon type; the perk subtracts AP rather than replacing the cost.
+			// Retail v1.2 0x6c0f81..0x6c1010: base preparation depends on the
+			// weapon type. Its original zero-parameter perk bug is corrected below.
 			int nAP = 0;
 			CWeaponItem *pWeapon = pRPGUnit->GetWeaponItem();
 			if ( IsValid( pWeapon ) )
 				nAP = pWeapon->GetDBWeapon()->pWeaponType->nPrepareCost;
 			float fParam;
 			if ( HasPerk( N_PERK_CHEAP_SHOOT_PREPARE, &fParam ) )
-				nAP = int( nAP - fParam );
+			{
+				// ORIGINAL RETAIL BUG FIXED (perk 22): Param1=0 describes free
+				// preparation; subtracting zero left the entire AP cost in place.
+				nAP = int( nAP * fParam );
+			}
 			return Min( 8, Max( 0, nAP ) );
 		}
 		case AC_SHOOT:   return pRPGUnit->GetWeaponAP();
@@ -681,7 +698,7 @@ int CUnitMission::GetActionAP( NAI::EPose curPose, EAction action ) const
 					return 0;
 				NDb::CRPGMeleeWeapon *pW = pMelee->GetDBMeleeWeapon();
 				NDb::ESkillType skill = action == AC_THROW_KNIFE ? NDb::ST_THROWING : NDb::ST_MELEE;
-				int nAP = pW->nMaxAP - (pW->nMaxAP - pW->nMinAP) * pRPGUnit->Skills( skill ) / N_MAX_SKILL;
+				int nAP = pW->nMaxAP - (pW->nMaxAP - pW->nMinAP) * GetSkillValue( skill ) / N_MAX_SKILL;
 				float fParam;
 				if ( HasPerk( action == AC_THROW_KNIFE ? N_PERK_CHEAP_THROW : N_PERK_CHEAP_MELEE, &fParam ) )
 					nAP = int( ( 1.0 - double( fParam ) ) * nAP );
@@ -693,9 +710,10 @@ int CUnitMission::GetActionAP( NAI::EPose curPose, EAction action ) const
 		{
 			int nAP = pRPGUnit->GetWeaponReloadAP();
 			float fParam;
-			// Retail 0x6c1443 multiplies by Param1 itself, not by (1 - Param1).
+			// ORIGINAL RETAIL BUG FIXED (perk 33): the stated 30% reduction
+			// means paying 70% of base AP, not 30% as in retail 0x6c1443.
 			if ( HasPerk( N_PERK_CHEAP_RELOAD, &fParam ) )
-				nAP = int( double( nAP ) * fParam );
+				nAP = int( nAP * ( 1.0f - fParam ) );
 			return nAP;
 		}
 		case AC_OPEN_CLOSE:
@@ -970,7 +988,7 @@ bool CUnitMission::CreateAttack( vector<CAttackPortion> *pRes, bool bSpendAmmo,
 		// (every other attack source keeps the ctor's bNoBlowUp=true).
 		a.bNoBlowUp = pPanzerklein == 0;
 		const int nStr = pRPGUnit->Skills( NDb::ST_STR );
-		int nMelee = pRPGUnit->Skills( NDb::ST_MELEE );
+		int nMelee = GetSkillValue( NDb::ST_MELEE ); // perk 70, including actual damage
 		// retail @0x6c26c2: backstab multiplies the melee skill by the DIFFICULTY record's
 		// fBackstabMeleeMultiplier (pGlobalGame->pDifficulty), not the old F_BACKSTAB_MELEE_COEFF
 		// constant -- so backstab strength is difficulty-tunable. Truncating (int) matches the fistp.
@@ -1036,26 +1054,25 @@ bool CUnitMission::CreateAttack( vector<CAttackPortion> *pRes, bool bSpendAmmo,
 	}
 	// retail @0x6c2ae8 (adaptation tail): on a real, ammo-spending attack (once per shot -- the shoot
 	// execs pass bAdaptWeapon = nBulletGone==0, melee always true) update the weapon familiarity.
-	// Perk 6 "SpeedUP adaptation" replaces the base rate (1.0) with its Param1; perk 71 "Slow
-	// Adaptation bonus" divides the rate by its Param2 and (below) scales the cap by its Param1;
-	// perk 87 "Adaptation bonus" scales the cap by its Param1. Cap/mult come from the RPGToHit
-	// constants record (MaxWeaponAdaptation / WeaponAdaptationMultiplyer).
+	// ORIGINAL RETAIL BUGS FIXED (perks 6/71): change training/decay rate only.
+	// Perk 71's 100% slower means twice the training time (Param2=2), not zero
+	// training. Its independent bonus multiplier is applied by GetWeaponAdaptation,
+	// not by doubling the counter cap, which otherwise cancels or delays its effect.
+	// Perk 87 still scales the counter cap from the RPGToHit constants record.
 	if ( bSpendAmmo && bAdaptWeapon && pUsedItem )
 	{
 		float fRate = 1.0f;
 		float fFastRate = 0;
 		if ( HasPerk( N_PERK_FAST_WEAPON_ADAPTATION, &fFastRate ) )
 			fRate = fFastRate;
-		float fSlowCapMult = 0, fSlowRateDiv = 0;
-		const bool bSlowAdaptation = HasPerk( N_PERK_SLOW_ADAPTATION_BONUS, &fSlowCapMult, &fSlowRateDiv );
+		float fSlowRateDiv = 0;
+		const bool bSlowAdaptation = HasPerk( N_PERK_SLOW_ADAPTATION_BONUS, 0, &fSlowRateDiv );
 		if ( bSlowAdaptation )
 			fRate /= fSlowRateDiv;
 		int nCap = tohit.nMaxWeaponAdaptation;
 		float fCapMult = 0;
 		if ( HasPerk( N_PERK_ADAPTATION_BONUS, &fCapMult ) )
 			nCap = (int)( nCap * fCapMult );
-		if ( bSlowAdaptation ) // retail re-queries perk 71 here; same Param1
-			nCap = (int)( nCap * fSlowCapMult );
 		pRPGUnit->UseWeapon( pUsedItem, fRate, nCap, tohit.fWeaponAdaptationMult );
 	}
 	return bRet;
@@ -1472,7 +1489,9 @@ float CUnitMission::GetWeaponSkill( CObjectBase *pItem, int nExtraAP, int nBulle
 			fSkill += fBonus;
 		NDb::EShootMode mode = pWeapon->GetShootMode();
 		float fMove = 0;
-		if ( !IsFirstTurn() )
+		// ORIGINAL RETAIL BUG FIXED (perk 19): steady hand cancels the movement
+		// penalty here too, not only the additive calcer penalty.
+		if ( !IsFirstTurn() && !HasPerk( 19 ) )
 			fMove = Min( GetToHitConstants()->nSMaxMove, GetMoveInLastTurn() ) *
 				pWeapon->GetDBWeapon()->pWeaponType->fMovePenalty;
 		if ( mode == NDb::SM_Careful || mode == NDb::SM_Snipe )
@@ -1493,9 +1512,8 @@ float CUnitMission::GetWeaponSkill( CObjectBase *pItem, int nExtraAP, int nBulle
 	}
 	if ( nBullet > 0 )
 	{
+		const float fBeforeRecoil = fSkill;
 		int nExponent = nBullet;
-		if ( HasPerk( 30, &fBonus ) )
-			nExponent = int( nBullet / fBonus );
 		int nBurst = GetRPGUnit()->Skills( NDb::ST_BURST );
 		float fUnstabilized = fSkill * pow( double( nBurst ) / N_MAX_SKILL, nExponent );
 		// Retail truncates the stabilization percentage BEFORE multiplying by skill.
@@ -1508,6 +1526,10 @@ float CUnitMission::GetWeaponSkill( CObjectBase *pItem, int nExtraAP, int nBulle
 			nRecoil = info.nRecoil;
 		}
 		fSkill = Max( fUnstabilized, fStabilized ) * nRecoil * 0.01f;
+		// ORIGINAL RETAIL BUG FIXED (perk 30): a 100% recoil reduction removes
+		// the complete burst accuracy loss. Halving the decay exponent did not.
+		if ( IsValid( pWeapon ) && HasPerk( 30, &fBonus ) )
+			fSkill += ( fBeforeRecoil - fSkill ) * Clamp( fBonus - 1.f, 0.f, 1.f );
 	}
 	return fSkill * GetVPPenalty( GetRPGUnit()->Skills( NDb::ST_VP ),
 		GetHealedVP(), GetRPGUnit()->Skills( NDb::ST_VP ).GetMaxValue() );
@@ -2009,8 +2031,12 @@ float CUnitMission::GetCriticalDmgModifier( NWorld::IWorld *pWorld, NAI::EHitLoc
 	float fParam = 0;
 	if ( HasPerk( N_PERK_CRITICAL_RESISTANCE, &fParam ) )
 		fCriticalResist *= 1.f - fParam;
-	if ( HasPerk( N_PERK_REDUCED_CRITICAL_SEVERITY, &fParam ) && fParam != 0 )
-		nCriticalDifficulty = int( nCriticalDifficulty / fParam );
+	// ORIGINAL RETAIL BUG FIXED (perk 47): its 25% critical-damage reduction
+	// applies to the resulting extra damage, not to the injury-selection input.
+	// Dividing severity by Param1=1.25 gave 20% and no fixed HP reduction.
+	float fCriticalDamageMultiplier = 1.0f;
+	if ( HasPerk( N_PERK_REDUCED_CRITICAL_SEVERITY, &fParam ) )
+		fCriticalDamageMultiplier = 2.0f - fParam;
 	if ( IsValid( pGame ) )
 		nCriticalDifficulty = Min( nCriticalDifficulty, pGame->GetMaxCriticalSeverity() );
 
@@ -2040,7 +2066,7 @@ float CUnitMission::GetCriticalDmgModifier( NWorld::IWorld *pWorld, NAI::EHitLoc
 	case NAI::HL_LHAND: fDamage *= 0.5f; break;
 	}
 	ApplyCritical( pCritical, nSeverity );
-	return fDamage * fCriticalResist;
+	return fDamage * fCriticalResist * fCriticalDamageMultiplier;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CUnitMission::DumpStats() const

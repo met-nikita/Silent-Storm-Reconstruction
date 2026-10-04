@@ -3294,7 +3294,8 @@ void CWorld::CheckSpot( const vector< CPtr<CPlayer> > &players )
 						pEnemyUS->CanFight() && GetGame()->CheckVisibility( pEnemyUS, *u, true ) )
 					{
 						float fDistance = fabs( pEnemyUS->GetPosition().GetCP() - (*u)->GetPosition().GetCP() ) / FP_GRID_STEP;
-						int nProbability = pEnemyUS->GetUnitRPG()->GetUnhideProbability( (*u)->GetUnitRPG(), fDistance );
+						int nProbability = pEnemyUS->GetUnitRPG()->GetUnhideProbability( (*u)->GetUnitRPG(), fDistance,
+							GetGame()->IsNight() );
 						int nCheck = random.Get( 0,100 );
 						if ( nCheck < nProbability )
 						{

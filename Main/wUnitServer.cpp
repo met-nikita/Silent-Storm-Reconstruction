@@ -1346,7 +1346,8 @@ bool CUnitServer::CheckSpot( CUnitServer *pTarget )
 		GetWorld()->GetGame()->CheckVisibility( this, pTarget, true ) )
 	{
 		float fDistance = fabs( GetPosition().GetCP() - pTarget->GetPosition().GetCP() ) / FP_GRID_STEP;
-		int nProbability = GetUnitRPG()->GetUnhideProbability( pTarget->GetUnitRPG(), fDistance );
+		int nProbability = GetUnitRPG()->GetUnhideProbability( pTarget->GetUnitRPG(), fDistance,
+			GetWorld()->GetGame()->IsNight() );
 		int nCheck = random.Get( 0, 100 );   // @0x7bff43: shared global RNG (retail &random@0x9c9978)
 		if ( nCheck >= nProbability && !IsAudible( pTarget ) )
 			return false;

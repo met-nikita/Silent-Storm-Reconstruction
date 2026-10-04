@@ -186,7 +186,11 @@ float GetMaxThrowVelocity( IUnitMission *pMission, IGrenadeItem *pItem, bool bFi
 	float fVelocity = fPower / ( fWeight * 0.001f );
 	float fMultiplier;
 	if ( pMission->HasPerk( 0x58, &fMultiplier ) )
-		fVelocity *= fMultiplier;
+	{
+		// ORIGINAL RETAIL BUG FIXED (perk 88): the description increases range,
+		// not velocity. Range is proportional to velocity squared.
+		fVelocity *= sqrt( fMultiplier );
+	}
 	return fVelocity;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -202,7 +206,7 @@ static float GetKnifeThrowSkill( IUnitMission *pMission, IMeleeWeaponItem *pItem
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // v1.2 0x6b7b60: shared throw physics, specialized here to the blade caller.
-// Weight is stored in grams. The perk multiplies velocity, not range.
+// Weight is stored in grams; perk 88 now scales range as its description promises.
 float GetMaxThrowVelocity( IUnitMission *pMission, IMeleeWeaponItem *pItem, bool bFirstRound )
 {
 	float fStrength = pMission->GetRPGUnit()->Skills( NDb::ST_STR );
@@ -216,7 +220,11 @@ float GetMaxThrowVelocity( IUnitMission *pMission, IMeleeWeaponItem *pItem, bool
 	float fVelocity = fPower / ( fWeight * 0.001f );
 	float fMultiplier;
 	if ( pMission->HasPerk( 0x58, &fMultiplier ) )
-		fVelocity *= fMultiplier;
+	{
+		// ORIGINAL RETAIL BUG FIXED (perk 88): apply the range multiplier once,
+		// through its square root in the shared grenade/blade velocity formula.
+		fVelocity *= sqrt( fMultiplier );
+	}
 	return fVelocity;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -386,10 +394,11 @@ float CToHitCalcer::GetTArea()
 float CToHitCalcer::GetCA()
 {
 	float fTArea = GetTArea();
-	// release-new: the "ignore cover" perk (0x48) zeroes the cover/area contribution.
-	if ( pUnitMission->HasPerk( 0x48 ) )
-		fTArea = 0;
 	float fTCover = fHitCover / 100.f;
+	// Retail v1.2 0x6b7053..0x6b707e: perk 72 scales cover, preserving area.
+	float fCoverMultiplier;
+	if ( pUnitMission->HasPerk( 0x48, &fCoverMultiplier ) )
+		fTCover *= fCoverMultiplier;
 	float fScopeFactor = sWeaponInfo.fScopeFactor; // 20 - normal weapon // 100 - sniper rifle
 	float fDistCoeff = DistanceFunc( nDistance, fScopeFactor );
 	return ( (100-fDistCoeff)*(fTCover*fTArea)+fDistCoeff ) / 100.0f;
@@ -590,10 +599,11 @@ float CUnitToHitCalcer::GetTMove()
 		(float)pUnitMission->GetToHitConstants()->nMaxMoveBonus );
 	if ( bFirstRound )
 		fRes = 0;
-	// release-new: the target's "lead the moving target" perk (0xe) scales the move penalty by the
-	// cosine between the target move- and the shot-direction.
-	if ( pTarget->GetUnitRPG()->HasPerk( 0xe ) )
-		return fCos * fRes;
+	// Retail v1.2 0x6b7803: perk 14 multiplies the projected movement penalty
+	// by Param1, not by the earlier direction-cosine local.
+	float fMoveMultiplier;
+	if ( pTarget->GetUnitRPG()->HasPerk( 0xe, &fMoveMultiplier ) )
+		return fMoveMultiplier * fRes;
 	return fRes;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
