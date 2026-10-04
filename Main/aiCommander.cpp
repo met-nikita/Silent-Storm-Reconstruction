@@ -101,7 +101,9 @@ void SAIUpdateTracker::Update()
 		return;
 	CPtr<CAIReaction> pR = reactions.front();
 	reactions.pop_front();
-	if ( IsValid( pR ) )
+	// ORIGINAL RETAIL BUG FIXED: death/unconsciousness may occur after enqueue.
+	// Keep one dequeue per segment, but never run a stale actor's reaction.
+	if ( IsValid( pR ) && pR->CanUpdate() )
 		pR->Update();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////

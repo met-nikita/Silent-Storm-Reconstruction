@@ -17,6 +17,13 @@
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 namespace NAI
 {
+bool CAIReaction::CanUpdate() const
+{
+	// ORIGINAL RETAIL BUG FIXED: an enqueued reaction can outlive the actor's
+	// combat state. Recheck eligibility before its cover/path queries run.
+	return CanAIOperateThisUnit( pUnit );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 SAIUnitState* CAIReaction::GetAIUnitState() const
 {
 	return IsValid( pUnit ) ? pUnit->GetAIUnitState() : 0;

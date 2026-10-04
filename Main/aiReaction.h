@@ -47,6 +47,7 @@ public:
 	CAIReaction(): pUnit( 0 ) {}
 	CAIReaction( IAIUnit *_pUnit ): pUnit( _pUnit ) {}
 	//
+	bool CanUpdate() const;
 	virtual void Update() = 0;                           // the one behaviour hook
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////

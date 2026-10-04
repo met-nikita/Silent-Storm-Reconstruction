@@ -1854,11 +1854,17 @@ void CPathNetwork::LockUnlockPoint( const SPathPlace &p, bool bLock )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CPathNetwork::Lock( CObjectBase *pUnit, const SPathPlace &p )
 {
+	// ORIGINAL RETAIL BUG FIXED: path/range queries restore the actor's lock
+	// even after death. Use the existing locker policy (including PK bodies),
+	// and release any stale footprint instead of silently leaving it behind.
+	if ( !IsLockerUnit( pUnit ) )
+	{
+		Unlock( pUnit );
+		return;
+	}
 	CLocksHash::iterator i = lockedPlaces.find( pUnit );
 	if ( i != lockedPlaces.end() )
 		DisableLocks( pUnit );
-	//if ( pUnit->IsDead() )
-	//	return;
 	vector<SPathPlace> res;
 	bool bBigUnit = IsBigLocker( pUnit );
 	GetLockArea( &res, p, bBigUnit );
@@ -1872,7 +1878,13 @@ void CPathNetwork::Lock( CObjectBase *pUnit, const SPathPlace &p )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CPathNetwork::Lock( CObjectBase *pUnit, const vector<SPathPlace> &places )
 {
-	CLocksHash::iterator i = lockedPlaces.find( pUnit );
+	// ORIGINAL RETAIL BUG FIXED: bulk path-query restoration must recheck
+	// locker eligibility, too. places may alias this owner's current record.
+	if ( !IsLockerUnit( pUnit ) )
+	{
+		Unlock( pUnit );
+		return;
+	}
 	for ( unsigned int i = 0; i < places.size(); ++i )
 	{
 		const SPathPlace &l = places[i];
@@ -1883,11 +1895,15 @@ void CPathNetwork::Lock( CObjectBase *pUnit, const vector<SPathPlace> &places )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CPathNetwork::LockMovingObject( CObjectBase *pUnit, const SPathPlace &p1, const SPathPlace &p2 )
 {
+	// ORIGINAL RETAIL BUG FIXED: a stale move must not reserve corpse tiles.
+	if ( !IsLockerUnit( pUnit ) )
+	{
+		Unlock( pUnit );
+		return;
+	}
 	CLocksHash::iterator i = lockedPlaces.find( pUnit );
 	if ( i != lockedPlaces.end() )
 		DisableLocks( pUnit );
-	//if ( pUnit->IsDead() )
-	//	return;
 	vector<SPathPlace> res;
 	bool bBigUnit = IsBigLocker( pUnit );
 	GetLockArea( &res, p1, bBigUnit );
@@ -1905,9 +1921,20 @@ void CPathNetwork::Unlock( CObjectBase *pUnit )
 	CLocksHash::iterator i = lockedPlaces.find( pUnit );
 	if ( i != lockedPlaces.end() )
 	{
+		bool bStaleLocker = !IsLockerUnit( pUnit );
 		DisableLocks( pUnit );
 		ASSERT( i->second.bLocked == false );
 		lockedPlaces.erase( i );
+		if ( bStaleLocker )
+		{
+			// ORIGINAL RETAIL BUG FIXED: nLocks is a boolean, not a reference
+			// count. Removing a corpse's overlapping footprint must preserve
+			// other currently enabled living-unit/PK locks (including selection).
+			for ( CLocksHash::const_iterator k = lockedPlaces.begin(); k != lockedPlaces.end(); ++k )
+				if ( k->second.bLocked && IsLockerUnit( k->first ) )
+					for ( unsigned int n = 0; n < k->second.places.size(); ++n )
+						LockUnlockPoint( k->second.places[n], true );
+		}
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -2034,10 +2061,11 @@ void CPathNetwork::LockSelected( const list<CObjectBase*> &selected )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CPathNetwork::UnlockSelected()
 {
-	for ( CLocksHash::iterator i = lockedPlaces.begin(); i != lockedPlaces.end(); ++i )
+	for ( CLocksHash::iterator i = lockedPlaces.begin(); i != lockedPlaces.end(); )
 	{
-		//if ( !i->second.bLocked )
-			Lock( i->first, i->second.places );
+		// Lock may erase a stale corpse record; advance before that happens.
+		CLocksHash::iterator current = i++;
+		Lock( current->first, current->second.places );
 	}
 	for ( vector<SFlipper>::iterator it = flippers.begin(); it != flippers.end(); ++it )
 		it->nFixedFlags &= ~F_VISIBLE_TRAP;
