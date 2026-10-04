@@ -103,12 +103,18 @@ static void GetDirectedPoints( NAI::IPathNetwork *pNet, const NAI::SPathPlace &f
 	vector<NAI::SPathPlace> *pRes, int nPoseMask = PM_ALL )
 {
 	NAI::EDirection dir = NRPG::GetShootDirection( pNet, from, ptTarget ) ;
+	// Retail v1.1 0x793310 / v1.2 0x793560 preserves the fly bit in every pose.
+	// Without it, a flying attack's encoded altitude becomes a movement-layer index.
+	NAI::SPathPlace place( from.GetX(), from.GetY(), from.GetLayer(), dir, NAI::CM_LAY, false );
+	place.SetFinal( from.IsFinal() );
 	if ( nPoseMask & PM_LAY )
-		pRes->push_back( NAI::SPathPlace( from.GetX(), from.GetY(), from.GetLayer(), dir, NAI::CM_LAY, false ) );
+		pRes->push_back( place );
+	place.SetPose( NAI::CM_CROUCH );
 	if ( nPoseMask & PM_CROUCH )
-		pRes->push_back( NAI::SPathPlace( from.GetX(), from.GetY(), from.GetLayer(), dir, NAI::CM_CROUCH, false ) );
+		pRes->push_back( place );
+	place.SetPose( NAI::CM_STAND );
 	if ( nPoseMask & PM_STAND )
-		pRes->push_back( NAI::SPathPlace( from.GetX(), from.GetY(), from.GetLayer(), dir, NAI::CM_STAND, false ) );
+		pRes->push_back( place );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void GetMeleeAttackPlaces( CUnitServer *pUS, const CVec3 &ptTarget, vector<NAI::SPathPlace> *pRes )

@@ -98,7 +98,7 @@ private:
 	bool bTemporaryAimed;                // tag 23
 	CVec3 vPrevGetCorpseAIPosition;      // tag 24
 	bool bNotAddedToVisitors;            // tag 25
-	vector<IRenderVisitor::SBoundEffect> attachedEffects;  // tag 26 (scriptParticles)
+	vector<IRenderVisitor::SBoundEffect> attachedEffects;  // tag 26 (scriptParticles); structured DB refs, not retail's raw pointers
 	bool bTrackSequence;                 // tag 27
 	vector<CVec3> corpseHLpos;           // tag 28
 	// dev-only members: kept (used by IsJustUnhided/Hide/GetAIMapUnitHull) but NOT serialized by

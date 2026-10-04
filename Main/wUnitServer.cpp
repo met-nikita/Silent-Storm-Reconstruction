@@ -856,7 +856,9 @@ void CUnitServer::OnTBSEvent( ETBSEvent event )
 			{
 				NAI::IPathNetwork *pNet = GetWorld()->GetPathNetwork();
 				pNet->Unlock( this );
-				if ( !pNet->IsPassable( GetPosition().pos.p ) )
+				// Retail v1.1 0x7c2c70 queries GetPassability, not the legacy
+				// ground-only IsPassable: airborne places return AIP_YES.
+				if ( pNet->GetPassability( GetPosition().pos.p ) != NAI::AIP_YES )
 					ForcedMove();
 				else
 				{

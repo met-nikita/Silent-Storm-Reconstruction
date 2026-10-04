@@ -661,7 +661,7 @@ public:
 	virtual void MakeExplosion( const CRay &ray, int nMaxFloor );
 	// retail @0x376f40 fills IWorld slot 59.
 	virtual NRPG::CGlobalGame *GetGlobalGame() const { return pGlobalGame; }
-	bool UsePassageObject( CUnitServer *pUS, int nPassageZoneID );
+	bool UsePassageObject( CUnitServer *pUS, int nPassageZoneID, bool bForced = false );
 	void GetScenarioPlayerUnits( int nScenarioPlayer, vector< CPtr<CUnitServer> > *pUnits );
 	void GetScenarioPlayerUnits( int nScenarioPlayer, vector< CPtr<NRPG::IUnitMission> > *pUnits );
 	CPlayer *GetPlayerByID( int nScenarioPlayerID, int nIndex = 0 );  // retail @0x365530: the nIndex-th player with that scenario id

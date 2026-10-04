@@ -195,8 +195,8 @@ END_SCRIPT_COMMAND
 // retail luaLeaveToSubZone @0x2ed740 ("n"): trigger the in-mission transition to passage-zone id n. Retail
 // picks the first non-AI player's first live unit and calls IWorld vtbl+0x12c (CWorld::UsePassageObject):
 // n<1 -> exit to the chapter map (CUICmdContinueChapter); else match the template carrying passage-zone n and
-// queue a CUICmdLoadTemplate. The dev already has the full worker (CWorld::UsePassageObject, wMain.cpp:2272),
-// so this binding just resolves a controllable unit to drive it.
+// queue a CUICmdLoadTemplate. Retail v1.1 0x6ed8ec passes true for the forced
+// transition, bypassing ordinary passage proximity checks after a cutscene.
 BEGIN_SCRIPT_COMMAND( LeaveToSubZone, "n" )
 	int nPassageZoneID = luaParams[ 0 ].n;
 	NWorld::CWorld *pWorld = pScript->pWorld;
@@ -219,7 +219,7 @@ BEGIN_SCRIPT_COMMAND( LeaveToSubZone, "n" )
 			{
 				if ( IsValid( units[ i ] ) )
 				{
-					pWorld->UsePassageObject( units[ i ], nPassageZoneID );
+					pWorld->UsePassageObject( units[ i ], nPassageZoneID, true );
 					return 0;
 				}
 			}
