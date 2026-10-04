@@ -424,7 +424,12 @@ void CUnitServer::Do( CCommand *_pCmd )
 						CPtr<NAI::CPath> pPath = FindPath(GetWorld()->GetPathNetwork(), this, src, dst,
 							0, true, pCmdPath->eParams, IsStrafing());
 						if (IsValid(pPath))
+						{
 							pMove->SetNewPath(pPath, pCmdPath->eParams);
+							// Keep the command used to restore the route after an interruption
+							// in sync with the accepted live path (retail v1.2 0x7c29e4).
+							pCurrentCmd = pCmdPath;
+						}
 						/*else
 						{
 							CancelAction();
