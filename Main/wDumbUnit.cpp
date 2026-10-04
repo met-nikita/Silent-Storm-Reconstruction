@@ -74,7 +74,7 @@ CDumbUnitServer::CDumbUnitServer( CWorld *_pWorld, NRPG::IUnitMission *_pRPG, ND
 	wishPose = pos.GetPose();
 	animator.SetWeaponAnimation( pRPG->GetWeaponType() );
 	NRPG::IInventory *pInventory = pRPG->GetInventory();
-	if ( IsValid( pInventory->GetActive() ) )
+	if ( IsActiveItemToShow( pInventory ) )
 		animator.SetActiveItem( true );
 	animator.PlaceUnit( pos );
 	pHold.Extract();
@@ -289,23 +289,24 @@ void CDumbUnitServer::GetBonePos( CVec3 *pRes, CQuat *pQuat, const char *pszBone
 	pQuat->FromEulerMatrix( t.forward );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-bool CDumbUnitServer::TearOffItem( SResItem *pRes, NDb::ESlot slot, bool bPlaceNextSameItem )
+// Retail v1.2 0x74fb80: synchronize the held pose after an item action finishes,
+// not while TearOffItem is consuming the item at the animation's time label.
+void CDumbUnitServer::AnimateActivation()
 {
-	CObj<NRPG::IInventoryItem> pNext;
-	bool bRes = TearOffItem( pRes, slot, bPlaceNextSameItem ? &pNext : 0 );
 	NRPG::IInventory *pInventory = pRPG->GetInventory();
-	if ( IsValid( pNext ) )
-	{
-		pInventory->Take( pNext );
-		pInventory->Equip( slot, pNext );
-	}
 	CPtr<NRPG::IInventoryItem> pItem = pInventory->GetActive();
 	if ( IsValid( pItem ) )
 	{
 		int nPlace = pInventory->GetPlaceBySubType( pItem->GetDBItem()->subType );
-		animator.ActivateItem( position, false, nPlace == -1, (NDb::EItemPlace)nPlace, pRPG->GetWeaponType() );
+		animator.ActivateItem( position, false, nPlace == -1, (NDb::EItemPlace)nPlace,
+			pRPG->GetWeaponType(), !IsActiveItemToShow( pInventory ) );
 	}
-	return bRes;
+	else
+	{
+		animator.SetWeaponAnimation( NDb::WT_DEFAULT );
+		animator.SetActiveItem( false );
+		animator.PlaceUnit( position );
+	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CDumbUnitServer::TearOffItem( SResItem *pRes, NDb::ESlot slot, CObj<NRPG::IInventoryItem> *pNextSameItem )

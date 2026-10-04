@@ -458,6 +458,8 @@ public:
 		NRPG::IInventory *pInventory = pRPG->GetInventory();
 		if ( nStage == 2 || !pInventory->Get(slot) )
 		{
+			// Retail v1.2 0x7b55e0: completion clears both temporary holster flags.
+			pUS->SetUndrawItem( false );
 			Finished();
 			return;
 		}
@@ -478,7 +480,7 @@ public:
 	{
 		NRPG::IUnitMission *pRPG = pUS->GetUnitRPG();
 		NRPG::IInventory *pInventory = pUS->GetUnitRPG()->GetInventory();
-		bool bActive = pInventory->GetActive() != 0;
+		bool bActive = IsActiveItemToShow( pInventory );
 		pUS->SetUndrawItem( !bActive );
 		pUS->animator.SetWeaponAnimation( bActive ? pRPG->GetWeaponType() : NDb::WT_DEFAULT );
 		pUS->animator.SetActiveItem( bActive );

@@ -715,6 +715,8 @@ void CUnitStateHealer::OnStateFinished()
 			// healing finished and the medkits are used up, remove the item
 			CObj<NRPG::IInventoryItem> pErase = pInventory->TakeOff( (NDb::ESlot)pInventory->GetActiveSlot() );
 			pUS->animator.SetActiveItem( false );
+			// Retail v1.2 0x7ca7cf: a spent medkit also restores the unarmed animation set.
+			pUS->animator.SetWeaponAnimation( NDb::WT_DEFAULT );
 			pUS->Update();
 		}
 	}
