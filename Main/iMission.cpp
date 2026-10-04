@@ -2584,6 +2584,34 @@ void CMission::ExecWorldCommands()
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// The dev script-UI bridge is live during a mission, but a zone-reentry snapshot
+// must not reach CInterface -> CMissionUI -> CMission through that bridge.
+// Keep it detached until the saver has finished traversing the entire graph,
+// then restore it even if writing fails. Normal full-game saves keep the link.
+class CZoneScriptInterfaceScope
+{
+	CPtr<NScript::CScript> pScript;
+	CPtr<NUI::CInterface> pSavedInterface;
+	CZoneScriptInterfaceScope( const CZoneScriptInterfaceScope & );
+	CZoneScriptInterfaceScope &operator=( const CZoneScriptInterfaceScope & );
+public:
+	explicit CZoneScriptInterfaceScope( NWorld::IWorld *pWorld )
+	{
+		CDynamicCast<NWorld::CWorld> pCWorld( pWorld );
+		if ( IsValid( pCWorld ) && IsValid( pCWorld->GetOwnScript() ) )
+		{
+			pScript = pCWorld->GetOwnScript();
+			pSavedInterface = pScript->GetScriptInterface();
+			pScript->SetScriptInterface( 0 );
+		}
+	}
+	~CZoneScriptInterfaceScope()
+	{
+		if ( IsValid( pScript ) )
+			pScript->SetScriptInterface( pSavedInterface );
+	}
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
 void CMission::SaveWorld( const string &szFile )
 {
 	NMainLoop::CSaveManager *pSaveManager = NMainLoop::GetSaveManager();
@@ -2603,6 +2631,7 @@ void CMission::SaveWorld( const string &szFile )
 		CFileStream sFile;
 		sFile.OpenWrite( szPath.c_str() );
 
+		CZoneScriptInterfaceScope scriptInterfaceScope( pWorld );
 		CStructureSaver sSaver( sFile, CStructureSaver::WRITE_COMPRESSED );
 		sSaver.Add( 2, &pWorld );
 		SerializeShared( &sSaver );

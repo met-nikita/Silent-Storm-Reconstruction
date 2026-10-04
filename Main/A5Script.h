@@ -57,7 +57,7 @@ private:
 	list<int> interfaceActionIDs;
 	list< CPtr<CObjectBase> > miscObjectsHolder;
 	CPtr<CObjectBase> pInterface;	// release: CPtr<NUI::CInterface>; CObjectBase here is save-equivalent (CPtr
-									// serializes by object id) and avoids a heavy UI include in this TU. Always null in dev.
+									// serializes by object id) and avoids a heavy UI include in this TU. Bound to the live HUD in dev.
 public:
 	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(Script*)this); f.Add(2,&pWorld); f.Add(3,&interfaceActionIDs); f.Add(4,&miscObjectsHolder); f.Add(5,&pInterface); return 0; }
 	CScript();
@@ -76,7 +76,7 @@ public:
 	// CPtr<NUI::CInterface>). GetWindow/GetCursorPos root their lookups here. Set by CMission to the
 	// in-mission HUD interface so the bridge is LIVE in-mission (defined in scriptUI.cpp, where the NUI
 	// types are complete). pInterface is a weak CPtr saved alongside the mission's own CInterface, so it
-	// round-trips through save/load.
+	// round-trips through full save/load. SaveWorld temporarily detaches it for zone snapshots.
 	NUI::CInterface* GetScriptInterface();
 	void SetScriptInterface( NUI::CInterface *pInterface );
 };
