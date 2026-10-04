@@ -201,8 +201,12 @@ void CDumbUnitServer::Visit( IRenderVisitor *p )
 	}
 	NGScene::CLightGroup *pGroup = p->MakeGroup();
 
-	if ( bEverybodyIsAlien )
-		p->StartAlienStyle(); // is hidden PK
+	// Retail v1.2 0x752980..0x7529cd: hiding outside a sequence uses
+	// the alien material for a worn PK, rather than the human tint overlay.
+	bool bHidden = pRPG->IsHiding() && !GetWorld()->IsSequence();
+	bool bAlienStyle = ( bHidden && IsWearingPK() ) || bEverybodyIsAlien;
+	if ( bAlienStyle )
+		p->StartAlienStyle();
 	CUnit *pHead = dynamic_cast<CUnit*>(this);
 	if ( pHead->GetWearingDBPK() && pHead->GetWearingDBPK()->bHasNoHead )
 		pHead = 0;
@@ -217,7 +221,7 @@ void CDumbUnitServer::Visit( IRenderVisitor *p )
 		if ( IsValid( i->pEffect ) )
 			p->AddParticleEffect( i->tBegin, i->pEffect, nFloor,
 				new NAnimation::CAddBoneFilter( animator.GetSkeletonAnimator(), 0 ), animator.GetSkeletonAnimator() );
-	if ( pRPG->IsHiding() ) // is hidden
+	if ( bHidden && !bAlienStyle )
 	{
 		p->AddFlare( 
 			new NGScene::CExtractTranslation( new NAnimation::CAddBoneFilter( animator.GetSkeletonAnimator(), 0 ) ), 
@@ -226,8 +230,8 @@ void CDumbUnitServer::Visit( IRenderVisitor *p )
 		// Retail v1.2 @0x752b5f: translucent blue-gray, not opaque black.
 		p->AddColorPostFilter( CVec4( 0.0703125f, 0.11015625f, 0.140625f, 0.6f ) );
 	}
-	if ( bEverybodyIsAlien )
-		p->FinishAlienStyle(); // is hidden PK
+	if ( bAlienStyle )
+		p->FinishAlienStyle();
 	nPrevFloor = nFloor;
 	bTrackSequence = GetWorld()->IsSequence();   // @0x352380: render-path write-back for Segment's track-seq bug branch
 }
