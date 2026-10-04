@@ -2164,68 +2164,42 @@ bool CPathNetwork::IsNotOnDoor( const SPathPlace &p ) const
 	return true;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// @0x42e30 CPathNetwork::GetPassability( const SPathPlace & ) -> EPassable. This is bool IsPassable
-// (below) un-collapsed: every branch that made IsPassable return `false` now returns the SPECIFIC
-// verdict (AIP_LOCKED / AIP_DOOR / AIP_NOT_PASSABLE / AIP_CANNOT_LAY) that CDumbUnitServer::CheckPassable
-// maps to CMR_LOCKED / CMR_DOOR / CMR_NOT_PASSABLE. By construction GetPassability(p)==AIP_YES exactly
-// when IsPassable(p) is true, so IsPassable is left byte-identical below and its ~18 callers are unchanged.
-// Two deliberate divergences from the retail @0x42e30 decode, kept to preserve the dev IsPassable
-// behaviour those callers depend on: (1) dev's branch order (area-locks -> door -> tile) rather than
-// retail's tile-first order, so a locked-AND-pose-blocked tile reports AIP_LOCKED (retail: AIP_NOT_PASSABLE)
-// -- a rare edge that only delays a reroute by one wait cycle; (2) the ladder branch keeps dev's
-// pass/lock test without retail's facing-direction check. AIP_CANNOT_LAY is the one added granular
-// distinction (a CM_LAY place blocked in its direction on a tile that still allows lying, CP_LAY set);
-// it maps to CMR_NOT_PASSABLE like AIP_NOT_PASSABLE, so it changes no movement verdict.
+// Retail v1.1 0x442e30 / v1.2 0x443670: query this place's pose, anchor lock, then door.
+// Do not expand GetLockArea here. Equivalent cells on other layers can have different locks;
+// checking their footprint rejects a valid melee approach (e.g. the tile in front of a PK).
+// Large/prone footprint checks belong to the callers that explicitly request them.
+// The legacy bool IsPassable below is a separate query and retains its existing callers.
 EPassable CPathNetwork::GetPassability( const SPathPlace &p )
 {
+	if ( p.IsFinal() )
+		return AIP_YES;
+	if ( p.GetLayer() >= layers.size() )
+		return AIP_NOT_PASSABLE;
+	CNodesLayer *pLayer = layers[ p.GetLayer() ];
 	if ( !p.IsIntegral() )
 	{
 		// ladder...
-		CNodesLayer::SLadder &ladder = GetLayer( p.GetLayer() )->ladders[ p.GetX() ];
-		GetLayer( p.GetLayer() )->RefreshLadder( p.GetX(), pMap );
+		CNodesLayer::SLadder &ladder = pLayer->ladders[ p.GetX() ];
+		pLayer->RefreshLadder( p.GetX(), pMap );
 		ASSERT( p.GetY() < ladder.GetHeight() );
 		if ( ladder.pointPassable[ p.GetLadderStep() ] == 0 )
 			return AIP_NOT_PASSABLE;
 		if ( ladder.nLocks[ p.GetLadderStep() ] != 0 )
 			return AIP_LOCKED;
-		return AIP_YES;
+		return p.GetDirection() == ( ( ladder.eDir * 2 + 4 ) & 7 ) ? AIP_YES : AIP_NOT_PASSABLE;
 	}
 
 	// Bounds-check the layer, build the spot, then bounds-check p against the layer's tiles BEFORE any
 	// tile read (an unbuilt layer has empty tiles -> AV otherwise; see the note on IsPassable below).
-	if ( p.GetLayer() >= layers.size() )
-		return AIP_NOT_PASSABLE;
-	CNodesLayer *pPLayer = layers[ p.GetLayer() ];
-	pPLayer->pGroup->RefreshSpot( p, pMap, 1 );
-	if ( p.GetX() >= pPLayer->tiles.GetXSize() || p.GetY() >= pPLayer->tiles.GetYSize() )
-		return AIP_NOT_PASSABLE;
-
-	static vector<SPathPlace> locked( 20 );
-	locked.resize(0);
-	GetLockArea( &locked, p, false );
-	for ( unsigned int i = 0; i < locked.size(); ++i )
-	{
-		SPathPlace pLock( locked[i] );
-		CNodesLayer *pLayer = layers[pLock.GetLayer()];
-		pLayer->pGroup->RefreshSpot( pLock, pMap, 1 );
-		const CNodesLayer::STile &t = pLayer->tiles[pLock.GetY()][pLock.GetX()];
-		if ( t.nLocks != 0 )
-			return AIP_LOCKED;
-	}
-
-	if ( !IsNotOnDoor( p ) )
-		return AIP_DOOR;
-
-	CNodesLayer *pLayer = layers[p.GetLayer()];
 	pLayer->pGroup->RefreshSpot( p, pMap, 1 );
 	if ( ( p.GetX() >= pLayer->tiles.GetXSize() ) || ( p.GetY() >= pLayer->tiles.GetYSize() ) )
 		return AIP_NOT_PASSABLE;
 	const CNodesLayer::STile &t = pLayer->tiles[p.GetY()][p.GetX()];
-	if ( IsTilePassable( p, t ) )
-		return AIP_YES;
-	if ( p.GetPose() == CM_LAY && ( t.nPassable & CP_LAY ) )
-		return AIP_CANNOT_LAY;
-	return AIP_NOT_PASSABLE;
+	if ( !IsTilePassable( p, t ) )
+		return p.GetPose() == CM_LAY && ( t.nPassable & CP_LAY ) ? AIP_CANNOT_LAY : AIP_NOT_PASSABLE;
+	if ( t.nLocks != 0 )
+		return AIP_LOCKED;
+	return IsNotOnDoor( p ) ? AIP_YES : AIP_DOOR;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CPathNetwork::IsPassable( const SPathPlace &p )
