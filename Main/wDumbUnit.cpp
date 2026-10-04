@@ -540,6 +540,21 @@ void CDumbUnitServer::EnableHide()
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// Retail v1.1 0x74f310 / v1.2 0x74f660. A downed wearer keeps its shell:
+// play the PK collapse clip and hold its last frame, not a normal crawl pose.
+static void PanzerkleineDeathAnimation( CUnitAnimator *pAnimator,
+	const NAI::SUnitPosition &pos, CWorld *pWorld )
+{
+	pAnimator->SetPose( NAI::CRAWL );
+	NAI::SUnitPosition animPos = pos;
+	// Retail changes only the copied place's pose bits, preserving bRun.
+	animPos.pos.p.SetPose( NAI::CM_LAY );
+	pAnimator->AlignTime();
+	pAnimator->PlayCustomAnimation( animPos,
+		pos.pos.p.GetPose() == NAI::CM_STAND ? 2484 : 2466, true );
+	pWorld->MakeSound( pos.GetCP(), NDb::GetSound( 16584 ) );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 void CDumbUnitServer::FallAsIfDead( const CVec3 &ptDir, bool bDropItemsFromBackPack, bool bPlayDeathAnim )
 {
 	DropItems( !IsWearingPK(), true, bDropItemsFromBackPack );   // retail @0x350770 always drops the cap here (bDropCap=true)
@@ -570,12 +585,7 @@ void CDumbUnitServer::FallAsIfDead( const CVec3 &ptDir, bool bDropItemsFromBackP
 		pWorld->GetPathNetwork()->Unlock( this );
 	}
 	else
-	{
-		animator.SetPose( NAI::CRAWL );
-		NAI::SUnitPosition animPos = position;
-		animPos.pos.p.SetPose( NAI::CRAWL );
-		animator.PlaceUnit( animPos );
-	}
+		PanzerkleineDeathAnimation( &animator, position, pWorld );
 	bindGlobal.Update();
 	pWorld->UpdateVisible();
 }
@@ -710,6 +720,11 @@ int CDumbUnitServer::ProcessAttack( NWorld::IWorld *_pWorld, int nUserID, NRPG::
 	// calculated as an integer separately in the periodic regeneration pass.
 	// The dev rule manufactured fractional strengths, including zero on a blocked hit.
 	int nCurrentVP = pRPG->GetTotalVP();
+
+	// Retail v1.1 0x750f51..0x750f7d / v1.2 +0x350: the same frozen
+	// PK collapse is used for a stunned wearer before world-state reconciliation.
+	if ( IsWearingPK() && pRPG->HasCritical( NDb::C_STUN ) )
+		PanzerkleineDeathAnimation( &animator, position, pWorld );
 
 	// Retail v1.2 0x7512e6: already unconscious units do not voice pain.
 	// This uses world state before the death/unconscious reconciliation below.
@@ -867,13 +882,17 @@ void CDumbUnitServer::Segment()
 	// do NOT add the write-backs here. Branch (A) is the floor change; branch (B) is the track-sequence flag, gated
 	// on CWorld::IsSequence @0x376ff0 (the interrupt/real-time predicate, delegated to CTBSWorld::IsSequence and
 	// exposed as an IWorld default-no-op virtual). bTrackSequence is written back in Visit above.
-	// Retail's full corpse gate (disasm @0x350960): !CanFight && not a Panzerklein pers && no corpse
-	// carrier. Inside it, BEFORE the Update branches, the corpse hit-location refresh: when the physical
+	// Retail's corpse-position refresh (v1.1 @0x750960, v1.2 @0x750cb0) skips fighters, PK persons,
+	// valid worn PKs (GetWearingDBPK vtbl+0x34), and carried bodies. The worn-PK gate also skips both
+	// Update branches. BEFORE those branches, the corpse hit-location refresh: when the physical
 	// body drifted > sqrt(2) from the last snapshot (or the points were never filled), re-snap the logical
 	// place to the body (NAI::GetNearestPosition @0x7ef50) and rebuild the 6 corpseHLpos ray points from
 	// the AI-map hull (CAIMap::GetUnitHLPos @0x65ee0, retail fill order 1,0,3,2,5,4). These points feed
 	// CGame::IsCorpseVisible @0x298da0 -- the tracker's corpse-sighting probe.
-	if ( !CanFight() && pRPG->GetRPGPers()->pPanzerklein == 0
+	// A dead pilot still renders the worn shell at its locked logical place. Do not re-snap it
+	// to the collapse animation's hip as an ordinary human corpse: that can select another layer
+	// and make the shell disappear while its original tile remains locked.
+	if ( !CanFight() && pRPG->GetRPGPers()->pPanzerklein == 0 && !IsWearingPK()
 	     && !IsValid( animator.GetCorpseCarrier() ) )
 	{
 		CVec3 ptReal;
@@ -961,7 +980,11 @@ void CDumbUnitServer::PlaceOnPassablePlace()
 	bool bBigUnit = NAI::IsBigLocker( this );
 	NAI::IPathNetwork *pNet = pWorld->GetPathNetwork();
 	pNet->Unlock( this );
-	bool bPassable = bBigUnit? NAI::IsBigLockerPassable( pNet, position.pos.p ) : pNet->IsPassable( position.pos.p );
+	// Retail v1.1 0x751d8f / v1.2 0x7520df checks the anchor's
+	// passability as well as the large footprint's locks. An unlocked empty
+	// layer is not a floor: accepting it strands the wearer at height zero
+	// and the first GRID_INFO_UPDATED can kill its pilot via ForcedMove.
+	bool bPassable = bBigUnit? NAI::BigLockerPassableState( pNet, position.pos.p ) == NAI::AIP_YES : pNet->IsPassable( position.pos.p );
 	if ( bPassable )
 	{
 		bLocksTwoPlaces = false;
@@ -980,7 +1003,7 @@ void CDumbUnitServer::PlaceOnPassablePlace()
 		for ( int k = 0; k < places.size(); ++k )
 		{
 			places[k].SetPose( NAI::CM_STAND );
-			bool bPassable = bBigUnit? NAI::IsBigLockerPassable( pNet, places[k] ) : pNet->IsPassable( places[k] );
+			bool bPassable = bBigUnit? NAI::BigLockerPassableState( pNet, places[k] ) == NAI::AIP_YES : pNet->IsPassable( places[k] );
 			if ( bPassable && pNet->GetFloor( places[k].GetLayer() ) <= nStartFloor )
 			{
 				NAI::SPosition pos( position.pos );
