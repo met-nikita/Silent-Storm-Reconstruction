@@ -1156,8 +1156,20 @@ NDb::CSound* CDumbUnitServer::GetStepSound( NDb::CRPGArmor *pArmor )
 		return 0;
 
 	SRand rand;
-	if ( pArmor && pArmor->pSoundStep )
-		return pArmor->pSoundStep->GetSound( &rand )->pSound;
+	// Retail v1.2 0x74f480 (v1.1 0x74f130): a worn PK's mechanical
+	// footsteps override the floor's sound set, without changing its AI noise type.
+	NDb::CPanzerklein *pPK = GetWearingDBPK();
+	NDb::CTSound *pStepSound = 0;
+	if ( IsValid( pPK ) && pPK->pStepSound )
+		pStepSound = pPK->pStepSound;
+	else if ( pArmor && pArmor->pSoundStep )
+		pStepSound = pArmor->pSoundStep;
+	if ( pStepSound )
+	{
+		NDb::CSoundVariant *pVariant = pStepSound->GetSound( &rand );
+		if ( pVariant )
+			return pVariant->pSound;
+	}
 
 	return 0;
 }
