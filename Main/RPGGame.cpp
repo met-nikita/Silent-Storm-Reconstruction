@@ -934,7 +934,8 @@ float CheckToHit( NWorld::CUnit *pAttacker, NWorld::CUnit *pTarget, int nExtraAP
 	*nToHit = GetAttackerToHit( pAttacker, pTarget, nExtraAP, eHL, accessibleHLs, pCover, bFirstRound, nBullet );
 	csRPG << "\tToHit = " << *nToHit;
 	int nCheck = GetRandomForToHit( pAttacker );
-	csRPG << "\tCheck = " << nCheck << " Hit: " << bool(nCheck < *nToHit) << "\n";
+	// Retail v1.2 0x6b52d4: equality is a hit, as in the ratio >= 1 ray gate.
+	csRPG << "\tCheck = " << nCheck << " Hit: " << bool(nCheck <= *nToHit) << "\n";
 	return float(*nToHit) / float(nCheck);
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -944,7 +945,8 @@ float CheckTileToHit( NWorld::CUnit *pAttacker, const CVec3 ptTarget, int nExtra
 	*nToHit = GetAttackerTileToHit( pAttacker, ptTarget, nExtraAP, eHitLocation, pCover, bFirstRound, nBullet );
 	csRPG << "\tTileToHit = " << *nToHit;
 	int nCheck = GetRandomForToHit( pAttacker );
-	csRPG << "\tCheck = " << nCheck << " Hit: " << bool(nCheck < *nToHit) << "\n";
+	// Retail v1.2 0x6b5493 uses the same inclusive comparison for tile shots.
+	csRPG << "\tCheck = " << nCheck << " Hit: " << bool(nCheck <= *nToHit) << "\n";
 	return float(*nToHit) / float(nCheck);
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
