@@ -407,10 +407,14 @@ void CMissionDlgUI::UpdatePhrases( NGScene::I2DGameView *pView )
 			pML->Generate( pView, int( pDialog->GetSize().x * vScreenRect.x / 1024.0f ) );
 
 			sRealSize = pML->GetSize();
-			sRealSize.x = sRealSize.x * 1024 / vScreenRect.x;
-			sRealSize.y = sRealSize.y * 768 / vScreenRect.y;
+			// ORIGINAL RETAIL BUG FIXED (v1.1 0x607024 / v1.2 0x6077d4):
+			// Render returns screen-pixel bounds, but retail compared them with
+			// the virtual 768-high dialog cap. Keep BOTH height tests in pixels;
+			// font/aspect-ratio differences must not decide whether later phrases survive.
+			const float fDialogHeight = nDialogHeight * ( vScreenRect.y / 768.0f );
+			int nPageEnd = wsText.length();
 
-			if ( sRealSize.y > nDialogHeight )
+			if ( sRealSize.y > fDialogHeight )
 			{
 				list<CTRect<float> > rects;
 				pML->Render( &rects, CTPoint<float>( 0, 0 ), CTRect<float>( 0, 0, 0, 0 ) );
@@ -418,73 +422,53 @@ void CMissionDlgUI::UpdatePhrases( NGScene::I2DGameView *pView )
 				int nCutChar = 0;
 				for ( list<CTRect<float> >::const_iterator iRect = rects.begin(); iRect != rects.end(); iRect++ )
 				{
-					// Retail compares the rendered rectangle directly (0x6077d4),
-					// unlike the virtual-height conversion for the overflow test.
-					if ( iRect->y2 > nDialogHeight )
+					// Independently scaled line/cap edges can differ by a few float ULPs.
+					if ( iRect->y2 > fDialogHeight + 0.001f )
 						break;
 
 					nCutChar++;
 				}
 
-				if ( nCutChar == 0 )
+				// If a real line is taller than the box, or has no character bounds,
+				// retain the remaining phrase as one fitted page instead of retail's
+				// assertion/whole-dialogue abort. The default end also guarantees progress
+				// if markup cannot be mapped back to a character. All-fitting bounds keep
+				// trailing tags on this page rather than creating an empty continuation.
+				if ( nCutChar > 0 && nCutChar < rects.size() )
 				{
-					csSystem << "ERROR: Text-line height bigger then dialog size!" << endl;
-					ASSERT( 0 && "Text size bigger then dialog size!" );
-					return;
-				}
-
-				int nTemp = 0, nCursor = 0;
-				while( nCursor < wsText.length() )
-				{
-					WCHAR wcChar = wsText.c_str()[nCursor];
-
-					if ( wcChar == '<' )
+					int nChar = 0, nCursor = 0;
+					while ( nCursor < wsText.length() )
 					{
-						int nFind = wsText.find_first_of( '>', nCursor );
-						if ( nFind != wstring::npos )
-							nCursor = nFind + 1;
-						else
-							nCursor = wsText.length();
-
-						continue;
-					}
-
-					nTemp++;
-					nCursor++;
-					if ( nTemp == nCutChar )
-					{
-						SAckEvent &sEvent = *parsedPhrasesSet.insert( parsedPhrasesSet.end(), SAckEvent());
-						sEvent.pUnit = pEvent->pUnit;
-						sEvent.wsText = wsText.substr( 0, nCursor );
-						sEvent.nPriority = pEvent->nPriority;
-						if ( bFirstPage )
+						if ( wsText[nCursor] == '<' )
 						{
-							sEvent.pSound = sVoice.pSound;
-							sEvent.pSequence = sVoice.pSequence;
-							sEvent.pExpression = pExpression;
-							bFirstPage = false;
+							int nFind = wsText.find_first_of( '>', nCursor );
+							nCursor = nFind != wstring::npos ? nFind + 1 : wsText.length();
+							continue;
 						}
 
-						wsText = wsText.substr( nCursor );
+						nCursor++;
+						if ( ++nChar == nCutChar )
+						{
+							nPageEnd = nCursor;
+							break;
+						}
 					}
 				}
 			}
-			else
-			{
-				SAckEvent &sEvent = *parsedPhrasesSet.insert( parsedPhrasesSet.end(), SAckEvent());
-				sEvent.pUnit = pEvent->pUnit;
-				sEvent.wsText = wsText;
-				sEvent.nPriority = pEvent->nPriority;
-				if ( bFirstPage )
-				{
-					sEvent.pSound = sVoice.pSound;
-					sEvent.pSequence = sVoice.pSequence;
-					sEvent.pExpression = pExpression;
-					bFirstPage = false;
-				}
-			}
 
-		} while( !wsText.empty() && ( sRealSize.y > pDialog->GetSize().y ) );
+			SAckEvent &sEvent = *parsedPhrasesSet.insert( parsedPhrasesSet.end(), SAckEvent());
+			sEvent.pUnit = pEvent->pUnit;
+			sEvent.wsText = wsText.substr( 0, nPageEnd );
+			sEvent.nPriority = pEvent->nPriority;
+			if ( bFirstPage )
+			{
+				sEvent.pSound = sVoice.pSound;
+				sEvent.pSequence = sVoice.pSequence;
+				sEvent.pExpression = pExpression;
+				bFirstPage = false;
+			}
+			wsText = wsText.substr( nPageEnd );
+		} while ( !wsText.empty() );
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////

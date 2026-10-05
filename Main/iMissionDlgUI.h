@@ -26,6 +26,15 @@ struct SAckEvent
 	// retail SAckEvent tail: the per-phrase facial-expression sequence (UpdatePhrases @0x206d60
 	// resolves it via GetSequenceByExpression from the ack's FaceExpression column; first page only)
 	CDBPtr<NDb::CSequence> pExpression;
+	// Retail v1.1 0x609730 / v1.2 0x609e80: serialize each parsed page's values
+	// and references, not the string/smart-pointer storage. Without operator&,
+	// vector serialization dumps raw heap pointers and loaded dialogue pages crash.
+	int operator&( CStructureSaver &f )
+	{
+		f.Add(2,&nPriority); f.Add(3,&wsText); f.Add(4,&pUnit);
+		f.Add(5,&pSound); f.Add(6,&pSequence); f.Add(7,&pExpression);
+		return 0;
+	}
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CMissionDlgUI
