@@ -582,11 +582,13 @@ NDb::EWeaponType CUnit::GetWeaponType() const
 		return NDb::WT_MINE_DETECTOR;
 
 	CWeaponItem *pWeapon = GetWeaponItem();
-	if ( pWeapon )
+	// Retail v1.1 0x6bb220 / v1.2 0x6bb250: a retained mounted-gun
+	// reference can be invalid after the previous world is destroyed.
+	if ( IsValid( pWeapon ) )
 		return pWeapon->GetWeaponType();
 
 	CMeleeWeaponItem *pMeleeWeapon = GetMeleeWeaponItem();
-	if ( pMeleeWeapon )
+	if ( IsValid( pMeleeWeapon ) )
 		return pMeleeWeapon->GetWeaponType();
 
 	return NDb::WT_DEFAULT;
@@ -665,7 +667,10 @@ int CUnit::GetWeaponReloadAP( CWeaponItem *_pWeapon ) const
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CWeaponItem* CUnit::GetWeaponItem() const
 {
-	if ( pCannonItem )
+	// ORIGINAL RETAIL BUG FIXED (v1.1 0x6ba4e0 / v1.2 0x6ba510):
+	// a departed world's invalid cannon must not mask the equipped firearm.
+	// Otherwise the next mission caches an unarmed animation for an active gun.
+	if ( IsValid( pCannonItem ) )
 		return pCannonItem;
 	CDynamicCast<NRPG::CWeaponItem> pWeapon(pInventory->GetActive());
 	if (pWeapon)
