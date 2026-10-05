@@ -11,6 +11,9 @@
 #include "RPGItemSet.h" // CRAP
 #include "RPGUnitMission.h"
 #include "RPGGame.h"
+#include "RPGGlobal.h"
+#include "scScenarioTracker.h"
+#include "scFlowChartItems.h"
 #include "aiMap.h"
 #include "aiCollider.h"
 #include "phCollider.h"	// PhysCollideInfo (impact path; the free NAI::CollideInfo was removed)
@@ -527,6 +530,22 @@ static bool IsRectsIntersect( const CTRect<int> &s1, const CTRect<int> &s2 )
 	return false;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+static bool IsInstantClue( NRPG::IInventoryItem *pItem, CUnitServer *pUS )
+{
+	// retail v1.1 @0x7a3a30 / v1.2 @0x7a3e70: only actual scenario clue items with
+	// GiveImmediately bypass inventory placement. A normal item with the same DB ID does not.
+	if ( !IsValid( pUS ) || !IsValid( pItem ) || !dynamic_cast<NRPG::IClueItem*>( pItem ) )
+		return false;
+	NRPG::CGlobalGame *pGame = pUS->GetWorld()->GetGlobalGame();
+	if ( !IsValid( pGame ) )
+		return false;
+	CPtr<NScenario::CScenarioTracker> pTracker = pGame->pScenarioTracker;
+	if ( !IsValid( pTracker ) || !IsValid( pItem->GetDBItem() ) )
+		return false;
+	CPtr<NScenario::CScenarioClue> pClue = pTracker->GetClueByItemID( pItem->GetDBItem()->GetRecordID() );
+	return IsValid( pClue ) && pClue->GetDBClue()->bGiveImmediately;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 static EUnitCommandResult CanMoveInventoryItem( CUnitServer *pUS, CCmdMoveInventoryItem *pMoveItem )
 {
 	CObj<NRPG::IInventoryItem> pItem;
@@ -617,6 +636,10 @@ static EUnitCommandResult CanMoveInventoryItem( CUnitServer *pUS, CCmdMoveInvent
 	{
 		return UCR_OK;
 	}
+	// retail v1.1 @0x7aa34a / v1.2 @0x7aa79a: an immediate clue needs no free hand/slot
+	// or backpack space; MoveInventoryItem consumes it and opens the clue text instead.
+	if ( IsInstantClue( pItem, pUS ) )
+		return UCR_OK;
 
 	switch( sTarget.eType )
 	{
@@ -754,6 +777,9 @@ static void MoveInventoryItem( CUnitServer *pUS, CCmdMoveInventoryItem *pMoveIte
 
 	SItem sSource = pMoveItem->GetSource();
 	SItem sTarget = pMoveItem->GetTarget();
+	// Capture the real owners before GROUND stamps the picking unit onto the drag origin.
+	CDynamicCast<CUnitServer> pSourceUnit( sSource.pUnit );
+	CDynamicCast<CUnitServer> pTargetUnit( sTarget.pUnit );
 
 	switch( sSource.eType )
 	{
@@ -839,13 +865,25 @@ static void MoveInventoryItem( CUnitServer *pUS, CCmdMoveInventoryItem *pMoveIte
 
 	ASSERT( IsValid( pItem ) );
 
-	// retail v1.2 @0x7aac10: hints are consumed when picked up and advance the world's
+	// retail v1.1 @0x7aab30: hints are consumed when picked up and advance the world's
 	// UI-hint sequence instead of being placed into the requested inventory destination.
 	if ( dynamic_cast<NRPG::IHintItem*>( pItem.GetPtr() ) )
 	{
 		pUS->GetWorld()->AddNextUIHint( false );
 		return;
 	}
+	bool bClue = dynamic_cast<NRPG::IClueItem*>( pItem.GetPtr() ) != 0;
+	if ( bClue && IsValid( pSourceUnit ) )
+		pSourceUnit->nClueCount = Max( 0, pSourceUnit->nClueCount - 1 );
+	// retail v1.1 @0x7aac10 / v1.2 @0x7ab060: do this before any hand/inventory placement.
+	// Missing this branch let document folders enter the drag slot and its held-item preview.
+	if ( IsInstantClue( pItem, pTargetUnit ) )
+	{
+		CPtr<NScenario::CScenarioTracker> pTracker = pTargetUnit->GetWorld()->GetGlobalGame()->pScenarioTracker;
+		pTracker->OnItemTaken( pTargetUnit, pItem, (NDb::ESlot)NDb::N_SLOTS, true );
+		return;
+	}
+	NDb::ESlot clueSlot = (NDb::ESlot)NDb::N_SLOTS; // backpack/non-equipped destination
 
 	switch( sTarget.eType )
 	{
@@ -888,6 +926,7 @@ static void MoveInventoryItem( CUnitServer *pUS, CCmdMoveInventoryItem *pMoveIte
 			}
 
 			pInventory->Equip( (NDb::ESlot)sTarget.nSlot, pItem );
+			clueSlot = (NDb::ESlot)sTarget.nSlot;
 			break;
 		}
 	case SItem::BACKPACK:
@@ -966,6 +1005,7 @@ static void MoveInventoryItem( CUnitServer *pUS, CCmdMoveInventoryItem *pMoveIte
 				{
 					bComplete = true;
 					pInventory->Equip( eSlot, pItem );
+					clueSlot = eSlot;
 					break;
 				}
 			}
@@ -987,6 +1027,15 @@ static void MoveInventoryItem( CUnitServer *pUS, CCmdMoveInventoryItem *pMoveIte
 		// destroy the item: it was already taken off its source above, so just drop the last
 		// reference (pItem is a CObj) -- the item is removed from the world. (DestroyItemInHand)
 		break;
+	}
+	// retail @0x7ab25d: ordinary clue transfers update carrier counts and invalidate the
+	// scenario's leave-zone cache too, but they retain the item and do not open the text modal.
+	if ( bClue && IsValid( pTargetUnit ) )
+	{
+		++pTargetUnit->nClueCount;
+		NRPG::CGlobalGame *pGame = pTargetUnit->GetWorld()->GetGlobalGame();
+		if ( IsValid( pGame ) && IsValid( pGame->pScenarioTracker ) )
+			pGame->pScenarioTracker->OnItemTaken( pTargetUnit, pItem, clueSlot, true );
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////

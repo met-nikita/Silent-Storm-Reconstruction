@@ -3,6 +3,7 @@
 #include "wInterface.h"
 #include "wUnitServer.h"
 #include "wMain.h"
+#include "wUICommands.h"
 //
 #include "RPGUnitMission.h"
 #include "RPGMerc.h"
@@ -455,6 +456,14 @@ CScenarioClue* CScenarioTracker::GetClueByPersID( int nPersID ) const
 	return pScenarioFlowChart->GetClueByPersID( nPersID );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+CScenarioClue* CScenarioTracker::GetClueByItemID( int nItemID ) const
+{
+	// retail v1.1 @0x700210 / v1.2 @0x700aa0
+	if ( !bScenarioAvailable )
+		return 0;
+	return pScenarioFlowChart->GetClueByItemID( nItemID );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CScenarioTracker::OnScenarioClueTaken( int nID, bool bUnit )
 {
 	if ( !bScenarioAvailable )
@@ -571,6 +580,44 @@ static void CompleteTasks( CScenarioClue *pClue, NDb::ETaskTag tag )
 		if ( IsValid( tasks[n] ) && tasks[n]->GetDBTask()->eTag == tag )
 			tasks[n]->SetState( TS_COMPLETED );
 }
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CScenarioTracker::OnItemTaken( NWorld::CUnitServer *pUS, NRPG::IInventoryItem *pItem, NDb::ESlot slot, bool bTaken )
+{
+	// retail v1.1 @0x701f50 / v1.2 @0x7027d0: immediate clues are acknowledged on pickup,
+	// not carried out of the zone. This callback was missing in the reconstruction.
+	if ( !IsValid( pUS ) || !IsValid( pItem ) || !dynamic_cast<NRPG::IClueItem*>( pItem ) || pUS->IsAIUnit() )
+		return;
+	InvalidateLeaveZoneCache();
+	if ( !bScenarioAvailable )
+		return;
+	CPtr<CScenarioClue> pClue = GetClueByItemID( pItem->GetDBItem()->GetRecordID() );
+	if ( !IsValid( pClue ) || !pClue->GetDBClue()->bGiveImmediately )
+		return;
+	if ( bTaken )
+	{
+		CPtr<NRPG::IInventory> pInventory = pUS->GetUnitRPG()->GetInventory();
+		CheatTakeClue( pClue, true ); // retail TakeClue: process the capture immediately
+		if ( slot < NDb::N_SLOTS )
+			pInventory->TakeOff( slot );
+		else
+		{
+			// The pre-placement pickup callback has already removed the source and never inserts
+			// a destination entry. Retail Take is a no-op there; avoid its dev-only debug assertion.
+			const vector<NRPG::SBackPackItem> &items = pInventory->GetItems();
+			for ( int n = 0; n < items.size(); ++n )
+				if ( items[n].pItem == pItem )
+				{
+					pInventory->Take( pItem );
+					break;
+				}
+		}
+	}
+	pUS->GetWorld()->AddUICommand( new NWorld::CUICmdShowClue( pClue ) );
+	CompleteTasks( pClue, NDb::TT_FIND_ITEM );
+	CompleteTasks( pClue, NDb::TT_TAKE_ITEM );
+	CompleteTasks( pClue, NDb::TT_CARRY_OUT_ITEM );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 // Retail v1.2 0x702e80: discovery is driven by the human player's merged visibility.
 void CScenarioTracker::OnUpdateVisible( NWorld::CPlayer *pPlayer, CScenarioZone *pZone )
 {
