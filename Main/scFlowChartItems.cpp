@@ -313,9 +313,10 @@ int CScenarioZone::GetVariantIDForTemplate( int nTemplateID )
 CScenarioClue::CScenarioClue( NDb::CDBScenarioClue *_pDBClue, int _nInnerID ):
 	pDBClue( _pDBClue ), bPlaced( false ), bCompound( false ),
 	bInaccessible( true ), bJustFound( false ), nOpenOrder( 0 ),
-	bInShortestPath( false ),	nInnerID( _nInnerID ), bDestroyed( false ),
+	nInnerID( _nInnerID ), bInShortestPath( false ), nTemplateID( 0 ), bDestroyed( false ),
 	bDetected( false )
 {
+	// Retail v1.1 0x6e07c9 / v1.2 0x6e0d89: a new clue has no map until placed.
 	ASSERT( IsValid( pDBClue ) );
 	// retail @0x2e0770 tail: a clue whose DB record carries a goal gets its runtime goal built
 	// right in the ctor, with this clue as the tasks' parent.
