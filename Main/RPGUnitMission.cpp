@@ -1075,25 +1075,26 @@ bool CUnitMission::CreateAttack( vector<CAttackPortion> *pRes, bool bSpendAmmo,
 	}
 	// retail @0x6c2ae8 (adaptation tail): on a real, ammo-spending attack (once per shot -- the shoot
 	// execs pass bAdaptWeapon = nBulletGone==0, melee always true) update the weapon familiarity.
-	// ORIGINAL RETAIL BUGS FIXED (perks 6/71): change training/decay rate only.
-	// Perk 71's 100% slower means twice the training time (Param2=2), not zero
-	// training. Its independent bonus multiplier is applied by GetWeaponAdaptation,
-	// not by doubling the counter cap, which otherwise cancels or delays its effect.
-	// Perk 87 still scales the counter cap from the RPGToHit constants record.
+	// Retail v1.1 0x6c2b0c..0x6c2c3c / v1.2 0x6c2c1c..0x6c2d4c:
+	// perk 6 changes growth/decay rate; perk 71 divides rate and scales the
+	// counter cap; perk 87 also scales that cap. UseWeapon converts the counter
+	// to an accuracy bonus with the DB multiplier (normally 0.1), not the rate.
 	if ( bSpendAmmo && bAdaptWeapon && pUsedItem )
 	{
 		float fRate = 1.0f;
 		float fFastRate = 0;
 		if ( HasPerk( N_PERK_FAST_WEAPON_ADAPTATION, &fFastRate ) )
 			fRate = fFastRate;
-		float fSlowRateDiv = 0;
-		const bool bSlowAdaptation = HasPerk( N_PERK_SLOW_ADAPTATION_BONUS, 0, &fSlowRateDiv );
+		float fSlowCapMult = 0, fSlowRateDiv = 0;
+		const bool bSlowAdaptation = HasPerk( N_PERK_SLOW_ADAPTATION_BONUS, &fSlowCapMult, &fSlowRateDiv );
 		if ( bSlowAdaptation )
 			fRate /= fSlowRateDiv;
 		int nCap = tohit.nMaxWeaponAdaptation;
 		float fCapMult = 0;
 		if ( HasPerk( N_PERK_ADAPTATION_BONUS, &fCapMult ) )
 			nCap = (int)( nCap * fCapMult );
+		if ( bSlowAdaptation )
+			nCap = (int)( nCap * fSlowCapMult );
 		pRPGUnit->UseWeapon( pUsedItem, fRate, nCap, tohit.fWeaponAdaptationMult );
 	}
 	return bRet;

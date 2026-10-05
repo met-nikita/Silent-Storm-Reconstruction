@@ -355,10 +355,9 @@ public:
 	NDb::CString* GetBiography() const { return pBiography; }
 	bool HasPerk( int nPerkID, float *pParam1 = 0, float *pParam2 = 0, float *pParam3 = 0 ) const;
 	float GetWeaponAdaptation( IInventoryItem *pItem ) const;   // retail @0x2bb4a0: live familiarity of pItem (0 unless adapted to it)
-	// Based on retail @0x2bba60, with original perk-6/71 bugs fixed: training
-	// rate affects counter growth/decay only; GetWeaponAdaptation applies the
-	// separate perk-71 effect. Other-weapon decay/switch behavior is unchanged.
-	void UseWeapon( IInventoryItem *pItem, float fRate, int nMaxAdaptation, float fOtherRate );
+	// Retail @0x2bba60: rate grows/decays the counter; the DB multiplier converts
+	// it to the combat/tooltip bonus. Familiarity perks scale rate and/or cap.
+	void UseWeapon( IInventoryItem *pItem, float fRate, int nMaxAdaptation, float fMultiplier );
 	bool IsHero() const { return bHero; }
 	// retail CUnit::GetSightDistance @0x2ba680: a FLAT 20.0 world units, scaled by perk 0x53's param when
 	// present. (The per-pose CUnitMission::GetSightDistance table is a different, older surface -- retail's

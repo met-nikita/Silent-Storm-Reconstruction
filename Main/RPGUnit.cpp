@@ -874,27 +874,21 @@ bool CUnit::HasPerk( int nPerkID, float *pParam1, float *pParam2, float *pParam3
 float CUnit::GetWeaponAdaptation( IInventoryItem *pItem ) const
 {
 	if ( IsValid( pItem ) && pItem == pAdaptatedWeapon )
-	{
-		// ORIGINAL RETAIL BUG FIXED (perk 71): effect and learning rate are
-		// independent. Double the bonus, not the counter's training threshold.
-		float fEffect = 1.0f;
-		HasPerk( N_PERK_SLOW_ADAPTATION_BONUS, &fEffect );
-		return fCurrentAdaptation * fEffect;
-	}
+		return fCurrentAdaptation;
 	return 0.f;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // retail CUnit::UseWeapon @0x2bba60 (disasm-verified): raise familiarity with the weapon in use,
 // decay it for any other weapon; a fully drained counter (<= 0) switches the adapted weapon.
-void CUnit::UseWeapon( IInventoryItem *pItem, float fRate, int nMaxAdaptation, float fOtherRate )
+void CUnit::UseWeapon( IInventoryItem *pItem, float fRate, int nMaxAdaptation, float fMultiplier )
 {
 	if ( pItem == pAdaptatedWeapon )
 	{
 		fAdaptationCounter = Min( (float)nMaxAdaptation, fAdaptationCounter + fRate );
-		// ORIGINAL RETAIL BUG FIXED (perks 6/71): rate changes how quickly the
-		// counter grows/decays, not its combat bonus. Perk 71's effect is read
-		// separately by GetWeaponAdaptation, including immediately after learning it.
-		fCurrentAdaptation = fAdaptationCounter;
+		// Retail v1.1 0x6bba92 / v1.2 0x6bbb42: Min's RET 8 restores ESP;
+		// [esp+0x14] is the fourth argument (DB multiplier), not the growth rate.
+		// The default counter cap is 100, but its accuracy bonus caps at 10.
+		fCurrentAdaptation = fMultiplier * fAdaptationCounter;
 		return;
 	}
 	fAdaptationCounter -= fRate;
@@ -903,7 +897,7 @@ void CUnit::UseWeapon( IInventoryItem *pItem, float fRate, int nMaxAdaptation, f
 		pAdaptatedWeapon = pItem;
 		fAdaptationCounter = 0;
 	}
-	fCurrentAdaptation = fOtherRate * fAdaptationCounter;
+	fCurrentAdaptation = fMultiplier * fAdaptationCounter;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 } // namespace
