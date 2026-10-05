@@ -634,6 +634,9 @@ int CUnit::GetWeaponAP( CWeaponItem *_pWeapon ) const
 		else if ( ShotMode == NDb::SM_ShortBurst )
 			HasPerk( N_PERK_CHEAP_SHORT_BURST, &fDelta );
 		nRes -= nRes * fDelta;
+		// ORIGINAL RETAIL BUG FIXED: discounts may not make a paid shot free
+		// or negative. Apply here so direct AI weapon quotes share the same floor.
+		nRes = Max( 1, nRes );
 	}
 	return nRes;
 }
@@ -661,7 +664,7 @@ int CUnit::GetWeaponReloadAP( CWeaponItem *_pWeapon ) const
 	if ( !IsValid( pWeapon ) )
 		pWeapon = GetWeaponItem();
 	if ( IsValid( pWeapon ) )
-		return pWeapon->GetReloadAP();
+		return Max( 1, pWeapon->GetReloadAP() ); // Paid action; no weapon still returns zero.
 	return 0;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -754,9 +757,13 @@ void CUnit::CreateFirstAid( SFirstAid *pRes, int nHealVP, int nSkill ) const
 	pRes->fdVP = nHealVP;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-bool CUnit::CreateFirstAid( SFirstAid *pRes, int nMaxSpentAP, float fKitCapacity, 
+bool CUnit::CreateFirstAid( SFirstAid *pRes, int nMaxSpentAP, float fKitCapacity,
 	IFirstAidItem *pItem, CUnit *pTarget, int *pRequiredAP )
 {
+	// ORIGINAL RETAIL BUG FIXED: high medicine/engineering can truncate a
+	// treatment's cost to zero. A real treatment needs at least 1 available AP.
+	if ( nMaxSpentAP <= 0 )
+		return false;
 	SFirstAid tmp;
 	if ( pItem->GetDBFirstAid()->effect == NDb::FAE_REPAIR_PK )
 	{
@@ -764,7 +771,7 @@ bool CUnit::CreateFirstAid( SFirstAid *pRes, int nMaxSpentAP, float fKitCapacity
 		if ( nVPToHeal <= 0 )
 			return false;
 		int nSkill = Skills( NDb::ST_ENGINEERING );
-		int nRequiredAP = int( float(nVPToHeal) / Max(1, nSkill) * 20.f );
+		int nRequiredAP = Max( 1, int( float(nVPToHeal) / Max(1, nSkill) * 20.f ) );
 		if ( nRequiredAP > nMaxSpentAP )
 		{
 			nRequiredAP = nMaxSpentAP;
@@ -790,7 +797,7 @@ bool CUnit::CreateFirstAid( SFirstAid *pRes, int nMaxSpentAP, float fKitCapacity
 	float fSpeed = 1.f;
 	if ( pItem->GetDBFirstAid()->effect == NDb::FAE_NORMAL && HasPerk( 63, &fPerk ) )
 		fSpeed = fPerk;
-	int nRequiredAP = int( nVPToHeal / Max(1.f, nSkill * fSpeed) * 60.f );
+	int nRequiredAP = Max( 1, int( nVPToHeal / Max(1.f, nSkill * fSpeed) * 60.f ) );
 	if ( nRequiredAP > nMaxSpentAP )
 	{
 		nRequiredAP = nMaxSpentAP;

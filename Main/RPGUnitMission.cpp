@@ -574,6 +574,11 @@ void CUnitMission::SpendAP( int nAP )
 		GetRPGUnit()->IsCheatEnabled( CHEAT_SCRIPTSEQUENCE ) )
 			return;
 	//
+	// ORIGINAL RETAIL BUG FIXED (v1.1 0x6bf810 / v1.2 0x6bf9c0):
+	// subtracting a negative action cost awards AP. Preserve explicit zero-cost
+	// calls (free perks, no extra aiming AP), but never treat spending as a refund.
+	if ( nAP < 0 )
+		nAP = 1;
 	ASSERT( pRPGUnit->Skills(NDb::ST_AP) >= nAP );
 	pRPGUnit->Skills(NDb::ST_AP) -= nAP;
 }
@@ -584,6 +589,8 @@ bool CUnitMission::CanSpendAP( int nAP ) const
 		GetRPGUnit()->IsCheatEnabled( CHEAT_SCRIPTSEQUENCE ) )
 			return true;
 	//
+	if ( nAP < 0 )
+		nAP = 1; // Keep affordability consistent with SpendAP's negative-cost guard.
 	return pRPGUnit->Skills(NDb::ST_AP) >= nAP;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -627,6 +634,9 @@ void CUnitMission::StartRealTime()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 int CUnitMission::GetActionAP( NAI::EPose curPose, EAction action ) const
 {
+	// ORIGINAL RETAIL BUG FIXED: paid costs have a 1-AP floor AFTER skill and
+	// perk reductions, so UI/AI planning and execution agree. Explicitly free
+	// preparation/turning, no-op actions and missing-item sentinels stay zero.
 	// actions whose cost does not depend on the pose
 	switch ( action )
 	{
@@ -640,14 +650,18 @@ int CUnitMission::GetActionAP( NAI::EPose curPose, EAction action ) const
 			CWeaponItem *pWeapon = pRPGUnit->GetWeaponItem();
 			if ( IsValid( pWeapon ) )
 				nAP = pWeapon->GetDBWeapon()->pWeaponType->nPrepareCost;
+			if ( nAP <= 0 )
+				return 0; // No weapon, or a weapon type that needs no preparation.
 			float fParam;
 			if ( HasPerk( N_PERK_CHEAP_SHOOT_PREPARE, &fParam ) )
 			{
 				// ORIGINAL RETAIL BUG FIXED (perk 22): Param1=0 describes free
 				// preparation; subtracting zero left the entire AP cost in place.
+				if ( fParam == 0 )
+					return 0;
 				nAP = int( nAP * fParam );
 			}
-			return Min( 8, Max( 0, nAP ) );
+			return Min( 8, Max( 1, nAP ) );
 		}
 		case AC_SHOOT:   return pRPGUnit->GetWeaponAP();
 		case AC_PREPARE_AND_SHOOT:	return GetActionAP( curPose, AC_PREPARE ) + GetActionAP( curPose, AC_SHOOT );
@@ -658,10 +672,12 @@ int CUnitMission::GetActionAP( NAI::EPose curPose, EAction action ) const
 			// Keep x87 intermediate precision until the final truncating conversion.
 			NDb::CRPGAP *pAP = NDb::GetRPGAP( 5 );
 			int nAP = pAP ? pAP->nAP : 0;
+			if ( nAP == 0 )
+				return 0; // Preserve a missing record or an explicitly free DB cost.
 			float fParam;
 			if ( HasPerk( N_PERK_CHEAP_THROW, &fParam ) )
 				nAP = int( ( 1.0 - double( fParam ) ) * nAP );
-			return nAP;
+			return Max( 1, nAP );
 		}
 		case AC_CLIMB_1: return 10;
 		case AC_CLIMB_2: return 12;
@@ -702,19 +718,23 @@ int CUnitMission::GetActionAP( NAI::EPose curPose, EAction action ) const
 				float fParam;
 				if ( HasPerk( action == AC_THROW_KNIFE ? N_PERK_CHEAP_THROW : N_PERK_CHEAP_MELEE, &fParam ) )
 					nAP = int( ( 1.0 - double( fParam ) ) * nAP );
-				return nAP;
+				// Retail v1.1 0x6c11b1 / v1.2 0x6c1347 extrapolate below zero
+				// at high skills. Floor the final cost, not the skill itself.
+				return Max( 1, nAP );
 			}
 		case AC_BURST:
 			return pRPGUnit->GetWeaponBurstAP();
 		case AC_RELOAD:
 		{
 			int nAP = pRPGUnit->GetWeaponReloadAP();
+			if ( nAP == 0 )
+				return 0; // No firearm to reload.
 			float fParam;
 			// ORIGINAL RETAIL BUG FIXED (perk 33): the stated 30% reduction
 			// means paying 70% of base AP, not 30% as in retail 0x6c1443.
 			if ( HasPerk( N_PERK_CHEAP_RELOAD, &fParam ) )
 				nAP = int( nAP * ( 1.0f - fParam ) );
-			return nAP;
+			return Max( 1, nAP );
 		}
 		case AC_OPEN_CLOSE:
 			return 4;
@@ -736,7 +756,8 @@ int CUnitMission::GetActionAP( NAI::EPose curPose, EAction action ) const
 			if ( HasPerk( N_PERK_CHEAP_CHANGE_POSE, &fParam ) )
 				nCoeff -= fParam;
 			//
-			return abs( curPose - ( action - AC_POSE_CRAWL ) ) * nCoeff;
+			int nChanges = abs( curPose - ( action - AC_POSE_CRAWL ) );
+			return nChanges == 0 ? 0 : Max( 1, nChanges * nCoeff );
 		}
 		case AC_LADDER:
 			return 2;
@@ -752,7 +773,7 @@ int CUnitMission::GetActionAP( NAI::EPose curPose, EAction action ) const
 			{
 				float fParam;
 				if ( HasPerk( N_PERK_CHEAP_ROTATE, &fParam ) )
-					return fParam;
+					return fParam == 0 ? 0 : Max( 1, int( fParam ) );
 				else
 					return curPose == NAI::CRAWL? 4 : 2;
 			}
@@ -815,13 +836,13 @@ int CUnitMission::GetActionAP( NAI::EPose curPose, EAction action ) const
 			float fCorpseAP;
 			if ( ( action == AC_MOVE_CORPSE_SIDE || action == AC_MOVE_CORPSE_DIAGONAL ) &&
 				HasPerk( N_PERK_CORPSE_TRACKER, &fCorpseAP ) )
-				return int( action == AC_MOVE_CORPSE_SIDE ? double( fCorpseAP ) : double( fCorpseAP ) * 1.5 );
+				return Max( 1, int( action == AC_MOVE_CORPSE_SIDE ? double( fCorpseAP ) : double( fCorpseAP ) * 1.5 ) );
 			switch ( action )
 			{
-				case AC_MOVE_SIDE:		return nPose + nAddedAP;
-				case AC_MOVE_DIAGONAL:	return ( ( nPose + nAddedAP ) * 15 ) / 10 ;
-				case AC_MOVE_CORPSE_SIDE:		return ( ( nPose + nAddedAP ) * 15 ) / 10;
-				case AC_MOVE_CORPSE_DIAGONAL:	return ( ( nPose + nAddedAP ) * 225 ) / 100;
+				case AC_MOVE_SIDE:		return Max( 1, nPose + nAddedAP );
+				case AC_MOVE_DIAGONAL:	return Max( 1, ( ( nPose + nAddedAP ) * 15 ) / 10 );
+				case AC_MOVE_CORPSE_SIDE:		return Max( 1, ( ( nPose + nAddedAP ) * 15 ) / 10 );
+				case AC_MOVE_CORPSE_DIAGONAL:	return Max( 1, ( ( nPose + nAddedAP ) * 225 ) / 100 );
 			}
 		}
 		break;

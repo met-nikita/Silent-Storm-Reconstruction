@@ -765,6 +765,10 @@ void CAIUnit::SpendHP( int _nHP )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CAIUnit::SpendAP( int _nAP )
 {
+	// Keep the AI's simulated balance consistent with mission AP spending:
+	// a negative cost cannot award AP; explicit free actions remain free.
+	if ( _nAP < 0 )
+		_nAP = 1;
 	SetAP( Max( 0, skills[0].nValue - _nAP ), skills[0].nMaxValue );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////

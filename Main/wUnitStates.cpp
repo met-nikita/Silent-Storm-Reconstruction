@@ -515,6 +515,10 @@ void CUnitStateHealer::DoHealing( int nUnitAP )
 		pUS->SetState( new CUnitStateNormal( pUS ) );
 		return;
 	}
+	// Paid treatment now needs at least 1 AP. Wait for the next turn rather
+	// than treating an exhausted AP budget as a finished/failed treatment.
+	if ( nUnitAP <= 0 )
+		return;
 	int nRequiredAP = 0;
 	NRPG::SFirstAid fa;
 	if ( pItem->GetDBFirstAid()->effect == NDb::FAE_REPAIR_PK )
