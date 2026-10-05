@@ -15,10 +15,8 @@
 //
 // CCoverGridInfo is the earlier additive reconstruction of that carrier. The live CCoverInfo
 // in RPGGame.cpp now also retains its grids for shooting. This separate unregistered carrier
-// remains for the aiPlaceSource helper surface pending consolidation.
-//
-// Nothing in the dev tree calls these two helpers yet (the sole release caller is the
-// not-yet-converged aiPlaceSource path), so this is a behaviour-neutral parity surface.
+// remains for the earlier helper surface. The live overload below is used by the
+// AI place-source safety check and is implemented beside CCoverInfo in RPGGame.cpp.
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 #include "RPGBullet.h"   // NRPG::SAttackRayInfo, NRPG::STrailPoint (via RPGGame.h), NAI::CFastRenderer::SResult
                          // + NAI::SSourceInfo (via aiRender.h->aiInterval.h), NAI::IAIMap (fwd-declared there)
@@ -53,6 +51,8 @@ struct CCoverGridInfo
 // unordered_map used as a set: value 1). For each ray, re-walk its source grid cell's SResult
 // depth-interval list and add the interval's source object.
 void GetObjectsThatMayBeDamaged( CCoverGridInfo *pCover,
+	unordered_map<CPtr<CObjectBase>, int, SPtrHash> *pRes );
+void GetObjectsThatMayBeDamaged( CCoverInfo *pCover,
 	unordered_map<CPtr<CObjectBase>, int, SPtrHash> *pRes );
 // @0x293910 -- index a finished ray back into its grid cell, then hand that cell's SResult list to
 // the per-ray GetHitIntersections overload (RPGBullet.obj @0x2915d0).

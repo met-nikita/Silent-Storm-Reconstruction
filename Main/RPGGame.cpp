@@ -1,6 +1,7 @@
 #include "StdAfx.h"
 #include "RPGGame.h"
 #include "RPGBullet.h"
+#include "RPGCover.h"
 #include "aiMap.h"
 #include "aiRender.h"
 #include "..\Misc\RandomGen.h"
@@ -74,6 +75,19 @@ static bool operator < ( const CCoverInfo::SRay &right, const CCoverInfo::SRay &
 bool CanShoot( CCoverInfo *pCover )
 {
 	return !pCover->hitRays.empty() || !pCover->looseRays.empty();
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// Retail v1.1 0x694300 / v1.2 0x694020: inspect every hit AND loose ray,
+// not obstRays. Keep the live carrier private here; its save layout is unchanged.
+void GetObjectsThatMayBeDamaged( CCoverInfo *pCover,
+	unordered_map<CPtr<CObjectBase>, int, SPtrHash> *pRes )
+{
+	pRes->clear();
+	vector<CCoverInfo::SRay> rays( pCover->hitRays );
+	rays.insert( rays.end(), pCover->looseRays.begin(), pCover->looseRays.end() );
+	for ( vector<CCoverInfo::SRay>::const_iterator i = rays.begin(); i != rays.end(); ++i )
+		for ( NAI::CFastRenderer::SResult *p = pCover->grids[i->nGrid].resGrid[i->nY][i->nX]; p; p = p->pNext )
+			(*pRes)[ p->GetInfo().pUserData ] = 1;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CGame
@@ -283,6 +297,10 @@ static void AddGridToCovers( CCoverInfo *pRes, const NAI::CFastRenderer &res, co
 						CDynamicCast<NWorld::CUnitServer> pHitSrv( p->GetInfo().pUserData );
 						if ( pHitSrv && pAttackerSrv->GetDiplomacyState( pHitSrv ) == NDb::DS_ALLY )
 						{
+							// Retail CanHitTarget v1.1 0x690d48 / v1.2 0x690ab8
+							// clears the target-hit output too. This is a loose ray,
+							// not a blocked hit ray (which can yield NaN AI cover).
+							bHitTarget = false;
 							bBlocked = true;
 							break;
 						}
@@ -302,7 +320,10 @@ static void AddGridToCovers( CCoverInfo *pRes, const NAI::CFastRenderer &res, co
 				pRes->fSummAPA += fTempPiercing;
 				ray.isPenetrate = true;
 			}
-			pRes->hitRays.push_back( ray );
+			if ( bHitTarget )
+				pRes->hitRays.push_back( ray );
+			else
+				pRes->looseRays.push_back( ray );
 #ifdef OUTPUT_GRID_TO_FILE
 			fputc( ray.isPenetrate ? '#' : '?', f );
 #endif

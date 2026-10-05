@@ -16,6 +16,8 @@
 #include "wMainPath.h"         // NWorld::FindPath / NWorld::PrepareAllPaths decls
 #include "wUnitAttack.h"       // NWorld::GetMeleeAttackPlaces (the enemy melee ring)
 #include "RPGGame.h"           // NRPG::GetShootDirection (face the candidate place at the enemy) @0x8e5e0
+#include "RPGCover.h"          // NRPG::GetObjectsThatMayBeDamaged (live shot-raster query)
+#include "RPGItemSet.h"        // CWeaponItem::CreateNewAttackPortion
 #include "aiMisc.h"            // NAI::GetAPForMove @0x74520 (price the held-spot move at CROUCH)
 #include "aiInventory.h"       // CAIInventory::GetFirstFireArms
 #include "aiWeapon.h"          // CAIFireArmsWeapon
@@ -299,49 +301,44 @@ bool CAIActionPlaceSource::AddAllPoses( const SPathPlace &p, int nMoveAP, int nM
 	return ( nWalkCost <= nMaxAP ) && ( !bCanCrouch || nCrouchCost <= nMaxAP );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// True if firing `pWeapon` from `pos` can catch a live ally before the current enemy. Retail
-// @0x0048e5e0 obtains the shot's cover raster, calls GetObjectsThatMayBeDamaged and intersects that set
-// with SAIState's live allied units. The development CCoverInfo predates the shipped raster-bearing
-// layout, so that exact transient set is unavailable without changing the save-load class. The live
-// equivalent below performs the same safety decision geometrically: gather units around the finite
-// shooter->target segment and reject a place when a live ally's centre enters a one-metre firing
-// corridor. This is deliberately conservative around the ray and, unlike the former false stub,
-// restores the friendly-fire gate at every retail call site without altering serialized data.
+// Retail v1.1 0x48f4a0 / v1.2 0x48f880: probe from the weapon origin and
+// intersect the hit/loose shot-raster objects with SAIState's live non-enemies.
+// A centreline corridor misses body geometry, elevation and off-axis shot rays.
 bool CAIActionPlaceSource::IsPosDangerousForAllies( const SUnitPosition &pos, CAIFireArmsWeapon *pWeapon )
 {
 	IAIUnit *pU = GetUnit();
 	IAIUnit *pEnemy = GetEnemy();
+	SAIState *pState = GetAIState();
+	if ( !IsValid( pU ) || !IsValid( pU->GetUnitServer() ) || !IsValid( pState ) ||
+		 !IsValid( pEnemy ) || !IsValid( pEnemy->GetUnitServer() ) || !pEnemy->GetUnitServer()->CanFight() )
+		return true;
 	if ( !IsValid( pWeapon ) || !IsValid( pWeapon->GetItem() ) )
 		return false;
-	if ( !IsValid( pU ) || !IsValid( pU->GetUnitServer() ) ||
-		 !IsValid( pEnemy ) || !IsValid( pEnemy->GetUnitServer() ) )
-		return true;
 	NWorld::CUnitServer *pUS = pU->GetUnitServer();
 	NWorld::CWorld *pWorld = pUS->GetWorld();
-	if ( !IsValid( pWorld ) )
+	if ( !IsValid( pWorld ) || !IsValid( pWorld->GetGame() ) )
 		return true;
-	const CVec3 from = pos.GetCP();
-	const CVec3 to = pEnemy->GetUnitPosition().GetCP();
-	const CVec3 shot = to - from;
-	const float length = fabs( shot );
-	if ( length <= FP_EPSILON )
+	vector<NRPG::CAttackPortion> attacks;
+	pWeapon->GetItem()->CreateNewAttackPortion( &attacks, false );
+	if ( attacks.empty() )
 		return true;
-	const float lengthSq = shot * shot;
-	const CVec3 middle = from + shot * 0.5f;
-	list< CPtr<NWorld::CUnitServer> > nearby;
-	pWorld->GetUnitsNear( middle, &nearby, length * 0.5f + 1.0f );
-	for ( list< CPtr<NWorld::CUnitServer> >::const_iterator i = nearby.begin(); i != nearby.end(); ++i )
+	CObj<NRPG::CCoverInfo> pCover = pWorld->GetGame()->CalcCovers(
+		pUS->GetAttackOrigin( pos, false ), attacks.front(), pUS,
+		pEnemy->GetUnitServer(), HL_BODY, 1.f, true );
+	if ( !IsValid( pCover ) )
+		return true;
+	unordered_map<CPtr<CObjectBase>, int, SPtrHash> endangered;
+	NRPG::GetObjectsThatMayBeDamaged( pCover, &endangered );
+	vector< CPtr<IAIUnit> > allies;
+	pState->GetUnits( &allies, true, true );
+	for ( vector< CPtr<IAIUnit> >::const_iterator i = allies.begin(); i != allies.end(); ++i )
 	{
-		NWorld::CUnitServer *pOther = *i;
-		if ( !IsValid( pOther ) || pOther == pUS || pOther == pEnemy->GetUnitServer() ||
-			 !pOther->CanFight() || pUS->GetDiplomacyState( pOther ) != NDb::DS_ALLY )
+		if ( !IsValid( *i ) || *i == pU )
 			continue;
-		const CVec3 rel = pOther->GetPosition().GetCP() - from;
-		const float t = ( rel * shot ) / lengthSq;
-		if ( t <= 0.0f || t >= 1.0f )
+		NWorld::CUnitServer *pOther = (*i)->GetUnitServer();
+		if ( !IsValid( pOther ) || !pOther->CanFight() )
 			continue;
-		const CVec3 offRay = rel - shot * t;
-		if ( fabs( offRay ) <= 1.0f )
+		if ( endangered.find( CastToObjectBase( pOther ) ) != endangered.end() )
 			return true;
 	}
 	return false;
