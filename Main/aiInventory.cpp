@@ -381,6 +381,10 @@ CAIFireArmsWeapon* CAIInventory::GetBestFireArms( const NAI::SUnitPosition &pos,
 	for ( vector< CObj<CAIFireArmsWeapon> >::const_iterator i = fireArms.begin(); i != fireArms.end(); ++i  )
 	{
 		CPtr<NRPG::CWeaponItem> pWeaponItem( (*i)->GetItem() );
+		// Retail v1.1 0x45616c / v1.2 0x4566cc: the AI wrapper can outlive
+		// its RPG weapon. Skip invalid items before cover/mode queries read cleared DB data.
+		if ( !IsValid( pWeaponItem ) )
+			continue;
 		int nHitCover = pOwner->GetCoverForFixedUnit( pos, pTarget->GetUnitServer(), pWeaponItem, NAI::HL_ANY );
 		//
 		for ( int nShootMode = ( int )NDb::SM_Snap; nShootMode != ( int )NDb::SM_Snipe; ++nShootMode )
