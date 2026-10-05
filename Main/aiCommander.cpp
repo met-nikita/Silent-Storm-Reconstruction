@@ -715,6 +715,27 @@ void CAICommander::RemoveUnit( NWorld::CUnitServer *pUS )
 	worldToAIUnit.erase( pUS );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+void CAICommander::RemoveInvalidUnits()
+{
+	// Retail 0x434a40. Removing a player invalidates its master-owned servers;
+	// other commanders must not retain those wrappers/cache entries in a zone save.
+	for ( vector<CObj<IAIUnit> >::iterator i = units.begin(); i != units.end(); )
+	{
+		if ( !IsValid( *i ) || !IsValid( (*i)->GetUnitServer() ) )
+			i = units.erase( i );
+		else
+			++i;
+	}
+	for ( unordered_map<CPtr<NWorld::CUnitServer>, CPtr<IAIUnit>, SPtrHash>::iterator i = worldToAIUnit.begin();
+		i != worldToAIUnit.end(); )
+	{
+		if ( !IsValid( i->first ) || !IsValid( i->second ) )
+			i = worldToAIUnit.erase( i );
+		else
+			++i;
+	}
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 void CAICommander::OnTBSEvent( NWorld::ETBSEvent event )
 {
 	if ( bForbidAI )

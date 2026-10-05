@@ -265,6 +265,7 @@ public:
 	virtual CObjectBase* GetAIMapHull() { return GetAIMapUnitHull(); }
 
 	void Segment();
+	void PrepareToRemove(); // Retail 0x7bf7b0: release this unit's static grid footprint.
 	void UpdateVisible( SInterruptInfo *pRes );
 	// retail CUnitServer::CheckSpot @0x3bfe30: one distance-roll to unhide a spotted enemy (this=spotter).
 	bool CheckSpot( CUnitServer *pTarget );

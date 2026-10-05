@@ -67,7 +67,7 @@
 #include "aiReaction.h"			// NAI::CreateUnitReaction -- the map-deploy reaction install (AI-convergence Stage 2)
 #include "aiReactions.h"
 #include "aiUnit.h"
-#include "aiNearestPosition.h"	// NAI::GetNearestPosition -- FetchDeployPoint's free-cell snap (retail LookWhereToMoveUnit analog)
+#include "aiNearestPosition.h"	// NAI::LookWhereToMoveUnit -- FetchDeployPoint's unit-aware free-cell snap
 #include "rpgCheatConstants.h"
 #include "wUnitCommands.h"
 #include "..\DBFormat\DataDifficulty.h"
@@ -1995,8 +1995,9 @@ void CWorld::RemoveCarriedCorpses()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // retail NWorld::FetchDeployPoint @0x362430: SILENT named-waypoint lookup (the Unit1..9 probe
 // misses BY DESIGN -- CWorld::GetWaypoint would ScriptWarning each miss) -> copy the waypoint's
-// position, bRun=false, WALK pose, snap to a free nearby cell (retail LookWhereToMoveUnit r=10
-// @0x7e500; dev stand-in = GetNearestPosition, the same analog UnitSetToWaypoint uses).
+// position, bRun=false, WALK pose, snap to a free nearby cell (retail LookWhereToMoveUnit,
+// 3m search, max-fall parameter 10 @0x7e500). Do not substitute generic GetNearestPosition: its default prone candidates
+// can reject adjacent standing tiles and move a hero upstairs on a later base visit.
 static bool FetchDeployPoint( unordered_map< string, CObj<NAI::CAIRouteWaypoint> > &waypoints,
 	NAI::IPathNetwork *pNet, const string &szName, NAI::SPathPlace *pRes )
 {
@@ -2009,8 +2010,12 @@ static bool FetchDeployPoint( unordered_map< string, CObj<NAI::CAIRouteWaypoint>
 	unitPos.pos = pWp->pos;
 	unitPos.bRun = false;
 	unitPos.SetPose( NAI::WALK );
-	if ( IsValid( pNet ) && !pNet->IsPassable( unitPos.pos.p ) )
-		unitPos.pos = NAI::GetNearestPosition( unitPos.pos.GetCP(), pNet, false, CVec3() );
+	if ( IsValid( pNet ) && pNet->GetPassability( unitPos.pos.p ) != NAI::AIP_YES )
+	{
+		NAI::SUnitPosition relocated;
+		NAI::LookWhereToMoveUnit( unitPos, &relocated, 10, pWp->ptPos.z );
+		unitPos = relocated;
+	}
 	*pRes = unitPos.pos.p;
 	return true;
 }
@@ -2205,6 +2210,17 @@ IPlayer* CWorld::AddPlayer( const wstring &wsName, NRPG::CGlobalPlayer *pGlobalP
 void CWorld::RemovePlayer( IPlayer *_pPlayer )
 {
 	CDynamicCast<CPlayer> pPlayer( _pPlayer );
+	// Retail v1.1 0x767420 / v1.2 0x767670 prepares every departing unit BEFORE
+	// unregistering its owner. Otherwise a base snapshot retains the old hero's
+	// static footprint, and a later deployment treats an empty tile as occupied.
+	vector<CPtr<CUnitServer> > departing;
+	pPlayer->GetUnits( &departing );
+	for ( int k = 0; k < departing.size(); ++k )
+	{
+		GetGlobalAck()->RemoveUnitAcks( departing[k] );
+		if ( IsValid( departing[k] ) )
+			departing[k]->PrepareToRemove();
+	}
 	UnregisterPlayer( pPlayer );
 
 	for ( list< CObj<CUnitServer> >::iterator i = units.begin(); i != units.end(); )
@@ -2214,6 +2230,7 @@ void CWorld::RemovePlayer( IPlayer *_pPlayer )
 		else
 			i = units.erase( i );
 	}
+	RemoveInvalidUnitsFromAI();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CWorld::GetActiveUnits( IPlayer *_pPlayer, list<CUnit*> *pRes )
@@ -3890,6 +3907,20 @@ void CWorld::RemoveUnitFromAI( CUnitServer *pUS )
 		CDynamicCast<NAI::CAICommander> pCommander((*i)->GetCommander());
 		if (pCommander)
 			pCommander->RemoveUnit( pUS );
+	}
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// Retail 0x765640: prune removed servers from the remaining commanders without
+// running their normal per-unit Synchronize/decision work during zone teardown.
+void CWorld::RemoveInvalidUnitsFromAI()
+{
+	vector<CPtr<CPlayer> > players;
+	GetPlayersList( &players );
+	for ( int k = 0; k < players.size(); ++k )
+	{
+		CDynamicCast<NAI::CAICommander> pCommander( players[k]->GetCommander() );
+		if ( IsValid( pCommander ) )
+			pCommander->RemoveInvalidUnits();
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////

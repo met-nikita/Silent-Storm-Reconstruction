@@ -177,6 +177,7 @@ public:
 	virtual void OnPassControl( NWorld::CPlayer *_pPlayer );
 	virtual void OnUnitDied( NWorld::CUnitServer *pUnit );
 	void RemoveUnit( NWorld::CUnitServer *pUS );
+	void RemoveInvalidUnits(); // Retail 0x434a40: roster/cache cleanup, no per-unit sync.
 	virtual bool IsEndOfTurn();
 	// Inherit CCommander::IsRequestInterrupt. Retail CAICommander has no override: when AI queues a
 	// non-skippable command (notably CCmdShootObject/CCmdShootTile), CCommander::Do raises the request

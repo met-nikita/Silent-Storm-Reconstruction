@@ -8,6 +8,71 @@
 namespace NAI
 {
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// Retail v1.1 0x47e3f0 / v1.2 0x47e420. An upward destination is not a fallback
+// for a blocked spawn/teleport. The small forward preference breaks equidistant ties.
+static float LookWhereMoveCriterium( const CVec3 &vDist, const CVec3 &facing,
+	float fMaxFallDist, bool *pFall )
+{
+	*pFall = false;
+	if ( vDist.z < -0.05f )
+		return 1000;
+	float fHorDist = vDist.x * vDist.x + vDist.y * vDist.y;
+	float fPenalty = vDist.x * facing.x + vDist.y * facing.y + vDist.z * facing.z > 0 ? 0.04f : 0;
+	if ( vDist.z < fMaxFallDist )
+	{
+		if ( fHorDist < 0.01f )
+		{
+			*pFall = true;
+			return fHorDist + vDist.z * vDist.z * ( 0.2f * 0.2f );
+		}
+		return fHorDist + vDist.z * vDist.z + fPenalty;
+	}
+	return fHorDist + vDist.z * vDist.z * 4 + fPenalty;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+ENearestUnitPosResult LookWhereToMoveUnit( const SUnitPosition &from, SUnitPosition *pTo,
+	float fMaxFallDist, float fHeight )
+{
+	*pTo = from; // Retail keeps the requested place when no candidate succeeds.
+	CPathNetwork *pNet = from.pos.pNet;
+	if ( !IsValid( pNet ) )
+		return NPR_FAILED;
+	CVec3 desired = from.GetCP();
+	vector<SPathPlace> places;
+	pNet->GetNearPlaces( SSphere( desired, 3 ), &places );
+	int pose = from.pos.p.GetPose();
+	if ( pose == CM_INACTIVE )
+		pose = CM_CROUCH;
+	float fAngle = from.GetDirection();
+	CVec3 facing( cos( fAngle ) * 0.3f, sin( fAngle ) * 0.3f, 0.3f );
+	float fMinDist = 1000;
+	bool bFall = false;
+	for ( int i = 0; i < places.size(); ++i )
+	{
+		places[i].SetPose( pose );
+		places[i].SetDirection( from.GetDir() );
+		// Retail uses the anchor query, not IsPassable's large/prone lock footprint.
+		if ( pNet->GetPassability( places[i] ) != AIP_YES )
+			continue;
+		CNodesLayer *pLayer = pNet->GetLayer( places[i].GetLayer() );
+		if ( !pLayer || pLayer->tiles[places[i].GetY()][places[i].GetX()].nMove[pose] == 0 )
+			continue;
+		CVec3 cp = pNet->GetCP( places[i] );
+		CVec3 vDist( desired.x - cp.x, desired.y - cp.y, fHeight - cp.z );
+		bool bCandidateFall;
+		float fDist = LookWhereMoveCriterium( vDist, facing, fMaxFallDist, &bCandidateFall );
+		if ( fDist < fMinDist )
+		{
+			fMinDist = fDist;
+			bFall = bCandidateFall;
+			pTo->pos.p = places[i];
+		}
+	}
+	if ( fMinDist < 100 )
+		return bFall ? NPR_FALL : NPR_MOVE;
+	return NPR_FAILED;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 NAI::SPosition GetNearestPosition( CVec3 ptPos, IPathNetwork *_pPathNetwork, bool bMustHaveLink, const CVec3 &ptLink, bool bNative )
 {
 	CDynamicCast<CPathNetwork> pPathNetwork(_pPathNetwork);

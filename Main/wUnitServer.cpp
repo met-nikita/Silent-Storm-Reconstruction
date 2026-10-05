@@ -41,6 +41,13 @@
 namespace NWorld
 {
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+void CUnitServer::PrepareToRemove()
+{
+	// Retail v1.1 0x7bf7b0 / v1.2 0x7bfb70. Lifecycle cleanup only: do not
+	// sweep unrelated locks or repair old snapshots when loading a world.
+	GetWorld()->GetPathNetwork()->Unlock( this );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CUnitServer::GetPointOfInterest( CVec3 *pOut )
 {
 	// Retail CUnitServer CUnit-interface thunk @0x7bfbc0 forwards to the owning commander.

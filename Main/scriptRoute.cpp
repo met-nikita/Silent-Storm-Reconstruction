@@ -4,7 +4,7 @@
 #include "aiControl.h"
 #include "aiCommander.h"
 #include "aiPosition.h"
-#include "aiNearestPosition.h"	// NAI::GetNearestPosition (UnitSetToWaypoint blocked-cell relocation)
+#include "aiNearestPosition.h"	// NAI::LookWhereToMoveUnit (UnitSetToWaypoint blocked-cell relocation)
 #include "aiRoute.h"
 #include "rpgUnitMission.h"
 #include "aiUnit.h"
@@ -79,7 +79,7 @@ static void SetOneWaypointRoute( NWorld::CUnitServer *pUS, NAI::CAIRouteWaypoint
 // not a raw SetPosition. Retail: build the WALK-posed target from the waypoint; skip the teleport
 // entirely when the unit already stands within 0.05 of it; if the target cell is not freely passable
 // (locked by another unit -- e.g. GFirst teleports three robbers to the SAME "firstfloor" waypoint in
-// a row) relocate to a free cell nearby (NAI::LookWhereToMoveUnit, radius 10); then, for a live unit,
+// a row) relocate to a free cell nearby (NAI::LookWhereToMoveUnit, 3m radius, max-fall 10); then, for a live unit,
 // Do( CCmdCancel ) + Do( CCmdSetCommand( CCmdTeleport ) ) + Do( CCmdSetCommand( CCmdContinue ) ).
 // The CCmdCancel FIRST is the load-bearing part: the old raw SetPosition/PlaceUnit teleported a unit
 // whose move executor was still LIVE, so the surviving CExecMove kept operating on stale path state
@@ -107,15 +107,19 @@ BEGIN_SCRIPT_COMMAND(UnitSetToWaypoint, "us")
 			SetOneWaypointRoute( pUS, pWaypoint );
 			NAI::SUnitPosition unitPos;
 			unitPos.pos = pWaypoint->pos;
+			unitPos.bRun = false;
+			unitPos.SetPose( NAI::WALK ); // Retail sets WALK before both passability and relocation.
 			CVec3 ptDst = unitPos.pos.GetCP();
 			CVec3 ptCur = pUS->GetPosition().GetCP();
 			if ( fabs2( ptDst - ptCur ) >= 0.05f * 0.05f )   // retail distance gate (0.05, linear)
 			{
 				NAI::IPathNetwork *pNet = pScript->pWorld->GetPathNetwork();
-				if ( IsValid( pNet ) && !pNet->IsPassable( unitPos.pos.p ) )
-					unitPos.pos = NAI::GetNearestPosition( ptDst, pNet, false, CVec3() );   // retail LookWhereToMoveUnit analog
-				unitPos.bRun = false;
-				unitPos.SetPose( NAI::WALK );
+				if ( IsValid( pNet ) && pNet->GetPassability( unitPos.pos.p ) != NAI::AIP_YES )
+				{
+					NAI::SUnitPosition relocated;
+					NAI::LookWhereToMoveUnit( unitPos, &relocated, 10, ptCur.z );
+					unitPos = relocated;
+				}
 				if ( pUS->CanFight() )
 				{
 					pUS->Do( new NWorld::CCmdCancel() );
