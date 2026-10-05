@@ -57,6 +57,11 @@ enum EUnitCommandResult
 class CCmd: public CObjectBase
 {
 public:
+	// ORIGINAL RETAIL BUG FIXED: Hide, TakePerk and other base-chain commands
+	// serialized sizeof(CCmd), including the vtable and reference counts
+	// (Hide: v1.1 0x41b230 / v1.2 0x41ba40). An explicit serializer prevents
+	// CStructureSaver's raw-data fallback; this base has no persistent state.
+	int operator&( CStructureSaver &f ) override { return 0; }
 	virtual bool IsSkippable() const { return true; }
 	// retail CCmd vtbl +0x18/+0x1c -- reserve / release the command's target-reservation lock
 	// (CExecCannon::CanDoIt @0x3a2360 calls Unlock, probes ILockable::IsLocked, then Lock around the
