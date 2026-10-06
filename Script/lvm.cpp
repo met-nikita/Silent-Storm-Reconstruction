@@ -24,6 +24,7 @@
 #include "ltable.h"
 #include "ltm.h"
 #include "lvm.h"
+#include "../MiscDll/LogStream.h"
 
 
 #ifdef OLD_ANSI
@@ -173,6 +174,11 @@ void luaV_settable (lua_State *L, StkId t, StkId key) {
 const TObject *luaV_getglobal (lua_State *L, TString *s) {
 	Hash *gt = L->tables[ L->nGT ];
   const TObject *value = gt->GetStr(s);
+  // Retail @007ea05d: diagnose missing globals before tag-method dispatch.
+  // FALSE is Lua 4's deliberately nil boolean; do not warn for that name.
+  if (value->GetType() == LUA_TNIL && s->GetStr() != "FALSE")
+    csSystem << CC_RED << "[Script warning!] Value was NIL when getting global with name "
+             << s->GetStr() << endl;
   int tm = luaT_gettmindex(L, value, TM_GETGLOBAL);
   if (tm == STK_NULL)  /* is there a tag method? */
     return value;  /* default behavior */

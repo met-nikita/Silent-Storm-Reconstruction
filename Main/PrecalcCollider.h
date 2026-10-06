@@ -75,8 +75,12 @@ public:
 		SBound b;
 		CVec3 ptHalfBox( fabs(vel.x) * 0.5f, fabs(vel.y) * 0.5f, fabs(vel.z) * 0.5f );
 		b.BoxExInit( sphere.ptCenter + vel * 0.5f, ptHalfBox );
-		b.Extend( sphere.fRadius );
-		volume.Fetch( b );
+		// Retail @0047c3e0/@0047caa0 expands only the volume lookup copy.
+		// Entity bounds already include F_TEST_SPHERE_RADIUS; using the expanded
+		// copy below double-counted it and baked false wall collisions (template 3453).
+		SBound fetchBound = b;
+		fetchBound.Extend( sphere.fRadius );
+		volume.Fetch( fetchBound );
 		const vector<int> &fetchRes = volume.GetFetchBuffer();
 		for ( int i = 0; i < volume.GetFetchedNum(); ++i )
 		{
