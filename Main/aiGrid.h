@@ -58,6 +58,8 @@ const float F_3D_STEP = 0.1f;
 const float F_MAX_HEIGHT = 25.0f;
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 const int N_MAX_FLOORS = 8;
+// Height-field slots without a supporting surface. Never a playable floor.
+const int N_NO_SURFACE_FLOOR = 100;
 // retail = 3 (disasm: RegisterFloorLayer @0x3f610 / SetOnBaseLayer @0x77ba0 `lea eax,[eax+eax*2]`,
 // PDB STempArrayGroup = [8][3]). LOAD-BEARING for bTop: on a 4+-surface column (switchback
 // stairwell) the 3rd slot IS the floor's top layer (bTop short-circuit) and the 4th surface

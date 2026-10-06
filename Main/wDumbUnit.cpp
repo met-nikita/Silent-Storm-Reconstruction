@@ -919,6 +919,12 @@ void CDumbUnitServer::Segment()
 		if ( bTrackSequence != GetWorld()->IsSequence() )
 			Update();
 	}
+	// A living unit's floor can change without SetPosition (navigation recalc,
+	// or a loaded position resolving an empty surface slot to real support).
+	// Rebuild a previously rendered mesh when its cached floor is stale too.
+	// Leave never-rendered and excluded units alone; Visit owns the write-back.
+	if ( CanFight() && nPrevFloor != 1000 && IsAddedToVisitor() && GetFloor() != nPrevFloor )
+		Update();
 	bJustUnhided = false;
 	CallSegment( &miscObjects );
 	ProcessSteps( GetWorld()->GetTime()->GetValue() );

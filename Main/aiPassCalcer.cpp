@@ -536,6 +536,10 @@ int CPassCalcer::CalcPoseInPoint( int x, int y, NAI::CCollider *pCollider, const
 	}
 	if ( !HasFlag( nX, nY, flags, N_FLAG_MUST_CALC ) )
 		return 0;
+	// Neighbor/ladder marking can request a probe of an empty height-field slot.
+	// It has no support, even when a collision-free sphere fits at height zero.
+	if ( tempH[ nY ][ nX ].nFloor == N_NO_SURFACE_FLOOR )
+		return 0;
 	STile &tile = temp[y][x];
 	tile.nHeight = tempH[ nY ][ nX ].nHeight;
 	tile.nFloor = tempH[ nY ][ nX ].nFloor;
@@ -934,7 +938,12 @@ void CPassCalcer::CreateAdditionalLayers()
 			// the (bCollides && !bTop) gate kills every colliding steep-stair tile.
 			for ( int k = 1; k < N_MAX_FLOORS * N_MAX_LAYERS_PER_FLOOR; ++k )
 			{
-				if ( table[k].nHeight < table[k-1].nHeight )
+				// Retail's height-only comparison leaves an empty {0,100} above
+				// real height-zero terrain, then treats the floor difference as a
+				// native surface. Fill empty slots too, but never invent support
+				// when the preceding slot is also empty.
+				if ( table[k-1].nFloor != N_NO_SURFACE_FLOOR &&
+					( table[k].nFloor == N_NO_SURFACE_FLOOR || table[k].nHeight < table[k-1].nHeight ) )
 				{
 					table[k] = table[k-1];
 					char &nCur = nIntersectsOnFloor[ k / N_MAX_LAYERS_PER_FLOOR ][j][i];
@@ -952,8 +961,10 @@ void CPassCalcer::CreateAdditionalLayers()
 					int nIndex = nF * N_MAX_LAYERS_PER_FLOOR + nL;
 					tempH[j][i] = table[ nIndex ];
 					bool bSurface;
-					if ( nIndex == 0 )
-						bSurface = table[0].nFloor < 100;
+					if ( table[ nIndex ].nFloor == N_NO_SURFACE_FLOOR )
+						bSurface = false;
+					else if ( nIndex == 0 )
+						bSurface = true;
 					else
 						bSurface = table[ nIndex ].nHeight != table[ nIndex - 1 ].nHeight ||
 						           table[ nIndex ].nFloor != table[ nIndex - 1 ].nFloor;

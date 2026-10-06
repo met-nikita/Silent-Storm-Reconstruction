@@ -1037,7 +1037,24 @@ int CPathNetwork::GetFloor( const SPathPlace &src ) const
 	// what silently killed click-descents of exactly one floor.)
 	if ( !src.IsIntegral() )
 		return GetFloor( layers[ src.GetLayer() ]->ladders[ src.GetX() ].placeOnBottom ) + ( src.GetY() >> 2 );
-	return GetLayer( src.GetLayer() )->tiles[ src.GetY() ][ src.GetX() ].nFloor;
+	const CNodesLayer *pLayer = GetLayer( src.GetLayer() );
+	const STile &tile = pLayer->tiles[ src.GetY() ][ src.GetX() ];
+	if ( tile.nFloor != N_NO_SURFACE_FLOOR )
+		return tile.nFloor;
+	// A unit can already occupy an empty duplicate (retail zero-height bug).
+	// Resolve its supporting surface in navigation, without moving the unit,
+	// rewriting saved grids, or assigning an unrelated layer's nominal floor.
+	for ( int i = 0; i < N_MAX_FLOORS * N_MAX_LAYERS_PER_FLOOR; ++i )
+	{
+		const CNodesLayer *pSame = pLayer->pGroup->layers[i];
+		if ( !pSame || pSame == pLayer )
+			continue;
+		const STile &support = pSame->tiles[ src.GetY() ][ src.GetX() ];
+		if ( support.nFloor != N_NO_SURFACE_FLOOR && support.nPassable != 0 &&
+			support.nHeight == tile.nHeight && support.nDisplacement == tile.nDisplacement )
+			return support.nFloor;
+	}
+	return tile.nFloor;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // true while any layer group still has a pending recolour job -- the script-visible "pass calcer is

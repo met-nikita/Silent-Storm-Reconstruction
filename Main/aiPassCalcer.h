@@ -28,7 +28,7 @@ struct SPCHeight
 {
 	unsigned short nHeight;
 	short nFloor;
-	SPCHeight(): nHeight( 0 ), nFloor( 100 ) {}
+	SPCHeight(): nHeight( 0 ), nFloor( N_NO_SURFACE_FLOOR ) {}
 	bool operator==( const SPCHeight &op ) const { return nHeight == op.nHeight && nFloor == op.nFloor; }
 	bool operator!=( const SPCHeight &op ) const { return !( *this == op ); }
 };
