@@ -405,8 +405,9 @@ void SplitOps( CRenderCmdList *pLower, CRenderCmdList *pSrc, int nHighPass )
 			pLower->ops.push_back( pSrc->ops[k] );
 		else
 		{
+			// Retail v1.1 0x548e63 / v1.2 0x548f16: compact retained passes in the source.
 			if ( nDest != k )
-				pLower->ops[ nDest++ ] = pSrc->ops[k];
+				pSrc->ops[ nDest++ ] = pSrc->ops[k];
 			else
 				++nDest;
 		}
