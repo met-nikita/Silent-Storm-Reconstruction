@@ -512,7 +512,13 @@ CScenarioGoal::CScenarioGoal( NDb::CScenarioGoal *_pGoal, CScenarioClue *pParent
 	{
 		const vector< CPtr<NDb::CScenarioTask> > &dbTasks = _pGoal->tasks;
 		for ( int i = 0; i < dbTasks.size(); ++i )
+		{
 			tasks.push_back( new CScenarioTask( dbTasks[ i ], pParentClue ) );
+			// Retail v1.1 0x6e0675 / v1.2 0x6e0c35: carrier tasks start hidden.
+			// OnUpdateVisible reveals them only when a visible person carries the clue.
+			if ( IsValid( dbTasks[ i ] ) && dbTasks[ i ]->eTag == NDb::TT_DESTROY_ITEM_CARRIER )
+				tasks.back()->SetVisible( false );
+		}
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
