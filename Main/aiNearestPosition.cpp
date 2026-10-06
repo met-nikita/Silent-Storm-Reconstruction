@@ -4,6 +4,7 @@
 #include "aiGrid.h"
 #include "aiMap.h"
 #include "wTSFlags.h"
+#include <float.h>
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 namespace NAI
 {
@@ -76,6 +77,11 @@ ENearestUnitPosResult LookWhereToMoveUnit( const SUnitPosition &from, SUnitPosit
 NAI::SPosition GetNearestPosition( CVec3 ptPos, IPathNetwork *_pPathNetwork, bool bMustHaveLink, const CVec3 &ptLink, bool bNative )
 {
 	CDynamicCast<CPathNetwork> pPathNetwork(_pPathNetwork);
+	SPosition invalidPlace;
+	invalidPlace.SetNetwork( pPathNetwork );
+	// Invalid physical positions must not reach the grid's Float2Int conversion.
+	if ( !IsValid( pPathNetwork ) || !_finite( ptPos.x ) || !_finite( ptPos.y ) || !_finite( ptPos.z ) )
+		return invalidPlace;
 	float fMinDistance = 0xFFFF;
 
 	SPosition sNearestPlace;
@@ -136,13 +142,11 @@ NAI::SPosition GetNearestPosition( CVec3 ptPos, IPathNetwork *_pPathNetwork, boo
 		{
 			ASSERT(0); // No position found near search place
 			ASSERT( !vNearestPlaces.empty() );
+			// Retail also returns at the radius cap when the candidate list is
+			// empty. Do not grow the radius forever on an empty/bad grid.
 			if ( !vNearestPlaces.empty() )
-			{
-				SPosition sPlace;
-				sPlace.p = vNearestPlaces[0];
-				sPlace.SetNetwork( pPathNetwork );
-				return sPlace;
-			}
+				invalidPlace.p = vNearestPlaces[0];
+			return invalidPlace;
 		}
 	}
 	return sNearestPlace;

@@ -241,19 +241,6 @@ int CWeaponItem::GetClipType() const
 	return pInnerClip->GetDBClipID();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-struct SFindClipResult
-{
-	enum ESource
-	{
-		SLOT,
-		BACKPACK
-	};
-
-	ESource eSource;
-	NDb::ESlot eSlot;
-	CPtr<CClipItem> pItem;
-};
-////////////////////////////////////////////////////////////////////////////////////////////////////
 static void EraseFindResultItem( IInventory *pInventory, const SFindClipResult &sResult )
 {
 	switch( sResult.eSource )

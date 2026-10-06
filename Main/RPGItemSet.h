@@ -177,7 +177,13 @@ public:
 	void LoadAmmo( CAmmoItem *pAmmo );
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-struct SFindClipResult;
+struct SFindClipResult
+{
+	enum ESource { SLOT, BACKPACK };
+	ESource eSource;
+	NDb::ESlot eSlot;
+	CPtr<CClipItem> pItem;
+};
 class CWeaponItem: public CInventoryItem, public IWeaponItem
 {
 	OBJECT_BASIC_METHODS(CWeaponItem);
@@ -190,10 +196,8 @@ private:
 public:
 	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CInventoryItem*)this); f.Add(2,&pInnerClip); f.Add(3,&eShootMode); f.Add(4,&pDBWeapon); f.Add(5,&bWorking); return 0; }
 	
-private:
-	bool FindProperClip( IInventoryInfo *pInventory, SFindClipResult *pResult, bool bCheckSameColor ) const;
-
 public:
+	bool FindProperClip( IInventoryInfo *pInventory, SFindClipResult *pResult, bool bCheckSameColor ) const;
 	CWeaponItem() {}
 	CWeaponItem( NDb::CRPGWeapon *_pWeapon );
 

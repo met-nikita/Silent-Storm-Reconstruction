@@ -899,8 +899,14 @@ void CDumbUnitServer::Segment()
 		GetRealUnitPosition( &ptReal );
 		if ( fabs2( ptReal - vPrevGetCorpseAIPosition ) > 2.0f || corpseHLpos.empty() )
 		{
-			position.pos = NAI::GetNearestPosition( ptReal, position.pos.GetNetwork() );
-			vPrevGetCorpseAIPosition = ptReal;
+			NAI::SPosition nearest = NAI::GetNearestPosition( ptReal, position.pos.GetNetwork() );
+			// A failed physical snap must not replace the last valid logical
+			// place with the invalid sentinel (which GetFloor cannot resolve).
+			if ( nearest.p.GetData() != NAI::SPathPlace().GetData() && IsValid( nearest.pNet ) && nearest.IsValid() )
+			{
+				position.pos = nearest;
+				vPrevGetCorpseAIPosition = ptReal;
+			}
 			corpseHLpos.resize( 6 );
 			NAI::IAIMap *pMap = pWorld->GetAIMap();
 			CObjectBase *pHull = pMap->GetHull( this );

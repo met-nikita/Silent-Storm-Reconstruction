@@ -15,6 +15,7 @@
 #include "Bound.h"          // SBoundCalcer/SBound for the BeStopped resting corpse bound (retail @0xea4f0)
 #include "aiStability.h"    // IStabilityTrackers for the BeStopped corpse registration (retail @0xea4f0)
 #include "RPGItemInfo.h"    // IGrenadeItemInfo/IWeaponItemInfo RTTI for the Init physics-case (retail @0x4ebe00)
+#include <float.h>
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // wOSBase.obj @0x347bd0 -- breakable-glass collider gate (defined in wOSBase.cpp). Declared here so the
 // particle-physics step can let flying debris pass THROUGH a breakable pane (and break it) instead of
@@ -129,11 +130,37 @@ void CAParticle::RestoreAll( vector<CVec3> parts, SSkeletonPose *pPose )
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// The cross product vanishes for both parallel and antiparallel directions.
+// Normalizing it at 180 degrees used to turn a finite ragdoll into NaNs.
+static CQuat GetRestoreRotation( CVec3 from, CVec3 to, const CVec3 &halfTurnAxis = VNULL3 )
+{
+	float fromLength = fabs2( from ), toLength = fabs2( to );
+	if ( !( fromLength > 0 ) || !( toLength > 0 ) || !_finite( fromLength ) || !_finite( toLength ) )
+		return QNULL; // A collapsed line/triangle has no orientation to restore.
+	Normalize( &from );
+	Normalize( &to );
+	float dot = Max( -1.f, Min( 1.f, from * to ) );
+	if ( 1 - dot < 1e-6f )
+		return QNULL;
+	CVec3 axis = from ^ to;
+	if ( fabs2( axis ) < 1e-12f )
+	{
+		// The second triangle alignment must stay in its already aligned
+		// plane. A line (or collapsed triangle) instead uses a stable basis.
+		axis = halfTurnAxis - from * ( from * halfTurnAxis );
+		if ( !( fabs2( axis ) > 1e-12f ) || !_finite( fabs2( axis ) ) )
+		{
+			CVec3 basis = fabs( from.x ) < fabs( from.y )
+				? ( fabs( from.x ) < fabs( from.z ) ? CVec3(1,0,0) : CVec3(0,0,1) )
+				: ( fabs( from.y ) < fabs( from.z ) ? CVec3(0,1,0) : CVec3(0,0,1) );
+			axis = from ^ basis;
+		}
+	}
+	return CQuat( acos( dot ), axis, true );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 void CAParticle::RestoreTriangle( vector<CVec3> parts, int nP1, int nP2, int nP3, int nTargetBone, SSkeletonPose *pPose )
 {
-	CVec3 axis;
-	float fAngle;
-
 	int nBone1 = nParticleBones[nP1];
 	int nBone2 = nParticleBones[nP2];
 	int nBone3 = nParticleBones[nP3];
@@ -164,24 +191,12 @@ void CAParticle::RestoreTriangle( vector<CVec3> parts, int nP1, int nP2, int nP3
 	old3 += move;
 	CVec3 n1 = (old2 - old1) ^ (old3 - old1);
 	CVec3 n2 = (new2 - new1) ^ (new3 - new1);
-	Normalize(&n1);
-	Normalize(&n2);
-	axis = n1 ^ n2;
-	fAngle = acos( n1 * n2 );
-	CQuat q1( fAngle, axis, true );
-	if ( 1 - n1 * n2 < 1e-6 )
-		q1 = QNULL;
+	CQuat q1 = GetRestoreRotation( n1, n2 );
 	old2 = old1 + q1.Rotate(old2 - old1);
 	old3 = old1 + q1.Rotate(old3 - old1);
 	n1 = old2 - old1;
 	n2 = new2 - new1;
-	Normalize(&n1);
-	Normalize(&n2);
-	axis = n1 ^ n2;
-	fAngle = acos( n1 * n2 );
-	CQuat q2( fAngle, axis, true );
-	if ( 1 - n1 * n2 < 1e-6 )
-		q2 = QNULL;
+	CQuat q2 = GetRestoreRotation( n1, n2, (new2 - new1) ^ (new3 - new1) );
 
 	CQuat q = q2 * q1;
 	(*pPose)[nTargetBone].rot = q * (*pPose)[nTargetBone].rot;
@@ -219,13 +234,7 @@ void CAParticle::RestoreLine( vector<CVec3> parts, int nP1, int nP2, int nTarget
 	new2 = parts[nP2];
 	CVec3 n1 = old2 - old1;
 	CVec3 n2 = new2 - new1;
-	Normalize(&n1);
-	Normalize(&n2);
-	CVec3 axis = n1 ^ n2;
-	float fAngle = acos( n1 * n2 );
-	CQuat q( fAngle, axis, true );
-	if ( 1 - n1 * n2 < 1e-6 )
-		q = QNULL;
+	CQuat q = GetRestoreRotation( n1, n2 );
 	(*pPose)[nTargetBone].pos = new1;
 	(*pPose)[nTargetBone].rot = q * (*pPose)[nTargetBone].rot;
 /*

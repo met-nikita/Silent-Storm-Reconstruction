@@ -7,6 +7,7 @@
 #include "wMainPath.h"
 #include "wMisc.h"
 #include "RPGItem.h"
+#include "RPGItemSet.h"
 #include "RPGPerk.h"
 #include "RPGUnitMission.h"
 #include "rpgCheatConstants.h"
@@ -41,16 +42,44 @@ static int nTestModel = 0;
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CExecReload
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CExecReload::CExecReload( CUnitServer *_pUS, int nSlot ): CCommandExecute(_pUS)
+CExecReload::CExecReload( CUnitServer *_pUS, int _nSlot ):
+	CExecLoadWeapon( _pUS, 0, SItem( _pUS, SItem::VACUUM, 0 ) ), nSlot( _nSlot ), bSameColor( true )
 {
+	sClip.sPosition = CTPoint<int>( 0, 0 );
 	if ( !IsValid( pUS ) )
-		return;   // saveload path: operator& restores pItem
+		return;   // saveload path: operator& restores the nested bases
 	// Retail v1.2 0x794a89..0x794a96: -1 resolves the weapon in use,
 	// including a mounted cannon, not the unrelated active inventory slot.
 	if ( nSlot == -1 )
-		pItem = pUS->GetUnitRPG()->GetWeaponItem();
+		pWeapon = pUS->GetUnitRPG()->GetWeaponItem();
 	else
-		pItem = pUS->GetUnitRPG()->GetInventory()->Get( NDb::ESlot( nSlot ) );
+		pWeapon = CDynamicCast<NRPG::IWeaponItemInfo>( pUS->GetUnitRPG()->GetInventory()->Get( NDb::ESlot( nSlot ) ) );
+	FindReloadClip();
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CExecReload::FindReloadClip()
+{
+	sClip = SItem( pUS, SItem::VACUUM, 0 );
+	sClip.sPosition = CTPoint<int>( 0, 0 );
+	CDynamicCast<NRPG::CWeaponItem> weapon( pWeapon );
+	if ( !IsValid( pUS ) || !IsValid( weapon ) )
+		return;
+	NRPG::SFindClipResult found;
+	NRPG::IInventory *inventory = pUS->GetUnitRPG()->GetInventory();
+	bSameColor = weapon->FindProperClip( inventory, &found, true );
+	if ( !bSameColor && !weapon->FindProperClip( inventory, &found, false ) )
+		return;
+	sClip = SItem( pUS, found.eSource == NRPG::SFindClipResult::SLOT ? SItem::SLOT : SItem::BACKPACK,
+		found.eSource == NRPG::SFindClipResult::SLOT ? int(found.eSlot) : 0, found.pItem );
+	sClip.sPosition = CTPoint<int>( 0, 0 );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+int CExecReload::operator&( CStructureSaver &f )
+{
+	f.Add( 1, (CExecLoadWeapon*)this );
+	f.Add( 2, &nSlot );
+	f.Add( 3, &bSameColor );
+	return 0;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 int CExecReload::GetStartAP() const
@@ -81,7 +110,7 @@ bool CExecReload::TimeLabelReached()
 {
 	//return false;
 	pUS->GetUnitRPG()->Reload();
-	CDynamicCast<NRPG::IWeaponItem> pW(pItem);
+	CDynamicCast<NRPG::IWeaponItem> pW(pWeapon);
 	if (pW)
 	{
 		NDb::CSound *pSound = pW->GetDBWeapon()->pSoundReload;
@@ -94,7 +123,7 @@ bool CExecReload::TimeLabelReached()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 EUnitCommandResult CExecReload::CanDoIt()
 {
-	CDynamicCast<NRPG::IWeaponItem> pW(pItem);
+	CDynamicCast<NRPG::IWeaponItem> pW(pWeapon);
 	if (pW)
 	{
 		if ( !pW->CanReload( pUS->GetUnitRPG()->GetInventory() ) )
@@ -493,75 +522,80 @@ public:
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CExecLoadWeapon
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-class CExecLoadWeapon: public CCommandExecute
+CExecLoadWeapon::CExecLoadWeapon()
 {
-	OBJECT_BASIC_METHODS(CExecLoadWeapon);
-	ZDATA_(CCommandExecute)
-	SItem sClip;
-	CPtr<NRPG::IWeaponItemInfo> pWeapon;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CCommandExecute*)this); f.Add(2,&sClip); f.Add(3,&pWeapon); return 0; }
-public:
-	CExecLoadWeapon() {}
-	CExecLoadWeapon( CUnitServer *_pUS, NRPG::IWeaponItemInfo* _pWeapon, const SItem &_sClip ): CCommandExecute(_pUS), pWeapon( _pWeapon ), sClip( _sClip ) {}
-	int GetStartAP() const { return pUS->GetActionAP( NRPG::AC_RELOAD ); }
-	int GetActionAP( int nAlreadyReservedAP = 0 ) const { return pUS->GetActionAP( NRPG::AC_RELOAD ); }
-	virtual void Run()
+	sClip.nSlot = 0;
+	sClip.eType = SItem::VACUUM;
+	sClip.sPosition = CTPoint<int>( 0, 0 );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+CExecLoadWeapon::CExecLoadWeapon( CUnitServer *_pUS, NRPG::IWeaponItemInfo *_pWeapon, const SItem &_sClip ):
+	CCommandExecute( _pUS ), sClip( _sClip ), pWeapon( _pWeapon )
+{
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+int CExecLoadWeapon::GetStartAP() const { return pUS->GetActionAP( NRPG::AC_RELOAD ); }
+////////////////////////////////////////////////////////////////////////////////////////////////////
+int CExecLoadWeapon::GetActionAP( int nAlreadyReservedAP ) const { return pUS->GetActionAP( NRPG::AC_RELOAD ); }
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CExecLoadWeapon::Run()
+{
+	pUS->DoAction( NRPG::AC_RELOAD );
+	pUS->animator.Reload( pUS->GetPosition() );
+	StartAction( pUS->GetWorld(), SKIPPABLE );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+bool CExecLoadWeapon::TimeLabelReached()
+{
+	CDynamicCast<NRPG::IClipItem> pClipItem( sClip.pItem );
+	if ( IsValid( pClipItem ) && pUS->GetUnitRPG()->LoadWeapon( pWeapon, pClipItem ) && ( pClipItem->GetQuantity() == 0 ) )
 	{
-		pUS->DoAction( NRPG::AC_RELOAD );
-		pUS->animator.Reload( pUS->GetPosition() );
-		StartAction( pUS->GetWorld(), SKIPPABLE );
-	}
-	virtual bool TimeLabelReached()
-	{
-		CDynamicCast<NRPG::IClipItem> pClipItem( sClip.pItem );
-		if ( IsValid( pClipItem ) && pUS->GetUnitRPG()->LoadWeapon( pWeapon, pClipItem ) && ( pClipItem->GetQuantity() == 0 ) )
+		NRPG::IInventory *pInventory = pUS->GetUnitRPG()->GetInventory();
+		switch( sClip.eType )
 		{
-			NRPG::IInventory *pInventory = pUS->GetUnitRPG()->GetInventory();
-			switch( sClip.eType )
+		case SItem::SLOT:
+			pInventory->TakeOff( NDb::ESlot( sClip.nSlot ) );
+			break;
+		case SItem::HAND:
 			{
-			case SItem::SLOT:
-				pInventory->TakeOff( NDb::ESlot( sClip.nSlot ) );
-				break;
-			case SItem::HAND:
-				{
-					// retail CExecLoadWeapon::LoadClip @0x3949a0: the consumed in-hand clip is cleared
-					// by calling CUnitServer::SetHandItem (@0x387b30) DIRECTLY on the unit with an
-					// SItem whose only written field is eType = VACUUM (all five smart pointers are
-					// zeroed by the default ctor). Not the inventory -- retail's CInventory has no
-					// hand member -- and not through the player.
-					SItem sItem;
-					sItem.eType = SItem::VACUUM;
-					pUS->SetHandItem( sItem );
-				}
-				break;
-			case SItem::BACKPACK:
-				pInventory->Take( sClip.pItem );
-				break;
+				// retail CExecLoadWeapon::LoadClip @0x3949a0: the consumed in-hand clip is cleared
+				// by calling CUnitServer::SetHandItem (@0x387b30) DIRECTLY on the unit with an
+				// SItem whose only written field is eType = VACUUM (all five smart pointers are
+				// zeroed by the default ctor). Not the inventory -- retail's CInventory has no
+				// hand member -- and not through the player.
+				SItem sItem;
+				sItem.eType = SItem::VACUUM;
+				pUS->SetHandItem( sItem );
 			}
+			break;
+		case SItem::BACKPACK:
+			pInventory->Take( sClip.pItem );
+			break;
 		}
-
-		NDb::CSound *pSound = pWeapon->GetDBWeapon()->pSoundReload;
-		NDb::SAISound sound = { NDb::GetAISound( 26 ), 0, 1.0f };   // retail @0x394df0: no silencer on load
-		pUS->GetWorld()->MakeAISound( sound, pUS, pSound );
-
-		pUS->Update();
-		return false;
 	}
-	EUnitCommandResult CanDoIt()
-	{
-		if ( sClip.pUnit.GetPtr() != pUS.GetPtr() )
-			return UCR_GENERAL_FAILURE;
 
-		CDynamicCast<NRPG::IClipItem> pClipItem( sClip.pItem );
-		if ( !IsValid( pClipItem ) )
-			return UCR_GENERAL_FAILURE;
+	NDb::CSound *pSound = pWeapon->GetDBWeapon()->pSoundReload;
+	NDb::SAISound sound = { NDb::GetAISound( 26 ), 0, 1.0f };   // retail @0x394df0: no silencer on load
+	pUS->GetWorld()->MakeAISound( sound, pUS, pSound );
 
-		if ( !pWeapon->CanLoad( pClipItem ) )
-			return UCR_GENERAL_FAILURE;
+	pUS->Update();
+	return false;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+EUnitCommandResult CExecLoadWeapon::CanDoIt()
+{
+	if ( sClip.pUnit.GetPtr() != pUS.GetPtr() )
+		return UCR_GENERAL_FAILURE;
 
-		return UCR_OK;
-	}
-};
+	CDynamicCast<NRPG::IClipItem> pClipItem( sClip.pItem );
+	if ( !IsValid( pClipItem ) )
+		return UCR_GENERAL_FAILURE;
+
+	if ( !pWeapon->CanLoad( pClipItem ) )
+		return UCR_GENERAL_FAILURE;
+
+	return UCR_OK;
+}
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CExecUnloadWeapon
 ////////////////////////////////////////////////////////////////////////////////////////////////////
