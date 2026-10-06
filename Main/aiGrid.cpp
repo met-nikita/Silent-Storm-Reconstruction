@@ -645,7 +645,9 @@ bool CLayersGroup::IsIgnored( float x, float y ) const
 void CNodesLayer::GetSamePoints( const SPathPlace& p, vector<SPathPlace> *pRes )
 {
 	STile &t1 = tiles[ p.GetY() ][ p.GetX() ];
-	if ( ( t1.nFlags & TF_HAS_SAME ) == 0 )
+	// An already occupied isolated alias may escape to a connected copy even
+	// without TF_HAS_SAME. Never enumerate isolated copies as destinations.
+	if ( ( t1.nFlags & TF_HAS_SAME ) == 0 && t1.HasNavigationLinks() )
 		return;
 	for ( int i = 0; i < N_MAX_FLOORS * N_MAX_LAYERS_PER_FLOOR; ++i )
 	{
@@ -655,7 +657,7 @@ void CNodesLayer::GetSamePoints( const SPathPlace& p, vector<SPathPlace> *pRes )
 		if ( pL == this )
 			continue;
 		STile &t2 = pL->tiles[ p.GetY() ][ p.GetX() ];
-		if ( t2.nHeight == t1.nHeight && t2.nDisplacement == t1.nDisplacement )
+		if ( t2.IsLinkedSame( t1 ) )
 			pRes->push_back( SPathPlace( p.GetX(), p.GetY(), pL->nLayer ) );
 	}
 }
@@ -663,7 +665,7 @@ void CNodesLayer::GetSamePoints( const SPathPlace& p, vector<SPathPlace> *pRes )
 int CNodesLayer::GetSamePoints( const SPathPlace& p, SPathPlace *places )
 {
 	STile &t1 = tiles[ p.GetY() ][ p.GetX() ];
-	if ( ( t1.nFlags & TF_HAS_SAME ) == 0 )
+	if ( ( t1.nFlags & TF_HAS_SAME ) == 0 && t1.HasNavigationLinks() )
 		return 0;
 	int nP = 0;
 	for ( int i = 0; i < N_MAX_FLOORS * N_MAX_LAYERS_PER_FLOOR; ++i )
@@ -674,7 +676,7 @@ int CNodesLayer::GetSamePoints( const SPathPlace& p, SPathPlace *places )
 		if ( pL == this )
 			continue;
 		STile &t2 = pL->tiles[ p.GetY() ][ p.GetX() ];
-		if ( t2.nHeight == t1.nHeight && t2.nDisplacement == t1.nDisplacement )
+		if ( t2.IsLinkedSame( t1 ) )
 		{
 			places[ nP ] = SPathPlace( p.GetX(), p.GetY(), pL->nLayer );
 			++nP;
@@ -848,7 +850,7 @@ void CNodesLayer::AddNearPoints( const SSphere &s, vector<SPathPlace> *pRes, boo
 						bool bBetter = ( t2.nPassable & t1.nPassable ) == t1.nPassable;
 						if ( t2.nPassable == t1.nPassable )
 							bBetter = pL->nLayer < nLayer;
-						if ( t2.nHeight == t1.nHeight && t2.nDisplacement == t1.nDisplacement && bBetter )
+						if ( t2.IsLinkedSame( t1 ) && bBetter )
 						{
 							bAdd = false;
 							break;
@@ -1297,7 +1299,7 @@ bool CPathNetwork::HasLowerSame( const SPathPlace &p )
 		if ( pL == pLayer )
 			return false;
 		CNodesLayer::STile &t2 = pL->tiles[ p.GetY() ][ p.GetX() ];
-		if ( t2.nHeight == t.nHeight && t2.nDisplacement == t.nDisplacement )
+		if ( t2.IsLinkedSame( t ) )
 			return true;
 	}
 	ASSERT(0);

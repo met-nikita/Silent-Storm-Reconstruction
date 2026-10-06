@@ -78,7 +78,7 @@ static bool HasSame( CPathNetwork *pNet, const SPathPlace &src, int nLayer )
 		return false;
 	CNodesLayer::STile &t1 = pSrcL->tiles[ src.GetY() ][ src.GetX() ];
 	CNodesLayer::STile &t2 = pDstL->tiles[ src.GetY() ][ src.GetX() ];
-	return ( t1.nHeight == t2.nHeight && t1.nDisplacement == t2.nDisplacement );
+	return t2.IsLinkedSame( t1 );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 static void SetOnBaseLayer( CPathNetwork *pNet, SPathPlace *pSrc )
@@ -105,7 +105,7 @@ static bool IsSame( CPathNetwork *pNet, const SPathPlace &src, const SPathPlace 
 		return false;
 	CNodesLayer::STile &t1 = pSrcL->tiles[ src.GetY() ][ src.GetX() ];
 	CNodesLayer::STile &t2 = pDstL->tiles[ src.GetY() ][ src.GetX() ];
-	return ( t1.nHeight == t2.nHeight && t1.nDisplacement == t2.nDisplacement );
+	return t1.HasNavigationLinks() && t2.IsLinkedSame( t1 );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 ETransitionType GetTransitionType( const IPathNetwork *_pNet, const SPathPlace &src, const SPathPlace &dst )
@@ -138,6 +138,10 @@ ETransitionType GetTransitionType( const IPathNetwork *_pNet, const SPathPlace &
 		SPathPlace s( src.GetX(), src.GetY(), src.GetLayer() );
 		SPathPlace d( dst.GetX(), dst.GetY(), dst.GetLayer() );
 		CNodesLayer *pDstLayer = layers[dst.GetLayer()];
+		// The reverse HasSame shortcut below must not allow entry into an
+		// isolated destination by borrowing the source layer's movement links.
+		if ( !pDstLayer->tiles[dst.GetY()][dst.GetX()].HasNavigationLinks() )
+			return TT_NO_WAY;
 		if ( HasSame( pNet, s, d.GetLayer() ) )
 		{
 			SPathPlace test( src );
@@ -772,7 +776,7 @@ void GetNonStandartMoves(
 		{
 			CLayersGroup *pGroup = pLayer->pGroup;
 			int nFloor = pLayer->nFloor; 
-			if ( t.nFlags & TF_HAS_SAME )
+			if ( ( t.nFlags & TF_HAS_SAME ) || !t.HasNavigationLinks() )
 			{
 				for ( int nL = 0; nL < N_MAX_FLOORS * N_MAX_LAYERS_PER_FLOOR; ++nL )
 				{
@@ -782,7 +786,7 @@ void GetNonStandartMoves(
 					if ( pNew == pLayer )
 						continue;
 					CNodesLayer::STile &tDst = pNew->tiles[ src.GetY() ][ src.GetX() ];
-					if ( tDst.nHeight == t.nHeight && tDst.nDisplacement == t.nDisplacement )
+					if ( tDst.IsLinkedSame( t ) )
 					{
 						// retail @0x479576: the destination tile must allow the current pose
 						bool bDstPassable;
@@ -798,6 +802,8 @@ void GetNonStandartMoves(
 							m.dest = SPathPlace( src.GetX(), src.GetY(), pNew->nLayer, 0, src.GetPose(), 0 );
 						else
 							m.dest = SPathPlace( src.GetX(), src.GetY(), pNew->nLayer, src.GetDirection(), src.GetPose(), src.IsMoving() );
+						if ( !IsGoodPt( m.dest, pNet ) )
+							continue;
 						m.type = MT_ZERO;
 						res[ pResPos ] = m;
 						dynLocks[ pResPos ] = 0;

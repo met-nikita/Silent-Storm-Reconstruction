@@ -103,6 +103,18 @@ struct STile
 	unsigned char nFlipper; 
 	// (nFlipper != 0) if a tile is locked by a door or another flipping object and is a number of that flipper + 1
 	char nFake1, nFake2; // needed to make structure size = 16
+
+	// A pose can fit on a propagated/place-same tile without any route out.
+	// Such a tile is not a usable destination for a zero-distance layer switch.
+	bool HasNavigationLinks() const
+	{
+		return nPassable != 0 && ( nMoveLay || nMoveCrouch || nMoveStand || nMoveHC ||
+			( nFlags & ( TF_HAS_INTERGRID | TF_IS_LADDER_UP ) ) );
+	}
+	bool IsLinkedSame( const STile &from ) const
+	{
+		return HasNavigationLinks() && nHeight == from.nHeight && nDisplacement == from.nDisplacement;
+	}
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CPathNetwork;

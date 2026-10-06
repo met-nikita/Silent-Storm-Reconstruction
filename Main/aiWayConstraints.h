@@ -18,6 +18,7 @@ class CLayerColorConstraints
 	bool bHasCheckZones;
 	bool bMoveOnly;
 	bool bDoNotCheck;
+	bool bDoNotCheckZones;
 	const int *pCosts;
 	int minCost;
 	int bestPose;
@@ -30,7 +31,7 @@ class CLayerColorConstraints
 public:
 	unordered_map<SPathPlace, SPathPlace, SPathPlaceHash> finalPoints;
 	CLayerColorConstraints( CPathNetwork* _pNet, bool _bMoveOnly, const int *_pCosts ): 
-			pNet( _pNet ), bMoveOnly( _bMoveOnly ), pCosts( _pCosts ), bDoNotCheck( false ), bHasCheckZones( false )
+			pNet( _pNet ), bMoveOnly( _bMoveOnly ), pCosts( _pCosts ), bDoNotCheck( false ), bDoNotCheckZones( false ), bHasCheckZones( false )
 	{
 		minCost = Min( pCosts[ MT_MOVE_STAND ], pCosts[ MT_MOVE_CRAWL ] );
 		minCost = Min( pCosts[ MT_MOVE_CROUCH ], minCost );
@@ -54,6 +55,7 @@ public:
 	}
 	
 	void DoNotCheck() { bDoNotCheck = true; }
+	void DoNotCheckZones() { bDoNotCheckZones = true; }
 	void AddCheckArea( const SZone &zone )
 	{
 		CArray2D<bool> &areas = areasToCheck[ zone.nLayer ];
@@ -143,7 +145,7 @@ public:
 		unsigned char cY = (unsigned char)dst.GetY();
 		int nLayerDst = dst.GetLayer(),
 		    nLayerSrc = src.GetLayer();
-		if ( !areasToCheck[ nLayerDst ][ cY >> 3 ][ cX >> 3 ] )
+		if ( !bDoNotCheckZones && !areasToCheck[ nLayerDst ][ cY >> 3 ][ cX >> 3 ] )
 			return false;
 		if ( dst.GetPose() != CM_LAY || bestPose == CM_LAY )
 			return true;
