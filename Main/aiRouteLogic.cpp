@@ -201,7 +201,23 @@ void CAIRouteLogic::GenerateCommand()
 		{
 			NWorld::CCmd *pCmd = routeCommands[nCurrentCommand]->GetCommand();
 			if ( pCmd )
-				DoCommand( new NWorld::CCmdSetCommand( GetUnitServer(), pCmd ) );
+			{
+				NWorld::CUnitServer *pUS = GetUnitServer();
+				// Original AI bug: an investigation route can be installed while mounted,
+				// but UsingCannon rejects its movement/turn/stance commands. Check the live
+				// server, not the combat planner's cached cannon, including restored routes.
+				if ( IsValid( pUS ) && pUS->GetState() == NWorld::CUnit::ST_MACHINE_GUN &&
+					( CDynamicCast<NWorld::CCmdPath>( pCmd ) || CDynamicCast<NWorld::CCmdLook>( pCmd ) ||
+						CDynamicCast<NWorld::CCmdWishPose>( pCmd ) || CDynamicCast<NWorld::CCmdStrafe>( pCmd ) ||
+						CDynamicCast<NWorld::CCmdHide>( pCmd ) ) )
+				{
+					// Keep the original command queued behind the normal dismount executor.
+					// The base logic waits for its animation/AP boundary before draining it.
+					// UsingCannon binds a default ExitCannon to the actually mounted gun.
+					DoCommand( new NWorld::CCmdSetCommand( pUS, new NWorld::CCmdExitCannon() ) );
+				}
+				DoCommand( new NWorld::CCmdSetCommand( pUS, pCmd ) );
+			}
 		}
 	}
 	if ( !bCircled && nCurrentCommand >= n )
