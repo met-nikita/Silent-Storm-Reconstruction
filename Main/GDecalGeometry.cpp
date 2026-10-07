@@ -307,7 +307,12 @@ void CPerPolyDecal::Recalc()
 		return;
 	}
 
-	if ( srcPositions.empty() || srcPositions.size() != pSource->GetValue()->GetPositions().size() )
+	// Retail reuses the saved projection positions when only their count matches.
+	// Regenerated terrain can reorder an equally sized mesh on load. Untransformed
+	// parts already use world-space positions, so refresh their indexing from the
+	// current mesh. Keep the original projection pose for transformed/animated parts.
+	if ( pPart->GetTransformType() == TT_NONE || srcPositions.empty() ||
+		srcPositions.size() != pSource->GetValue()->GetPositions().size() )
 		TransformPart( pPart, &srcPositions, 0 );
 
 	Recalc( &data, *pSource->GetValue(), srcPositions );
@@ -336,6 +341,10 @@ public:
 		srcPolys( src.GetGeometry().polys ), srcIndices( src.GetGeometry().indices ),
 		srcWeights( src.GetWeights() )
 	{
+		// Rebuild the whole output, including after load. Keeping the saved vertices
+		// appends another mesh on each reload and eventually overflows WORD indices.
+		info.verts.clear();
+		info.weights.clear();
 		info.geometry.Clear();
 	}
 	struct SPolygon
