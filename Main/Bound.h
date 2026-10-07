@@ -103,32 +103,29 @@ inline void StartMMXBound( CVec3 *pMin, CVec3 *pMax )
 }
 inline void AddMMXBoundPoint( const CVec3 *p )
 {
+	// Coordinates are floats, not signed integers: integer ordering reverses
+	// negative values and can shrink the bound until a visible mesh is culled.
+	// Keep the MMX accumulator contract used by particles, but compare in SSE
+	// (without touching the x87 stack while MMX is active). Load only 12 bytes.
 	__asm
 	{
 		mov esi, p
 		movq mm0, [esi]
-		movd mm1, [esi+8]
-		movq mm2, mm6
-		movq mm3, mm0
-		pcmpgtd mm2, mm0
-		pcmpgtd mm3, mm4
-		pand mm6, mm2
-		pand mm4, mm3
-		pandn mm2, mm0
-		pandn mm3, mm0
-		por mm6, mm2
-		por mm4, mm3
+		movq2dq xmm0, mm0
+		movq2dq xmm1, mm4
+		movq2dq xmm2, mm6
+		minps xmm1, xmm0
+		maxps xmm2, xmm0
+		movdq2q mm4, xmm1
+		movdq2q mm6, xmm2
 
-		movq mm2, mm7
-		movq mm3, mm1
-		pcmpgtd mm2, mm1
-		pcmpgtd mm3, mm5
-		pand mm7, mm2
-		pand mm5, mm3
-		pandn mm2, mm1
-		pandn mm3, mm1
-		por mm7, mm2
-		por mm5, mm3
+		movd xmm0, [esi+8]
+		movq2dq xmm1, mm5
+		movq2dq xmm2, mm7
+		minss xmm1, xmm0
+		maxss xmm2, xmm0
+		movdq2q mm5, xmm1
+		movdq2q mm7, xmm2
 	}
 }
 inline void StoreMMXBoundResult( CVec3 *pMin, CVec3 *pMax )

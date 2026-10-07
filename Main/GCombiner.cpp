@@ -995,7 +995,6 @@ void CVBCombiner::XFormPosition()
 				trans.DoTransform( pPart, &((*pRes)[0]), *pRes );
 				// calc bv
 				SBoundCalcer bc;
-				bc.ptMax = CVec3(0,0,0);
 				StartMMXBound( &bc.ptMin, &bc.ptMax );
 				for ( int k = 0; k < nSize; ++k )
 					AddMMXBoundPoint( &(*pRes)[k] );
