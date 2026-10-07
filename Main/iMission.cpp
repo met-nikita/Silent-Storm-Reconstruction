@@ -1107,8 +1107,8 @@ int CMission::GetPanelState( int nMask ) const
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CMission::SetPanelState( int nMask, bool bState )
 {
-	// first-mission HUD (retail @0x1fb7e0 masks 0x14 = retail bits MEDALS(0x4)|BIOGRAPHY(0x10);
-	// dev renumbered EPanel, so use the names -- the raw 0x14 wrongly blocked dev PANEL_INVENTORY)
+	// First-mission HUD: retail @0x1fb7e0 masks MEDALS(0x4)|BIOGRAPHY(0x10),
+	// leaving inventory available.
 	if ( bSpecialFirstMissionMode && bState )
 		nMask &= ~( PANEL_MEDALS | PANEL_BIOGRAPHY );
 	if ( bState )

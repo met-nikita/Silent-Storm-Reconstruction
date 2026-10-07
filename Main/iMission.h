@@ -192,14 +192,13 @@ enum EScriptMode
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 enum EPanel
 {
+	// Serialized directly in CMission and dialogue/movie UI state: use retail bits.
 	PANEL_PERKS				= 0x00000001,
 	PANEL_STORE				= 0x00000002,
-	PANEL_INVENTORY		= 0x00000004,
+	PANEL_MEDALS			= 0x00000004,
 	PANEL_CHARACTER		= 0x00000008,
-	// retail hosts FOUR character sub-panels (skills/perks/medals/biography) switched exclusively
-	// (ActivateCharacterSubPanel @0x20f140); medals + biography were missing from the dev enum.
-	PANEL_MEDALS			= 0x00000010,
-	PANEL_BIOGRAPHY		= 0x00000020,
+	PANEL_BIOGRAPHY		= 0x00000010,
+	PANEL_INVENTORY		= 0x00010000,
 	////
 	PANEL_ALL					= 0xFFFFFFFF
 };
