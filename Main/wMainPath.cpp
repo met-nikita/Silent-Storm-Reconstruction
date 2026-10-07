@@ -1,6 +1,7 @@
 #include "StdAfx.h"
 #include "wMainPath.h"
 #include "aiMultiMoves.h"
+#include "aiLocker.h"
 #include "RPGUnitInfo.h"
 #include "wUnitServer.h"
 #include "wMainMoves.h"
@@ -84,7 +85,7 @@ void PrepareAllPaths( NAI::IPathNetwork *pPathNetwork, NAI::CMultiMovesTable *pT
 	// retail PrepareAllPaths @0x37d1b0 passes CannotFreelyChangePoses() as the move-only flag (same
 	// as FindPath) -- corpse-carry, live PK, or a script pose-lock -> the table omits pose transitions.
 	pTable->PrepareAllPaths( pResult, pPathNetwork, ptSrc, nCosts, nPriceLimit, vis,
-		bCheckSuicide, pUS->CannotFreelyChangePoses() );
+		NAI::IsBigLocker( pWho ), bCheckSuicide, pUS->CannotFreelyChangePoses() );
 
 	pPathNetwork->Lock( pWho, pUS->GetPosition().pos.p );
 }

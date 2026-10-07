@@ -324,7 +324,7 @@ bool CAIActionPlaceSource::IsPosDangerousForAllies( const SUnitPosition &pos, CA
 		return true;
 	CObj<NRPG::CCoverInfo> pCover = pWorld->GetGame()->CalcCovers(
 		pUS->GetAttackOrigin( pos, false ), attacks.front(), pUS,
-		pEnemy->GetUnitServer(), HL_BODY, 1.f, true );
+		pEnemy->GetUnitServer(), HL_BODY, 1.f, true, 0.f );
 	if ( !IsValid( pCover ) )
 		return true;
 	unordered_map<CPtr<CObjectBase>, int, SPtrHash> endangered;
@@ -433,7 +433,8 @@ void CAIAttackPlaceSource::Prepare()                                    // @0x00
 		Normalize( &dirUE );
 		NAI::CMultiMovesTable movesTable;
 		list<SPathPlace>      reach;
-		NWorld::PrepareAllPaths( pNet, &movesTable, &reach, pUS, curPlace, nBudget, pUS, true );
+		// Retail @0x48fd5a: flank wave skips suicide checks and transient unit locks.
+		NWorld::PrepareAllPaths( pNet, &movesTable, &reach, pUS, curPlace, nBudget, pUS, false, true );
 		for ( list<SPathPlace>::const_iterator i = reach.begin(); i != reach.end(); ++i )
 		{
 			if ( (*i).GetPose() == 3 )                                       // skip special/climbing-pose tiles

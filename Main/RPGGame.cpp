@@ -109,7 +109,8 @@ public:
 	CGame( NAI::IAIMap *_pAIMap, NAI::IPathNetwork *_pNet, const STerrainInfo &terrainInfo ):
 		pAIMap(_pAIMap), pNet(_pNet) { if ( _pAIMap ) pVision = CreateVisionTracker( _pAIMap, terrainInfo ); }
 	virtual CCoverInfo* CalcCovers( const CVec3 &src, const CAttackPortion &attack, 
-		NWorld::CUnit *pIgnore, CObjectBase *pDest, int nTargetUserID, float fMinClearDistance, bool bAIMode = false );
+		NWorld::CUnit *pIgnore, CObjectBase *pDest, int nTargetUserID, float fMinClearDistance,
+		bool bAIMode = false, float fTraceDistance = 30.f );
 	virtual CCoverInfo* CalcCoversForTile( const CVec3 &src, const CAttackPortion &attack, NWorld::CUnit *pIgnore,
 		const CVec3 &ptTarget, float fMinClearDistance );
 	virtual void ProcessMeleeAttackPortion( const CAttackPortion &a, const CRay &ray, const vector<IAttackable*> &ignores );
@@ -345,7 +346,7 @@ float CGame::GetCoverForAIUnit( CVec3 ptFrom, NWorld::CUnit *pIgnore,
 {
 	float fHitCover = 0;
 	CObj<NRPG::CCoverInfo> pCover = CalcCovers( ptFrom, 
-		AttackPortion, pIgnore, pTarget, HitLocation, 1.f, true );
+		AttackPortion, pIgnore, pTarget, HitLocation, 1.f, true, 0.f );
 	//
 	int nPenetrateCount = 0;
 	for ( vector<NRPG::CCoverInfo::SRay>::const_iterator i = pCover->hitRays.begin(); i != pCover->hitRays.end(); ++i )
@@ -364,7 +365,7 @@ float CGame::GetCoverForAIUnit( CVec3 ptFrom, NWorld::CUnit *pIgnore,
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // nTargetUserID == -1 means without hit location targeting
 CCoverInfo* CGame::CalcCovers( const CVec3 &src, const CAttackPortion &attack, NWorld::CUnit *pIgnore,
-	CObjectBase *pDest, int nTargetUserID, float fMinClearDistance, bool bAIMode )
+	CObjectBase *pDest, int nTargetUserID, float fMinClearDistance, bool bAIMode, float fTraceDistance )
 {
 	const float F_VIEW_BOUND = 2.f;			// grid diameter
 	const int N_LOW_HALF_GRID = 5;
@@ -386,9 +387,11 @@ CCoverInfo* CGame::CalcCovers( const CVec3 &src, const CAttackPortion &attack, N
 	float fTargetDistance = fabs( vTargetDir );
 	float fDistance = Min( fTargetDistance + 1, float(N_WEAPONTRAIL_MAXDISTANCE) );
 	Normalize( &vTargetDir );
-	// Retail 0x693a6d..0x693b05: render past the target/ray range while
-	// preserving the sampling angle. The penetration walk keeps its own cap.
-	float fProjectionDistance = Max( 0.1f, Max( float(N_WEAPONTRAIL_MAXDISTANCE), fTargetDistance + 2 ) );
+	// Retail CalcCovers (v1.1 0x693c30) takes separate maximum bullet range
+	// and raster trace distance. AI passes trace distance zero: extending its
+	// raster to 30m falsely vetoes shots for distant allies behind the target.
+	// Preserve the sampling angle; the penetration walk keeps its own cap.
+	float fProjectionDistance = Max( 0.1f, Max( fTraceDistance, fTargetDistance + 2 ) );
 	CVec3 ptProjectionTarget = src + vTargetDir * fProjectionDistance;
 	float fProjectionScale = fProjectionDistance / fTargetDistance;
 
