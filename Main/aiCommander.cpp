@@ -430,6 +430,8 @@ bool CAICommander::HasUnitWork( IAIUnit *pUnit )
 {
 	if ( !IsValid( pUnit ) )
 		return false;
+	if ( ShouldYieldInactiveUnit( pUnit ) )
+		return false;
 	IAILogic *pLogic = pUnit->GetLogic();
 	if ( !IsValid( pLogic ) )
 		return false;
@@ -559,6 +561,19 @@ void CAICommander::FinishTurn()
 	ClearNonFreezeCounters();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+bool CAICommander::ShouldYieldInactiveUnit( IAIUnit *pUnit )
+{
+	if ( pWorld->IsRealTime() || IsSequence() || !IsThisPlayerTurn() || pWorld->IsAction() ||
+		!IsValid( pUnit ) || !IsValid( pUnit->GetUnitServer() ) )
+		return false;
+	NWorld::CUnitServer *pUS = pUnit->GetUnitServer();
+	// Idle turn/wait routines cannot progress from an orphaned climb pose.
+	// Yield without moving the unit or interrupting an existing climb command.
+	return !pUS->GetPosition().pos.p.IsFinal() &&
+		pUS->GetPosition().pos.p.GetPose() == CM_INACTIVE &&
+		!pUS->HasCommand() && !pUS->IsPerformingAction();
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CAICommander::IsEndOfTurn()
 {
 	if ( pWorld->IsRealTime() )
@@ -581,6 +596,8 @@ bool CAICommander::IsEndOfTurn()
 		// IUnit::IsCheatEnabled(NRPG::CHEAT_NOAI) (CHEAT_NOAI == 0x20). A pure ADD: NOAI units are the only ones
 		// newly skipped, so no AI-driven unit's turn is cut short.
 		if ( pUS->IsCheatEnabled( NRPG::CHEAT_NOAI ) )
+			continue;
+		if ( ShouldYieldInactiveUnit( *i ) )
 			continue;
 		IAILogic *pLogic = (*i)->GetLogic();
 		if ( IsValid( pLogic ) && pLogic->IsActive() && !IsEndOfLogicTurn( pLogic ) )

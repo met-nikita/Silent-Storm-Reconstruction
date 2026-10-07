@@ -137,6 +137,7 @@ public:	// operator& must be reachable from CSequenceCommander's base-as-chunk A
 	ZEND int operator&( CStructureSaver &f ) { f.Add(2,(NWorld::CCommander*)this); f.Add(3,&pPlayer); f.Add(4,&units); f.Add(5,&worldToAIUnit); f.Add(6,&pWorld); f.Add(7,&state); f.Add(8,&nAILag); f.Add(9,&commandTracker); f.Add(10,&eotLogics); f.Add(11,&updateTracker); f.Add(12,&unitsTracker); f.Add(13,&pLastReportedUnit); return 0; }
 	//
 private:
+	bool ShouldYieldInactiveUnit( IAIUnit *pUnit );
 	// TBSEvents
 	void OnTurnStarted();
 	void OnTurnFinished();
