@@ -159,6 +159,8 @@ private:
 			pStuff = 0;
 			pCurrentObject = 0;
 		}
+		else
+			PostVisit( nID, 0 ); // Let derived caches release the removed object's slot too.
 	}
 protected:
 	virtual void PostVisit( int nID, T *pObject ) {}

@@ -309,6 +309,8 @@ void CSetRender::PostVisit( int nID, NWorld::IVisObj *pObject )
 	if ( nID >= objects.size() )
 		objects.resize( nID + 1 );
 	objects[nID] = pObject;
+	if ( !pObject )
+		return;
 	CSelectionHash::iterator i = selections.find( pObject );
 	if ( i != selections.end() && IsValid( i->second ) )
 		CreateSelection( nID, i->second->selectionInfo, i->second );
