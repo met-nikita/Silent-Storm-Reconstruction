@@ -142,6 +142,9 @@ void CScenarioTracker::CheatTakeClue( CScenarioClue *pClue, bool bImmediately )
 			list< CPtr<CScenarioClue> > cluesToProcess;
 			cluesToProcess.push_back( pClue );
 			ProcessCluesList( cluesToProcess, NDb::OT_CAPTURE );
+			// Retail FoundClue: the immediate modal replaces the chapter-map notification.
+			// Clear only this clue, leaving newly unlocked compound clues queued.
+			pClue->SetJustFound( false ); // v1.1 0x701d0b / v1.2 0x70258b
 		}
 		else
 		{
