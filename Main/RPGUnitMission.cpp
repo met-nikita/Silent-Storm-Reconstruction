@@ -725,17 +725,7 @@ int CUnitMission::GetActionAP( NAI::EPose curPose, EAction action ) const
 		case AC_BURST:
 			return pRPGUnit->GetWeaponBurstAP();
 		case AC_RELOAD:
-		{
-			int nAP = pRPGUnit->GetWeaponReloadAP();
-			if ( nAP == 0 )
-				return 0; // No firearm to reload.
-			float fParam;
-			// ORIGINAL RETAIL BUG FIXED (perk 33): the stated 30% reduction
-			// means paying 70% of base AP, not 30% as in retail 0x6c1443.
-			if ( HasPerk( N_PERK_CHEAP_RELOAD, &fParam ) )
-				nAP = int( nAP * ( 1.0f - fParam ) );
-			return Max( 1, nAP );
-		}
+			return pRPGUnit->GetWeaponReloadActionAP();
 		case AC_OPEN_CLOSE:
 			return 4;
 		case AC_APPROACH_CANNON:

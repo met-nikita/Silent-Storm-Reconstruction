@@ -395,6 +395,9 @@ void CAIReloadAction::GetInfoInner( const SPlaceWithAP &place, SInfo *pInfo ) co
 	CPtr<IAIUnit> pUnit = GetUnit();
 	if ( !IsValid( pUnit ) || !IsValid( pUnit->GetAIInventory() ) )
 		return;
+	CPtr<NRPG::CUnit> pRPGUnit = pUnit->GetRPGUnit();
+	if ( !IsValid( pRPGUnit ) )
+		return;
 	// can't reload from an inactive pose (release gates on the pose category bits)
 	if ( ( place.place.GetPose() & 0xc000 ) == 0xc000 )
 		return;
@@ -402,9 +405,9 @@ void CAIReloadAction::GetInfoInner( const SPlaceWithAP &place, SInfo *pInfo ) co
 	pInfo->pWeapon = pWeapon;
 	if ( IsValid( pWeapon ) )
 	{
-		// affordable from this place? release computes GetActionAP(pose, AC_RELOAD, weaponLen); the dev
-		// firearm exposes the equivalent reload cost via GetReloadAP(). @addr (pose-dependence elided)
-		if ( pWeapon->GetReloadAP() <= place.nUnitAP )
+		// Retail queries the selected item's AC_RELOAD cost, including perks.
+		// The firearm wrapper's base cost is still used by shot forecasts.
+		if ( pRPGUnit->GetWeaponReloadActionAP( pWeapon->GetItem() ) <= place.nUnitAP )
 			pInfo->bCanDo = true;
 	}
 }
@@ -420,10 +423,14 @@ void CAIReloadAction::Do( CAILog *pLog ) const   // @0x0041d2a0
 	CPtr<IAIUnit> pUnit = GetUnit();
 	if ( !IsValid( pUnit ) || !IsValid( pUnit->GetAIInventory() ) )
 		return;
+	CPtr<NRPG::CUnit> pRPGUnit = pUnit->GetRPGUnit();
+	if ( !IsValid( pRPGUnit ) )
+		return;
+	const int nReloadAP = pRPGUnit->GetWeaponReloadActionAP( info.pWeapon->GetItem() );
 	if ( !pUnit->GetAIInventory()->IsCurrentItem( info.pWeapon ) )
 		*pLog << new CAILogChangeWeapon( pUnit, info.pWeapon );
 	*pLog << new CAILogReloadWeapon( pUnit, info.pWeapon );
-	*pLog << new CAILogSpendAP( pUnit, info.pWeapon->GetReloadAP() );
+	*pLog << new CAILogSpendAP( pUnit, nReloadAP );
 }
 bool CAIReloadAction::ComparePlaces( const SPlaceWithAP &p1, const SPlaceWithAP &p2 ) const
 {

@@ -323,6 +323,8 @@ public:
 	int GetWeaponAP( CWeaponItem *_pWeapon = 0 ) const;
 	int GetWeaponBurstAP( CWeaponItem *_pWeapon = 0 ) const;
 	int GetWeaponReloadAP( CWeaponItem *_pWeapon = 0 ) const;
+	// Full reload action cost for execution and AI queries of a planned weapon.
+	int GetWeaponReloadActionAP( CWeaponItem *_pWeapon = 0 ) const;
 	IInventory *GetInventory() { return pInventory; }
 	void SetCannonItem( CWeaponItem *pItem ) { pCannonItem = pItem; }
 	CWeaponItem* GetCannonItem() { if ( !IsValid(pCannonItem) ) pCannonItem = 0; return pCannonItem; }

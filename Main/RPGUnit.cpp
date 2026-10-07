@@ -668,6 +668,20 @@ int CUnit::GetWeaponReloadAP( CWeaponItem *_pWeapon ) const
 	return 0;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+int CUnit::GetWeaponReloadActionAP( CWeaponItem *_pWeapon ) const
+{
+	int nAP = GetWeaponReloadAP( _pWeapon );
+	if ( nAP == 0 )
+		return 0; // No firearm to reload.
+	float fParam;
+	// Shared by the executor and AI, including a weapon not yet in hand.
+	// Preserve the corrected perk 33 semantics: a 30% discount pays 70%,
+	// not 30% as in retail 0x6c1443. Apply the paid-action floor only once.
+	if ( HasPerk( N_PERK_CHEAP_RELOAD, &fParam ) )
+		nAP = int( nAP * ( 1.0f - fParam ) );
+	return Max( 1, nAP );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 CWeaponItem* CUnit::GetWeaponItem() const
 {
 	// ORIGINAL RETAIL BUG FIXED (v1.1 0x6ba4e0 / v1.2 0x6ba510):
