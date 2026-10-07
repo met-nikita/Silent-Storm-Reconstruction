@@ -3200,6 +3200,10 @@ EUnitCommandResult CExecDisarmMine::CanDoIt( const NAI::SUnitPosition &from, boo
 		// Decomp: tool->CanBeUsed( pUS->GetUnitRPG()->GetRPGUnit() ); false -> NEED_HIGHER_SKILL.
 		if ( !pTool->CanBeUsed( pUS->GetUnitRPG()->GetRPGUnit() ) )
 			return UCR_NEED_HIGHER_SKILL;
+		// Use the same disarm reach as approach selection, including when an
+		// already queued action is revalidated after moving to its endpoint.
+		if ( !IsWithinHumanReach( from.GetCP(), pMine->GetMinePos(), F_DISARM_MINE_DISTANCE ) )
+			return UCR_TARGET_OUT_OF_RANGE;
 	}
 	else
 		return UCR_GENERAL_FAILURE;

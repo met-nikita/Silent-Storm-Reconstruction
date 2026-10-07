@@ -318,7 +318,8 @@ static EUnitCommandResult GetActionValidPlaces( CUnitServer *pUS, CCmdSetGrenade
 	return GetActionValidPlaces( pUS, pAppr, pRes );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-static void GetMinePlaces( const CVec3 &ptTarget, NAI::IPathNetwork *pNet, vector<NAI::SPathPlace> *pRes )
+static void GetMinePlaces( const CVec3 &ptTarget, NAI::IPathNetwork *pNet, vector<NAI::SPathPlace> *pRes,
+	float fPlaneDist = F_HEAL_DISTANCE )
 {
 	SSphere s;
 	s.ptCenter = ptTarget; 
@@ -335,7 +336,7 @@ static void GetMinePlaces( const CVec3 &ptTarget, NAI::IPathNetwork *pNet, vecto
 		CVec3 vFrom = from.GetCP();
 		if ( fabs( vFrom.x - ptTarget.x ) <= 0.5f && fabs( vFrom.y - ptTarget.y ) <= 0.5f )
 			continue;
-		if ( IsWithinHumanReach( vFrom, ptTarget, F_HEAL_DISTANCE ) )
+		if ( IsWithinHumanReach( vFrom, ptTarget, fPlaneDist ) )
 			GetDirectedPoints( pNet, from.p, ptTarget, pRes, PM_STAND | PM_CROUCH );
 	}	
 }
@@ -353,8 +354,10 @@ static EUnitCommandResult GetActionValidPlaces( CUnitServer *pUS, CCmdUntrapObje
 	CDynamicCast<CMine> pMine(pCmd->pTarget);
 	if (pMine)
 	{
-		GetMinePlaces(pMine->GetMinePos(), pUS->GetWorld()->GetPathNetwork(), pRes );
-		return UCR_OK;
+		// Shared retail bug: the placement reach can leave no safe approach to
+		// an off-grid mine. Disarming reaches farther without entering its box.
+		GetMinePlaces( pMine->GetMinePos(), pUS->GetWorld()->GetPathNetwork(), pRes, F_DISARM_MINE_DISTANCE );
+		return pRes->empty() ? UCR_PATH_NOT_FOUND : UCR_OK;
 	}
 	ASSERT(0);
 	return UCR_GENERAL_FAILURE;

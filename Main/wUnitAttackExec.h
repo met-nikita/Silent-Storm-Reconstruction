@@ -27,6 +27,10 @@ const float F_GRENADE_CHECK_HEIGHT = 1.2f;
 //
 const float F_GRAVITY = 10.f;
 const float F_HEAL_DISTANCE = 0.8f;
+// Disarming needs to reach an adjacent grid point outside the mine's 0.5m
+// exclusion box even when the mine lies between grid points. Placement keeps
+// F_HEAL_DISTANCE and the same exclusion box.
+const float F_DISARM_MINE_DISTANCE = 1.0f;
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 struct SGrenadeParams
 {
