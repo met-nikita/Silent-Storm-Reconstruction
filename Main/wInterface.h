@@ -573,7 +573,7 @@ public:
 	virtual bool GetInHandItem( SItem *pInfo ) const = 0;
 	virtual void GetStoreItems( list<CPtr<NRPG::IInventoryItem> > *pItems ) = 0;
 	virtual bool TakeStoreItem( NRPG::IInventoryItem *pItem ) = 0;
-	virtual void PlaceStoreItem( NRPG::IInventoryItem *pItem ) = 0;
+	virtual void PlaceStoreItem( const CTPoint<int> &point, NRPG::IInventoryItem *pItem ) = 0;
 	////
 	virtual void GetUnits( CUnitSet *pRes ) const = 0;
 	// retail CPlayer::GetEnemyUnitInfo @0x386c20: fill *out with what THIS player may learn about

@@ -376,13 +376,19 @@ bool CPlayer::TakeStoreItem( NRPG::IInventoryItem *pItem )
 	return false;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CPlayer::PlaceStoreItem( NRPG::IInventoryItem *pItem )
+void CPlayer::PlaceStoreItem( const CTPoint<int> &point, NRPG::IInventoryItem *pItem )
 {
 	if ( !IsValid( pGlobalPlayer ) )
 		return;
 	if ( !IsValid( pGlobalPlayer->pStore ) )
 		pGlobalPlayer->pStore = new NRPG::CStore( pGlobalPlayer );
-	pGlobalPlayer->pStore->Place( CTPoint<int>( -1, -1 ), pItem );
+	// Retail MoveInventoryItem @0x7ab154..0x7ab1ab: preserve the requested
+	// store cell when it fits, and find a fallback only for an invalid drop.
+	CTPoint<int> sPosition( point );
+	if ( !pGlobalPlayer->pStore->CanPlace( sPosition, pItem ) &&
+		!pGlobalPlayer->pStore->FindPlace( pItem, &sPosition ) )
+		return;
+	pGlobalPlayer->pStore->Place( sPosition, pItem );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // Retail @0x386ed0: snapshot the live mission units, combine scenario and hot-seat tech level, and

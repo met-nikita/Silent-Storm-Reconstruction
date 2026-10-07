@@ -211,7 +211,10 @@ void CBackPackSlot::Place( int nX, int nY, const NWorld::SItem &sItem )
 	sTarget.pUnit = pUnit->GetUnit();
 	sTarget.sPosition = sPos;
 
-	pMission->Command( pUnit->GetUnit(), new NWorld::CCmdMoveInventoryItem( NWorld::SItem( sItem.pUnit, NWorld::SItem::HAND, sItem.pItem ), sTarget ) );
+	// Retail 0x5ee54c / v1.2 0x5eeddc: execute on the dragged item's
+	// owner, falling back to this inventory's unit only for an invalid owner.
+	NWorld::CUnit *pCommandUnit = IsValid( sItem.pUnit ) ? sItem.pUnit.GetPtr() : pUnit->GetUnit();
+	pMission->Command( pCommandUnit, new NWorld::CCmdMoveInventoryItem( NWorld::SItem( sItem.pUnit, NWorld::SItem::HAND, sItem.pItem ), sTarget ) );
 	return;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////

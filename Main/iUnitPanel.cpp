@@ -811,7 +811,10 @@ void CInfoPanelSlot::Place( int nX, int nY, const NWorld::SItem &sItem )
 	sTarget.nSlot = eType;
 	sTarget.pUnit = pUnit;
 
-	pMission->Command( pUnit, new NWorld::CCmdMoveInventoryItem( NWorld::SItem( sItem.pUnit, NWorld::SItem::HAND, sItem.pItem.GetPtr() ), sTarget ) );
+	// Retail 0x655ab0: the command actor is the live hand owner, not the
+	// destination slot's unit. Ownerless/stale hands use the destination unit.
+	NWorld::CUnit *pCommandUnit = IsValid( sItem.pUnit ) ? sItem.pUnit.GetPtr() : pUnit.GetPtr();
+	pMission->Command( pCommandUnit, new NWorld::CCmdMoveInventoryItem( NWorld::SItem( sItem.pUnit, NWorld::SItem::HAND, sItem.pItem.GetPtr() ), sTarget ) );
 	return;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////

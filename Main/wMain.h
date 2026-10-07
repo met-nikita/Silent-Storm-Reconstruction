@@ -143,7 +143,7 @@ public:
 	////
 	void GetStoreItems( list<CPtr<NRPG::IInventoryItem> > *pItems );
 	bool TakeStoreItem( NRPG::IInventoryItem *pItem );
-	void PlaceStoreItem( NRPG::IInventoryItem *pItem );
+	void PlaceStoreItem( const CTPoint<int> &point, NRPG::IInventoryItem *pItem );
 	void UpdateStore();                                      // retail @0x386ed0
 	////
 	virtual void GetUnits( vector<CPtr<CUnitServer> > *pRes ) const;

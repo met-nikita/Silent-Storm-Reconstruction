@@ -109,9 +109,13 @@ void CStoreSlot::Take( int nX, int nY, bool bToUnit )
 	GetInSlotPos( nX, nY, &sPos );
 
 	CPtr<NGame::IPlayerTracker> pPlayer = GetGame()->GetActivePlayer();
+	if ( !IsValid( pPlayer ) )
+		return;
 	vector<CPtr<NGame::IUnitTracker> > unitsSet;
-	pPlayer->GetUnits( &unitsSet );
-	if ( unitsSet.empty() )
+	// Retail v1.1 0x641480 / v1.2 0x641220: take onto the single
+	// selected unit, not the first unit in the player's roster.
+	pPlayer->GetSelectedUnits( &unitsSet );
+	if ( unitsSet.size() != 1 || !IsValid( unitsSet.front() ) )
 		return;
 
 	CPtr<NGame::IUnitTracker> pUnit = unitsSet.front();
