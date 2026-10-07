@@ -151,7 +151,11 @@ bool CPath::AddNewPoint( const SPathPlace& point )
 		if ( ( point.GetPose() != CM_LAY && point.GetPose() != CM_INACTIVE ) || bTurn )
 		{
 			SPathPlace pushPoint( point );
-			if ( !bTurn )
+			// A pose-change wave point uses a canonical heading, not a turn.
+			// Preserve the actual facing through the animation; otherwise leaving
+			// prone silently adopts direction 0 and the following turn takes a detour.
+			// Keep explicit same-pose turns (and their passability) unchanged.
+			if ( !bTurn || point.GetPose() != last.GetPose() )
 				pushPoint.SetDirection( last.GetDirection() );
 			if ( !AddWithPossibleAction( pushPoint ) )
 				return false;
