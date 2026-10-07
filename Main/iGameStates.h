@@ -364,12 +364,14 @@ private:
 
 protected:
 	NWorld::CCmd* GetTargetCmd();
+	void UpdateCursor();
 
 public:
 	CStateUntrap(): bForced( false ) {}						// retail default ctor @0x1e00f0 leaves bForced at the zeroed head
 	CStateUntrap( bool _bForced ): bForced( _bForced ) {}	// retail @0x1d72a0
 
 	bool Initialize( IMission *pMission );
+	void Step();
 
 	bool OnLButtonUp( int nX, int nY );
 	NUI::SCursorInfo GetCursorInfo() const;

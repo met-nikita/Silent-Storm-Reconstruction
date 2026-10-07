@@ -1637,36 +1637,53 @@ bool CStateUntrap::Initialize( IMission *pMission )
 {
 	CStateBase::Initialize( pMission );
 
-	vector< CPtr<NGame::IUnitTracker> > unitsSet;
-	GetMission()->GetSelectedUnits( &unitsSet );
-	if ( unitsSet.size() != 1 )
-		return false;
-
-	if ( unitsSet[0]->GetUnit()->GetState() != NWorld::CUnit::ST_NORMAL_TOOL )
-		return false;
-
 	SActionInfo sGeneralInfo;
-	pMission->GetActionInfo( UA_USE, &sGeneralInfo );
+	pMission->GetActionInfo( UA_USETOOL, &sGeneralInfo );
 	if ( ( GetType() == FORCED ) && ( !sGeneralInfo.bOk || !sGeneralInfo.bEnoughAP ) )
 	{
 		ShowError( GetMission(), sGeneralInfo.eResult );
 		return false;
 	}
 
-	SActionInfo sInfo;
-	CPtr<NWorld::CCmd> pCmd = GetTargetCmd();
-	if ( !IsValid( pCmd ) )
-		return false;
+	// Retail @0x5dda10: forced tool targeting can start without a hovered object.
+	// Only the automatic hover state requires an already-known trapped object.
+	if ( GetType() != FORCED )
+	{
+		CObjectBase* pObject = GetMission()->GetStateTarget();
+		if ( !IsValid( pObject ) )
+			return false;
 
-	GetMission()->CanDoCommand( pCmd, false, &sInfo );
-	if ( !sInfo.bAvailable )
-		return false;
+		list< CPtr<CObjectBase> > trappedObjects;
+		GetMission()->GetActivePlayer()->GetPlayer()->GetTrappedObjectsList( &trappedObjects );
+		if ( !IsInSet( trappedObjects, pObject ) )
+			return false;
+	}
 
-	// retail caption: the shared MakeCursorString (@0x1d7990) AP line
-	wstring wsText;
-	MakeCursorString( GetMission(), sInfo, &wsText );
-	sCursorInfo = NUI::SCursorInfo( NDb::GetUICursor( N_CURSOR_HEAL ), wsText.c_str() );
+	UpdateCursor();
 	return true;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CStateUntrap::UpdateCursor()
+{
+	SActionInfo sInfo;
+	CObj<NWorld::CCmd> pCmd = GetTargetCmd();
+	if ( IsValid( pCmd ) )
+		GetMission()->CanDoCommand( pCmd, false, &sInfo );
+
+	// Retail @0x5dd000 tests bOk, selecting cursor 22 for a valid tool target.
+	if ( sInfo.bOk )
+	{
+		wstring wsText;
+		MakeCursorString( GetMission(), sInfo, &wsText );
+		sCursorInfo = NUI::SCursorInfo( NDb::GetUICursor( N_CURSOR_USE_TOOL ), wsText.c_str() );
+	}
+	else
+		sCursorInfo = NUI::SCursorInfo( NDb::GetUICursor( N_CURSOR_BLOCK ) );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CStateUntrap::Step()
+{
+	UpdateCursor();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CStateUntrap::OnLButtonUp( int nX, int nY )
