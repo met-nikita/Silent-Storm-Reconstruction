@@ -778,8 +778,9 @@ bool CStateAttack::Initialize( IMission *pMission )
 		// the heard-noise marker (dev CDMesh) is the IAISound case. The own-unit check applies to
 		// real units only (the marker skips it, exactly retail).
 		NWorld::CUnit* pUnit = dynamic_cast<NWorld::CUnit*>( pObject );
+		CDynamicCast<NWorld::IObject> pTargetObject( pObject );
 		bool bHeardMarker = ( NWorld::GetDMeshUnit( pObject ) != 0 );
-		if ( !IsValid( pUnit ) && !bHeardMarker )
+		if ( !IsValid( pUnit ) && !IsValid( pTargetObject ) && !bHeardMarker )
 			return false;
 
 		if ( IsValid( pUnit ) && pUnit->GetPlayer() == GetMission()->GetActivePlayer()->GetPlayer() )

@@ -164,6 +164,7 @@ private:
 	void RefreshExecutor();
 	void CheckCmdExecState();
 	void Fall();
+	void UpdateDeadPKSupport();
 	void ForcedMove();
 	// CDumbUnit callbacks
 	virtual void OnUnitMadeUnconscious( bool bFromScript = false );

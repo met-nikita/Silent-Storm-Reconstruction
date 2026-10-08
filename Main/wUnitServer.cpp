@@ -729,6 +729,50 @@ void CUnitServer::Fall()
 	FallFromHigh( fHeightDiff );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+void CUnitServer::UpdateDeadPKSupport()
+{
+	NAI::CPathNetwork *pNet = GetPosition().pos.pNet;
+	NAI::SUnitPosition dst( GetPosition() );
+	if ( !dst.pos.p.IsIntegral() || dst.pos.p.IsFinal() )
+		return;
+	CVec3 previous = dst.GetCP();
+	previous.z = fLastHeight;
+	float fBestHeight = -1e38f;
+	float fMaxFall = GetMaxFallDist( fLastHeight );
+	pNet->Unlock( this );
+	// Look straight down through every floor, not within ForcedMove's 3m
+	// sphere. Do not move sideways around walls or through an intact floor.
+	const vector<CObj<NAI::CNodesLayer> > &layers = pNet->GetLayers();
+	for ( int k = 0; k < layers.size(); ++k )
+	{
+		NAI::CNodesLayer *pLayer = layers[k];
+		NAI::SPoint pt = pLayer->pGroup->GetPoint( previous );
+		if ( pt.x < 0 || pt.y < 0 || pt.x >= pLayer->pGroup->GetXSize() || pt.y >= pLayer->pGroup->GetYSize() )
+			continue;
+		NAI::SUnitPosition candidate( dst );
+		candidate.pos.p.SetOnLayer( k, pt.x, pt.y );
+		candidate.pos.p.SetPose( dst.pos.p.GetPose() );
+		candidate.pos.p.SetDirection( pNet->GetClosestDir( k, GetPosition().GetDirection() ) );
+		NAI::EPassable pass = pNet->GetPassability( candidate.pos.p );
+		// Another unit's lock is not missing physical support.
+		if ( pass != NAI::AIP_YES && pass != NAI::AIP_LOCKED && pass != NAI::AIP_DOOR )
+			continue;
+		CVec3 cp = candidate.GetCP();
+		if ( sqr(cp.x - previous.x) + sqr(cp.y - previous.y) > 0.01f ||
+			cp.z > previous.z + 0.01f || previous.z - cp.z > fMaxFall + 0.05f || cp.z <= fBestHeight )
+			continue;
+		fBestHeight = cp.z;
+		dst = candidate;
+	}
+	if ( fBestHeight != -1e38f && fLastHeight - fBestHeight > 0.01f )
+	{
+		DropDeadPK( dst, dst.GetCP() - previous );
+		fLastHeight = fBestHeight;
+		plLast = dst.pos.p;
+	}
+	pNet->Lock( this, GetPosition().pos.p );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 void CUnitServer::ForcedMove()
 {
 	csSystem << CC_RED << "FORCED MOVE\n";
@@ -856,6 +900,11 @@ void CUnitServer::OnTBSEvent( ETBSEvent event )
 			pState->OnActionFinish();
 			break;
 		case TBS_GRID_INFO_UPDATED:
+			if ( IsDead() && IsWearingPK() )
+			{
+				UpdateDeadPKSupport();
+				break;
+			}
 			// retail @0x3c2a90 case 10: a locker unit re-seats on the changed grid -- release the lock,
 			// force-move off a now-impassable tile; otherwise fall/snap when the ground height under the
 			// SAME place drifted (> 0.01), store the new height/place, and re-lock.

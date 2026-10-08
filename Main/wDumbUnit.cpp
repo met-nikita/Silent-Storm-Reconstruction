@@ -394,6 +394,17 @@ bool CDumbUnitServer::IsLocker()
 	return CanFight() || ( IsEmptyPK() && !bIsPKWhichIsWeared ) || IsWearingPK();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+void CDumbUnitServer::DropDeadPK( const NAI::SUnitPosition &dst, const CVec3 &delta )
+{
+	// Unlike SetPosition, do not change the collapsed animation pose, make
+	// footsteps, or execute a living unit's movement callbacks.
+	animator.DropFrozenPose( dst, delta );
+	position = dst;
+	bLocksTwoPlaces = false;
+	Update();
+	pWorld->UpdateVisible();
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 void CDumbUnitServer::SetPosition( const NAI::SUnitPosition &dst )
 {
 	bool bNeedUpdate = dst.pos.GetFloor() != position.pos.GetFloor();

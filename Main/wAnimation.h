@@ -178,6 +178,7 @@ public:
 	void Climb( const NAI::SUnitPosition &prevPos, const NAI::SUnitPosition &cmdPos, bool bRealClimb );
 	void Jump( const NAI::SUnitPosition &prevPos, const NAI::SUnitPosition &cmdPos, bool bRealJump, bool bJumpBack = false );
 	void Fall( const NAI::SUnitPosition &cmdPos, float fPrevHeight );
+	void DropFrozenPose( const NAI::SUnitPosition &cmdPos, const CVec3 &delta );
 	void ForcedMove( const NAI::SUnitPosition &cmdPos );
 	// retail @0x33bb90: bPlayDeath gates ONLY the death CLIP -- the ragdoll handoff (AddDynamics)
 	// ALWAYS runs. bPlayDeath=false is the pure ragdoll-push entry (corpse push @0x350e20 /

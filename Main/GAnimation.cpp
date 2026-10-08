@@ -993,6 +993,20 @@ void CSkeletonAnimator::AddMemorizer( STime tActive )
 	pMemory->tActive = tActive;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+void CSkeletonAnimator::MoveFrozenPose( STime tFrom, STime tTo, STime tPose, const CVec3 &delta )
+{
+	SSkeletonPose start( nBones ), finish( nBones );
+	pSeq->GetFrame( tFrom, &start );
+	// Use the previous destination if another support change interrupts a fall.
+	pSeq->GetFrame( tPose, &finish );
+	for ( int k = 0; k < finish.size(); ++k )
+		if ( finish[k].nParent < 0 )
+			finish[k].pos += delta;
+	AddAnimator( tFrom, new CAPoseMemorizer( start, tFrom ) );
+	AddTransit( tFrom, tTo, new CAPoseMemorizer( finish, tFrom ) );
+	Updated();
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 void CSkeletonAnimator::AddTransit( STime tFrom, STime tTo, CAnimator *pAnim, ETransitType trType )
 {
 	CAInterpolator *pTransit = new CAInterpolator;

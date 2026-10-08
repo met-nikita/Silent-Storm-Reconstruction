@@ -1447,6 +1447,17 @@ void CUnitAnimator::ForcedMove( const NAI::SUnitPosition &cmdPos )
 	bInactivePose = cmdPos.pos.p.GetPose() == NAI::CM_INACTIVE;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+void CUnitAnimator::DropFrozenPose( const NAI::SUnitPosition &cmdPos, const CVec3 &delta )
+{
+	STime tNow = pTime->GetValue();
+	STime tPose = Max( tNow, tEnd );
+	STime tLength = Max( STime(1), STime( -delta.z / F_FALL_SPEED * 1000 ) );
+	tEnd = tNow + tLength;
+	pAnimator->MoveFrozenPose( tNow, tEnd, tPose, delta );
+	pTerrainFunc->Move( cmdPos );
+	bStandIfRecalcCommand = false;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 void CUnitAnimator::Fall( const NAI::SUnitPosition &cmdPos, float fPrevHeight )
 {
 	OutputDebugString("Forced fall began...\n");

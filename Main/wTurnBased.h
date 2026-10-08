@@ -104,7 +104,10 @@ public:
 		// Commander turn work is driven by OnPassControl instead.
 		for ( unsigned int k = 0; k < units.size(); ++k )
 		{
-			if ( IsValid( units[k] ) && !units[k]->IsDead() )
+			// A dead PK wearer has a frozen collapse pose, not a tracked ragdoll.
+			// It still needs support updates, but must never resume turn processing.
+			if ( IsValid( units[k] ) && ( !units[k]->IsDead() ||
+				( event == TBS_GRID_INFO_UPDATED && units[k]->IsWearingPK() ) ) )
 				units[k]->OnTBSEvent( event );
 		}
 	}

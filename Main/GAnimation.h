@@ -248,6 +248,9 @@ public:
 	STime tMemory;
 	STime tActive;
 
+	CAPoseMemorizer() {}
+	CAPoseMemorizer( const SSkeletonPose &pose, STime t ) : memory(pose), tMemory(t), tActive(t) {}
+
 	virtual bool NeedUpdate( STime t ) { return false; }
 	virtual void GetFrame( STime t, SSkeletonPose *pPose );
 	int operator&( CStructureSaver &f );
@@ -390,6 +393,7 @@ public:
 	void AddAnimator( STime tFrom, CAnimator *pAnim );
 	void AddTransit( STime tFrom, STime tTo, CAnimator *pAnim, ETransitType trType = LINEAR );
 	void AddMemorizer( STime tActive );
+	void MoveFrozenPose( STime tFrom, STime tTo, STime tPose, const CVec3 &delta );
 	void AddAimer( STime tFrom, CFuncBase<SSkeletonPose> *pNextPose, CFuncBase<STime> *pNextPoseTime );
 	void AddSmartAimer( STime tFrom, CFuncBase<SSkeletonPose> *pNextPose,
 		CFuncBase<SSkeletonState> *pState, CFuncBase<STime> *pNextPoseTime,
