@@ -340,11 +340,11 @@ void CPassCalcer::TestLayMovesInDirection( NAI::CCollider *pCollider, CArray2D<S
 			{
 				tSrc.nMoveLay |= nFwdFlag;
 				tDst.nMoveLay |= nBackFlag;
-				if ( analyzer.pSrc )
+				for ( int i = 0; i < analyzer.doors.size(); ++i )
 				{
-					STile &tileF = GetFlipperTile( x, y, nLayer, analyzer, tSrc, &tSrc.nFlipper );
+					STile &tileF = GetFlipperTile( x, y, nLayer, analyzer.doors[i], tSrc, &tSrc.nFlipper );
 					tileF.nMoveLay &= ~nFwdFlag;
-					STile &tileB = GetFlipperTile( x + shift.x, y + shift.y, nLayer, analyzer, tDst, &tDst.nFlipper );
+					STile &tileB = GetFlipperTile( x + shift.x, y + shift.y, nLayer, analyzer.doors[i], tDst, &tDst.nFlipper );
 					tileB.nMoveLay &= ~nBackFlag;
 				}
 			}
@@ -478,7 +478,7 @@ static int N_DISPLACEMENT_X[] = { 1, 1, 2, 1, 0, 0, 2, 2, 0 };
 static int N_DISPLACEMENT_Y[] = { 1, 2, 1, 0, 1, 2, 2, 0, 0 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CPassCalcer::STile &CPassCalcer::GetFlipperTile(
-	int x, int y, int nLayer, const SDoorColliderAnalyzer &analyzer, const STile &t, unsigned char *pNFlipper )
+	int x, int y, int nLayer, const SDoorCollision &analyzer, const STile &t, unsigned char *pNFlipper )
 {
 	CNodesLayer *pL = pNet->GetLayer( nLayer );
 	if ( !IsInArray( pL->tiles, x + region.minx, y + region.miny ) )
@@ -490,6 +490,7 @@ CPassCalcer::STile &CPassCalcer::GetFlipperTile(
 	CPtr<CObjectBase> iHateVCPP( analyzer.pSrc );
 	CPathNetwork::SFlipper &flipper = *pNet->GetFlipper( iHateVCPP );
 	*pNFlipper = flipper.nFlipper + 1;
+	pNet->InvalidateFlipperIndex();
 	typedef unordered_map<SPathPlace, STile,SPathPlaceHash> CFHash;
 	CFHash *pHash;
 	if ( analyzer.bInClosed )
@@ -505,6 +506,19 @@ CPassCalcer::STile &CPassCalcer::GetFlipperTile(
 		ft = t;
 		ft.nMoveLay = ft.nMoveCrouch = ft.nMoveStand = ft.nMoveHC = (char)255;
 		return ft;
+	}
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CPassCalcer::RecordDoorPose( int x, int y, int nLayer, int nDis,
+	const SDoorColliderAnalyzer &analyzer, int *pRecorded, STile *pTile )
+{
+	// Record each door at the first height at which it obstructs this pose.
+	// Later contacts with a different door must not overwrite the first one.
+	for ( ; *pRecorded < analyzer.doors.size(); ++*pRecorded )
+	{
+		STile &ft = GetFlipperTile( x, y, nLayer, analyzer.doors[*pRecorded], *pTile, &pTile->nFlipper );
+		ft.nDisplacement = nDis;
+		ft.nPassable = pTile->nPassable;
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -548,14 +562,10 @@ int CPassCalcer::CalcPoseInPoint( int x, int y, NAI::CCollider *pCollider, const
 	CVec3 ptTest( cp.x, cp.y, GetFHeight( tempH[ nY ][ nX ].nHeight ) );
 	ptTest.z += F_CHECK_HEIGHT;
 	SDoorColliderAnalyzer analyzer;
-	bool bWorkWithFlipperFinished = false;
+	int nRecordedDoors = 0;
 	bool bCollides = collider.DoesIntersect( ptTest, F_TEST_SPHERE_RADIUS, &analyzer );
-	if ( analyzer.pSrc && (!bCollides) ) // no inactive points in flipping objects
-	{
-		STile &tileF = GetFlipperTile( x, y, nLayer, analyzer, tile, &tile.nFlipper );
-		tileF.nDisplacement = nDis;
-		bWorkWithFlipperFinished = true;
-	}
+	if ( !bCollides ) // no inactive points in flipping objects
+		RecordDoorPose( x, y, nLayer, nDis, analyzer, &nRecordedDoors, &tile );
 	if ( flags[ nY ][ nX ] & N_FLAG_LADDER )
 		tile.nFlags |= TF_IS_LADDER_UP;
 	const bool bInactiveProbe = IsInactivePoint( nX, nY, tempH, flags );
@@ -614,6 +624,7 @@ int CPassCalcer::CalcPoseInPoint( int x, int y, NAI::CCollider *pCollider, const
 		// that surface's height AND floor, then falls through to the normal pose probes
 		ptTest.z = fHeightForZ + F_CHECK_HEIGHT;
 		analyzer.Clear();
+		nRecordedDoors = 0;
 		if ( collider.DoesIntersect( ptTest, F_TEST_SPHERE_RADIUS, &analyzer ) )
 			return 0;
 		tile.nHeight = GetIHeight( fHeightForZ );
@@ -625,25 +636,15 @@ int CPassCalcer::CalcPoseInPoint( int x, int y, NAI::CCollider *pCollider, const
 	// retail accumulates ONE analyzer across the pose probes and ORs the collision state
 	// (no Clear here -- a door pSrc captured by the first probe still bans the flipper tile)
 	bCollides = bCollides || collider.DoesIntersect( ptTest, F_TEST_SPHERE_RADIUS, &analyzer );
-	if ( analyzer.pSrc && !bCollides && !bWorkWithFlipperFinished ) 
-	{
-		STile &tileF = GetFlipperTile( x, y, nLayer, analyzer, tile, &tile.nFlipper );
-		tileF.nDisplacement = nDis;
-		tileF.nPassable = CP_LAY;
-		bWorkWithFlipperFinished = true;
-	}
+	if ( !bCollides )
+		RecordDoorPose( x, y, nLayer, nDis, analyzer, &nRecordedDoors, &tile );
 	if ( bCollides )
 		return 1;
 	tile.nPassable |= CP_CROUCH;
 	ptTest.z += F_TEST_SPHERE_STEP;
 	bCollides = collider.DoesIntersect( ptTest, F_TEST_SPHERE_RADIUS, &analyzer );
-	if ( analyzer.pSrc && !bCollides && !bWorkWithFlipperFinished )
-	{
-		STile &tileF = GetFlipperTile( x, y, nLayer, analyzer, tile, &tile.nFlipper );
-		tileF.nDisplacement = nDis;
-		tileF.nPassable = CP_LAY | CP_CROUCH;
-		bWorkWithFlipperFinished = true;
-	}
+	if ( !bCollides )
+		RecordDoorPose( x, y, nLayer, nDis, analyzer, &nRecordedDoors, &tile );
 	if ( bCollides )
 		return 2;
 	tile.nPassable |= CP_STAND;

@@ -10,6 +10,7 @@ namespace NAI
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CCollider;
 struct SDoorColliderAnalyzer;
+struct SDoorCollision;
 class CMovesCalcer
 {
 	typedef CNodesLayer::STile STile;
@@ -47,7 +48,7 @@ class CMovesCalcer
 	void NormalizeTransitions( vector<SPossibleTransition> *pRes );
 	void MarkNativePoints( CArray2D<STile> *pRes );
 	void MarkSame( CArray2D<STile> *pRes );
-	STile &GetFlipperTile( int x, int y, const SDoorColliderAnalyzer &analyzer, const STile &t, unsigned char *pNFlipper );
+	STile &GetFlipperTile( int x, int y, const SDoorCollision &analyzer, const STile &t, unsigned char *pNFlipper );
 public:
 	CMovesCalcer( CNodesLayer *_pLayer, IAIMap *_pMap, const CTRect<int> &_region, 
 		STempArrayGroup<STile> &_tempArrays, int _nGroupLayer, int _nGroupFloor, CCollider *_pCollider );

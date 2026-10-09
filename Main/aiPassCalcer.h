@@ -35,6 +35,7 @@ struct SPCHeight
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CCollider;
 struct SDoorColliderAnalyzer;
+struct SDoorCollision;
 class CPassCalcer
 {
 	struct SLadderInfo
@@ -90,7 +91,9 @@ class CPassCalcer
 	void MarkLadderUps();
 	void MarkInactiveEnlargements( CArray2D<char> *pRes, const CTPoint<int> &shift,
 		const CArray2D<SPCHeight> &tempH, const CFastRenderer &render );
-	STile &GetFlipperTile( int x, int y, int nLayer, const SDoorColliderAnalyzer &analyzer, const STile &t, unsigned char *pNFlipper );
+	STile &GetFlipperTile( int x, int y, int nLayer, const SDoorCollision &analyzer, const STile &t, unsigned char *pNFlipper );
+	void RecordDoorPose( int x, int y, int nLayer, int nDis, const SDoorColliderAnalyzer &analyzer,
+		int *pRecorded, STile *pTile );
 public:
 	typedef CNodesLayer::STile STile;
 	CPassCalcer( CPathNetwork *_pNet, CLayersGroup *_pGroup, IAIMap *_pMap,	STempArrayGroup<CNodesLayer::STile> &_tempArrays, const CTRect<int> &_region );

@@ -305,6 +305,7 @@ void CLayersGroup::RecalcSquare( int nX, int nY, IAIMap *pMap, char nLevel )
 	else
 	{
 		// pass calc
+		pNet->ClearFlipperTiles( this, region );
 		//char buf[128];
 		//sprintf( buf, "Recalcing spot %d %d, x = %d..%d, y = %d..%d \n", nX, nY, nMinX, nMaxX-1, nMinY, nMaxY-1 );
 		//OutputDebugString( buf );
@@ -1796,6 +1797,23 @@ void CPathNetwork::GetLockArea( vector<SPathPlace> *pRes, const SPathPlace &p, b
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+static bool IsTilePassable( const SPathPlace &p, const STile &t )
+{
+	switch ( p.GetPose() )
+	{
+		case CM_LAY:
+		{
+			int dir = p.GetDirection() & 3;
+			return ( t.nPassable & (CP_LAY1 << dir ) ) != 0;
+		}
+		case CM_CROUCH:   return (t.nPassable & CP_CROUCH) != 0;
+		case CM_STAND:    return (t.nPassable & CP_STAND) != 0;
+		case CM_INACTIVE: return (t.nPassable & CP_INACTIVE) != 0;
+	}
+	ASSERT( 0 );
+	return false;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CPathNetwork::IsLocked( const SPathPlace &p, bool bIgnoreBlockedDoors ) const
 {
 	int nX, nY;
@@ -1807,15 +1825,19 @@ bool CPathNetwork::IsLocked( const SPathPlace &p, bool bIgnoreBlockedDoors ) con
 			return true;
 		if ( bIgnoreBlockedDoors )
 			return false;
-		int nFlipper = layers[p.GetLayer()]->tiles[nY][nX].nFlipper;
-		if ( !nFlipper )
-			return false;
-		const SFlipper *pFlipper = GetFlipper( nFlipper - 1 );
-		// retail @0x45520: with bDoNotFlipAnything set (door-free re-route in NAI::FindPath @0x8bd80),
-		// EVERY tile on a flipper counts as locked, fixed or not.
-		if ( !bDoNotFlipAnything && pFlipper->nFixedFlags == 0 )
-			return false;
-		return !IsNotOnDoor( p );
+		const vector<int> &doors = GetFlippersAt( p );
+		SPathPlace test( p.GetX(), p.GetY(), p.GetLayer() );
+		for ( int i = 0; i < doors.size(); ++i )
+		{
+			const SFlipper &door = flippers[doors[i]];
+			if ( !bDoNotFlipAnything && door.nFixedFlags == 0 )
+				continue;
+			const auto &locks = door.bOpen ? door.locksOpen : door.locksClosed;
+			auto it = locks.find( test );
+			if ( it != locks.end() && !IsTilePassable( p, it->second ) )
+				return true;
+		}
+		return false;
 	}
 	else
 	{
@@ -2145,33 +2167,16 @@ bool CPathNetwork::IsValidDestination( const SPathPlace &p )
 	return true;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-static bool IsTilePassable( const SPathPlace &p, const STile &t )
-{
-	switch ( p.GetPose() )
-	{
-		case CM_LAY:      
-		{
-			int dir = p.GetDirection() & 3;
-			return ( t.nPassable & (CP_LAY1 << dir ) ) != 0;
-		}
-		case CM_CROUCH:   return (t.nPassable & CP_CROUCH) != 0;
-		case CM_STAND:    return (t.nPassable & CP_STAND) != 0;
-		case CM_INACTIVE: return (t.nPassable & CP_INACTIVE) != 0;
-	}
-	ASSERT( 0 );
-	return false;
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CPathNetwork::IsNotOnDoor( const SPathPlace &p ) const
 {
 	CNodesLayer *pLayer = layers[p.GetLayer()];
 	pLayer->pGroup->RefreshSpot( p, pMap, 1 );
 	if ( ( p.GetX() >= pLayer->tiles.GetXSize() ) || ( p.GetY() >= pLayer->tiles.GetYSize() ) )
 		return false;
-	const CNodesLayer::STile &t = pLayer->tiles[p.GetY()][p.GetX()];
-	if ( t.nFlipper )
+	const vector<int> &doors = GetFlippersAt( p );
+	for ( int i = 0; i < doors.size(); ++i )
 	{
-		const SFlipper &fl = *GetFlipper( t.nFlipper - 1 );
+		const SFlipper &fl = flippers[doors[i]];
 		const unordered_map<SPathPlace, CNodesLayer::STile, SPathPlaceHash> *pHash;
 		if ( fl.bOpen )
 			pHash = &fl.locksOpen;
@@ -2179,8 +2184,8 @@ bool CPathNetwork::IsNotOnDoor( const SPathPlace &p ) const
 			pHash = &fl.locksClosed;
 		SPathPlace test( p.GetX(), p.GetY(), p.GetLayer() );
 		unordered_map<SPathPlace, CNodesLayer::STile, SPathPlaceHash>::const_iterator it = pHash->find( test );
-		if ( it != pHash->end() )
-			return IsTilePassable( p, it->second );
+		if ( it != pHash->end() && !IsTilePassable( p, it->second ) )
+			return false;
 	}
 	return true;
 }
@@ -2526,6 +2531,55 @@ void CPathNetwork::FormationMoveTo( vector<SPosition> *pPlaces, const SPosition 
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+const vector<int> &CPathNetwork::GetFlippersAt( const SPathPlace &p ) const
+{
+	if ( !bFlippersIndexed )
+	{
+		flippersByPlace.clear();
+		for ( const auto &source : flippersHash )
+		{
+			if ( !IsValid(source.first) )
+				continue;
+			int i = source.second;
+			const SFlipper &door = flippers[i];
+			for ( const auto &entry : door.locksOpen )
+				flippersByPlace[entry.first].push_back(i);
+			for ( const auto &entry : door.locksClosed )
+				if ( door.locksOpen.find(entry.first) == door.locksOpen.end() )
+					flippersByPlace[entry.first].push_back(i);
+		}
+		// Stable action order, independent of hash-table iteration order.
+		for ( auto &entry : flippersByPlace )
+			sort( entry.second.begin(), entry.second.end() );
+		bFlippersIndexed = true;
+	}
+	static const vector<int> empty;
+	if ( !p.IsIntegral() || p.IsFinal() )
+		return empty;
+	SPathPlace test( p.GetX(), p.GetY(), p.GetLayer() );
+	auto it = flippersByPlace.find(test);
+	return it == flippersByPlace.end() ? empty : it->second;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CPathNetwork::ClearFlipperTiles( const CLayersGroup *pGroup, const CTRect<int> &region )
+{
+	// Geometry/displacement can change on a rebake. Do not leave obsolete door
+	// constraints behind, especially now that every door on a tile is consulted.
+	for ( auto &door : flippers )
+		for ( auto *locks : { &door.locksOpen, &door.locksClosed } )
+			for ( auto it = locks->begin(); it != locks->end(); )
+			{
+				const SPathPlace &p = it->first;
+				if ( p.GetLayer() < layers.size() && layers[p.GetLayer()]->pGroup == pGroup &&
+					p.GetX() >= region.minx && p.GetX() < region.maxx &&
+					p.GetY() >= region.miny && p.GetY() < region.maxy )
+					it = locks->erase(it);
+				else
+					++it;
+			}
+	InvalidateFlipperIndex();
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 CPathNetwork::SFlipper *CPathNetwork::GetFlipper( const CObjectBase *_pSrc )
 {
 	CObjectBase* pUnconstSrc = const_cast<CObjectBase*>(_pSrc);
@@ -2568,7 +2622,38 @@ void CPathNetwork::LockUnlockFlipper( CObjectBase* flipper, bool bLock )
 		GetFlipper( test )->nFixedFlags &= ~F_LOCKED_DOOR;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-bool CPathNetwork::IsBlockedByFlipper(
+static bool DoorBlocksMove( const unordered_map<SPathPlace, STile, SPathPlaceHash> &locks,
+	const SPathPlace &from, const SPathPlace &to )
+{
+	if ( !from.IsIntegral() || !to.IsIntegral() || from.IsFinal() || to.IsFinal() ||
+		from.GetLayer() != to.GetLayer() || from.GetPose() != to.GetPose() )
+		return false;
+	int dx = to.GetX() - from.GetX(), dy = to.GetY() - from.GetY();
+	int dir = 0;
+	while ( dir < 8 && (nMoveShift[dir][0] != dx || nMoveShift[dir][1] != dy) )
+		++dir;
+	if ( dir == 8 )
+		return false;
+	auto blocks = [&]( const SPathPlace &p, int direction )
+	{
+		auto it = locks.find( SPathPlace(p.GetX(), p.GetY(), p.GetLayer()) );
+		if ( it == locks.end() )
+			return false;
+		const STile &t = it->second;
+		unsigned char moves;
+		switch ( p.GetPose() )
+		{
+			case CM_LAY: moves = t.nMoveLay; break;
+			case CM_CROUCH: moves = t.nMoveCrouch; break;
+			case CM_STAND: moves = t.nMoveStand; break;
+			default: return false;
+		}
+		return (moves & (1 << direction)) == 0;
+	};
+	return blocks(from, dir) || blocks(to, (dir + 4) & 7);
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+bool CPathNetwork::IsBlockedByFlipper( int nFlipper,
 	const SPathPlace	&from, const SPathPlace	&to, CPtr<CObjectBase> *ppFlipper,
 	bool *bIsNowOpen, bool *bBlocksInOpenState, bool *bBlocksInClosedState )
 {
@@ -2577,12 +2662,12 @@ bool CPathNetwork::IsBlockedByFlipper(
 	*ppFlipper = 0;
 	pLayer->pGroup->RefreshSpot( to, pMap, 1 );
 	const CNodesLayer::STile &t = pLayer->tiles[ to.GetY() ][ to.GetX() ];
-	if ( t.nFlipper )
+	if ( nFlipper >= 0 && nFlipper < flippers.size() )
 	{
-		SFlipper &flipper = *GetFlipper( t.nFlipper - 1 );
+		SFlipper &flipper = flippers[nFlipper];
 		for ( CFlippersHash::iterator i = flippersHash.begin(); i != flippersHash.end(); ++i )
 		{
-			if ( i->second == t.nFlipper - 1 )
+			if ( i->second == nFlipper )
 			{
 				*ppFlipper = i->first;
 				break;
@@ -2630,6 +2715,8 @@ bool CPathNetwork::IsBlockedByFlipper(
 				*bBlocksInClosedState = ( nPassableC & CP_INACTIVE) == 0;
 				break;
 		}
+		*bBlocksInOpenState |= DoorBlocksMove( flipper.locksOpen, from, to );
+		*bBlocksInClosedState |= DoorBlocksMove( flipper.locksClosed, from, to );
 		return true;
 	}
 	return false;

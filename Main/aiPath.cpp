@@ -74,7 +74,15 @@ bool CPath::AddWithPossibleAction( const SPathPlace& point )
 	CDynamicCast<CPathNetwork> pRealNet( pNet );
 	CPtr<CObjectBase> pFlipper;
 	bool bIsNowOpen, bBlocksInOpenState, bBlocksInClosedState;
-	if ( pRealNet->IsBlockedByFlipper( last, point, &pFlipper, &bIsNowOpen, &bBlocksInOpenState, &bBlocksInClosedState ) )
+	// A doorway can overlap another door's swing. Keep actions for both owners,
+	// including the states established by earlier actions on this same route.
+	vector<int> doors = pRealNet->GetFlippersAt( point );
+	const vector<int> &fromDoors = pRealNet->GetFlippersAt( last );
+	for ( int door : fromDoors )
+		if ( find(doors.begin(), doors.end(), door) == doors.end() )
+			doors.push_back(door);
+	for ( int door : doors )
+	if ( pRealNet->IsBlockedByFlipper( door, last, point, &pFlipper, &bIsNowOpen, &bBlocksInOpenState, &bBlocksInClosedState ) )
 	{
 		for ( int i = 0; i < actions.size(); ++i )
 			if ( actions[i].pObject == pFlipper )
@@ -82,6 +90,11 @@ bool CPath::AddWithPossibleAction( const SPathPlace& point )
 		bool bMustFlip = bIsNowOpen? bBlocksInOpenState : bBlocksInClosedState;
 		if ( bMustFlip )
 		{
+			// Do not turn an edge-only collision into an attempt to operate a
+			// locked/trapped door, or flip a door that blocks in either state.
+			if ( pRealNet->GetFlipper(door)->nFixedFlags ||
+				(bBlocksInOpenState && bBlocksInClosedState) )
+				return false;
 			SPathAction a;
 			a.action = bIsNowOpen ?  PA_CLOSE : PA_OPEN;
 			a.where = last;

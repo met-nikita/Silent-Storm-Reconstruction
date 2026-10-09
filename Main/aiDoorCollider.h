@@ -9,27 +9,42 @@
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 namespace NAI
 {
-struct SDoorColliderAnalyzer
+struct SDoorCollision
 {
 	CPtr<CObjectBase> pSrc;
 	bool bInOpen, bInClosed;
+	SDoorCollision( CObjectBase *p ): pSrc(p), bInOpen(false), bInClosed(false) {}
+};
+struct SDoorColliderAnalyzer
+{
+	// States belong to a particular door, not to the whole collision query.
+	// A closed hull of A and an open hull of B can both be inactive at once.
+	vector<SDoorCollision> doors;
+	bool bBlocked;
 	bool operator()( const SColliderUserInfo& info ) 
 	{ 
-		pSrc = info.pSrc->pUserData;
+		CObjectBase *pSrc = info.pSrc->pUserData;
 		if ( !pSrc )
 			return false;
+		int i = 0;
+		while ( i < doors.size() && doors[i].pSrc != pSrc )
+			++i;
+		if ( i == doors.size() )
+			doors.push_back( SDoorCollision(pSrc) );
+		SDoorCollision &door = doors[i];
 		if ( ( info.pSrc->nTSFlags & NWorld::TS_STATE_OPEN ) == 0 )
-			bInClosed = true;
+			door.bInClosed = true;
 		if ( ( info.pSrc->nTSFlags & NWorld::TS_STATE_CLOSED ) == 0 )
-			bInOpen = true;
-		return ( bInOpen && bInClosed );
+			door.bInOpen = true;
+		bBlocked = bBlocked || ( door.bInOpen && door.bInClosed );
+		return bBlocked;
 	}
-	bool IsCollided() const { return bInOpen && bInClosed; }
-	SDoorColliderAnalyzer::SDoorColliderAnalyzer() : bInOpen( false ), bInClosed( false ), pSrc( 0 )  {}
+	bool IsCollided() const { return bBlocked; }
+	SDoorColliderAnalyzer(): bBlocked(false) {}
 	void Clear() 
 	{
-		bInOpen = bInClosed = false;
-		pSrc = 0;
+		bBlocked = false;
+		doors.clear();
 	}
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////

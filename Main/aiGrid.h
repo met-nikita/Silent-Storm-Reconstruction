@@ -474,6 +474,11 @@ private:
 	void FinishLaddersConstruction();
 	void CreateLaddersInternal( CLayersGroup *pGroup );
 	bool IsNotOnDoor( const SPathPlace &p ) const;
+	// Derived lookup only. The existing per-door maps remain the save format;
+	// a tile's single nFlipper byte cannot identify all overlapping doors.
+	mutable unordered_map<SPathPlace, vector<int>, SPathPlaceHash> flippersByPlace;
+	mutable bool bFlippersIndexed = false;
+	void ClearFlipperTiles( const CLayersGroup *pGroup, const CTRect<int> &region );
 
 public:
 	CPathNetwork( IAIMap *_pMap = 0, IAIJobManager *pManager = 0 );
@@ -519,7 +524,7 @@ public:
 	virtual bool IsValidDestination( const SPathPlace &p );
 	virtual bool IsPassable( const SPathPlace &p );
 	virtual EPassable GetPassability( const SPathPlace &p );   // @0x42e30 granular sibling; IsPassable == (GetPassability==AIP_YES)
-	bool IsBlockedByFlipper( const SPathPlace	&from, const SPathPlace	&to, CPtr<CObjectBase> *ppFlipper,
+	bool IsBlockedByFlipper( int nFlipper, const SPathPlace &from, const SPathPlace &to, CPtr<CObjectBase> *ppFlipper,
 		bool *bIsNowOpen, bool *bBlocksInOpenState, bool *bBlocksInClosedState );
 	virtual bool IsNativePassable( const SPathPlace &p );
 	virtual void GetNearPlaces( const SSphere &s, vector<SPathPlace> *pRes, bool bTakeAll = false );
@@ -537,6 +542,8 @@ public:
 	SFlipper *GetFlipper( int i ) { return &flippers[i]; }
 	const SFlipper *GetFlipper( int i ) const { return &flippers[i]; }
 	SFlipper *GetFlipper( const CObjectBase *pSrc );
+	const vector<int> &GetFlippersAt( const SPathPlace &p ) const;
+	void InvalidateFlipperIndex() { bFlippersIndexed = false; }
 
 	bool HasLowerSame( const SPathPlace &p );
 	bool IsGridReady() { return bColouringConstructed; }
