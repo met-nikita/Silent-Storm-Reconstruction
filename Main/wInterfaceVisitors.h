@@ -46,6 +46,7 @@ namespace NBuilding
 }
 namespace NLSHead
 {
+	class CHeadInfo;
 	class CHeadTransformInfo;   // live head-morph tension source (4-arg AddHead)
 }
 namespace NWorld
@@ -105,6 +106,8 @@ struct IRenderVisitor
 	// view renders the head any more. KEYING DEVIATION: retail passes the unit's NLSHead::CHeadInfo*;
 	// this tree keys head animators by NWorld::CUnit* (see CHeadsController::PlayIdle).
 	virtual void AddHeadIdleAnimator( CUnit *pUnit ) {}
+	// Retail render visitor slot 0x54: freeze a dead/unconscious unit's facial idle.
+	virtual void KillHead( NLSHead::CHeadInfo *pHeadInfo ) {}
 	virtual void AddOccluder( NDb::CAIGeometry *pAIGeom, const SFBTransform &pos, int nFloor ) {}
 	virtual void AddOccluder( NDb::CAIGeometry *pAIGeom, NDb::CSkeleton *pSkeleton, CFuncBase<NAnimation::SSkeletonPose> *pAnimation, int nFloor ) {}
 	virtual NGScene::CDecalTarget* CreateDecalTarget( const vector<CObjectBase*> &targets, const NGScene::SDecalMappingInfo &_info ) { return 0; }

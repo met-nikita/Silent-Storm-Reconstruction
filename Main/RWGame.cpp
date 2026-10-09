@@ -209,6 +209,7 @@ public:
 	virtual void AddHead( NDb::CComplexHead *pHead, CFuncBase<SFBTransform> *pPosition, const NGScene::SRoomInfo &room );
 	virtual void AddHead( NDb::CComplexHead *pHead, CFuncBase<SFBTransform> *pPosition, const NGScene::SRoomInfo &room, NLSHead::CHeadTransformInfo *pTransformInfo, CPtrFuncBase<NGfx::CTexture> *pFaceTexture = 0 );
 	virtual void AddHeadIdleAnimator( NWorld::CUnit *pUnit );
+	virtual void KillHead( NLSHead::CHeadInfo *pHeadInfo );
 	virtual void AddOccluder( NDb::CAIGeometry *pAIGeom, const SFBTransform &pos, int nFloor );
 	virtual void AddOccluder( NDb::CAIGeometry *pAIGeom, NDb::CSkeleton *pSkeleton, CFuncBase<NAnimation::SSkeletonPose> *pAnimation, int nFloor );
 	virtual NGScene::CDecalTarget* CreateDecalTarget( const vector<CObjectBase*> &targets, const NGScene::SDecalMappingInfo &_info );
@@ -580,6 +581,13 @@ void CSetRender::AddHeadIdleAnimator( NWorld::CUnit *pUnit )
 	CObjectBase *pIdler = pHeadsController->PlayIdle( pUnit->GetHeadInfo() );
 	if ( pIdler )
 		RegisterBase( pIdler );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// Retail v1.1 @0x6cb200: forward the world visitor's death/unconscious head state.
+void CSetRender::KillHead( NLSHead::CHeadInfo *pHeadInfo )
+{
+	if ( IsValid( pHeadsController ) )
+		pHeadsController->KillHead( pHeadInfo );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CSetRender::AddOccluder( NDb::CAIGeometry *pAIGeom, const SFBTransform &pos, int nFloor )

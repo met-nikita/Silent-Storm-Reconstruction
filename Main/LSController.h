@@ -70,8 +70,7 @@ public:
 	// created here -- the render path's AddHead/GetAnimator made it first). The caller must register
 	// the returned token into its render sync destination.
 	CObjectBase* PlayIdle( CHeadInfo *pHeadInfo );
-	// release @0x25dc60: force a dead unit's head into the frozen death-mask idle. No dev caller yet
-	// (the world-side unit-death render path is a later parity target); kept for retail parity.
+	// release @0x25dc60: force a dead/unconscious unit's head into the frozen death-mask idle.
 	void KillHead( CHeadInfo *pHeadInfo );
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////

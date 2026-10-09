@@ -214,6 +214,10 @@ void CDumbUnitServer::Visit( IRenderVisitor *p )
 		pHead = 0;
 	p->AddMesh( pModel, animator.GetSkeletonAnimator(), animator.GetSkeletonState(),
 		boundMeshes, pGroup, nFloor, pHead, 0 );
+	// Retail v1.2 @0x752a74: AddMesh creates the shared head animator first;
+	// the world visit then freezes dead/unconscious heads (also used by portraits).
+	if ( pHead && !CanFight() )
+		p->KillHead( pHead->GetHeadInfo() );
 	// release @0x752380 (AttachEffectToUnitBone): play each script-attached effect on the unit. The position
 	// func is the root bone (the dev's own idiom -- cf. the hiding flare below) and the skeleton animator is
 	// passed so the effect's glue-to-bone instances attach to the unit's bones.
