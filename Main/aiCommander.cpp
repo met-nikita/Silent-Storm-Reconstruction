@@ -13,6 +13,7 @@
 #include "aiPlayer.h"
 #include "aiUnitState.h"      // SAIUnitState (the per-unit threat tracker: pEnemy / IsModified)
 #include "aiLogic.h"          // IAILogic (per-unit command-driven behaviour)
+#include "aiRouteLogic.h"
 #include "aiReaction.h"       // CAIReaction (the update-tracker's payload)
 #include "aiMisc.h"           // NAI::CanAIOperateThisUnit
 #include "aiJob.h"            // NAI::IAIJobManager::HasPassCalcerJobs (GenerateCommand pass-calc barrier)
@@ -567,8 +568,12 @@ bool CAICommander::ShouldYieldInactiveUnit( IAIUnit *pUnit )
 		!IsValid( pUnit ) || !IsValid( pUnit->GetUnitServer() ) )
 		return false;
 	NWorld::CUnitServer *pUS = pUnit->GetUnitServer();
-	// Idle turn/wait routines cannot progress from an orphaned climb pose.
-	// Yield without moving the unit or interrupting an existing climb command.
+	// CM_INACTIVE alone does not prohibit every action (knives can still be
+	// thrown). Only bypass the stationary idle route that spins in this pose;
+	// combat decisions and routes with real work must reach their normal checks.
+	CDynamicCast<CAIRouteLogic> pRoute( pUnit->GetLogic() );
+	if ( !IsValid( pRoute ) || !pRoute->IsStationaryIdleRoutine() )
+		return false;
 	return !pUS->GetPosition().pos.p.IsFinal() &&
 		pUS->GetPosition().pos.p.GetPose() == CM_INACTIVE &&
 		!pUS->HasCommand() && !pUS->IsPerformingAction();

@@ -214,6 +214,7 @@ public:
 	CTaskCommandRoaming(): CTaskCommand() {}
 	CTaskCommandRoaming( const NAI::SPathPlace &_p, int _nAPRadius ):
 		CTaskCommand(), p( _p ), nAPRadius( _nAPRadius ) {}
+	int GetAPRadius() const { return nAPRadius; }
 	//
 	virtual void Do();
 };

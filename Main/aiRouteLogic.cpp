@@ -153,6 +153,24 @@ void CAIRouteLogic::AddCommand( CTaskCommand *pCmd )
 	routeCommands.push_back( CObj<CTaskCommand>( pCmd ) );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+bool CAIRouteLogic::IsStationaryIdleRoutine() const
+{
+	if ( !bCircled || routeCommands.empty() || !commands.empty() )
+		return false;
+	for ( int i = 0; i < (int)routeCommands.size(); ++i )
+	{
+		CTaskCommand *pCmd = routeCommands[i];
+		if ( !IsValid( pCmd ) || !pCmd->Commands.empty() )
+			return false;
+		if ( CDynamicCast<CTaskCommandWait>( pCmd ) || CDynamicCast<CTaskCommandChangeDirection>( pCmd ) )
+			continue;
+		CDynamicCast<CTaskCommandRoaming> pRoam( pCmd );
+		if ( !IsValid( pRoam ) || pRoam->GetAPRadius() != 0 )
+			return false;
+	}
+	return true;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 // @0x98f80: a dead unit/server finishes everything. Out of range -> finished iff the server has no live
 // command. In range -> the step's own IsEndOfCommand, but only while not resuming (bContinueCommand) and
 // while the server is idle (no live command). The release reads "pCurrentCmd alive"; the dev-native

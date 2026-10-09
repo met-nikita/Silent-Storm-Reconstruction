@@ -39,6 +39,7 @@ public:
 	//
 	void SetCircled( bool _bCircled ) { bCircled = _bCircled; }
 	bool IsCircled() const { return bCircled; }   // a circled route never Finish()es -- the squad-alarm guard excludes it
+	bool IsStationaryIdleRoutine() const;
 	void AddCommand( CTaskCommand *pCmd );   // append a route step (wires nothing; the factory sets the server)
 	//
 	// CAILogic overrides
