@@ -304,6 +304,7 @@ public:
 	void SetUnit( NGame::IUnitTracker *pUnit );
 	// release CUnitFace::PlayAckEvent @0x254ba0: arm the ack-effect state machine (Draw @0x254df0)
 	void PlayAckEvent( const STime &sTime, NUI::CAckEvent *pEvent );
+	void SkipAckAnimation( const STime &sTime );
 
 	bool ProcessMessage( const SEvent &sEvent );
 	void Draw( const STime &sTime, NGScene::I2DGameView *pView );
@@ -439,6 +440,17 @@ void CUnitFace::PlayAckEvent( const STime &sTime, NUI::CAckEvent *_pEvent )
 	// bReady so the ack's voice + subtitle still play (without the portrait dance). CRITICAL under the
 	// deferred scheme: skipping Set() here leaves bReady=false and the voice NEVER starts.
 	pEvent->Set( sTime );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CUnitFace::SkipAckAnimation( const STime &sTime )
+{
+	// ORIGINAL RETAIL BUG: a hidden single-unit portrait never reaches Draw's
+	// readiness handshake. Let its pending voice/subtitle play without the dance.
+	// Do not reset the TTL of a playing or cancelled acknowledgement.
+	if ( IsValid( pEvent ) && !pEvent->IsReady() )
+		pEvent->Set( sTime );
+	if ( eStage != ST_NONE )
+		eStage = ST_ACK_TERMINATE; // restore the selected face when shown again
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CUnitFace::Draw( const STime &sTime, NGScene::I2DGameView *pView )
@@ -1068,6 +1080,7 @@ public:
 
 	// release CInfoPanelSingleUnit::PlayAckEvent @0x256360 -> forward to the unit face's ack animation
 	void PlayAckEvent( const STime &sTime, NUI::CAckEvent *pEvent ) { if ( IsValid( pUnitFace ) ) pUnitFace->PlayAckEvent( sTime, pEvent ); }
+	void SkipAckAnimation( const STime &sTime ) { if ( IsValid( pUnitFace ) ) pUnitFace->SkipAckAnimation( sTime ); }
 
 	bool ProcessMessage( const SEvent &sEvent );
 	void Draw( const STime &sTime, NGScene::I2DGameView *pView );
@@ -1407,8 +1420,10 @@ void CUnitPanel::OnSerialize( CStructureSaver &f )
 // release CUnitPanel::PlayAckEvent @0x2563e0: forward the ack to the single-unit face panel.
 void CUnitPanel::PlayAckEvent( const STime &sTime, CAckEvent *pEvent )
 {
-	if ( IsValid( pInfoPanelSingleUnit ) )
+	if ( pMission->CountSelected() == 1 && IsValid( pInfoPanelSingleUnit ) )
 		pInfoPanelSingleUnit->PlayAckEvent( sTime, pEvent );
+	else if ( IsValid( pEvent ) && !pEvent->IsReady() )
+		pEvent->Set( sTime );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CUnitPanel::ProcessMessage( const SEvent &sEvent )
@@ -1484,6 +1499,11 @@ void CUnitPanel::Draw( const STime &sTime, NGScene::I2DGameView *pView )
 		bSignlePanel = true;
 	else if ( nCountSelected > 1 )
 		bMultiPanel = true;
+
+	// Also release a handshake already pending when selection changed or a save
+	// was loaded. The single-unit panel's Draw will not run while it is hidden.
+	if ( !bSignlePanel && IsValid( pInfoPanelSingleUnit ) )
+		pInfoPanelSingleUnit->SkipAckAnimation( sTime );
 
 	// v1.2 Draw @0x653f40: gate the buttons on the end-of-turn cooldown -- once the mission
 	// IsReady (v1.2-added guard; v1.1 @0x2542e0 probed unconditionally), CanDoCommand(new

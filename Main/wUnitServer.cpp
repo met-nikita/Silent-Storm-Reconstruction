@@ -1021,7 +1021,14 @@ NRPG::IUnitMissionInfo* CUnitServer::GetRPG() const
 // CExecMove::CheckLockerState to step the who-locks-whom chain onto the locking unit's own remover.
 CPathConflictsRemover* CUnitServer::GetPathConflictsRemover()
 {
-	return IsValid( pExec ) ? pExec->GetPathConflictsRemover() : 0;
+	// Retail v1.2 0x7c0420: a prepared route is not a promise to step aside.
+	// In turn-based mode, only a running, affordable action can free the tile;
+	// otherwise callers must treat this unit as stationary and reroute around it.
+	if ( !IsValid( pExec ) || !CanSpendAP( pExec->GetStartAP() ) )
+		return 0;
+	if ( !IsPerformingAction() && !GetWorld()->IsRealTime() )
+		return 0;
+	return pExec->GetPathConflictsRemover();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CUnitServer::Segment()
