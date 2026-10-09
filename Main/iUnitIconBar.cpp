@@ -62,24 +62,14 @@ static int GetUnitsGroupStrafe( NGame::IMission *pMission )
 	vector<CPtr<NGame::IUnitTracker> > unitsSet;
 	pMission->GetSelectedUnits( &unitsSet );
 
-	int nStrafe = N_ICON_UNAVAILABLE;
-	bool bPoseSet = false;
+	// Retail v1.2 0x6504b0: checked only for a nonempty, wholly strafing group.
+	// Mixed selections remain unchecked, not unavailable/undefined.
+	if ( unitsSet.empty() )
+		return 0;
 	for ( int nTemp = 0; nTemp < unitsSet.size(); nTemp++ )
-	{
-		int nNewStrafe = 0;
-		if ( unitsSet[nTemp]->GetUnit()->IsStrafing() )
-			nNewStrafe = 1;
-
-		if ( !bPoseSet )
-		{
-			nStrafe = nNewStrafe;
-			bPoseSet = true;
-		}
-		else if ( nStrafe != nNewStrafe )
-			nStrafe = N_ICON_UNDEFAINED;
-	}
-
-	return nStrafe;
+		if ( !unitsSet[nTemp]->GetUnit()->IsStrafing() )
+			return 0;
+	return 1;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 static int GetUnitsGroupHide( NGame::IMission *pMission )
@@ -87,24 +77,13 @@ static int GetUnitsGroupHide( NGame::IMission *pMission )
 	vector<CPtr<NGame::IUnitTracker> > unitsSet;
 	pMission->GetSelectedUnits( &unitsSet );
 
-	int nHide = N_ICON_UNAVAILABLE;
-	bool bSet = false;
+	// Retail v1.2 0x6505a0: the same all-members predicate as the Hide command.
+	if ( unitsSet.empty() )
+		return 0;
 	for ( int nTemp = 0; nTemp < unitsSet.size(); nTemp++ )
-	{
-		int nNewHide = 0;
-		if ( unitsSet[nTemp]->GetUnit()->IsHiding() )
-			nNewHide = 1;
-
-		if ( !bSet )
-		{
-			nHide = nNewHide;
-			bSet = true;
-		}
-		else if ( nHide != nNewHide )
-			nHide = N_ICON_UNDEFAINED;
-	}
-
-	return nHide;
+		if ( !unitsSet[nTemp]->GetUnit()->IsHiding() )
+			return 0;
+	return 1;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 static int GetUnitsGroupWeaponMode( NGame::IMission *pMission )
