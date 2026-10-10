@@ -3210,18 +3210,15 @@ CUnitServer *CWorld::GetUnitServerByPersID( int nPersID ) const
 	return 0;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-bool CWorld::UsePassageObject( CUnitServer *pUS, int nPassageZoneID, bool bForced )
+bool CWorld::CanUsePassageZone( int nPassageZoneID, bool bForced,
+	unordered_map< CPtr<CUnitServer>, CPtr<IPassageObject>, SPtrHash > *pPassagesForUnits )
 {
-	ASSERT( IsValid( pUS ) );
-	if ( !IsValid( pUS ) )
-		return false;
-	//
 	CPtr<NScenario::CScenarioZone> pZone = GetGlobalGame()->pCurrentZone;
 	if ( !IsValid( pZone ) )
 		return false;
 	//
-	CPtr<NRPG::CGlobalPlayer> pGlobalPlayer = pUS->GetPlayer()->GetGlobalPlayer();
-	if ( !IsValid( pGlobalPlayer ) )
+	CPtr<CPlayer> pPlayer = GetPlayerByID( 0 );
+	if ( !IsValid( pPlayer ) || !IsValid( pPlayer->GetGlobalPlayer() ) )
 		return false;
 	//
 	list< CPtr<IPassageObject> > passageObjects;
@@ -3231,28 +3228,41 @@ bool CWorld::UsePassageObject( CUnitServer *pUS, int nPassageZoneID, bool bForce
 	// Retail v1.1 CanUsePassageZone 0x767bb9..0x767c19: scripted exits
 	// assign the first passage without CanPass/proximity checks; normal exits
 	// still require every conscious living unit to reach a passage.
-	bool bCanPass = true;
-	unordered_map< CPtr<CUnitServer>, CPtr<IPassageObject>, SPtrHash > passagesForUnits;
 	for ( list< CObj<CUnitServer> >::iterator i = units.begin(); i != units.end(); ++i )
 	{
-		if ( !(*i)->IsUnconscious() && 
-			!(*i)->GetUnitRPG()->IsDead() && (*i)->GetPlayer() == pUS->GetPlayer() )
+		if ( (*i)->CanFight() && (*i)->GetPlayer() == pPlayer )
 		{
 			bool bCanUnitPass = false;
 			for (	list< CPtr<IPassageObject> >::iterator j = passageObjects.begin(); j != passageObjects.end(); ++j )
 				if ( bForced || (*j)->CanPass( *i ) )
 				{
 					bCanUnitPass = true;
-					passagesForUnits[ (*i).GetPtr() ] = *j;
+					if ( pPassagesForUnits )
+						(*pPassagesForUnits)[ (*i).GetPtr() ] = *j;
 					break;
 				}	
 			//
-			bCanPass &= bCanUnitPass;
+			if ( !bCanUnitPass )
+				return false;
 		}
 	}
-	//
-	if ( !bCanPass )
+	return true;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+bool CWorld::UsePassageObject( CUnitServer *pUS, int nPassageZoneID, bool bForced )
+{
+	ASSERT( IsValid( pUS ) );
+	if ( !IsValid( pUS ) )
 		return false;
+	CPtr<NRPG::CGlobalPlayer> pGlobalPlayer = pUS->GetPlayer()->GetGlobalPlayer();
+	if ( !IsValid( pGlobalPlayer ) )
+		return false;
+	// Share the retail whole-party gate with the command preview. The optional
+	// map records each unit's eligible exit only when actually transitioning.
+	unordered_map< CPtr<CUnitServer>, CPtr<IPassageObject>, SPtrHash > passagesForUnits;
+	if ( !CanUsePassageZone( nPassageZoneID, bForced, &passagesForUnits ) )
+		return false;
+	CPtr<NScenario::CScenarioZone> pZone = GetGlobalGame()->pCurrentZone;
 	//
 	if ( nPassageZoneID <= 0 )
 	{
