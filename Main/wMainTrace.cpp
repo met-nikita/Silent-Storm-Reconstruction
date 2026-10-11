@@ -2,6 +2,7 @@
 #include "wMainTrace.h"
 #include "wMain.h"
 #include "aiMap.h"
+#include "wOSBase.h"
 namespace NWorld
 {
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -39,30 +40,39 @@ void TraceObjects( IWorld *pWorld, const CRay &ray, vector<CObjectBase*> *pRes, 
 {
 	if ( !CDynamicCast<CWorld>(pWorld) )
 		return;
-	CVec3 ptDst;
 	vector<NAI::SInterval> intervals;
 	pWorld->GetAIMap()->Trace( ray, &intervals, TS_PICK|TS_PASS_BLOCKER );
-	ptDst = ray.ptOrigin - ray.ptDir * ( (ray.ptOrigin.z - 1) / ray.ptDir.z );
+	NAI::SInterval *pBest = 0;
+	float fBest = 1e30f;
 	for ( int k = 0; k < intervals.size(); ++k )
 	{
 		NAI::SInterval &interv = intervals[k];
 		if ( interv.enter.fT < 0 )
 			continue;
-		//if ( interv.pUserData == 0 )
-		//	continue;
-		ptDst = ray.ptOrigin + interv.enter.fT * ray.ptDir;
-		//NAI::SPosition test;
-		//pPathNetwork->SetOnFloor( &test, interv.pSrc->nFloor, ptDst );
-		//int nCurFloor = test.GetFloor();
-		int nCurFloor = interv.pSrc->nFloor;
-		if ( nCurFloor > nMaxFloor )
+		if ( interv.pSrc->nFloor > nMaxFloor )
 			continue;
-		if ( find( pRes->begin(), pRes->end(), interv.pSrc->pUserData ) == pRes->end() )
+		// Retail NWorld::Trace @0x77d760 ranks interactives ahead of scenery.
+		// A cut-away building hull can be nearer than the visible unit behind
+		// it. Do not stop at that hull before the caller can classify the pick.
+		// Pure vision/non-solid surfaces retain retail's unpenalized priority.
+		float fT = interv.enter.fT;
+		int nTS = interv.pSrc->nTSFlags;
+		if ( !( nTS & TS_VISION ) || ( nTS & TS_VISION_SOLID ) )
 		{
-			pRes->push_back( interv.pSrc->pUserData );
-			break;
+			CDynamicCast<CUnit> pUnit( interv.pSrc->pUserData );
+			CDynamicCast<CObjectServerBase> pObject( interv.pSrc->pUserData );
+			CDynamicCast<IItem> pItem( interv.pSrc->pUserData );
+			if ( !pUnit && !( pObject && pObject->IsTargetable() ) && !pItem )
+				fT += 1.0f;
+		}
+		if ( fT < fBest )
+		{
+			fBest = fT;
+			pBest = &interv;
 		}
 	}
+	if ( pBest )
+		pRes->push_back( pBest->pSrc->pUserData );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool TraceRay( IWorld *pWorld, const CRay &ray, int nMaxFloor, CObjectBase **ppUserData, int *pUserID, CVec3 *pPoint )

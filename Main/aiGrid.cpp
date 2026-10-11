@@ -1962,20 +1962,9 @@ void CPathNetwork::Unlock( CObjectBase *pUnit )
 	CLocksHash::iterator i = lockedPlaces.find( pUnit );
 	if ( i != lockedPlaces.end() )
 	{
-		bool bStaleLocker = !IsLockerUnit( pUnit );
 		DisableLocks( pUnit );
 		ASSERT( i->second.bLocked == false );
 		lockedPlaces.erase( i );
-		if ( bStaleLocker )
-		{
-			// ORIGINAL RETAIL BUG FIXED: nLocks is a boolean, not a reference
-			// count. Removing a corpse's overlapping footprint must preserve
-			// other currently enabled living-unit/PK locks (including selection).
-			for ( CLocksHash::const_iterator k = lockedPlaces.begin(); k != lockedPlaces.end(); ++k )
-				if ( k->second.bLocked && IsLockerUnit( k->first ) )
-					for ( unsigned int n = 0; n < k->second.places.size(); ++n )
-						LockUnlockPoint( k->second.places[n], true );
-		}
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1991,6 +1980,14 @@ void CPathNetwork::DisableLocks( CObjectBase *pUnit )
 			LockUnlockPoint( l, false );
 		}
 		i->second.bLocked = false;
+		// nLocks is a boolean, not a reference count. This also applies to
+		// live overlapping PKs during placement/path queries, not just corpses.
+		// Restore only enabled owners: selected-only queries deliberately
+		// disable the rest. Keep serialized lock flags/layout unchanged.
+		for ( CLocksHash::const_iterator k = lockedPlaces.begin(); k != lockedPlaces.end(); ++k )
+			if ( k->second.bLocked && IsLockerUnit( k->first ) )
+				for ( unsigned int n = 0; n < k->second.places.size(); ++n )
+					LockUnlockPoint( k->second.places[n], true );
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////

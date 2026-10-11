@@ -9,6 +9,8 @@ namespace NAI
 	// @0x5a730 granular sibling of IsBigLockerPassable (bool -> EPassable): AIP_LOCKED if any place of
 	// the big-unit lock footprint at p is locked, else the anchor place's own GetPassability verdict.
 	EPassable BigLockerPassableState( IPathNetwork *pNet, const NAI::SPathPlace &p );
+	// Spawn/relocation only: full standing footprint, borders and reservations.
+	bool IsBigLockerPlacePassable( IPathNetwork *pNet, const SPathPlace &p );
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 };
 #endif

@@ -1011,7 +1011,7 @@ void CDumbUnitServer::PlaceOnPassablePlace()
 	// passability as well as the large footprint's locks. An unlocked empty
 	// layer is not a floor: accepting it strands the wearer at height zero
 	// and the first GRID_INFO_UPDATED can kill its pilot via ForcedMove.
-	bool bPassable = bBigUnit? NAI::BigLockerPassableState( pNet, position.pos.p ) == NAI::AIP_YES : pNet->IsPassable( position.pos.p );
+	bool bPassable = bBigUnit? NAI::IsBigLockerPlacePassable( pNet, position.pos.p ) : pNet->IsPassable( position.pos.p );
 	if ( bPassable )
 	{
 		bLocksTwoPlaces = false;
@@ -1030,7 +1030,11 @@ void CDumbUnitServer::PlaceOnPassablePlace()
 		for ( int k = 0; k < places.size(); ++k )
 		{
 			places[k].SetPose( NAI::CM_STAND );
-			bool bPassable = bBigUnit? NAI::BigLockerPassableState( pNet, places[k] ) == NAI::AIP_YES : pNet->IsPassable( places[k] );
+			// Test the facing that will actually be installed below: diagonal
+			// PK footprints cover seven cells, cardinal ones only three.
+			if ( bBigUnit )
+				places[k].SetDirection( position.pos.p.GetDirection() );
+			bool bPassable = bBigUnit? NAI::IsBigLockerPlacePassable( pNet, places[k] ) : pNet->IsPassable( places[k] );
 			if ( bPassable && pNet->GetFloor( places[k].GetLayer() ) <= nStartFloor )
 			{
 				NAI::SPosition pos( position.pos );

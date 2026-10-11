@@ -2311,14 +2311,12 @@ bool CUnitMission::HasCritical( NDb::ECritical eCritical, CCritical** ppCritical
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CUnitMission::EnableCriticals()
 {
-	for ( int i = 0; i < NDb::N_CRIT_TYPES; ++i )
-		criticalsState[i] = CS_ENABLED;
+	criticalsState.assign( NDb::N_CRIT_TYPES, CS_ENABLED );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CUnitMission::DisableCriticals()
 {
-	for ( int i = 0; i < NDb::N_CRIT_TYPES; ++i )
-		criticalsState[i] = CS_DISABLED;
+	criticalsState.assign( NDb::N_CRIT_TYPES, CS_DISABLED );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CUnitMission::DisableCritical( NDb::ECritical eC, ECriticalState eState  )
