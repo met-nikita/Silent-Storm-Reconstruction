@@ -632,17 +632,13 @@ class CExecSnipeAim: public CCommandExecute
 private:
 	ZDATA_( CCommandExecute )
 	CPtr<CUnitServer> pTarget;
-	// @0x3a7280/@0x3b0260 -- release added a 4-byte hitLocation member at +0x1c (after
-	// pTarget@+0x18) holding the snipe's called-shot hit location; operator& serializes it
-	// as tag 3 (DataChunk, 4 bytes). Mirrors CUnitStateSniping's deferred-called-shot note:
-	// this predecessor snipe has no called-shot machinery, so it stays HL_BODY (un-called) --
-	// SAVE-FORMAT member only; behavior deferred (3-arg ctor / caller threading FLAGGED).
+	// Retail preserves the command's aim point, including HL_ANY (tag 3).
 	NAI::EHitLocation hitLocation;
 	ZEND int operator&( CStructureSaver &f ) { f.Add(1,( CCommandExecute *)this); f.Add(2,&pTarget); f.Add(3,&hitLocation); return 0; }
 
 public:
-	CExecSnipeAim() : hitLocation(NAI::HL_BODY) {}
-	CExecSnipeAim( CUnitServer *_pUnitServer, CUnitServer *_pTarget );
+	CExecSnipeAim() : hitLocation(NAI::HL_ANY) {}
+	CExecSnipeAim( CUnitServer *_pUnitServer, CUnitServer *_pTarget, NAI::EHitLocation _hitLocation );
 
 	virtual EUnitCommandResult CanDoIt( const NAI::SUnitPosition &from, bool bIgnoreTarget = false ) const;
 	virtual int GetStartAP() const;

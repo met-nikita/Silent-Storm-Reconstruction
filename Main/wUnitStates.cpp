@@ -206,11 +206,12 @@ void CUnitStateNormal::FilterCriticals()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CUnitStateSniping
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CUnitStateSniping::CUnitStateSniping( CUnitServer *_pUS, CUnitServer *_pTarget, int _nBaseAP ):
- CUnitState(_pUS), pTarget(_pTarget), nBaseAP(_nBaseAP), nSnipeAP(0), hitLocation(NAI::HL_BODY)
+CUnitStateSniping::CUnitStateSniping( CUnitServer *_pUS, CUnitServer *_pTarget, int _nBaseAP, NAI::EHitLocation _hitLocation ):
+ CUnitState(_pUS), pTarget(_pTarget), nBaseAP(_nBaseAP), nSnipeAP(0), TargetPosition(VNULL3), hitLocation(_hitLocation)
 {
-	TargetPosition = pTarget->GetPosition();
-	InitialTargetPosition = pTarget->GetPosition();
+	NAI::IAIMap *pAIMap = pUS->GetWorld()->GetAIMap();
+	pAIMap->GetUnitHLPos( &TargetPosition, pAIMap->GetHull(pTarget), NAI::HL_ANY );
+	InitialTargetPosition = TargetPosition;
 	pUS->GetUnitRPG()->SaveAP( NRPG::SSnipeAP( nSnipeAP, pTarget->GetUnitRPG() ) );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -222,12 +223,14 @@ bool CUnitStateSniping::CheckTarget()
 	// check target visibility
 	bRes = bRes && pUS->GetWorld()->GetGame()->CheckVisibility( pUS, pTarget, true );
 	// check the angle by which the target has moved
-	CVec3 ptInitialDir = ( InitialTargetPosition.GetCenter() - pUS->GetPosition().GetCenter() );
-	CVec3 ptCurrentDir = ( pTarget->GetPosition().GetCenter() - pUS->GetPosition().GetCenter() );
+	CVec3 ptInitialDir = ( InitialTargetPosition - pUS->GetPosition().GetCenter() );
+	CVec3 ptCurrentDir = ( TargetPosition - pUS->GetPosition().GetCenter() );
 	Normalize( &ptInitialDir );
 	Normalize( &ptCurrentDir );
-	float fAngle = acos( ptInitialDir * ptCurrentDir );
-	bRes = bRes && (fAngle <= PI/8);
+	// Retail avoids acos above 1 after normalization and uses a strict angle limit.
+	float fDot = ptInitialDir * ptCurrentDir;
+	double fAngle = fDot < 1.0f ? acos( fDot ) : 0.0;
+	bRes = bRes && (fAngle < PI/8);
 	//
 	return bRes;
 }
@@ -246,16 +249,14 @@ void CUnitStateSniping::CollectSnipeAP( int _nAP )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CUnitStateSniping::Segment()
 {
-	if ( TargetPosition.GetCenter() != pTarget->GetPosition().GetCenter() )
+	NAI::IAIMap *pAIMap = pUS->GetWorld()->GetAIMap();
+	CVec3 currentPosition = TargetPosition;
+	pAIMap->GetUnitHLPos( &currentPosition, pAIMap->GetHull(pTarget), NAI::HL_ANY );
+	if ( TargetPosition != currentPosition )
 	{
+		TargetPosition = currentPosition;
 		if ( !CheckTarget() )
 			CancelSnipe();
-		else
-		{
-//			pUS->Do( new CCmdSetCommand( pUS, new CCmdSnipeAim( pTarget ) ) );
-//			pUS->Do( new CCmdSetCommand( pUS, new CCmdContinue() ) );
-			TargetPosition = pTarget->GetPosition();
-		}
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////

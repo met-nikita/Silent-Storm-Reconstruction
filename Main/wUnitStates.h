@@ -79,21 +79,18 @@ class CUnitStateSniping: public CUnitState
 	int nBaseAP; // AP before snipe
 	int nSnipeAP; // AP accumulated during snipe
 	CPtr<CUnitServer> pTarget;
-	NAI::SUnitPosition InitialTargetPosition;
-	NAI::SUnitPosition TargetPosition;
-	// release-added (tag 7, @0x3cbe50): the chosen called-shot hit location of the snipe.
-	// The release ctor takes it as a 4th arg; this predecessor snipe has no called-shot
-	// machinery, so it stays HL_BODY (un-called) -- save-format member only, behavior deferred.
-	// (The release also retyped Initial/TargetPosition SUnitPosition->CVec3, but both are 12
-	// bytes raw-serialized, so tags 5/6 are byte-identical and the dev type is kept for GetCenter().)
+	// Retail tags 5/6 are raw world-space vectors, not nested SUnitPosition records.
+	CVec3 InitialTargetPosition;
+	CVec3 TargetPosition;
+	// Retail tag 7: the original aim point, including HL_ANY for an uncalled shot.
 	NAI::EHitLocation hitLocation;
 	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CUnitState*)this); f.Add(2,&nBaseAP); f.Add(3,&nSnipeAP); f.Add(4,&pTarget); f.Add(5,&InitialTargetPosition); f.Add(6,&TargetPosition); f.Add(7,&hitLocation); return 0; }
 
 	bool CheckTarget();
 
 public:
-	CUnitStateSniping() : hitLocation(NAI::HL_BODY) {}
-	CUnitStateSniping( CUnitServer *_pUS, CUnitServer *_pTarget, int _nBaseAP );
+	CUnitStateSniping() : nBaseAP(0), nSnipeAP(0), InitialTargetPosition(VNULL3), TargetPosition(VNULL3), hitLocation(NAI::HL_ANY) {}
+	CUnitStateSniping( CUnitServer *_pUS, CUnitServer *_pTarget, int _nBaseAP, NAI::EHitLocation _hitLocation );
 
 	void CancelSnipe();
 

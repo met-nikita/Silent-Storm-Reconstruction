@@ -3249,10 +3249,9 @@ bool CExecDisarmMine::TimeLabelReached()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CExecSnipeAim
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// @0x3a7280 -- release ctor also records hitLocation (3rd param). The called-shot 3rd arg is
-// deferred (see header note / FLAGGED); default to HL_BODY so the tag-3 save round-trips cleanly.
-CExecSnipeAim::CExecSnipeAim( CUnitServer *_pUnitServer, CUnitServer *_pTarget ):
-	CCommandExecute(_pUnitServer), pTarget(_pTarget), hitLocation(NAI::HL_BODY)
+// Retail @0x3a7280: keep the requested aim point through preparation and firing.
+CExecSnipeAim::CExecSnipeAim( CUnitServer *_pUnitServer, CUnitServer *_pTarget, NAI::EHitLocation _hitLocation ):
+	CCommandExecute(_pUnitServer), pTarget(_pTarget), hitLocation(_hitLocation)
 {
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -3296,8 +3295,8 @@ void CExecSnipeAim::Run()
 
 	// @0x3a19a0 -- release derives the snipe-ray END POINT from the target's AIMap hit-location
 	// world pos (GetUnitHLPos at hitLocation, HL_ANY clamped to HL_BODY) MINUS the attack origin,
-	// not Jan03's pTarget->GetCP() - pUS->GetCP(). hitLocation stays HL_BODY here (called-shot
-	// deferred), so this reduces to the body-centre ray for the un-called case.
+	// not Jan03's pTarget->GetCP() - pUS->GetCP(). The HL_ANY -> HL_BODY conversion is
+	// ONLY for the animation's aim ray; the sniping state keeps the requested location.
 	CRay ray;
 	ray.ptOrigin = pUS->GetAttackOrigin( pUS->GetPosition() );
 	pUS->GetWorld()->GetAIMap()->GetUnitHLPos( &ray.ptDir, pUS->GetWorld()->GetAIMap()->GetHull(pTarget),
@@ -3314,7 +3313,7 @@ void CExecSnipeAim::Run()
 		if ( !pUS->animator.IsAiming() )
 			pUS->DoAction( NRPG::AC_PREPARE );
 		pUS->animator.Snipe( pUS->GetPosition(), ray );
-		pUS->SetState( new CUnitStateSniping( pUS, pTarget, 0 ) );	// 4th hitLocation arg deferred (FLAGGED)
+		pUS->SetState( new CUnitStateSniping( pUS, pTarget, 0, hitLocation ) );
 	}
 	else
 	{
