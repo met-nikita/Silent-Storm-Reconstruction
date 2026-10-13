@@ -951,13 +951,15 @@ BEGIN_SCRIPT_COMMAND( UnitShootPrepare, "uun" )
 	return 0;
 END_SCRIPT_COMMAND
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// retail @0x2f9da0: leave the PK the unit sits in, or warn if it is not in one; then
-// always push the unit.
+// Retail @0x2f9da0 returns the PK captured BEFORE queuing the exit, not its pilot.
+// The base script stores this result for PartyWearPK on the return to the hangar.
 BEGIN_SCRIPT_COMMAND( UnitLeavePK, "u" )
 	CDynamicCast<NWorld::CUnitServer> pUS( luaParams[ 0 ].p );
+	CPtr<NWorld::CUnitServer> pPK;
 	if ( pUS )
 	{
-		if ( IsValid( pUS->GetWearingPK() ) )
+		pPK = pUS->GetWearingPK();
+		if ( IsValid( pPK ) )
 		{
 			DoCommand( pUS, new NWorld::CCmdExitPK(), true );
 		}
@@ -969,19 +971,18 @@ BEGIN_SCRIPT_COMMAND( UnitLeavePK, "u" )
 				<< "\"" << szName << "\"" << " does not sit in PK" << endl;
 		}
 	}
-	luaPushCPtr( pState, pUS );
+	luaPushCPtr( pState, pPK );
 	return 1;
 END_SCRIPT_COMMAND
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// retail @0x2f9c80 (helper @0x2f59f0): "wear PK" -- take the corpse body.
-// ORIGINAL BUG (confirmed by disasm): the guard takes the corpse when it CAN fight and
-// warns "not an empty PK" when it CANNOT -- the inverse of the obvious test.  Kept faithful.
+// Retail @0x2f9c80 (helper @0x2f59f0): CUnit vtbl+0x10 is IsEmptyPK,
+// NOT CanFight. Only a PK shell is a valid target for this script command.
 BEGIN_SCRIPT_COMMAND( UnitWearPK, "uu" )
 	CDynamicCast<NWorld::CUnitServer> pWho( luaParams[ 0 ].p );
 	CDynamicCast<NWorld::CUnitServer> pCorpse( luaParams[ 1 ].p );
 	if ( pWho && pCorpse )
 	{
-		if ( pCorpse->CanFight() )						// ORIGINAL BUG: inverted
+		if ( pCorpse->IsEmptyPK() )
 			DoCommand( pWho, new NWorld::CCmdTakeCorpse( ( NWorld::CUnit * )pCorpse ), true );
 		else
 		{

@@ -161,14 +161,12 @@ bool IsAIPlayer( NWorld::IPlayer *pPlayer )
 	return !CDynamicCast<CSequenceCommander>( pPlayer->GetCommander() );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// NAI::GetAICommander @0x73ea0. ELIDED (documented): the release additionally gates on a unit-component
-// predicate (server+0x14c vtbl 0x10) before resolving the commander. The dev tree resolves the AI
-// commander via this exact dyncast WITHOUT that gate in 6+ places (aiRoute / aiSignal / aiTacticalCommander
-// / aiTaskCommander / aiSnipeAction), so omitting it is dev-consistent; the gate only ADDS a rejection.
+// Retail NAI::GetAICommander @0x73ea0: require a live player and reject empty PK
+// shells (CUnit vtbl+0x10). Scripts may teleport those shells, but they have no AI.
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CAICommander* GetAICommander( NWorld::CUnitServer *pUS )
 {
-	if ( !IsValid( pUS ) || pUS->GetPlayer() == 0 )
+	if ( !IsValid( pUS ) || !IsValid( pUS->GetPlayer() ) || pUS->IsEmptyPK() )
 		return 0;
 	CDynamicCast<CAICommander> pCommander( pUS->GetPlayer()->GetCommander() );
 	if ( !IsValid( pCommander ) )
