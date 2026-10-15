@@ -469,8 +469,10 @@ void CHoverFlashButton::Draw( const STime &sTime, NGScene::I2DGameView *pView )
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CScrollWindowBase::CScrollWindowBase( const SWindowInfo &sInfo ): 
-	CWindow( sInfo )
+	CWindow( sInfo ), vValue( 0, 0 )
 {
+	// Retail initializes both axes. Without a scrollbar an axis is never refreshed;
+	// a stale NaN can move the client off-screen even when its overflow is zero.
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CWindow* CScrollWindowBase::GetClient() const
