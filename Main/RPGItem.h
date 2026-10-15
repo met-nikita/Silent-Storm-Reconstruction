@@ -38,6 +38,7 @@ public:
 	virtual bool Place( const CTPoint<int> &sPos, IInventoryItem *pItem ) = 0;
 	virtual void ArrangeItems() = 0;
 
+	virtual bool CanTakeOff( NDb::ESlot where ) const = 0;
 	virtual bool Equip( NDb::ESlot where, IInventoryItem *pWhat ) = 0;
 	virtual IInventoryItem *TakeOff( NDb::ESlot where ) = 0;
 	virtual bool Activate( NDb::ESlot where ) = 0;

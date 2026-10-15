@@ -572,6 +572,9 @@ static EUnitCommandResult CanMoveInventoryItem( CUnitServer *pUS, CCmdMoveInvent
 			ASSERT( !pUSSource->IsDead() );
 			NRPG::IInventory *pInventory = pUSSource->GetUnitRPG()->GetInventory();
 
+			// Retail GetItem (0x7a3bc0) validates removal before resolving a slot.
+			if ( !pInventory->CanTakeOff( (NDb::ESlot)sSource.nSlot ) )
+				return UCR_INVALID_COMMAND;
 			pItem = pInventory->Get( (NDb::ESlot)sSource.nSlot );
 			if ( !IsValid( pItem ) )
 				return UCR_INVALID_COMMAND;

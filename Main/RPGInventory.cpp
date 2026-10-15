@@ -40,6 +40,7 @@ public:
 	virtual const vector<SBackPackItem>& GetItems() const { return items; };
 
 	virtual bool CanEquip( NDb::ESlot where, const IInventoryItem *pWhat ) const;
+	virtual bool CanTakeOff( NDb::ESlot where ) const;
 	virtual bool Equip( NDb::ESlot where, IInventoryItem *pWhat );
 	virtual IInventoryItem *TakeOff( NDb::ESlot where );
 	virtual IInventoryItem *Get( NDb::ESlot where ) const;
@@ -224,6 +225,13 @@ bool CInventory::CanEquip( NDb::ESlot where, const IInventoryItem *pWhat ) const
 	}
 	else
 		return ( !pPK );	
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+bool CInventory::CanTakeOff( NDb::ESlot where ) const
+{
+	// Retail 0x69d7d0: single-slot PK weapons are fixed equipment. Keep this
+	// manual-transfer policy separate from TakeOff, used by suit/pilot transfers.
+	return !IsValid( pPK ) || !pPK->bSingleSlot;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CInventory::Equip( NDb::ESlot where, IInventoryItem *pWhat )
