@@ -41,10 +41,14 @@ EPassable BigLockerPassableState( IPathNetwork *pNet, const NAI::SPathPlace &p )
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 bool IsBigLockerPlacePassable( IPathNetwork *pNet, const SPathPlace &p )
 {
+	// Flying PKs have no ground footprint; GetLayer encodes their altitude.
+	// Match BigLockerPassableState instead of attempting ground relocation.
+	if ( p.IsFinal() )
+		return pNet->GetPassability( p ) == AIP_YES;
 	// Placement needs room for the entire PK, not merely an unlocked anchor.
 	// Keep movement's retail passability policy separate from this stricter
 	// spawn/relocation check. PKs require standing clearance even when empty.
-	if ( !p.IsIntegral() || p.IsFinal() )
+	if ( !p.IsIntegral() )
 		return false;
 	SPathPlace center( p );
 	center.SetPose( CM_STAND );

@@ -2227,6 +2227,10 @@ EPassable CPathNetwork::GetPassability( const SPathPlace &p )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CPathNetwork::IsPassable( const SPathPlace &p )
 {
+	// Match GetPassability: flying places encode altitude, not a ground layer.
+	// Accept them before either the ladder or tile lookup (e.g. pocket restore).
+	if ( p.IsFinal() )
+		return true;
 	if ( !p.IsIntegral() )
 	{
 		// ladder...
