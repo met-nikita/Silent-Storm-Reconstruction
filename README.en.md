@@ -13,17 +13,24 @@ Current status: the game builds and runs using the Steam version's files.
 Is mostly playable, with some subtle and not-so-subtle bugs and divergences from the
 retail version.
 
+Current status (18.10.2026): the game builds and runs using the Steam version's files,
+allies campaign was successfully completed from start to finish[^1], some bugs and divergences
+from the retail version may be present.
+
+[^1]: This repo does not fix bugs with game's LUA scripts and other assets, so, for example,
+you still have to install the unoffical patch to beat the last mission on Steam version.
+
 <div align="center">
   <table>
     <tr>
       <td colspan="3" align="center">
-        <img width="300" alt="Screenshot 2026-07-17 143626" src="https://github.com/user-attachments/assets/a7fa15d4-6be7-491d-abf9-882c63bd00cd" />
+        <img width="300" alt="image" src="https://github.com/user-attachments/assets/38ed17a9-1eb2-49c8-a3e5-37e54a1365c7" />
       </td>
     </tr>
     <tr>
       <td colspan="3" align="center">
-        <img width="300" alt="Screenshot 2026-07-18 143925" src="https://github.com/user-attachments/assets/b7021f4c-839f-48cc-a508-4541a851f195" />
-        <img width="300" alt="Screenshot 2026-07-18 144009" src="https://github.com/user-attachments/assets/731740e4-74d0-41db-940a-5c687bb2fbd5" />
+        <img width="300" alt="image" src="https://github.com/user-attachments/assets/33eb9149-4716-4c9a-931a-e8c2102f9761" />
+        <img width="300" alt="image" src="https://github.com/user-attachments/assets/5ac5fc48-9e68-4551-a1ff-022f59d13c3b" />
       </td>
     </tr>
   </table>

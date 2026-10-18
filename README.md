@@ -9,21 +9,24 @@ https://github.com/nival/Silent-Storm
 получение behaviour-equivalent версии Silent Storm v1.2, путём анализа
 .pdb файлов версии v1.1 (RussianPatch1) и декомпиляции v1.2.
 
-Текущий статус: игра собирается и запускается на файлах Steam версии,
-в целом играбельна, присутствуют различной заметности баги и расхождения с
-релизной версией.
+Текущий статус (18.10.2026): игра собирается и запускается на файлах Steam версии,
+была успешно пройдена от начала и до конца кампания союзников[^1], могут присутствовать
+различной заметности баги и расхождения с релизной версией.
+
+[^1]: Этот репозиторий не исправляет проблемы самих LUA скриптов и ассетов игры, и, например,
+чтобы пройти последнюю миссию на Steam версии, всё еще нужно устанавливать неофициальный патч.
 
 <div align="center">
   <table>
     <tr>
       <td colspan="3" align="center">
-        <img width="300" alt="Screenshot 2026-07-17 143626" src="https://github.com/user-attachments/assets/a7fa15d4-6be7-491d-abf9-882c63bd00cd" />
+        <img width="300" alt="image" src="https://github.com/user-attachments/assets/38ed17a9-1eb2-49c8-a3e5-37e54a1365c7" />
       </td>
     </tr>
     <tr>
       <td colspan="3" align="center">
-        <img width="300" alt="Screenshot 2026-07-18 143925" src="https://github.com/user-attachments/assets/b7021f4c-839f-48cc-a508-4541a851f195" />
-        <img width="300" alt="Screenshot 2026-07-18 144009" src="https://github.com/user-attachments/assets/731740e4-74d0-41db-940a-5c687bb2fbd5" />
+        <img width="300" alt="image" src="https://github.com/user-attachments/assets/33eb9149-4716-4c9a-931a-e8c2102f9761" />
+        <img width="300" alt="image" src="https://github.com/user-attachments/assets/5ac5fc48-9e68-4551-a1ff-022f59d13c3b" />
       </td>
     </tr>
   </table>
