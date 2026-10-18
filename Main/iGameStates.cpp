@@ -917,6 +917,9 @@ void CStateAttack::UpdateCursor()
 	if ( eNewHitLocation != eHitLocation )
 	{
 		eHitLocation = eNewHitLocation;
+		// A called shot can be forbidden even when an ordinary shot is valid
+		// (e.g. an unseen enemy). Refresh before choosing the cursor/caption.
+		UpdateInfo();
 		UpdateCursorInfo();
 	}
 
