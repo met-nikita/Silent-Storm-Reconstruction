@@ -3895,9 +3895,17 @@ EUnitCommandResult CExecSwap::CanDoIt( const NAI::SUnitPosition &from, bool bIgn
 {
 	if ( pUS->GetWorld()->IsBase() )
 		return UCR_GENERAL_FAILURE;
+	// GetPose() maps CM_INACTIVE to CROUCH. Swapping that transition pose
+	// (e.g. a unit on a ladder) transfers it without its movement executor.
+	if ( from.pos.p.GetPose() == NAI::CM_INACTIVE )
+		return UCR_UNAVAILABLE;
 	if ( !bIgnoreTarget )
 	{
+		if ( !IsValid( pTarget ) )
+			return UCR_NO_TARGET;
 		const NAI::SUnitPosition &to = pTarget->GetPosition();
+		if ( to.pos.p.GetPose() == NAI::CM_INACTIVE )
+			return UCR_UNAVAILABLE;
 		if ( from.GetPose() == NAI::CRAWL || to.GetPose() == NAI::CRAWL )
 			return UCR_TARGET_OUT_OF_RANGE;
 		NAI::ETransitionType type = NAI::GetTransitionType( from.pos.GetNetwork(), from.pos.p, to.pos.p );
@@ -3908,6 +3916,12 @@ EUnitCommandResult CExecSwap::CanDoIt( const NAI::SUnitPosition &from, bool bIgn
 }
 void CExecSwap::Run()
 {
+	// A target can start climbing after the command was accepted.
+	if ( CanDoIt( pUS->GetPosition() ) != UCR_OK )
+	{
+		Failed();
+		return;
+	}
 	pUS->DoAction( NRPG::AC_SWAP );
 	CObj<CExecSwap> pKeepAlive = this;
 	NAI::SUnitPosition from = pUS->GetPosition(), to = pTarget->GetPosition();
