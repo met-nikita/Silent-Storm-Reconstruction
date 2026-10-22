@@ -2628,13 +2628,16 @@ void CExecCorpse::Run()
 	{
 		// SpillPK: eject the corpse from its shell, lay it dead, re-seat the empty PK.
 		CUnitServer *pPK = pDeadUnit->GetWearingPK();
-		pPK->SetPosition( pDeadUnit->GetPosition() );
-		pPK->WearAsPK( false );
 		pDeadUnit->FlipPanzerklein( 0 );
 		// retail @0x3a62e0 (SpillPK): Die(pos, VNULL3, bPlayDeath=FALSE) -- the spilled pilot corpse
 		// drops as a pure ragdoll, no death clip and no synthetic (1,0) push direction.
 		pDeadUnit->animator.Die( pDeadUnit->GetPosition(), VNULL3, false, pDeadUnit );
 		pUS->GetWorld()->GetPathNetwork()->Unlock( pDeadUnit );
+		// Retail 0x7a63f3 / v1.2 0x7a6833: restore the shell only after
+		// releasing its pilot's footprint. WearAsPK checks placement; doing it
+		// earlier treats the pilot as an obstacle and relocates the shell.
+		pPK->SetPosition( pDeadUnit->GetPosition() );
+		pPK->WearAsPK( false );
 	}
 	else if ( bTake )
 	{
