@@ -162,7 +162,11 @@ bool CAIRouteLogic::IsStationaryIdleRoutine() const
 		CTaskCommand *pCmd = routeCommands[i];
 		if ( !IsValid( pCmd ) || !pCmd->Commands.empty() )
 			return false;
-		if ( CDynamicCast<CTaskCommandWait>( pCmd ) || CDynamicCast<CTaskCommandChangeDirection>( pCmd ) )
+		// Fear's stationary look-around routine starts with ChangePose. In the
+		// inactive pose checked by the commander this only sets the wish pose;
+		// it cannot move the unit or make the following look/wait steps progress.
+		if ( CDynamicCast<CTaskCommandWait>( pCmd ) || CDynamicCast<CTaskCommandChangeDirection>( pCmd ) ||
+			CDynamicCast<CTaskCommandChangePose>( pCmd ) )
 			continue;
 		CDynamicCast<CTaskCommandRoaming> pRoam( pCmd );
 		if ( !IsValid( pRoam ) || pRoam->GetAPRadius() != 0 )
