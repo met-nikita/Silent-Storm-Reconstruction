@@ -1006,16 +1006,20 @@ void CDumbUnitServer::PlaceOnPassablePlace()
 		return;
 	bool bBigUnit = NAI::IsBigLocker( this );
 	NAI::IPathNetwork *pNet = pWorld->GetPathNetwork();
-	pNet->Unlock( this );
-	// Retail v1.1 0x751d8f / v1.2 0x7520df checks the anchor's
-	// passability as well as the large footprint's locks. An unlocked empty
-	// layer is not a floor: accepting it strands the wearer at height zero
-	// and the first GRID_INFO_UPDATED can kill its pilot via ForcedMove.
-	bool bPassable = bBigUnit? NAI::IsBigLockerPlacePassable( pNet, position.pos.p ) : pNet->IsPassable( position.pos.p );
+	// Retail v1.1 0x751cba..0x751d80 evaluates against all other world
+	// units, then restores every reservation on each exit.
+	vector< CPtr<CUnit> > units;
+	pWorld->GetAllUnits( &units );
+	list<CObjectBase*> selected;
+	for ( int i = 0; i < units.size(); ++i )
+		selected.push_back( units[i] );
+	selected.remove( this );
+	pNet->LockSelected( selected );
+	bool bPassable = bBigUnit? NAI::BigLockerPassableState( pNet, position.pos.p ) == NAI::AIP_YES : pNet->IsPassable( position.pos.p );
 	if ( bPassable )
 	{
 		bLocksTwoPlaces = false;
-		pNet->Lock( this, position.pos.p );
+		pNet->UnlockSelected();
 		return;
 	}
 	CVec3 cp = position.GetCP();
@@ -1030,11 +1034,9 @@ void CDumbUnitServer::PlaceOnPassablePlace()
 		for ( int k = 0; k < places.size(); ++k )
 		{
 			places[k].SetPose( NAI::CM_STAND );
-			// Test the facing that will actually be installed below: diagonal
-			// PK footprints cover seven cells, cardinal ones only three.
-			if ( bBigUnit )
-				places[k].SetDirection( position.pos.p.GetDirection() );
-			bool bPassable = bBigUnit? NAI::IsBigLockerPlacePassable( pNet, places[k] ) : pNet->IsPassable( places[k] );
+			// Retail tests the candidate orientation supplied by GetNearPlaces;
+			// the unit's original orientation is restored only after selection.
+			bool bPassable = bBigUnit? NAI::BigLockerPassableState( pNet, places[k] ) == NAI::AIP_YES : pNet->IsPassable( places[k] );
 			if ( bPassable && pNet->GetFloor( places[k].GetLayer() ) <= nStartFloor )
 			{
 				NAI::SPosition pos( position.pos );
@@ -1058,13 +1060,14 @@ void CDumbUnitServer::PlaceOnPassablePlace()
 			newPos.pos.p = p;
 			animator.PlaceUnit( newPos );
 			SetPosition( newPos );
+			pNet->UnlockSelected();
 			return;			
 		}
 	}
 	ASSERT( 0 ); // no suitable place was found
 	OutputDebugString( "impossible to place unit correctly\n" );
 	bLocksTwoPlaces = false;
-	pNet->Lock( this, position.pos.p );
+	pNet->UnlockSelected();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // @0x351630: retail is CreateFlash(bLeft, bFirstBullet). bLeft picks the L_/R_Weapon barrel bone on a dual-mount

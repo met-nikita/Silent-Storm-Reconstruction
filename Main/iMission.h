@@ -689,13 +689,14 @@ protected:
 	// splash. Exec @0x20ba00 does a 3-way pick zone-image -> this->pPWLImage -> default 0x373, so a
 	// chapter whose zone carries no PWL image still shows the chapter's own loading background.
 	CDBPtr<NDb::CUITexture> pPWLImage;
+	CPtr<IMission> pMissionToTerminate;
 
 public:
 	CICBeginMission() {}
 	CICBeginMission( int nTemplateID, int nVariantID, const vector<string> &params, NRPG::CGlobalGame *_pGlobalGame, NDb::CUITexture *_pPWLImage = 0 );
 	// one scenario zone can consist of several templates
 	CICBeginMission( NScenario::CScenarioZone *pZone,
-		int _nTemplateID, const vector<string> &params, NRPG::CGlobalGame *_pGlobalGame, bool bEmulateChapter = false, NDb::CUITexture *_pPWLImage = 0 );
+		int _nTemplateID, const vector<string> &params, NRPG::CGlobalGame *_pGlobalGame, bool bEmulateChapter = false, NDb::CUITexture *_pPWLImage = 0, IMission *_pMissionToTerminate = 0 );
 	virtual void Exec();
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////

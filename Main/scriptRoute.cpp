@@ -95,16 +95,6 @@ BEGIN_SCRIPT_COMMAND(UnitSetToWaypoint, "us")
 		CPtr<NAI::CAIRouteWaypoint> pWaypoint = pScript->pWorld->GetWaypoint( luaParams[ 1 ].s );
 		if ( IsValid( pWaypoint ) )
 		{
-			// Route installed BEFORE the teleport chain. CORRECTED retail facts (disasm-verified):
-			// retail @0x2ebca0 installs the route AFTER the teleport commands, and retail's SetRoute
-			// @0xadb90 DOES cancel too (vtbl+0x28 = CAIUnit::CancelCommand @0xad820 -> a CCmdCancel
-			// through the server sink) -- so dev AssignControl's Do(CCmdCancel) mirrors retail, and
-			// since CExecTeleport::Run is fully SYNCHRONOUS (PlaceUnit+SetPosition+Finished inside Run)
-			// a trailing cancel cannot hit an in-flight teleport in either order. The route-first order
-			// is kept as a harmless invariant (the cancel then demonstrably targets only the unit's
-			// previous activity), NOT as a fix -- the "multi-segment teleport killed mid-flight" theory
-			// was refuted by live command-lifecycle logging (teleports complete synchronously).
-			SetOneWaypointRoute( pUS, pWaypoint );
 			NAI::SUnitPosition unitPos;
 			unitPos.pos = pWaypoint->pos;
 			unitPos.bRun = false;
@@ -135,6 +125,11 @@ BEGIN_SCRIPT_COMMAND(UnitSetToWaypoint, "us")
 					pUS->Do( new NWorld::CCmdSetCommand( pUS, new NWorld::CCmdContinue() ) );
 				}
 			}
+			// Retail 0x6ec00c installs the route after the synchronous teleport.
+			// SetRoute cancels the completed teleport command before later script
+			// commands (such as UnitSetDirection) are queued.
+			if ( pScript->pWorld->IsSequence() || pUS->IsAIUnit() )
+				SetOneWaypointRoute( pUS, pWaypoint );
 		}
 	}
 	return 0;

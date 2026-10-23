@@ -2565,7 +2565,7 @@ void CMission::ExecWorldCommands()
 						GetDesktop()->PlayAck( pAck->phrases.front() );
 					else if ( CDynamicCast<NWorld::CUICmdLoadTemplate> pLoadTemplate = pCmd )
 						NMainLoop::Command( new CICBeginMission( pLoadTemplate->pZone,
-							pLoadTemplate->nTemplateID, vector<string>(), GetRPGGame() ) );
+							pLoadTemplate->nTemplateID, vector<string>(), GetRPGGame(), false, pPWLImage, this ) );
 					else if ( CDynamicCast<NWorld::CUICmdShowStore> pShowStore = pCmd )
 					{
 						NWorld::CPlayer *pPlayer = dynamic_cast<NWorld::CPlayer*>( GetActivePlayer()->GetPlayer() );
@@ -3248,9 +3248,9 @@ CICBeginMission::CICBeginMission( int _nTemplateID, int _nVariantID, const vecto
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CICBeginMission::CICBeginMission( NScenario::CScenarioZone *_pZone,
-		int _nTemplateID, const vector<string> &_params, NRPG::CGlobalGame *_pGlobalGame, bool _bEmulateChapter, NDb::CUITexture *_pPWLImage ):
+		int _nTemplateID, const vector<string> &_params, NRPG::CGlobalGame *_pGlobalGame, bool _bEmulateChapter, NDb::CUITexture *_pPWLImage, IMission *_pMissionToTerminate ):
 	pZone( _pZone ), nTemplateID( _nTemplateID ), nVariantID( -1 ), pGlobalGame( _pGlobalGame ), params(_params),
-	bEmulateChapter( _bEmulateChapter ), pPWLImage( _pPWLImage )
+	bEmulateChapter( _bEmulateChapter ), pPWLImage( _pPWLImage ), pMissionToTerminate( _pMissionToTerminate )
 {
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -3269,6 +3269,10 @@ void CICBeginMission::Exec()
 		pSplash = pPWLImage;
 	SetLoadingImage( pSplash );
 	ShowLoadingScreen( 0 );
+	// Retail v1.1 0x60ba7f: finish the outgoing subzone before creating
+	// its replacement, while the main loop is outside its script/UI update.
+	if ( IsValid( pMissionToTerminate ) )
+		pMissionToTerminate->Terminate();
 
 	// retail @0x20ba00 bEmulateChapter arm: a direct mission->zone transition (script BeginZone)
 	// runs the leave-zone bookkeeping the chapter map would have done. The load-bearing call is

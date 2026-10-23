@@ -756,6 +756,11 @@ void luaV_stepExecute( lua_State *L )
 				break;
 			}
 		}
+		// Retail v1.1 0x7eb770 / v1.2 0x8238c0 yields after an implicit
+		// function end, leaving its caller for the next thread update.
+		// Explicit OP_RETURN keeps executing in this update.
+		if ( GET_OPCODE(i) == OP_END )
+			break;
   }
 #ifdef _DEBUG
 	// didn't we spoil the CBase?
