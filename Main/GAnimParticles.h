@@ -163,6 +163,7 @@ private:
 	float GetEnergy();
 	void ApplyCollision( CVec3 ptColl, CVec3 vel );
 	void AddSphere( const SSphere &sphere, float fMass );
+	void ResolveInitialFloorContact();
 public:
 	CASphereSet() : nCollided(0), nFloor(-100) {}   // saveload factory path; operator& fills the rest
 	// retail ctor @0x4eff40 folds Jan03's InitSpheres/InitBound into the ctor and adds pIgnore

@@ -1166,6 +1166,8 @@ void CASphereSet::Init( STime t, const CVec3 &position, const CQuat &rotation, c
 		lastPos = pos = position;
 	else
 		lastPos = pos = position + rot.Rotate( massCenter );
+	if ( !bMassCenter && ePhysCase != PH_GRENADE_ATTACK )
+		ResolveInitialFloorContact();
 	p = fMass * velocity;
 	l.x = random.GetFloat(-2.0f,2.0f);
 	l.y = random.GetFloat(-2.0f,2.0f);
@@ -1210,6 +1212,35 @@ void CASphereSet::Init( STime t, const CVec3 &position, const CQuat &rotation, c
 	}
 	csSystem << "Starting physics case " << pszCase << endl;
 	pPhys = NDb::GetDBPhysParams( pszCase );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CASphereSet::ResolveInitialFloorContact()
+{
+	// Map-placed items may rest with their collision-sphere centres on the floor.
+	// On waking, those embedded contacts have no usable radial normal and the
+	// first rotation can put the centres behind the one-sided floor triangles.
+	// Sweep from above to separate the initial overlap before integration starts.
+	vector<SSphere> probes;
+	vector<CVec3> velocities;
+	for ( int i = 0; i < spheres.size(); ++i )
+	{
+		const SMassSphere &s = spheres[i];
+		CVec3 center = pos + rot.Rotate( s.ptCenter );
+		center.z += s.fRadius;
+		probes.push_back( SSphere( center, s.fRadius ) );
+		velocities.push_back( CVec3( 0, 0, -2 * s.fRadius ) );
+	}
+	vector<NAI::SCollisionPoint> contacts;
+	NAI::PhysCollideInfo( pMap, probes, velocities, &contacts, NWorld::TS_ITEM_BLOCKER );
+	float fRaise = 0;
+	for ( int i = 0; i < contacts.size(); ++i )
+	{
+		const NAI::SCollisionPoint &c = contacts[i];
+		if ( c.fDist != NAI::FP_NO_COLLISION && c.plane.n.z > 0 )
+			fRaise = Max( fRaise, spheres[i].fRadius - c.fDist );
+	}
+	pos.z += fRaise;
+	lastPos = pos;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CASphereSet::Calc( STime t )
