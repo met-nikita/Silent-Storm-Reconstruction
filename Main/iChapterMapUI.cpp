@@ -620,7 +620,10 @@ void CRandomSector::UpdateSector( const STime &sTime, const CVec2 &vTeamPos )
 	static SRand sRand;
 
 	vector<string> templParams;
-	if ( HitTest( vTeamPos.x, vTeamPos.y ) )
+	// New markers have a visible window at (0,0) before their first spawn;
+	// expired markers also keep that window while fading out. Only an active
+	// encounter may trigger entry, irrespective of the window's draw state.
+	if ( IsVisible() && HitTest( vTeamPos.x, vTeamPos.y ) )
 	{
 		// Retail v1.1 0x5a9ac6: consume the marker before queuing entry.
 		SetVisible( false );
