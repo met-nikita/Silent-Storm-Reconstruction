@@ -121,12 +121,16 @@ const char* GetBoneName( NDb::ESlot slot, NRPG::IUnitMissionInfo *pRPG, bool bUn
 	NDb::CRPGUniform *pDBUniform = pInventory->GetUniform();
 	NRPG::IInventoryItem *pItem = pInventory->Get( slot );
 	NRPG::IInventoryItem *pActiveItem = pInventory->GetActive();
-	if ( !pItem || !pDBUniform )
+	if ( !pItem )
 		return "";
 	if ( pItem->GetDBItem()->subType == NDb::SUBTYPE_HEAVY )
 		return GetBoneName( UIT_WEAPON_HEAVY, pItem );
 	if ( pItem == pActiveItem && !bUndrawWeapon )
 		return GetBoneName( UIT_HAND, pItem );
+	// Retail v1.1 0x61d953..0x61d9a2: hand/heavy attachments do not
+	// require a uniform. The boss has none, but still throws held grenades.
+	if ( !pDBUniform )
+		return "";
 	for ( int i = 0; i < NDb::N_ITEM_PLACES; ++i )
 	{
 		// Retail GetBoneName uses the preferred subtype of each visual place.
