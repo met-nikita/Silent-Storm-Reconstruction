@@ -2544,7 +2544,12 @@ void CExecCannon::Run()
 	{
 		pUS->GetUnitRPG()->SetCannonItem(0);
 		if ( !pUS->GetUnitRPG()->IsUnconscious() && !pUS->GetUnitRPG()->IsDead() )
+		{
+			// Reloading can leave the mounted weapon's type cached. Restore
+			// the personal weapon before LeaveCannon selects the standing pose.
+			pUS->animator.SetWeaponAnimation( pUS->GetUnitRPG()->GetWeaponType() );
 			pUS->animator.LeaveCannon( pUS->GetPosition() );
+		}
 		pOS->SetCurrentUnit(0);
 		pUS->SetState( new CUnitStateNormal( pUS ) );
 	}
