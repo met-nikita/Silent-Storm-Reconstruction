@@ -36,7 +36,7 @@ const int
 	N_ZONE_SIZE									= 69,
 	N_RANDOMZONE_SIZE						= 49,
 	N_RANDOMZONE_TTL						= 10000,	// TimeToLife
-	N_RANDOMZONE_MIN_DIST				= 8,
+	N_RANDOMZONE_MIN_DIST				= 32,
 	N_RANDOMZONE_MAX_DIST				= 256,
 	N_RANDOMZONE_ROLLTRY_COUNT	= 100;
 const float
@@ -621,15 +621,25 @@ void CRandomSector::UpdateSector( const STime &sTime, const CVec2 &vTeamPos )
 
 	vector<string> templParams;
 	if ( HitTest( vTeamPos.x, vTeamPos.y ) )
+	{
+		// Retail v1.1 0x5a9ac6: consume the marker before queuing entry.
+		SetVisible( false );
 		NMainLoop::CommandWithAutoSave( NStr::ToAscii( GetDBString( 20243 ) ), new NGame::CICBeginMission( GetSector().nTemplate, -1, templParams, pChapter->GetRPGGame(), pChapter->GetChapterMap()->pPWLImage ) );
+		return;
+	}
 
 	if ( sUpdateTime > sTime )
 		return;
 
+	// Retail clears the last encounter template on the first matching update.
+	if ( pChapter->GetRPGGame()->nCurrentTemplateID == GetSector().nTemplate )
+		pChapter->GetRPGGame()->nCurrentTemplateID = 0;
+
 	sUpdateTime = sTime + N_RANDOMZONE_TTL * sRand.GetFloat( 0.5f, 1.0f );
 	if ( !IsVisible() )
 	{
-		if ( sRand.Get( 100 ) < GetSector().nProbability )
+		// Retail v1.1 0x5a9c7e: reject rolls ABOVE the configured chance.
+		if ( sRand.Get( 100 ) > GetSector().nProbability )
 			return;
 
 		for ( int nTemp = 0; nTemp < N_RANDOMZONE_ROLLTRY_COUNT; nTemp++ )
