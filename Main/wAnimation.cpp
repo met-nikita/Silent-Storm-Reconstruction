@@ -2391,8 +2391,15 @@ void CUnitAnimator::FinishHealing( const NAI::SUnitPosition &cmdPos, bool bRepai
 		PlayAnimation( cmdPos, pAnim, false, false );
 		SetCustomIdleAnimation( 0 );
 		nAnimFlagsPoseWeapon = nFlags;
+		IdleOn( cmdPos );
 	}
-	IdleOn( cmdPos );
+	else
+	{
+		// Ordinary idle is a rendering overlay. Replace the underlying healing
+		// pose too, or the next movement blends from that stale pose after
+		// switching the overlay off (also present in retail).
+		Stand( cmdPos );
+	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CUnitAnimator::PlayLadderAnimation( const NAI::SUnitPosition &prevPos, int nType )
