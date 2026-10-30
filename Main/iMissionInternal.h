@@ -92,7 +92,7 @@ private:
 	NInput::CBind bindFocusUnit, bindAddFloor, bindSubFloor;
 
 	NInput::CBind bindCancel, bindCancelAction, bindContinue, bindPause, bindMainMenu, bindCluesMenu, bindObjectivesMenu, bindGameMenu, bindEndMission;
-	NInput::CBind bindHero1, bindHero2, bindHero3, bindHero4, bindHero5, bindHero6, bindSelPrev, bindSelNext;
+	NInput::CBind bindHero1, bindHero2, bindHero3, bindHero4, bindHero5, bindHero6, bindHero7, bindSelPrev, bindSelNext;
 	NInput::CBind bindMove, bindAttack, bindSetMine, bindSetTrap, bindFirstAid, bindDropCorpse, bindExitPK, bindRotate;
 	NInput::CBind bindUseTool;	// retail "usetool" icon-bar command (use the held tool on a target)
 	NInput::CBind bindNormalPose, bindCrawlPose, bindCrouchPose, bindRunPose, bindStrafe, bindHide;

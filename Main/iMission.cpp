@@ -148,7 +148,7 @@ CMission::CMission():
 	bUpdated( false ), bForceUpdateNextFrame( false ),
 	bRealTime( false ), bHasCommands( false ), bTrackIsReady( false ), bTrackActionExecuted( false ),
 	bindCancel( "cancel" ),	bindCancelAction( "cancelaction" ),	bindContinue( "continue" ),	bindPause( "pause" ), bindMainMenu( "mainmenu" ), bindEndMission( "endmission" ), bindHideInterface( "hideinterface" ), bindSpecialHideInterface( "hideinterface_special" ), bindTrailerHideInterface( "hideinterface_trailer" ), 
-	bindHero1( "hero_1" ), bindHero2( "hero_2" ), bindHero3( "hero_3" ), bindHero4( "hero_4" ), bindHero5( "hero_5" ), bindHero6( "hero_6" ), bindSelPrev( "hero_prev" ), bindSelNext( "hero_next" ),
+	bindHero1( "hero_1" ), bindHero2( "hero_2" ), bindHero3( "hero_3" ), bindHero4( "hero_4" ), bindHero5( "hero_5" ), bindHero6( "hero_6" ), bindHero7("hero_7"), bindSelPrev( "hero_prev" ), bindSelNext( "hero_next" ),
 	bindSnapShot( "weapon_snapshot" ), bindAimedShot( "weapon_aimedshot" ), bindCarefulShot( "weapon_carefulshot" ), bindShortBurst( "weapon_shortburst" ), bindLongBurst( "weapon_longburst" ), bindSnipeShot( "weapon_snipeshot" ), bindWeaponPrevMode( "weapon_prevmode" ), bindWeaponNextMode( "weapon_nextmode" ),
 	bindGrenadeModeThrow( "grenade_throw" ), bindGrenadeModeSetTrap( "grenade_settrap" ),
 	bindWeaponReload( "weapon_reload" ), bindPrevSlot( "slot_prev" ), bindNextSlot( "slot_next" ), bindItemUnload( "unload" ), bindItemArrange( "arrange" ),
@@ -1773,6 +1773,8 @@ bool CMission::ProcessEvent( const NInput::SEvent &sEvent )
 		nSelection = 4;
 	else if ( bindHero6.ProcessEvent( sEvent ) )
 		nSelection = 5;
+	else if ( bindHero7.ProcessEvent( sEvent ) )
+		nSelection = 6;
 
 	if ( nSelection != -1 )
 	{
