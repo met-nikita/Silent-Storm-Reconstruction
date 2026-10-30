@@ -2107,10 +2107,16 @@ IPlayer* CWorld::AddPlayer( const wstring &wsName, NRPG::CGlobalPlayer *pGlobalP
 	if ( !pGlobalPlayer->deployData.bPassage && !waypoints.empty() )
 		FetchDeployWaypoints( waypoints, pPathNetwork, &deployWps );
 
-	int nPers = pGlobalPlayer->mercs.size();
+	// Retail v1.1 0x76e321..0x76e365: temporary recruits travel with
+	// the regular squad between templates of the same scenario zone.
+	vector< CObj<NRPG::CUnit> > deployingUnits = pGlobalPlayer->mercs;
+	deployingUnits.insert( deployingUnits.end(), pGlobalPlayer->zoneMercs.begin(), pGlobalPlayer->zoneMercs.end() );
+	int nPers = deployingUnits.size();
   for ( int i = 0; i < nPers; i++ )
 	{
-		if ( pGlobalPlayer->mercs[i]->IsDead() )
+		NRPG::CUnit *pUnit = deployingUnits[i];
+		// Carried unconscious units are restored by InitPlayerCorpseCarrying.
+		if ( pUnit->IsDead() || pUnit->IsUnconscious() )
 			continue;
 		//
 		NAI::SPathPlace placeForUnit;
@@ -2141,7 +2147,7 @@ IPlayer* CWorld::AddPlayer( const wstring &wsName, NRPG::CGlobalPlayer *pGlobalP
 			for ( list< CPtr<IPassageObject> >::iterator j = passageObjects.begin(); j != passageObjects.end(); ++j )
 			{
 				if ( (*j)->GetPassageObjectID() == 
-					pGlobalPlayer->deployData.unitsDeployData[ pGlobalPlayer->mercs[i].GetPtr() ].nPassageObjectID )
+					pGlobalPlayer->deployData.unitsDeployData[ pUnit ].nPassageObjectID )
 				{
 					pPassageObject = *j;
 					break;
@@ -2188,7 +2194,6 @@ IPlayer* CWorld::AddPlayer( const wstring &wsName, NRPG::CGlobalPlayer *pGlobalP
 		if ( !bSpecialPassageDeploy )
 			placeForUnit = pPathNetwork->GetDeployPlace( placeForUnit, nShift );
 
-		NRPG::CUnit *pUnit = pGlobalPlayer->mercs[i];
  		CPtr<CUnitServer> pUS = AddUnit( placeForUnit, NRPG::CreateUnit( pUnit ), pRes );
 		ASSERT( IsValid( pUS ) );
 		if ( !IsValid( pUS ) )
@@ -3963,6 +3968,17 @@ void CWorld::ChangeUnitPlayer( CUnitServer *pUnit, CPlayer *pPlayer )
 	// the order must be exactly this, otherwise pUnit becomes non-IsValid
 	pPlayer->AddUnit( pUnit );
 	pOldPlayer->RemoveUnit( pUnit );
+	// Retail v1.1 0x76cc28..0x76ccd4: retain temporary recruits in
+	// the new global owner, then release them from the previous owner.
+	CPtr<NRPG::CGlobalPlayer> pGlobalPlayer = pPlayer->GetGlobalPlayer();
+	if ( IsValid( pGlobalPlayer ) )
+		pGlobalPlayer->zoneMercs.push_back( pUnit->GetUnitRPG()->GetRPGUnit() );
+	pGlobalPlayer = pOldPlayer->GetGlobalPlayer();
+	if ( IsValid( pGlobalPlayer ) )
+	{
+		vector< CObj<NRPG::CUnit> > &zoneMercs = pGlobalPlayer->zoneMercs;
+		zoneMercs.erase( remove( zoneMercs.begin(), zoneMercs.end(), pUnit->GetUnitRPG()->GetRPGUnit() ), zoneMercs.end() );
+	}
 	//
 	pUnit->SetPlayer( pPlayer );
 	pUnit->GetUnitRPG()->SetDiplomacy( GetDiplomacy()->GetPlayerDiplomacy( pPlayer->GetScenarioPlayerID() ) );

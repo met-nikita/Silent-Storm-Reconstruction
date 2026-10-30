@@ -122,6 +122,13 @@ void CGlobalPlayer::GetAliveUnits( vector< CPtr<NRPG::CUnit> > *pUnits )
 		if ( !(*i)->IsDead() )
 			pUnits->push_back( (*i).GetPtr() );
 	}
+	// Retail v1.1 0x69a96b: rescued temporary companions also count
+	// when the scenario processes the units brought out of the mission.
+	for ( vector<CObj<CUnit> >::iterator i = zoneMercs.begin(); i != zoneMercs.end(); ++i )
+	{
+		if ( !(*i)->IsDead() )
+			pUnits->push_back( (*i).GetPtr() );
+	}
 	//
 	unordered_map< CPtr<NRPG::CUnit>, SUnitDeployData, SPtrHash >::iterator i;
 	for ( i = deployData.unitsDeployData.begin(); i != deployData.unitsDeployData.end(); ++i )
@@ -344,6 +351,9 @@ void CGlobalGame::UpdateScenarioOnLeaveZone()
 		vector< CPtr<NRPG::CUnit> > units;
 		pPlayer->GetAliveUnits( &units );
 		pScenarioTracker->ProcessScenario( units );
+		// Retail v1.1 0x69b0a3..0x69b0df: retain companions through
+		// linked subzones, but release them after processing mission exit.
+		pPlayer->zoneMercs.clear();
 		//
 		for ( vector<CObj<CUnit> >::iterator i = pPlayer->mercs.begin(); i != pPlayer->mercs.end(); ++i )
 			pPlayer->deployData.unitsDeployData[ (*i).GetPtr() ].pCorpse = 0;
