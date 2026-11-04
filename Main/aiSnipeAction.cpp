@@ -88,7 +88,7 @@ static bool CanHitSnipeTarget( IAIUnit *pU )
 //
 // Use the chosen snipe weapon, even when another weapon is currently held. Cover
 // remains floating point through GetToHit, as in retail's direct snipe probe.
-void CAIBeginSnipeAction::GetInfoInner( const SPlaceWithAP &, SInfo *pInfo ) const
+void CAIBeginSnipeAction::GetInfoInner( const SPlaceWithAP &place, SInfo *pInfo ) const
 {
 	pInfo->bCanDo = false;
 	IAIUnit *pU = GetUnit();
@@ -111,14 +111,6 @@ void CAIBeginSnipeAction::GetInfoInner( const SPlaceWithAP &, SInfo *pInfo ) con
 	IAIUnit *pEnemy = pState->pEnemy.GetPtr();
 	if ( !IsValid( pEnemy ) || !IsValid( pEnemy->GetUnitServer() ) )
 		return;
-	// to-hit gate: must connect at HL_ANY; aim the head when that also connects.
-	SUnitPosition selfPos = pU->GetUnitPosition();
-	pInfo->hitLocation = HL_ANY;
-	if ( pU->GetToHit( pEnemy, selfPos, HL_ANY, pInfo->pWeapon ) <= 0 )
-		return;
-	if ( pU->GetToHit( pEnemy, selfPos, HL_HEAD, pInfo->pWeapon ) > 0 )
-		pInfo->hitLocation = HL_HEAD;
-	// kill-zone scan: the sniper must still SEE every place the target could flee to next turn.
 	NWorld::CWorld *pWorld = pUS->GetWorld();
 	if ( !IsValid( pWorld ) )
 		return;
@@ -126,16 +118,26 @@ void CAIBeginSnipeAction::GetInfoInner( const SPlaceWithAP &, SInfo *pInfo ) con
 	IPathNetwork *pNet = pWorld->GetPathNetwork();
 	if ( !IsValid( pGame ) || !IsValid( pNet ) )
 		return;
+	// Evaluate the pose selected by the action search, facing the target as the
+	// shot will. Checking the current pose can approve a crouch behind cover.
+	SUnitPosition selfPos = place.place;
+	const SUnitPosition &enemyPos = pEnemy->GetUnitServer()->GetPosition();
+	EDirection direction = pNet->GetClosestDir( selfPos.pos.p, enemyPos.pos.p );
+	selfPos.pos.p.SetDirection( direction );
+	pInfo->hitLocation = HL_ANY;
+	if ( pU->GetToHit( pEnemy, selfPos, HL_ANY, pInfo->pWeapon ) <= 0 )
+		return;
+	if ( pU->GetToHit( pEnemy, selfPos, HL_HEAD, pInfo->pWeapon ) > 0 )
+		pInfo->hitLocation = HL_HEAD;
+	// kill-zone scan: the sniper must still SEE every place the target could flee to next turn.
 	// retail @0xa4810: the sniper's range/FOV hoisted once (game vtbl+0x34 + GetSightFOV @0x2ba6c0),
 	// then the 4-arg CheckPositionVisibility per flee place.
 	NRPG::CUnit *pRPG = pU->GetRPGUnit();
 	float fRange = pGame->GetUnitSightDistance( pRPG );
 	float fFOV = IsValid( pRPG ) ? pRPG->GetSightFOV() : FP_2PI;
 	vector<SPathPlace> places;
-	const SUnitPosition &enemyPos = pEnemy->GetUnitServer()->GetPosition();
 	// Retail v1.2 0x4a4c66/0x4a4d23: test each escape place facing from the
 	// sniper toward the target, rather than retaining the flood's direction bits.
-	EDirection direction = pNet->GetClosestDir( selfPos.pos.p, enemyPos.pos.p );
 	// Retail v1.2 0x4a4cdb: RUN, four AP, not the target's full turn budget.
 	GetNearestPlaces( pEnemy->GetUnitServer(), enemyPos.pos.p, 4, NAI::RUN, &places );
 	for ( vector<SPathPlace>::const_iterator i = places.begin(); i != places.end(); ++i )
