@@ -2130,6 +2130,31 @@ void CExecThrowGrenade::ThrowGrenade()
 		pUS->animator.ActivateItem( pUS->GetPosition(), false, nPlace == -1, (NDb::EItemPlace)nPlace, pRPG->GetWeaponType() );
 	}*/
 
+	// Retail v1.1 0x7acb99..0x7accb2: PK shells have a launch effect and sound,
+	// separate from the hand-grenade flight and impact effects.
+	if ( IsValid( pUS->GetWearingDBPK() ) )
+	{
+		NDb::CTEffect *pLaunch = NDb::GetTEffect( 1133 );
+		if ( IsValid( pLaunch ) )
+		{
+			SRand rnd;
+			NDb::CEffect *pEffect = pLaunch->GetEffect( &rnd );
+			if ( IsValid( pEffect ) )
+			{
+				CVec3 dir = grenadeParams.vel;
+				Normalize( &dir );
+				CVec3 axis( 0, -dir.z, dir.y );
+				CQuat rot = QNULL;
+				if ( fabs2( axis ) > 0 )
+					rot = CQuat( acos( Clamp( dir.x, -1.0f, 1.0f ) ), axis, true );
+				else if ( dir.x < 0 )
+					rot = CQuat( FP_PI, CVec3( 0, 0, 1 ) );
+				pUS->GetWorld()->CreateParticle( grenadeParams.ptStart, rot, pEffect, pUS->GetPosition().pos.GetFloor() );
+			}
+		}
+		pUS->GetWorld()->MakeSound( pUS->GetPosition().GetCP(), NDb::GetSound( 16459 ) );
+	}
+
 	// retail @0x764140: BOTH records go to the world -- CWorld::ThrowGrenade dispatches an
 	// engineer grenade (null regular record) to the contact-fused eng grenade server.
 	CObjectBase *pBullet = pUS->GetWorld()->ThrowGrenade( grenadeParams.ptStart, grenadeParams.vel,
