@@ -22,7 +22,7 @@
 //
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // Snipe actions: Begin, bank AP (CollectAP), fire (Shot), and abort when the enemy
-// gets too close (Cancel). Begin's weapon and escape scan match v1.2 0x4a4a90.
+// gets too close or cannot be hit (Cancel). Begin matches v1.2 0x4a4a90.
 //
 // One documented dev<->release divergence: the release reads the snipe AP pool + the unit's current AP from
 // the RPG skill block; the dev-native CUnitStateSniping caches the pool as nBaseAP (set at snipe start). The
@@ -61,6 +61,22 @@ static IAIUnit *SnipeGetAIUnit( NWorld::CUnitServer *pServer )
 	if ( !IsValid( pCommander ) )
 		return 0;
 	return pCommander->GetAIUnit( pServer );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// Use the real stored target and shot calculation, including banked aiming AP.
+// The simplified AI weapon probe omits that bonus and can reject a viable shot.
+static bool CanHitSnipeTarget( IAIUnit *pU )
+{
+	if ( !IsValid( pU ) || !IsValid( pU->GetUnitServer() ) )
+		return false;
+	NWorld::CUnitServer *pUS = pU->GetUnitServer();
+	NWorld::CUnitStateSniping *pSnipe = pUS->GetSnipingState();
+	if ( !pUS->IsSniping() || !pSnipe )
+		return false;
+	NWorld::CUnitServer *pTarget = pSnipe->GetTarget();
+	if ( !IsValid( pTarget ) || pTarget->IsDead() )
+		return false;
+	return pUS->GetWorld()->GetGame()->GetCompositeToHit( pUS, pTarget, pSnipe->GetHitLocation(), false ) > 0;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CAIBeginSnipeAction::GetInfoInner @0x4a4810: decide to start sniping. Not already sniping; the best snipe
@@ -165,7 +181,7 @@ void CAICollectSnipeAPAction::GetInfoInner( const SPlaceWithAP &place, SInfo *pI
 	if ( !IsValid( pUS ) || !pUS->IsSniping() )
 		return;
 	NWorld::CUnitStateSniping *pSnipe = pUS->GetSnipingState();
-	if ( pSnipe == 0 )
+	if ( pSnipe == 0 || !CanHitSnipeTarget( pU ) )
 		return;
 	int nPool = pSnipe->GetBaseSnipeAP();
 	int nCollected = pSnipe->GetCollectedSnipeAP();
@@ -193,7 +209,7 @@ void CAICollectSnipeAPAction::Do( CAILog *pLog ) const                   // @0x4
 		*pLog << new CAILogCollectSnipeAP( GetUnit(), info.nAP );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// CAISnipeShotAction::GetInfoInner @0x4a4650: sniping -> the shot is ready.
+// Retail @0x4a4650 only tests IsSniping; reject shots with no current hit chance.
 void CAISnipeShotAction::GetInfoInner( const SPlaceWithAP &, SInfo *pInfo ) const
 {
 	pInfo->bCanDo = false;
@@ -203,7 +219,7 @@ void CAISnipeShotAction::GetInfoInner( const SPlaceWithAP &, SInfo *pInfo ) cons
 	NWorld::CUnitServer *pUS = pU->GetUnitServer();
 	if ( !IsValid( pUS ) )
 		return;
-	if ( pUS->IsSniping() )
+	if ( pUS->IsSniping() && CanHitSnipeTarget( pU ) )
 		pInfo->bCanDo = true;
 }
 void CAISnipeShotAction::Do( CAILog *pLog ) const                        // @0x4a4c90
@@ -225,7 +241,7 @@ void CAISnipeShotAction::Do( CAILog *pLog ) const                        // @0x4
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CAICancelSnipeAction::GetInfoInner @0x4a4720: sniping, but the snipe conditions no longer hold (enemies
-// came too close) -> cancel.
+// came too close), or the stored target can no longer be hit -> cancel.
 void CAICancelSnipeAction::GetInfoInner( const SPlaceWithAP &, SInfo *pInfo ) const
 {
 	pInfo->bCanDo = false;
@@ -235,7 +251,7 @@ void CAICancelSnipeAction::GetInfoInner( const SPlaceWithAP &, SInfo *pInfo ) co
 	NWorld::CUnitServer *pUS = pU->GetUnitServer();
 	if ( !IsValid( pUS ) )
 		return;
-	if ( pUS->IsSniping() && !CanSnipe( pU ) )
+	if ( pUS->IsSniping() && ( !CanSnipe( pU ) || !CanHitSnipeTarget( pU ) ) )
 		pInfo->bCanDo = true;
 }
 void CAICancelSnipeAction::Do( CAILog *pLog ) const                      // @0x4a4df0

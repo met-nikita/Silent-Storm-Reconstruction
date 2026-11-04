@@ -99,6 +99,7 @@ public:
 	virtual void ProcessCritical( NDb::ECritical eCA );
 
 	virtual CUnitServer *GetTarget() { return pTarget; }
+	NAI::EHitLocation GetHitLocation() const { return hitLocation; }
 	virtual void CollectSnipeAP( int _nAP );
 	virtual int GetCollectedSnipeAP() { return nSnipeAP; }
 	int GetBaseSnipeAP() const { return nBaseAP; } // the snipe-AP budget set at snipe start (the pool to fill)
