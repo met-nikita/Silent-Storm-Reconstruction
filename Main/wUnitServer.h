@@ -178,6 +178,8 @@ private:
 	void CancelHeal();
 	
 public:
+	// Record stable support before an action can change the navigation grid.
+	void RememberSupportPosition();
 	int GetScriptToHit() const { return nScriptToHit; }			// UnitSetToHit override (-1 = none)
 	void SetScriptToHit( int n ) { nScriptToHit = n; }
 	bool IsWalkingWithoutWeapon() const { return bWalkWithoutWeapon; }

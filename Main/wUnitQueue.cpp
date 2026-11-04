@@ -566,6 +566,10 @@ void CExecOpenClose::Run()
 		Finished();
 		return;
 	}
+	// A combined approach/open order starts this executor before ACTION_FINISH.
+	// Remember the arrived height while the floor is still intact, not the old
+	// approach origin or the collision height after the door has opened.
+	pUS->RememberSupportPosition();
 	pUS->animator.OpenWindowDoor( pUS->GetPosition() );
 	StartAction( pUS->GetWorld(), SKIPPABLE );
 }

@@ -773,6 +773,12 @@ void CUnitServer::UpdateDeadPKSupport()
 	pNet->Lock( this, GetPosition().pos.p );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+void CUnitServer::RememberSupportPosition()
+{
+	fLastHeight = GetPosition().GetCP().z;
+	plLast = GetPosition().pos.p;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 void CUnitServer::ForcedMove()
 {
 	csSystem << CC_RED << "FORCED MOVE\n";
@@ -895,8 +901,7 @@ void CUnitServer::OnTBSEvent( ETBSEvent event )
 			// stop it from clearing a held aim on every shot) has moved to its RETAIL home below --
 			// CWorld::Segment now delivers TBS_GRID_INFO_UPDATED only when the path network actually
 			// changed, so the reseat no longer fires on every action-finish edge and needs no aim gate.
-			fLastHeight = GetPosition().GetCP().z;
-			plLast = GetPosition().pos.p;
+			RememberSupportPosition();
 			pState->OnActionFinish();
 			break;
 		case TBS_GRID_INFO_UPDATED:
