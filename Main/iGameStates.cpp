@@ -2197,9 +2197,6 @@ NWorld::CCmd* CStateFirstAid::GetTargetCmd()
 	if ( !IsValid( pUnit ) )
 		return 0;
 
-	if ( pUnit->GetPlayer() != GetMission()->GetActivePlayer()->GetPlayer() )
-		return 0;
-
 	return new NWorld::CCmdHeal( pUnit );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
