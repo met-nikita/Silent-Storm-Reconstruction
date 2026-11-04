@@ -359,7 +359,9 @@ void CLayersGroup::RecalcSquare( int nX, int nY, IAIMap *pMap, char nLevel )
 					//sprintf( buf, "Marking already created ladder %d at %d, %d\n", j, upX, upY );
 					//OutputDebugString( buf );
 					passCalcer.MakeInactiveForLadder( x - region.minx, y - region.miny, upX - region.minx, upY - region.miny, 
-						(ladder.GetHeight() - 1) * F_LADDER_STEP, i );
+						// The array index is relative to this group's first floor.
+						// Retail v1.1 0x43f9f5 adds the offset for existing ladders too.
+						(ladder.GetHeight() - 1) * F_LADDER_STEP, i + nFirstFloor );
 				}
 			}
 		}

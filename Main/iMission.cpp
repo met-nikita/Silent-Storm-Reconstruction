@@ -1,6 +1,7 @@
 #include "StdAfx.h"
 #include "ScreenShot.h"
 #include "wInterface.h"
+#include "aiJob.h"
 #include "wMain.h"			// NWorld::CWorld::GetOwnScript -- wire the script-UI bridge to the mission HUD
 #include "wUnitServer.h"	// temporary GFirst music diagnostics: script unit names
 #include "wMainTrace.h"
@@ -1196,8 +1197,20 @@ void CMission::Step()
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// Retail pairs string 21061 with 21067 when pass-calculation jobs drain.
+// Observe that same condition in the UI pump; repeated failed clicks coalesce.
+void CMissionBase::CheckPathCalculationNotification()
+{
+	if ( bNotifyPathCalculationDone && !pWorld->GetAIJobManager()->HasPassCalcerJobs() )
+	{
+		bNotifyPathCalculationDone = false;
+		csGame << NUI::GetDBString( 21067 ) << endl;
+	}
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 void CMission::GameStep()
 {
+	CheckPathCalculationNotification();
 	// retail CMission::GameStep @0x2017a0 head: track the world current-player; on a change stamp
 	// tLastCurrentPlayerChange with the UI clock (the @0x1fbf10 end-of-turn 2s cooldown reads it).
 	NWorld::IPlayer *pCurrentPlayer = pWorld->GetCurrentPlayer();
