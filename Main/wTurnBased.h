@@ -176,11 +176,9 @@ private:
 	bool bWasAction;
 	bool bFirstTurn;
 	int nActionLag;
-	// retail CTBSWorld+0x1c (save tag 8). Write-only in retail too: the ctor (@0x375960) and
-	// OnPassControl (@0x372bf0, at its tail) clear it, FetchPlayerCommands (@0x371610) sets it when the
-	// fetched command's player IS the stack-top owner -- and NOTHING ever reads it back except
-	// operator& (@0x37b300). Carried purely so the tag-8 chunk round-trips (wire-audit UNREAD 1.8:
-	// retail wrote 1 byte every slot, this fork consumed none).
+	// Retail CTBSWorld+0x1c (save tag 8). OnPassControl clears it; fetching
+	// a command from the new owner sets it. NeedShowInterrupt uses it to wait
+	// until the interrupting AI actually starts acting before updating the bar.
 	bool bHasCommandFromCurrentPlayer;
 public:
 	// retail v1.2 save convergence: retail's CTBSWorld::operator& (@0x37b300) serializes
@@ -463,6 +461,7 @@ public:
 	bool IsSkippableAction() const { return IsValid( pSkippableCount ) && nActionLag == 0; }
 	bool IsFirstTurn() const { return bFirstTurn || IsRealTime(); }
 	bool IsInterrupt() const { return interrupts.size() > 1; }
+	bool HasCommandFromCurrentPlayer() const { return bHasCommandFromCurrentPlayer; }
 	int GetEnemyPlayerWatchers( const vector<CMObj<TUnit> > &units, TPlayer *pl ) const // "internal heap limit reached" workaround
 	{
 		int nWatchers = 0;

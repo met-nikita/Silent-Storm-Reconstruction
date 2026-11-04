@@ -162,6 +162,12 @@ bool CTopBar::ProcessMessage( const SEvent &sEvent )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CTopBar::Draw( const STime &sTime, NGScene::I2DGameView *pView )
 {
+	// Retail 0x64d010 keeps the previous banner until the interrupting AI acts.
+	if ( pMission->GetWorld()->IsInterrupt() && !pMission->GetWorld()->NeedShowInterrupt() )
+	{
+		CWindow::Draw( sTime, pView );
+		return;
+	}
 	EMode ePrevMode = eMode;
 	if ( pMission->IsRealTime() )
 		eMode = REALTIME;

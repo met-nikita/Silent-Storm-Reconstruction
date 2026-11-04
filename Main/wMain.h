@@ -573,6 +573,7 @@ public:
 	virtual void GetActiveUnits( IPlayer *pPlayer, list<CUnit*> *pRes );
 	virtual bool IsFirstTurn() const { return TTBSWorld::IsFirstTurn(); }
 	virtual bool IsInterrupt() const { return TTBSWorld::IsInterrupt(); }
+	virtual bool NeedShowInterrupt() const;
 	// retail CWorld::IsSequence @0x376ff0 -> CTBSWorld::IsSequence @0x375a30: "non-empty interrupt stack
 	// with an OWNERLESS top". luac_BeginSequence @0x2f1890 pushes that ownerless entry (StartSequence
 	// @0x375dd0), luaEndSequence @0x2f1a60 pops it (EndOfTurn) -- true for exactly the

@@ -3396,6 +3396,13 @@ void CWorld::OnPassControlNotify( CPlayer *pPlayer )
 		players[k]->GetCommander()->OnPassControl( pPlayer );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+bool CWorld::NeedShowInterrupt() const
+{
+	// Retail v1.1 0x762140: hide an AI interrupt until its first command.
+	CPlayer *pPlayer = GetTBSCurrentPlayer();
+	return !IsValid( pPlayer ) || !NAI::IsAIPlayer( pPlayer ) || HasCommandFromCurrentPlayer();
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 void CWorld::ProcessTBSEvents()
 {
 	// Retail v1.2 0x767820: pop before dispatch, and drain events appended by callbacks.
