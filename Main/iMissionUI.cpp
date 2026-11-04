@@ -969,7 +969,8 @@ void CHitTracker::Draw( const STime &sTime, NGScene::I2DGameView *pView )
 
 	CVec2 vScreenPoint;
 	CVec2 vScreenRect = pMission->GetScene()->GetScreenRect();
-	CTransformStack sTS = pMission->GetCameraTransform();
+	CTransformStack sTS;
+	pMission->GetCamera()->GetTransform( &sTS, vScreenRect );
 	if ( !TestRayInFrustrum( vBegPoint, &sTS, vScreenRect, &vScreenPoint ) )
 		return;
 
