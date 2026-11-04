@@ -1528,14 +1528,24 @@ void CUnitAnimator::Jump( const NAI::SUnitPosition &prevPos, const NAI::SUnitPos
 	if ( !bRealJump )
 	{
 		pTerrainFunc->Move( prevPos, cmdPos );
+		bool bRetreat = prevPos.pos.GetNetwork()->GetDir( prevPos.pos.p, cmdPos.pos.p ) ==
+			( ( prevPos.pos.p.GetDirection() + 4 ) & 7 );
 		CPtr<NAnimation::CAnimation> pAnim = pAnimator->CreateAnimation(
-			pSkeleton->GetAnimation( NDb::CAnimation::CLIMB_FINISH, 0 ), tEnd );
+			pSkeleton->GetAnimation( bRetreat ? NDb::CAnimation::JUMP_START : NDb::CAnimation::CLIMB_FINISH, 0 ), tEnd );
 		if ( !pAnim )
 		{
 			DefaultAction( cmdPos );
 			return;
 		}
-		pAnim->SetStand( tEnd, prevPos.GetCPNoHeight(), prevPos.GetDirection() );
+		// Reverse the approach clip at its original starting tile. Reversing
+		// its time also reverses the root motion, preserving the ledge pose.
+		if ( bRetreat )
+		{
+			pAnim->SetStand( tEnd, cmdPos.GetCPNoHeight(), prevPos.GetDirection() );
+			pAnim->SetTimeFunction( new NAnimation::CAFunctionLinear( tEnd, tEnd + pAnim->GetTime(), 1.f, 0.f ) );
+		}
+		else
+			pAnim->SetStand( tEnd, prevPos.GetCPNoHeight(), prevPos.GetDirection() );
 		pResult = PutOnTerrain(pAnim);
 		t = pAnim->GetTime();
 	}

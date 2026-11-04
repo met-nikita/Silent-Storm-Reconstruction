@@ -229,6 +229,9 @@ class CExecMove: public CPathConflictsRemover
 	ENeedActiveItem eNeedActive;   // release-new (tag 14): the path's active-item constraint, kept saved
 	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CPathConflictsRemover*)this); f.Add(2,&commandsQueue); f.Add(3,&pCurCmd); f.Add(4,&bLastCommand); f.Add(5,&result); f.Add(10,&desired); f.Add(11,&eParams); f.Add(12,&pathActions); f.Add(13,&bCheckCanRotate); f.Add(14,&eNeedActive); return 0; }
 
+	// Transient: identifies commands replaced during collision callbacks.
+	unsigned nPathRevision = 0;
+
 	void DoGameMove( const NAI::SUnitPosition &dst );
 	void CheckDoors( const NAI::SUnitPosition &dst );
 	NRPG::EAction GetAction( const NAI::SUnitPosition &dst ) const
@@ -250,15 +253,20 @@ class CExecMove: public CPathConflictsRemover
 
 	bool TestSingleGameMove( CCmdTravel *pCmd )
 	{
-		if ( !CanDoMove(pCmd) )
+		unsigned nRevision = nPathRevision;
+		bool bCanMove = CanDoMove( pCmd );
+		// A successful reroute clears bWaiting, but does not authorize the
+		// old destination. Neither execute nor requeue that obsolete command.
+		if ( !IsValid( this ) || nRevision != nPathRevision )
 			return false;
-		if ( !HaveEnoughAP( pCmd->pos ) )
+		if ( bCanMove && !HaveEnoughAP( pCmd->pos ) )
 		{
 			StopAction();
-			//commandsQueue.push_front( pCmd );
-			return false;
+			bCanMove = false;
 		}
-		return true;
+		if ( !bCanMove )
+			commandsQueue.push_front( pCmd );
+		return bCanMove;
 	}
 
 	bool TestNextGameMove( CCmdTravel *pCmd )
@@ -376,7 +384,8 @@ bool CPathConflictsRemover::CheckCanDoMove( NAI::SUnitPosition *reqPos )
 	if ( bWaiting )
 		return false;
 	bAfterWaiting = true;
-	pUS->animator.PlaceUnit( pUS->GetPosition() );
+	if ( pUS->GetPosition().pos.p.GetPose() != NAI::CM_INACTIVE )
+		pUS->animator.PlaceUnit( pUS->GetPosition() );
 	return true;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -507,10 +516,7 @@ bool CExecMove::ProcessFirstMove( CCmdMove *pMove )
 	if ( commandsQueue.empty() )
 		return false;
 	if ( !TestSingleGameMove( pMove ) )
-	{
-		commandsQueue.push_front( pMove );
 		return false;
-	}
 	bWaiting = false;
 	bAfterWaiting = false;
 	nTimeToWait = 0;
@@ -651,10 +657,7 @@ void CExecMove::DoCommand()
 					DoGameMove(pClimb->pos);
 				}
 				else
-				{
-					commandsQueue.push_front(pCmd);
 					return;
-				}
 			}
 			else {
 				CDynamicCast<CCmdJump> pJump(pCmd);
@@ -672,10 +675,7 @@ void CExecMove::DoCommand()
 						// fall deferred to the START of the next DoCommand pass (retail @0x3b87fc)
 					}
 					else
-					{
-						commandsQueue.push_front(pCmd);
 						return;
-					}
 				}
 				else {
 					CDynamicCast<CCmdRotate> pRotate(pCmd);
@@ -700,10 +700,7 @@ void CExecMove::DoCommand()
 							DoGameMove(pRotate->pos);
 						}
 						else
-						{
-							commandsQueue.push_front(pCmd);
 							return;
-						}
 					}
 					else {
 						CDynamicCast<CCmdChangePose> pChangePose(pCmd);
@@ -719,10 +716,7 @@ void CExecMove::DoCommand()
 								DoGameMove(pChangePose->pos);
 							}
 							else
-							{
-								commandsQueue.push_front(pCmd);
 								return;
-							}
 						}
 						else {
 							CDynamicCast<CCmdActivateItem> pActivateItem(pCmd);
@@ -786,10 +780,7 @@ void CExecMove::DoCommand()
 											DoGameMove(pMoveLadder->pos);
 										}
 										else
-										{
-											commandsQueue.push_front(pCmd);
 											return;
-										}
 									}
 									else {
 										CDynamicCast<CCmdEnterLadder> pEnterLadder(pCmd);
@@ -806,10 +797,7 @@ void CExecMove::DoCommand()
 												DoGameMove(pEnterLadder->pos);
 											}
 											else
-											{
-												commandsQueue.push_front(pCmd);
 												return;
-											}
 										}
 										else {
 											CDynamicCast<CCmdLeaveLadder> pLeaveLadder(pCmd);
@@ -826,10 +814,7 @@ void CExecMove::DoCommand()
 													DoGameMove(pLeaveLadder->pos);
 												}
 												else
-												{
-													commandsQueue.push_front(pCmd);
 													return;
-												}
 											}
 										}
 									}
@@ -927,6 +912,7 @@ void CExecMove::Cancel()
 	CDynamicCast<CCmdJump> pWasJump( pCurCmd );
 	if ( pWasJump )
 		return;
+	++nPathRevision;
 	CDynamicCast<CCmdMove> pWasMove( pCurCmd );
 	CDynamicCast<CCmdRotate> pWasRotate( pCurCmd );
 	commandsQueue.clear();
@@ -943,6 +929,7 @@ void CExecMove::Cancel()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CExecMove::FullCancel()
 {
+	++nPathRevision;
 	commandsQueue.clear();
 	result = FAILED;
 	pCurCmd = 0;
@@ -955,6 +942,7 @@ void CExecMove::FullCancel()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CExecMove::SetNewPath( NAI::CPath *pPath, NAI::EFindPathParams _eParams, ENeedActiveItem eActive )
 {
+	++nPathRevision;
 	// Keep the interrupted command alive while a waiting reroute clears pCurCmd.
 	CObj<CCommand> pHoldCur( pCurCmd );
 	CDynamicCast<CCmdMove> pWasMove( pCurCmd );
@@ -965,7 +953,9 @@ void CExecMove::SetNewPath( NAI::CPath *pPath, NAI::EFindPathParams _eParams, EN
 		bWaiting = false;
 		bAfterWaiting = false;
 		pCurCmd = 0;
-		pUS->animator.PlaceUnit( pUS->GetPosition() );
+		// Keep the ledge animation frozen until the new retreat/descent starts.
+		if ( pUS->GetPosition().pos.p.GetPose() != NAI::CM_INACTIVE )
+			pUS->animator.PlaceUnit( pUS->GetPosition() );
 		nTimeToWait = 0;
 		//StopAction();
 	}	

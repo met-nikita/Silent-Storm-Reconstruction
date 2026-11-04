@@ -514,6 +514,30 @@ void GetNonStandartMoves(
 			if ( !bMoveOnly )
 			{
 				int i = src.GetDirection();
+				// A drop can be interrupted after approaching the edge. Allow undoing
+				// that approach onto a clear crouching tile, not only jumping down.
+				int nRetreat = ( i + 4 ) & 7;
+				if ( ( i & 1 ) == 0 && ( t.nMoveCrouch & (1<<nRetreat) ) )
+				{
+					int nX1 = nX + nMoveShift[nRetreat][0];
+					int nY1 = nY + nMoveShift[nRetreat][1];
+					if ( IsInArray( pLayer->tiles, nX1, nY1 ) )
+					{
+						CNodesLayer::STile &t1 = pLayer->tiles[nY1][nX1];
+						if ( ( t1.nPassable & CP_CROUCH ) &&
+							fabs( GetFHeight(t1.nHeight) - GetFHeight(t.nHeight) ) < F_MIN_CLIMB_HEIGHT )
+						{
+							m.dest = SPathPlace( nX1, nY1, src.GetLayer(), 0, CM_CROUCH, 0 );
+							m.type = MT_MOVE_CROUCH;
+							if ( IsGoodPt( m.dest, pNet ) )
+							{
+								res[ pResPos ] = m;
+								dynLocks[ pResPos ] = t.nDynLocks;
+								++pResPos;
+							}
+						}
+					}
+				}
 				if ( t.nMoveCrouch & (1<<i) )
 				{
 					int nX1 = nX + nMoveShift[i][0];
