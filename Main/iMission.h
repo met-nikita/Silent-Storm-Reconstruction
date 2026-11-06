@@ -73,8 +73,8 @@ namespace NWorld
 {
 struct STraceResult
 {
-	bool bPointSet;                 // retail: the scene-point trace hit (dev computes the world
-	CVec3 vPoint;                   //   point live in GetTracePosition(CVec3*) -- kept default here)
+	bool bPointSet;                 // retail: the ranked cursor-trace hit (TraceObjects' best interval)
+	CVec3 vPoint;                   //   returned by GetTracePosition(CVec3*)
 	bool bTileSet;                  // dev bTraceOk
 	NAI::SPosition sTile;           // dev sTraceTile
 	bool bObjectSet;                // retail: IsValid(pObject) latch

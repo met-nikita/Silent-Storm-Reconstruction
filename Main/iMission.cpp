@@ -154,6 +154,7 @@ CMission::CMission():
 	bindGrenadeModeThrow( "grenade_throw" ), bindGrenadeModeSetTrap( "grenade_settrap" ),
 	bindWeaponReload( "weapon_reload" ), bindPrevSlot( "slot_prev" ), bindNextSlot( "slot_next" ), bindItemUnload( "unload" ), bindItemArrange( "arrange" ),
 	bindSwitchLighting("switch_lighting"),
+	bindModifier( "modifier" ),
 	cmdTypeCamera( "camerapos", CommandTypeCameraParams, this ), 
 	cmdSurrender( "surrender", CommandSurrender, this ), 
 	cmdSummonUnit( "summonunit", CommandSummonUnit, this ), 
@@ -1042,25 +1043,17 @@ const CTransformStack& CMission::GetCameraTransform() const
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CObjectBase* CMission::GetTraceObject() const
 {
-	return sTraceResult.pObject;	// W4.2: retail STraceResult record (tag 21)
+	// retail v1.2 0x5fc1f0: the object only while the latch is set (Trace leaves pObject stale)
+	return sTraceResult.bObjectSet ? sTraceResult.pObject.GetPtr() : 0;	// W4.2: STraceResult (tag 21)
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// Retail v1.2 0x5fc0c0: the point NWorld::Trace ranked this frame (no trace of its own). A fresh
+// nearest-PASS_BLOCKER trace stopped on see-through hulls (gratings), so the cursor to-hit
+// previewed the grating itself instead of the surface behind it.
 bool CMission::GetTracePosition( CVec3 *pPos ) const
 {
-	int nMaxFloor = GetScene()->GetCutFloor();
-	vector<NAI::SInterval> intervals;
-	pWorld->GetAIMap()->Trace( rTraceRay, &intervals, NWorld::TS_PASS_BLOCKER, NAI::CFloorsSet() );
-	for ( int k = 0; k < intervals.size(); ++k )
-	{
-		NAI::SInterval &interv = intervals[k];
-		if ( interv.enter.fT < 0 )
-			continue;
-		if ( interv.pSrc->nFloor > nMaxFloor )
-			continue;
-		*pPos = rTraceRay.Get( intervals[k].enter.fT );
-		return true;
-	}
-	return false;
+	*pPos = sTraceResult.vPoint;
+	return sTraceResult.bPointSet;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CMission::GetTracePosition( NAI::SPosition *pPos ) const
@@ -1274,7 +1267,10 @@ void CMission::GameStep()
 				new NWorld::CCmdCallScriptFunction( "OnPlayerLose", "i", 0 ), 4000 ) );
 	}
 
-	sTraceResult.bTileSet = false;	// W4.2: was the dev bTraceOk
+	// retail v1.2 0x6024ba: all three latches drop every frame; only a ready mission re-traces
+	sTraceResult.bTileSet = false;
+	sTraceResult.bPointSet = false;
+	sTraceResult.bObjectSet = false;
 	if ( IsReady() )
 	{
 		TraceCursor();
@@ -2219,97 +2215,52 @@ void CMission::TraceCursor()
 	CTransformStack sTS;
 	GetCamera()->GetTransform( &sTS, GetScene()->GetScreenRect() );   // retail @0x1fec80 traces against the SELECTED camera (vtbl+0xb8)
 	MakeProjectiveRay( &rTraceRay.ptDir, &rTraceRay.ptOrigin, &sTS, GetScene()->GetScreenRect(), GetCursor()->GetPos() );
-	sTraceResult.bTileSet = NWorld::TraceTile( GetWorld(), rTraceRay, &sTraceResult.sTile, GetScene()->GetCutFloor() );
+	// retail 0x5ff7df..0x5ff813: ONE ranked trace fills the tile, the point and the hovered object
+	// (NWorld::Trace @0x77e200); the "modifier" bind (Shift/Ctrl) drops TS_PICK-only hulls.
+	// TODO retail 0x5ff6a4..0x5ff741 first clears all three latches and returns when the cursor is
+	// outside a UI window (mission vtbl+0x108 -> CMission+0xc4, its +0x80; IsInside @0x727cc0 in
+	// 1024x768 space);
+	// that window is not identified in the dev UI yet, so the cursor over the HUD still traces.
+	NWorld::Trace( GetWorld(), GetActivePlayer()->GetPlayer(), rTraceRay, GetScene()->GetCutFloor(),
+		&sTraceResult, bindModifier.IsActive() );
 
 	list< CPtr<NWorld::CUnit> > visibleList;
 	GetActivePlayer()->GetPlayer()->GetVisible( &visibleList );
 
-	CPtr<CObjectBase> pTraceObject;
-	vector<CObjectBase*> objectsSet;
-	NWorld::TraceObjects( GetWorld(), rTraceRay, &objectsSet, GetScene()->GetCutFloor() );
-	if ( !objectsSet.empty() )
-	{
-		for ( vector<CObjectBase*>::iterator iTemp = objectsSet.begin(); iTemp != objectsSet.end(); iTemp++ )
-		{
-			NWorld::CUnit *pTempUnit = dynamic_cast<NWorld::CUnit*>( *iTemp );
-			if ( pTempUnit )
-			{
-				if ( find( visibleList.begin(), visibleList.end(), pTempUnit ) != visibleList.end() )
-				{
-					pTraceObject = *iTemp;
-					break;
-				}
-			}
-
-			CDynamicCast<NWorld::IObject> pTempObject( *iTemp );
-			if ( pTempObject && pTempObject->IsTargetable() )
-			{
-				pTraceObject = *iTemp;
-				break;
-			}
-			CDynamicCast<NWorld::IItem> pTempItem(*iTemp);
-			if ( pTempItem )
-			{
-				pTraceObject = *iTemp;
-				break;
-			}
-
-			// retail NWorld::Trace @0x37d760: a heard-not-seen unit's noise marker (CDMesh) is a
-			// valid pick. News gate (retail's sound-interval filter): skip when the heard unit is
-			// one of MINE or is ALREADY VISIBLE, and only accept a marker present in the player's
-			// audible sound set (GetSounds). CRITICAL: the trace object stays THE MARKER (retail
-			// pObject = the IAISound) -- every state except CStateAttack CUnit-casts and bails, so
-			// no name tooltip / carry-body / friend state can spoil the hidden unit's identity.
-			// INTENTIONAL DIVERGENCE from retail: retail targets a heard-not-seen unit ONLY through
-			// its ear icon (CSoundIcon CActionDecorator hover -> SetStateTarget); this world-trace
-			// pick of the silhouette CDMesh itself is an ADDITION so the model is hover-targetable
-			// too. Keep both paths (the ear icon path lives in iMissionUI.cpp CSoundIcon).
-			NWorld::CUnit *pHeardUnit = dynamic_cast<NWorld::CUnit*>( NWorld::GetDMeshUnit( *iTemp ) );
-			if ( pHeardUnit )
-			{
-				NWorld::IPlayer::CUnitSet myUnits;
-				GetActivePlayer()->GetPlayer()->GetUnits( &myUnits );
-				vector<NWorld::IVisObj*> soundsList;
-				GetActivePlayer()->GetPlayer()->GetSounds( &soundsList );
-				if ( find( myUnits.begin(), myUnits.end(), pHeardUnit ) == myUnits.end()
-					&& find( visibleList.begin(), visibleList.end(), pHeardUnit ) == visibleList.end()
-					&& find( soundsList.begin(), soundsList.end(), CDynamicCast<NWorld::IVisObj>( *iTemp ) ) != soundsList.end() )
-				{
-					pTraceObject = *iTemp;
-					break;
-				}
-			}
-		}
-	}
-
-	if ( sTraceResult.bTileSet && !IsValid( pTraceObject ) )
+	// retail 0x5ff818..0x5ff8ef: no ranked object -> a visible unit standing in the traced tile
+	if ( sTraceResult.bTileSet && !sTraceResult.bObjectSet )
 	{
 		NAI::SUnitPosition sPosition;
 		sPosition.pos = sTraceResult.sTile;
 		sPosition.bRun = false;
 		NWorld::CUnit *pTempUnit = GetWorld()->GetUnitInTile( sPosition );
 		if ( find( visibleList.begin(), visibleList.end(), pTempUnit ) != visibleList.end() )
-			pTraceObject = pTempUnit;
+		{
+			sTraceResult.pObject = pTempUnit;
+			sTraceResult.bObjectSet = true;
+		}
 	}
 
-	// retail: suppress the hovered OBJECT while the camera is still moving (a moving camera must not
+	// dev: suppress the hovered OBJECT while the camera is still moving (a moving camera must not
 	// snap-target a unit under the transiently-passing cursor), but leave the tile/point trace live so
-	// a click resolves to the correct ground tile. Do this BEFORE the object snaps the tile below.
+	// a click resolves to the correct ground tile. Retail TraceCursor has no such gate (it is in
+	// GetStateTarget @0x1fbd40); kept here as before, BEFORE the object snaps the tile below.
 	if ( nFramesSameCameraPosition < 4 )
-		pTraceObject = 0;
-
-	if ( pTraceObject != 0 )
 	{
-		NWorld::CUnit *pTempUnit = dynamic_cast<NWorld::CUnit*>( pTraceObject.GetPtr() );
+		sTraceResult.pObject = 0;
+		sTraceResult.bObjectSet = false;
+	}
+
+	// retail 0x5ff966..0x5ff9a3: a hovered unit snaps the tile to its own position
+	if ( sTraceResult.bObjectSet )
+	{
+		NWorld::CUnit *pTempUnit = dynamic_cast<NWorld::CUnit*>( sTraceResult.pObject.GetPtr() );
 		if ( pTempUnit )
 		{
 			sTraceResult.bTileSet = true;
 			sTraceResult.sTile = pTempUnit->GetPosition().pos;
 		}
 	}
-
-	sTraceResult.pObject = pTraceObject;
-	sTraceResult.bObjectSet = IsValid( pTraceObject );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CMission::GetGroupHideState()

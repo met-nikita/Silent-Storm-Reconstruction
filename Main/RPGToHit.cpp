@@ -507,7 +507,8 @@ int CToHitCalcer::GetToHit()
 		return 0;
 	fToHit = GetAllMult() + ( GetAuraToHitAdd() + GetCarefulShootPerk() ) - GetWeatherPenalty();
 	fToHit = Clamp( fToHit, 2.0f, 100.0f );
-	return int( fToHit + 0.5f );  // release rounds the result (fistp), unlike the dev's truncation
+	// v1.2 0x6b864f..0x6b8667: fnstcw / or ah,0x0c / fldcw / fistp -- RC=11 is TRUNCATE, not round.
+	return int( fToHit );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CToHitCalcer::Log()
@@ -562,7 +563,8 @@ int CUnitToHitCalcer::GetToHit()
 		fDef = GetTAuraEvasionAdd() + pTarget->GetUnitRPG()->GetIC() / pUnitMission->GetToHitConstants()->fICModifier;
 	fToHit = GetAllMult() * GetCA() + GetCarefulShootPerk() + GetAuraToHitAdd() - fDef - GetWeatherPenalty();
 	fToHit = Clamp( fToHit, 2.0f, 100.0f );
-	return int( fToHit + 0.5f );  // release rounds the result (fistp), unlike the dev's truncation
+	// v1.2 0x6b8796..0x6b87ae: the same RC=11 (truncate) fistp as CToHitCalcer::GetToHit.
+	return int( fToHit );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // NRPG::GetTAreaReal  @0x2b8800 (RVA) -- release-new free helper extracted as the single source of truth

@@ -95,6 +95,7 @@ private:
 	NInput::CBind bindHero1, bindHero2, bindHero3, bindHero4, bindHero5, bindHero6, bindHero7, bindSelPrev, bindSelNext;
 	NInput::CBind bindMove, bindAttack, bindSetMine, bindSetTrap, bindFirstAid, bindDropCorpse, bindExitPK, bindRotate;
 	NInput::CBind bindUseTool;	// retail "usetool" icon-bar command (use the held tool on a target)
+	NInput::CBind bindModifier;	// retail CMission+0x260 "modifier" (Shift/Ctrl): TraceCursor drops TS_PICK while held (vtbl+0x118 0x5fc0f0)
 	NInput::CBind bindNormalPose, bindCrawlPose, bindCrouchPose, bindRunPose, bindStrafe, bindHide;
 	NInput::CBind bindSnipeAttack, bindCollect1AP, bindCollect10AP, bindCollectMaxAP, bindCollectAllAP;
 	NInput::CBind bindGrenadeModeThrow, bindGrenadeModeSetTrap;
@@ -154,8 +155,8 @@ private:
 	SHMatrix sCameraPos;
 	CTransformStack sTransform;
 	//// trace (retail tags 20/21: the loose dev bTraceOk/sTraceTile/pTraceObject collapsed into
-	//// the retail NWorld::STraceResult record -- bTileSet/sTile/pObject; bPointSet/vPoint stay
-	//// default: the dev computes the world point live in GetTracePosition(CVec3*))
+	//// the retail NWorld::STraceResult record -- bTileSet/sTile/pObject; bPointSet/vPoint are
+	//// TraceObjects' ranked point, returned by GetTracePosition(CVec3*) like retail 0x5fc0c0)
 	CRay rTraceRay;
 	NWorld::STraceResult sTraceResult;
 	//// Active interface command -- TRANSIENT: retail serializes NO general executor on CMission
