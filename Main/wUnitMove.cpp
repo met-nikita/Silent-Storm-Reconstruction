@@ -231,6 +231,8 @@ class CExecMove: public CPathConflictsRemover
 
 	// Transient: identifies commands replaced during collision callbacks.
 	unsigned nPathRevision = 0;
+	// Transient: reroutes in a row that still start on a blocked step.
+	int nBlockedReroutes = 0;
 
 	void DoGameMove( const NAI::SUnitPosition &dst );
 	void CheckDoors( const NAI::SUnitPosition &dst );
@@ -255,10 +257,25 @@ class CExecMove: public CPathConflictsRemover
 	{
 		unsigned nRevision = nPathRevision;
 		bool bCanMove = CanDoMove( pCmd );
+		if (!IsValid(this))
+			return false;
 		// A successful reroute clears bWaiting, but does not authorize the
 		// old destination. Neither execute nor requeue that obsolete command.
-		if ( !IsValid( this ) || nRevision != nPathRevision )
+		if (nRevision != nPathRevision)
+		{
+			// Retail still runs the interrupted command after a reroute. That is
+			// unsafe for a step to another place (a ledge drop onto a landing that
+			// became occupied), but harmless for a pose change or turn on the
+			// unit's own place -- and required: a crouched squad packed together
+			// can only stand up this way before walking off its new route.
+			if (bCanMove && IsInPlace(pCmd) && HaveEnoughAP(pCmd->pos))
+			{
+				nBlockedReroutes = 0;
+				return true;
+			}
+			ParkIfRerouteBlocked();
 			return false;
+		}
 		if ( bCanMove && !HaveEnoughAP( pCmd->pos ) )
 		{
 			StopAction();
@@ -266,7 +283,47 @@ class CExecMove: public CPathConflictsRemover
 		}
 		if ( !bCanMove )
 			commandsQueue.push_front( pCmd );
+		else
+			nBlockedReroutes = 0;
 		return bCanMove;
+	}
+
+	bool IsInPlace(CCmdTravel * pCmd) const
+	{
+		const NAI::SPathPlace & cur = pUS->GetPosition().pos.p, &dst = pCmd->pos.pos.p;
+		return cur.GetX() == dst.GetX() && cur.GetY() == dst.GetY() && cur.GetLayer() == dst.GetLayer();
+	}
+	
+	// A reroute whose first step is free continues at once (the next Segment
+	// iteration runs it). If the new route still starts on a blocked cell --
+	// e.g. the locker is a moving unit, which FindPath does not treat as an
+	// obstacle -- park on that step. Otherwise CUnitServer::Segment sees
+	// neither an animation nor a wait and re-enters DoCommand -> reroute
+	// until the nDoNotFreeze guard. Cancel leaves only an ender queued and
+	// FullCancel empties the queue, so neither is parked.
+	// A wait on a locker that cannot step aside (e.g. a ledge drop whose
+	// landing and retreat are both taken) never ends: after a few attempts
+	// give the order up like the no-route case, returning control to the
+	// player/AI.
+	void ParkIfRerouteBlocked()
+	{
+		if (GetState() != RUNNING || commandsQueue.empty())
+			return;
+		CDynamicCast<CCmdTravel> pNext(commandsQueue.front());
+		if (!pNext || pUS->CanDoGameMove(pNext->pos) == CMR_YES)
+			return;
+		CObjectBase * pLocker = pUS->GetWorld()->GetPathNetwork()->GetWhoLocksThisPlace(pNext->pos.pos.p);
+		CDynamicCast<CUnitServer> pWho(pLocker);
+		bool bLockerCanMove = IsValid(pWho) && pWho.GetPtr() != pUS && pWho->GetPathConflictsRemover() != 0;
+		if (++nBlockedReroutes >= (bLockerCanMove ? 10 : 3))
+		{
+			FullCancel();
+			return;
+		}
+		bWaiting = true;
+		posToWait = pNext->pos;
+		if (nTimeToWait <= 0)
+			nTimeToWait = 10;
 	}
 
 	bool TestNextGameMove( CCmdTravel *pCmd )
