@@ -1516,7 +1516,7 @@ void CUnitAnimator::Fall( const NAI::SUnitPosition &cmdPos, float fPrevHeight )
 	
 	pAnimator->Updated();
 	IdleOn( cmdPos );
-
+	bInactivePose = cmdPos.pos.p.GetPose() == NAI::CM_INACTIVE;   // retail v1.2 0x73e94b..0x73e965
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CUnitAnimator::Jump( const NAI::SUnitPosition &prevPos, const NAI::SUnitPosition &cmdPos, bool bRealJump, bool bJumpBack )
@@ -2441,6 +2441,10 @@ void CUnitAnimator::EnterLadder( const NAI::SUnitPosition &prevPos, const NAI::S
 void CUnitAnimator::LeaveLadder( const NAI::SUnitPosition &prevPos, const NAI::SUnitPosition &cmdPos, bool bUp )
 {
 	bLadder = false;
+	// Fix of a retail v1.2 bug: Climb (0x73e110) raises bInactivePose for the ledge step before
+	// a downward ladder, and no ladder transition (0x740c40/0x740ca0) lowers it -> after the
+	// descent CanActivateItem() stays false until the next Jump.
+	bInactivePose = false;
 	NDb::CAnimation::EType type = bUp ? NDb::CAnimation::LEAVE_LADDER_UP : NDb::CAnimation::LEAVE_LADDER_DOWN;
 	pTerrainFunc->Move( cmdPos );
 	if ( !PlayLadderAnimation( prevPos, type ) )
@@ -2475,6 +2479,10 @@ void CUnitAnimator::MoveLadder( const NAI::SUnitPosition &prevPos, const NAI::SU
 void CUnitAnimator::JumpFromLadder( const NAI::SUnitPosition &prevPos, const NAI::SUnitPosition &cmdPos )
 {
 	bLadder = false;
+	// Fix of a retail v1.2 bug: Climb (0x73e110) raises bInactivePose for the ledge step before
+	// a downward ladder, and no ladder transition (0x740c40/0x740ca0) lowers it -> after the
+	// descent CanActivateItem() stays false until the next Jump.
+	bInactivePose = false;
 	float fHeightDiff = prevPos.GetCP().z - cmdPos.GetCP().z;
 	if ( fHeightDiff < 0 )
 		fHeightDiff = 0;

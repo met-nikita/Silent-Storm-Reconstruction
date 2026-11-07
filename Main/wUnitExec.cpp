@@ -460,6 +460,13 @@ public:
 		if ( !pUS->animator.CanActivateItem() ) // on ladder, for example
 		{
 			NRPG::IUnitMission *pRPG = pUS->GetUnitRPG();
+			// Fix of a retail v1.2 bug: switching to an empty slot here kept bActiveItem=1 with
+			// WT_DEFAULT -> WEAPON_ITEM pose ("holding a grenade"), no melee clip.
+			if (bActive && !pInventory->Get(slot))
+			{
+				pUS->animator.SetActiveItem(false);
+				bActive = false;
+			}
 			pUS->animator.SetWeaponAnimation( bActive ? pRPG->GetWeaponType() : NDb::WT_DEFAULT );
 			pUS->SetUndrawItem( !bActive );
 			Finished();
