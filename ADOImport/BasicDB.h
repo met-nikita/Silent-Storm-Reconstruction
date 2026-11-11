@@ -6,6 +6,7 @@
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 #include "..\Misc\basic2.h"
 #include "..\FileIO\BasicChunk1.h"
+#include "..\Misc\RetailHashOrder.h"
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CDBRecord;
 namespace NDatabase {
@@ -76,6 +77,48 @@ class CDBTableBase
 {
 	typedef std::unordered_map<int, CObj<CDBRecord> > CRecordHash;
 	CRecordHash records;
+	NRetail::CIntHashOrder recordOrder;
+	void SetRecord( int nID, CDBRecord *pRecord )
+	{
+		if ( records.find( nID ) == records.end() )
+			recordOrder.Insert( nID );
+		records[nID] = pRecord;
+	}
+	struct SRecordIO
+	{
+		CDBTableBase &table;
+		SRecordIO( CDBTableBase &t ) : table( t ) {}
+		int operator&( CStructureSaver &f )
+		{
+			// Same key/value chunks as DoHashMap, retaining insertion order on read.
+			if ( f.IsReading() )
+			{
+				table.records.clear();
+				table.recordOrder.Clear();
+				const int n = f.CountChunks( 1 );
+				std::vector<int> keys( n );
+				for ( int i = 0; i < n; ++i )
+					f.Add( 1, &keys[i], i + 1 );
+				for ( int i = 0; i < n; ++i )
+				{
+					if ( table.records.find( keys[i] ) == table.records.end() )
+						table.recordOrder.Insert( keys[i] );
+					f.Add( 2, &table.records[keys[i]], i + 1 );
+				}
+			}
+			else
+			{
+				const std::vector<int> &keys = table.recordOrder.GetKeys();
+				for ( int i = 0; i < keys.size(); ++i )
+				{
+					int key = keys[i];
+					f.Add( 1, &key, i + 1 );
+					f.Add( 2, &table.records.find( key )->second, i + 1 );
+				}
+			}
+			return 0;
+		}
+	};
 	//
 	void PreCreate( int nTypeID );
 	void Refresh( int nTypeID );
@@ -84,7 +127,8 @@ public:
 	CDBRecord* GetDBRecord( int nID );
 	int operator&( CStructureSaver &f ) 
 	{
-		f.Add( 1, &records );
+		SRecordIO io( *this );
+		f.Add( 1, &io );
 		return 0;
 	}
 	friend void NDatabase::Import();
@@ -110,19 +154,20 @@ public:
 class CDBIteratorBase
 {
   const CDBTableBase &table;
-  CDBTableBase::CRecordHash::const_iterator i;
+  int position;
 protected:
-  CDBRecord* Get() const { return i->second; }
+  CDBRecord* Get() const { return table.records.find( table.recordOrder.GetKeys()[position] )->second; }
   CDBIteratorBase( const CDBTableBase &t ): table(t) { MoveFirst(); }
 public:
-  void MoveFirst() { i = table.records.end(); }
+  void MoveFirst() { position = -1; }
   bool MoveNext() 
   { 
-    if ( i == table.records.end() ) 
-      i = table.records.begin(); 
+    const int count = table.recordOrder.GetKeys().size();
+    if ( position < 0 || position == count )
+      position = 0;
     else 
-      ++i;
-    return i != table.records.end();
+      ++position;
+    return position < count;
   }
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
