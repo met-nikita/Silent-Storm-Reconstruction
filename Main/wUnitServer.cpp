@@ -369,15 +369,15 @@ void CUnitServer::Do( CCommand *_pCmd )
 	ASSERT( CanFight() );
 	if ( !CanFight() )
 		return;
-	// TURN-STUCK FIX (dev-bugs s7): retail CUnitServer::Do @0x3c2390 has NO bIsRunningForcedAction
-	// refusal -- its only gate is CanFight + not-cannon (oracle s2_unitserver.h Do mirror). The Jan03
-	// early-return here was FATAL when the flag leaked: any direct pExec=0 drop of a RUNNING forced
-	// critical executor (e.g. the old TBS_RECALC_COMMAND arm, fired by OnPassControl right after
-	// turn-start bleed damage rolled a critical) left bIsRunningForcedAction latched TRUE with no
-	// executor -- and with this gate the unit then silently ignored EVERY later command forever
-	// (CheckCmdExecState, the only place that clears the flag, is unreachable without an executor).
-	// Retail self-heals instead: commands are accepted, and the next executor retire clears the flag.
-	ASSERT( !bIsRunningForcedAction );
+	// Retail 0x7c2e10 refuses orders while a forced critical action is active.
+	// Preserve recovery from old saves whose forced-action flag outlived the
+	// executor: without an executor, normal retirement cannot clear the latch.
+	if ( bIsRunningForcedAction )
+	{
+		if ( IsValid( pExec ) )
+			return;
+		bIsRunningForcedAction = false;
+	}
 	CDynamicCast<CCmdCancel> pCancel(_pCmd);
 	if (pCancel)
 	{
