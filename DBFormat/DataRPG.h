@@ -189,7 +189,10 @@ enum EItemSubType
 	SUBTYPE_AMMO_RIFLE,
 	SUBTYPE_AMMO_MG,
 	SUBTYPE_AMMO_HEAVY,
-	//...
+	SUBTYPE_AMMO_SMG_ALLIES,
+	SUBTYPE_AMMO_SMG_AXIS,
+	SUBTYPE_AMMO_RIFLE_ALLIES,
+	SUBTYPE_AMMO_RIFLE_AXIS,
 	N_SUBTYPES
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
