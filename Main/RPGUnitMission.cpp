@@ -2077,6 +2077,9 @@ float CUnitMission::GetCriticalDmgModifier( NWorld::IWorld *pWorld, NAI::EHitLoc
 	case NAI::HL_RHAND:
 	case NAI::HL_LHAND: fDamage *= 0.5f; break;
 	}
+	IUnitMissionForMedals *pMedals = dynamic_cast<IUnitMissionForMedals*>( pAttacker );
+	if ( pMedals )
+		pMedals->AddAttackToAttackSession( this, true, true );
 	ApplyCritical( pCritical, nSeverity );
 	return fDamage * fCriticalResist * fCriticalDamageMultiplier;
 }

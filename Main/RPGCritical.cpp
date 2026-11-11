@@ -19,7 +19,7 @@ CCritical::CCritical( const SCritical &crit ): critical(crit), nTurn(0)
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CCritical::NextTurn()
 {
-	if ( critical.nDuration >= 0 && ++nTurn > critical.nDuration )
+	if ( critical.nDuration >= 0 && ++nTurn >= critical.nDuration )
 		return false;
 	return true;
 }
@@ -118,7 +118,7 @@ bool CVPCritical::SetModifiers( CUnit *pRPGUnit, IUnitMission *pRPGMission )
 
 	const int nEff = vp;                                     // frozen -> cap, else min(cap, value)
 	const int nDenom = vp.GetTheoreticalMax();               // nBaseValue + nXPValue
-	int nPercentage = int( float( pRPGUnit->nHealedVP + nEff ) * 100.0f / float( nDenom ) );
+	int nPercentage = int( float( Max( 0, pRPGUnit->nHealedVP ) + nEff ) * 100.0f / float( nDenom ) );
 	// Retail v1.2 0x695138 tests the original VP percentage for perk 8;
 	// perk 5 changes only the wound-penalty tiers, not the survival threshold.
 	const int nHealthPercentage = nPercentage;
@@ -194,7 +194,7 @@ bool CWeaponSkillCritical::SetModifiers( CUnit *pRPGUnit, IUnitMission *pRPGMiss
 bool CDeathCritical::SetModifiers( CUnit *pRPGUnit, IUnitMission *pRPGMission )
 {
 	ASSERT( pRPGUnit );
-	pRPGUnit->Skills(NDb::ST_VP) -= pRPGUnit->Skills(NDb::ST_VP);
+	pRPGMission->MakeDirectDamage( pRPGMission->GetTotalVP() );
 	return false;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
