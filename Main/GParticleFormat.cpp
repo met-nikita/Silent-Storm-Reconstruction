@@ -59,11 +59,20 @@ void Interpolate( const float &v1, const float &v2, float fAlpha, float *pRes )
 }
 void Interpolate( const DWORD &v1, const DWORD &v2, float fAlpha, DWORD *pRes )
 {
-	DWORD b = DWORD( (v1 & 0x000000FF) * (1 - fAlpha) + (v2 & 0x000000FF) * fAlpha );
-	DWORD g = DWORD( (v1 & 0x0000FF00) * (1 - fAlpha) + (v2 & 0x0000FF00) * fAlpha );
-	DWORD r = DWORD( (v1 & 0x00FF0000) * (1 - fAlpha) + (v2 & 0x00FF0000) * fAlpha );
-	DWORD a = DWORD( (v1 & 0xFF000000) * (1 - fAlpha) + (v2 & 0xFF000000) * fAlpha );
-	*pRes = b | (g & 0x0000FF00) | (r & 0x00FF0000) | (a & 0xFF000000);
+	// Retail's packed signed high-word products, wrapping sum and unsigned byte saturation.
+	const WORD w = (WORD)Float2Int( fAlpha * 16384.0f );
+	const short w2 = (short)w, w1 = (short)(WORD)( 0x4000 - w );
+	DWORD result = 0;
+	for ( int shift = 0; shift < 32; shift += 8 )
+	{
+		const short c1 = (short)( ( ( (v1 >> shift) & 0xff ) * 0x101 ) >> 2 );
+		const short c2 = (short)( ( ( (v2 >> shift) & 0xff ) * 0x101 ) >> 2 );
+		const short h1 = (short)( ( int(c1) * w1 ) >> 16 );
+		const short h2 = (short)( ( int(c2) * w2 ) >> 16 );
+		const WORD sum = (WORD)( (WORD)h1 + (WORD)h2 ) >> 4;
+		result |= DWORD( sum > 255 ? 255 : sum ) << shift;
+	}
+	*pRes = result;
 }
 void Interpolate( const short &v1, const short &v2, float fAlpha, short *pRes )
 {
