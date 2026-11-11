@@ -44,7 +44,7 @@ enum EUIMode
 {
 	UIM_800x600 = 0,
 	UIM_1024x768,
-	UIM_1280x1024,
+	UIM_1280x1024, // historical identifier: DB texture set R_1280x960
 	UIM_1600x1200,
 	UIM_MAX,
 };

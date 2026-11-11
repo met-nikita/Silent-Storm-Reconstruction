@@ -140,7 +140,7 @@ void CUITexture::Import()
 		else if ( pTextures[NDb::UIM_1280x1024] )
 		{
 			nWidth = pTextures[NDb::UIM_1280x1024]->nWidth * 1024 / 1280;
-			nHeight = pTextures[NDb::UIM_1280x1024]->nHeight * 768 / 1024;
+			nHeight = pTextures[NDb::UIM_1280x1024]->nHeight * 768 / 960;
 		}
 		else if ( pTextures[NDb::UIM_800x600] )
 		{

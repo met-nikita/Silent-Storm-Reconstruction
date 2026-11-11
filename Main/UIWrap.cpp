@@ -222,7 +222,7 @@ void CImageDraw::Draw( CWindow *pWindow, const STime &sTime, NGScene::I2DGameVie
 					break;
 				}
 				scale.x *= 1600.0f / 1280.0f;
-				scale.y *= 1200.0f / 1024.0f;
+				scale.y *= 1200.0f / 960.0f;
 			case 1280:
 				if ( IsValid( pUITexture->pTextures[NDb::UIM_1280x1024] ) )
 				{
@@ -230,7 +230,7 @@ void CImageDraw::Draw( CWindow *pWindow, const STime &sTime, NGScene::I2DGameVie
 					break;
 				}
 				scale.x *= 1280.0f / 1024.0f;
-				scale.y *= 1024.0f / 768.0f;
+				scale.y *= 960.0f / 768.0f;
 			case 1024:
 				if ( IsValid( pUITexture->pTextures[NDb::UIM_1024x768] ) )
 				{
