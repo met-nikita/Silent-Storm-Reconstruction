@@ -1188,7 +1188,7 @@ void CUnitServer::UpdateVisible( SInterruptInfo *pRes )
 				if ( pEnemy->pPlayer == pPlayer )
 					continue;
 				//
-				if ( GetDiplomacyState( pEnemy ) == NDb::DS_ALLY )
+				if ( pEnemy->GetDiplomacyState( this ) == NDb::DS_ALLY )
 				{
 					visible.push_back( pEnemy );
 					continue;
@@ -1215,12 +1215,6 @@ void CUnitServer::UpdateVisible( SInterruptInfo *pRes )
 				continue;
 			} 
 			//
-			if ( GetDiplomacyState( pEnemy ) != NDb::DS_ENEMY )
-			{
-				visible.push_back( pEnemy );
-				continue;
-			}
-			//
 //			if ( !IsCheatEnabled( NRPG::CHEAT_SCRIPTSEQUENCE ) && !IsCheatEnabled( NRPG::CHEAT_NOAI ) )
 //			{
 			bool bWasHidden = ( find( hiddenAtSight.begin(), hiddenAtSight.end(), pEnemy ) != hiddenAtSight.end() );
@@ -1244,7 +1238,7 @@ void CUnitServer::UpdateVisible( SInterruptInfo *pRes )
 			if ( find_if( playerVisible.begin(), playerVisible.end(), SPtrTest(pEnemy) ) == playerVisible.end() )
 			{
 				lostUnits.erase( remove( lostUnits.begin(), lostUnits.end(), pEnemy ), lostUnits.end() );
-				if ( pEnemy->CanFight() )
+				if ( pEnemy->CanFight() && GetDiplomacyState( pEnemy ) == NDb::DS_ENEMY )
 				{
 					GetWorld()->GetGlobalAck()->OnEnemyBecomesVisible( this, pEnemy, GetWorld()->IsRealTime() );
 					pRes->AddEvent( this, pEnemy );
@@ -1254,7 +1248,8 @@ void CUnitServer::UpdateVisible( SInterruptInfo *pRes )
 			// retail CUnitServer::UpdateVisible: a unit that NEWLY sees an enemy raises CEventOnSeeNewEnemy, whose
 			// handler relays the enemy to allies within 5m as a possibleEnemy (squad spotting). Gate on the unit not
 			// having seen it last update so it fires once per acquisition.
-			if ( pEnemy->CanFight() && find( oldVisible.begin(), oldVisible.end(), pEnemy ) == oldVisible.end() )
+			if ( pEnemy->CanFight() && GetDiplomacyState( pEnemy ) == NDb::DS_ENEMY &&
+				find( oldVisible.begin(), oldVisible.end(), pEnemy ) == oldVisible.end() )
 				NGlobal::ThrowEvent( NWorld::CEventOnSeeNewEnemy( this, pEnemy, GetWorld()->IsRealTime() ) );
 			visible.push_back( pEnemy );
 		}

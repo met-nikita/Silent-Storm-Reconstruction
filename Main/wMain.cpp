@@ -3336,21 +3336,8 @@ void CWorld::CheckSpot( const vector< CPtr<CPlayer> > &players )
 				for ( vector< CPtr<CUnit> >::iterator e = enemies.begin(); e != enemies.end(); ++e )
 				{
 					CDynamicCast<CUnitServer> pEnemyUS( e->GetPtr() );
-					if ( IsValid( pEnemyUS ) && pEnemyUS->GetDiplomacyState( (*u) ) == NDb::DS_ENEMY &&
-						pEnemyUS->CanFight() && GetGame()->CheckVisibility( pEnemyUS, *u, true ) )
-					{
-						float fDistance = fabs( pEnemyUS->GetPosition().GetCP() - (*u)->GetPosition().GetCP() ) / FP_GRID_STEP;
-						int nProbability = pEnemyUS->GetUnitRPG()->GetUnhideProbability( (*u)->GetUnitRPG(), fDistance,
-							GetGame()->IsNight() );
-						int nCheck = random.Get( 0,100 );
-						if ( nCheck < nProbability )
-						{
-							csSystem << CC_RED << 
-								"Hiding unit detected: probability = " << nProbability << ", check = " << nCheck << endl;
-							(*u)->Hide( false );
-							bUpdate = true;
-						}
-					}
+					if ( IsValid( pEnemyUS ) && pEnemyUS->CheckSpot( *u ) )
+						bUpdate = true;
 					//
 					if ( !(*u)->GetUnitRPG()->IsHiding() )
 						break;
