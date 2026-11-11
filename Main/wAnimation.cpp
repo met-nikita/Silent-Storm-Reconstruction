@@ -1528,6 +1528,8 @@ void CUnitAnimator::Jump( const NAI::SUnitPosition &prevPos, const NAI::SUnitPos
 	CPtr<NAnimation::CAnimator> pResult = 0;
 	STime t = 0;
 	pose = cmdPos.GetPose();
+	// Original retail bug: the climb can finish crouched with standing idle flags.
+	CalculateAnimFlags();
 	if ( !bRealJump )
 	{
 		pTerrainFunc->Move( prevPos, cmdPos );
