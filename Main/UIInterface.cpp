@@ -1,4 +1,5 @@
 #include "StdAfx.h"
+#include "..\Misc\RetailSort.h"
 #include "G2DView.h"
 #include "Transform.h"
 #include "GSceneUtils.h"
@@ -141,7 +142,7 @@ void CLoader::Load( CWindow* _pParent, NDb::CUIContainer *pTemplate )
 		pParent->SetSize( SPoint( pTemplate->nWidth, pTemplate->nHeight ) );
 
 		vector< CPtr<NDb::CUIControl> > controls( pTemplate->controls );
-		sort( controls.begin(), controls.end(), SControlsSort() );
+		NRetail::Sort( controls.begin(), controls.end(), SControlsSort() );
 
 		windowsSet.resize( controls.size() );
 		for ( int nTemp = 0; nTemp < controls.size(); nTemp++ )
