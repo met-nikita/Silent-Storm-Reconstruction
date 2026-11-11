@@ -672,7 +672,7 @@ bool PrepareAttackRay( NAI::IAIMap *pAIMap, CCoverInfo *pCover, SAttackRayInfo *
 	bool bMissed;
 	pInfo->trailPoints.clear();
 	pInfo->bTargetIsHit = false;
-	if ( !RealPeekRay( pCover, &ray, fHit, &bMissed, false, &selected ) )
+	if ( !RealPeekRay( pCover, &ray, fHit, &bMissed, pInfo->nBullet >= 1, &selected ) )
 		return false;
 	pInfo->vOrigin = ray.ptOrigin;
 	pInfo->vDir = ray.ptDir;
