@@ -79,8 +79,7 @@ static EUnitCommandResult HasWorkingWeapon( CUnitServer *pUS )
 		return UCR_WEAPON_JAMMED;
 	//
 	vector<NRPG::CAttackPortion> attack;
-	pUS->GetUnitRPG()->CreateAttack( &attack, false );
-	if ( attack.empty() )
+	if ( !pUS->GetUnitRPG()->CreateAttack( &attack, false, true ) || attack.empty() )
 		return UCR_GENERAL_FAILURE;
 	//
 	return UCR_OK;
@@ -1562,7 +1561,8 @@ EUnitCommandResult CExecShootTile::CanDoIt( const NAI::SUnitPosition &from, bool
 	//
 	CWorld *pWorld = pUS->GetWorld();
 	vector<NRPG::CAttackPortion> attack;
-	pUS->GetUnitRPG()->CreateAttack( &attack, false );
+	if ( !pUS->GetUnitRPG()->CreateAttack( &attack, false, true ) || attack.empty() )
+		return UCR_GENERAL_FAILURE;
 	CObj<NRPG::CCoverInfo> pCover = pWorld->GetGame()->CalcCoversForTile( pUS->GetAttackOrigin( from ), 
 		attack[0], pUS, ptAnimTarget, pUS->GetMinClearDistance() );
 	if ( !NRPG::CanShoot( pCover ) )
@@ -1621,8 +1621,7 @@ EUnitCommandResult CExecShootObject::CanDoIt( const NAI::SUnitPosition &from, bo
 	if ( bIgnoreTarget )
 		return UCR_NO_TARGET;
 	vector<NRPG::CAttackPortion> portions;
-	pUS->GetUnitRPG()->CreateAttack( &portions, false );
-	if ( portions.empty() )
+	if ( !pUS->GetUnitRPG()->CreateAttack( &portions, false, true ) || portions.empty() )
 		return UCR_GENERAL_FAILURE;
 	CObj<NRPG::CCoverInfo> pCover = pUS->GetWorld()->GetGame()->CalcCovers(
 		pUS->GetAttackOrigin( from ), portions[0], pUS, pTarget, -1, pUS->GetMinClearDistance() );
@@ -1705,7 +1704,8 @@ EUnitCommandResult CExecShootUnit::CanDoIt( const NAI::SUnitPosition &from, bool
 	//
 	CWorld *pWorld = pUS->GetWorld();
 	vector<NRPG::CAttackPortion> attack;
-	pUS->GetUnitRPG()->CreateAttack( &attack, false );
+	if ( !pUS->GetUnitRPG()->CreateAttack( &attack, false, true ) || attack.empty() )
+		return UCR_GENERAL_FAILURE;
 	CObj<NRPG::CCoverInfo> pCover = pWorld->GetGame()->CalcCovers( pUS->GetAttackOrigin( from ), attack[0], pUS, pTarget, eHL, pUS->GetMinClearDistance() );
 	if ( !NRPG::CanShoot( pCover ) )
 		return UCR_GENERAL_FAILURE;
