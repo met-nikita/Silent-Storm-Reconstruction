@@ -655,44 +655,40 @@ static void MarkCandidatesToDisplace( CArray2D<char> *pSpH, const CArray2D<CPass
 {
 	ASSERT( B_3x3_RENDER );
 	CArray2D<char> &sphereHeight = *pSpH;
-	for ( int y = 1; y < tiles.GetYSize() - 1; ++y )
+	for ( int y = 0; y < tiles.GetYSize(); ++y )
+	for ( int x = 0; x < tiles.GetXSize(); ++x )
 	{
-		for ( int x = 1; x < tiles.GetXSize() - 1; ++x )
+		if ( ( tiles[y][x].nPassable & CP_INACTIVE ) == 0 )
+			continue;
+		if ( tiles[y][x].nFlags & TF_IS_LADDER_UP )
 		{
-			if ( ( tiles[y][x].nPassable & CP_INACTIVE ) == 0 )
-				continue;
-			if ( tiles[y][x].nFlags & TF_IS_LADDER_UP )
-			{
-				sphereHeight[y][x] = 3;
-				sphereHeight[y-1][x] = 3;
-				sphereHeight[y+1][x] = 3;
-				sphereHeight[y][x-1] = 3;
-				sphereHeight[y][x+1] = 3;
-				continue;   // retail @0x485240: the ladder anchor is FINAL (falling through wiped it)
-			}
-			sphereHeight[y][x] = 0;
-			bool b1 = tiles[y-1][x].nPassable & CP_CROUCH;
-			bool b2 = tiles[y+1][x].nPassable & CP_CROUCH;
-			bool b3 = tiles[y][x-1].nPassable & CP_CROUCH;
-			bool b4 = tiles[y][x+1].nPassable & CP_CROUCH;
-			int nH = tiles[y][x].nHeight;
-			int nDH1 = abs( tiles[y-1][x].nHeight - nH );
-			int nDH2 = abs( tiles[y+1][x].nHeight - nH );
-			int nDH3 = abs( tiles[y][x-1].nHeight - nH );
-			int nDH4 = abs( tiles[y][x+1].nHeight - nH );
-			int nMinH = GetIHeight( F_MIN_CLIMB_HEIGHT );
-			if ( b1 && b2 && ( nDH1 >= nMinH || nDH2 >= nMinH ) )
-			{
-				sphereHeight[y][x] = 3;
-				sphereHeight[y-1][x] = 3;
-				sphereHeight[y+1][x] = 3;
-			}
-			if ( b3 && b4 && ( nDH3 >= nMinH || nDH4 >= nMinH ) )
-			{
-				sphereHeight[y][x] = 3;
-				sphereHeight[y][x-1] = 3;
-				sphereHeight[y][x+1] = 3;
-			}
+			sphereHeight[y][x] = 3;
+			if ( y > 0 ) sphereHeight[y-1][x] = 3;
+			if ( y + 1 < tiles.GetYSize() ) sphereHeight[y+1][x] = 3;
+			if ( x > 0 ) sphereHeight[y][x-1] = 3;
+			if ( x + 1 < tiles.GetXSize() ) sphereHeight[y][x+1] = 3;
+			continue;
+		}
+		sphereHeight[y][x] = 0;
+		const int nH = tiles[y][x].nHeight;
+		const int nMinH = GetIHeight( F_MIN_CLIMB_HEIGHT );
+		if ( y == 0 || y == tiles.GetYSize() - 1 )
+			sphereHeight[y][x] = 3;
+		else if ( ( tiles[y-1][x].nPassable & CP_CROUCH ) && ( tiles[y+1][x].nPassable & CP_CROUCH ) &&
+			( abs( tiles[y-1][x].nHeight - nH ) >= nMinH || abs( tiles[y+1][x].nHeight - nH ) >= nMinH ) )
+		{
+			sphereHeight[y][x] = 3;
+			sphereHeight[y-1][x] = 3;
+			sphereHeight[y+1][x] = 3;
+		}
+		if ( x == 0 || x == tiles.GetXSize() - 1 )
+			sphereHeight[y][x] = 3;
+		else if ( ( tiles[y][x-1].nPassable & CP_CROUCH ) && ( tiles[y][x+1].nPassable & CP_CROUCH ) &&
+			( abs( tiles[y][x-1].nHeight - nH ) >= nMinH || abs( tiles[y][x+1].nHeight - nH ) >= nMinH ) )
+		{
+			sphereHeight[y][x] = 3;
+			sphereHeight[y][x-1] = 3;
+			sphereHeight[y][x+1] = 3;
 		}
 	}
 }

@@ -244,7 +244,7 @@ void CMovesCalcer::TestHCMoves( NAI::CCollider *pCollider, CArray2D<STile> *pRes
 				fStartHeight = fDstHeight + F_CHECK_HEIGHT + F_TEST_SPHERE_STEP;
 				fFinishHeight = fSrcHeight + F_CHECK_HEIGHT;
 			}
-			SSphere sph( CVec3(cp.x, cp.y, fStartHeight), F_HC_TEST_SPHERE_RADIUS );
+			SSphere sph( CVec3(cp.x, cp.y, fStartHeight), F_TEST_SPHERE_RADIUS );
 			CVec3 vel( 0, 0, fFinishHeight - fStartHeight );
 			SDoorColliderAnalyzer analyzer;
 			pCollider->CollideBool( sph, vel, &analyzer );
