@@ -682,7 +682,7 @@ CUnitServer* CWorld::AddUnit( const NAI::SPathPlace &aiPos,	NRPG::IUnitMission *
 		NRPG::CUnit *pUnit = pUS->GetUnitRPG()->GetRPGUnit();
 		if ( pUnit->pPanzerklein )
 		{
-			CPtr<CUnitServer> pPKServer = AddUnit( pUS->GetPosition().pos.p, NRPG::CreateUnit( pUnit->pPanzerklein ), 0 );
+			CPtr<CUnitServer> pPKServer = AddUnit( pUS->GetPosition().pos.p, NRPG::CreateUnit( pUnit->pPanzerklein, 0, 0, pGlobalGame->pDifficulty ), 0 );
 			if ( pPKServer->WearAsPK( true ) )
 				pUS->FlipPanzerklein( pPKServer, false, false );	// retail @0x366510: no unload, no inventory link
 		}
@@ -1525,7 +1525,7 @@ void CWorld::CreateAIUnits( const SMapInfo &mapInfo, const ClueToSlot &personClu
 		// hand the map builder's rolled chest loot (WeaponInHand/WeaponInBackpack rolls) to the
 		// unit factory -- retail CreateAIUnits passes the whole SMapUnit into NRPG::CreateUnit
 		// @0x2c4f50, which consumes +108/+112 as the in-hand item / backpack chest
-		CPtr<NRPG::IUnitMission> pRPG = NRPG::CreateUnit( i->pPers, i->pInHandItem, i->pBackpack );
+		CPtr<NRPG::IUnitMission> pRPG = NRPG::CreateUnit( i->pPers, i->pInHandItem, i->pBackpack, pGlobalGame->pDifficulty );
 		int nLevel = Max( 0, nMobsLevel + i->nRelativeLevel + pGlobalGame->pDifficulty->nAIUnitsLevel );
 		if ( !IsValid( i->pPers->pPanzerklein ) )
 		{

@@ -229,7 +229,7 @@ float CUnit::GetXPForSkill( NDb::ESkillType eSkill, int nLvl )
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CUnit::CUnit( NDb::CRPGPers *_pPers, NDb::CComplexHead *_pHead, bool _bHero, NDb::CModel *_pOverrideModel,
-	NDb::CRPGItem *_pInHandItem, NDb::CRPGChestReal *_pBackpack, bool bMedalsDisabled ):
+	NDb::CRPGItem *_pInHandItem, NDb::CRPGChestReal *_pBackpack, bool bMedalsDisabled, NDb::CDBDifficulty *pDifficulty ):
 	CMedalsGainer( _pPers, bMedalsDisabled ), pPers( _pPers ), nHealedVP( 0 ), nCheats( 0 ),
 	nDeathVP( 0 ), bUnconscious( false ), bHero( _bHero ),
 	fAdaptationCounter( 0 ), fCurrentAdaptation( 0 ), nVoice( 0 )
@@ -328,6 +328,8 @@ CUnit::CUnit( NDb::CRPGPers *_pPers, NDb::CComplexHead *_pHead, bool _bHero, NDb
 		{
 			if ( !IsValid( it->pItem ) || !IsValid( it->pItem->pSuccessor ) )
 				continue;
+			if ( it->pDifficulty && it->pDifficulty != pDifficulty )
+				continue;
 			for ( int i = 0; i < it->nQuantity; ++i )
 			{
 				CPtr<NRPG::IInventoryItem> pItem = CreateItem( it->pItem->pSuccessor );
@@ -340,6 +342,8 @@ CUnit::CUnit( NDb::CRPGPers *_pPers, NDb::CComplexHead *_pHead, bool _bHero, NDb
 	for ( vector<NDb::SItemAssign>::const_iterator it = pPers->items.begin(); it != pPers->items.end(); ++it )
 	{
 		const NDb::SItemAssign &assign = *it;
+		if ( assign.pDifficulty && assign.pDifficulty != pDifficulty )
+			continue;
 		for( int i = 0; i < assign.nQuantity; ++i )
 		{
 			if ( IsValid( assign.pItem ) )

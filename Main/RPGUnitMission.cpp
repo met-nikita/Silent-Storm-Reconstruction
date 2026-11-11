@@ -2536,12 +2536,12 @@ IUnitMission* CreateUnit( CUnit *pSrc )
 // Variant for creating a monster
 // pInHandItem/pBackpack = the map builder's rolled loot (retail NRPG::CreateUnit @0x2c4f50 params
 // 4/5 from SMapUnit); they thread into the CUnit ctor and replace the pers-default equipment.
-IUnitMission* CreateUnit( NDb::CRPGPers *pSrc, NDb::CRPGItem *pInHandItem, NDb::CRPGChestReal *pBackpack )
+IUnitMission* CreateUnit( NDb::CRPGPers *pSrc, NDb::CRPGItem *pInHandItem, NDb::CRPGChestReal *pBackpack, NDb::CDBDifficulty *pDifficulty )
 {
 	static int nUnitN = 0;
 	CUnitMission *pRes = new CUnitMission();
 	// v1.2 0x6c5131: map-created units do not collect medals (mercenaries do).
-	pRes->pRPGUnit = new CUnit( pSrc, 0, false, 0, pInHandItem, pBackpack, true );
+	pRes->pRPGUnit = new CUnit( pSrc, 0, false, 0, pInHandItem, pBackpack, true, pDifficulty );
 	if ( IsValid( pSrc->pDefaultWearsPanzerklein ) )
 		pRes->GetRPGUnit()->pPanzerklein = pSrc->pDefaultWearsPanzerklein;
 	NStr::ToDotString( &pRes->sID, ++nUnitN );

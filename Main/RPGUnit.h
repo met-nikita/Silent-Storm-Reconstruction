@@ -295,7 +295,7 @@ public:
 	// from SMapUnit +108/+112) -- when set they REPLACE the persona's default hand weapon / item
 	// list; null keeps the pers defaults (the only path before the chest-loot subsystem).
 	CUnit( NDb::CRPGPers *pPers, NDb::CComplexHead *pHead = 0, bool _bHero = false, NDb::CModel *pOverrideModel = 0,
-		NDb::CRPGItem *pInHandItem = 0, NDb::CRPGChestReal *pBackpack = 0, bool bMedalsDisabled = false );
+		NDb::CRPGItem *pInHandItem = 0, NDb::CRPGChestReal *pBackpack = 0, bool bMedalsDisabled = false, NDb::CDBDifficulty *pDifficulty = 0 );
 
 	void AddXP( float nXPToAdd );
 	bool UseSkill( int eSkill );
