@@ -480,6 +480,12 @@ void CPathConflictsRemover::TryToSetNewPath()
 		FullCancel();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+bool CUnitServer::IsWaitingForPath()
+{
+	CPathConflictsRemover *pRemover = GetPathConflictsRemover();
+	return IsValid( pRemover ) && pRemover->IsWaitingForPath();
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CUnitServer::CanVacatePathTile()
 {
 	CPathConflictsRemover *pRemover = GetPathConflictsRemover();

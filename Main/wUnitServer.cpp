@@ -1044,15 +1044,15 @@ void CUnitServer::Segment()
 {
 	STime tCur = GetWorld()->GetTime()->GetValue();
 	int nDoNotFreeze = 0;
+	// Retail Steam 0x7c3930: service once per tick, then recheck the executor.
+	// Servicing can replace it; animation retirement must use the current one.
+	if ( IsValid( pExec ) && pExec->IsExecuting() )
+		pExec->Segment();
 	while ( IsValid( pExec ) && pExec->IsExecuting() )
 	{
-		// Service the move wait-state (path-conflict recovery) each tick. The Jan03 inline locker/reroute
-		// pump now lives in CExecMove::CheckCanDoMove/CheckLockerState/TryToSetNewPath, driven from
-		// CPathConflictsRemover::Segment (@0x3cc670). Still waiting after servicing -> hold this tick.
-		pExec->Segment();
-		// Retail v1.2 0x7c3346: parked movement waits; normal retirement is
-		// driven by the animation boundary, not the executor's finish-state flag.
-		if ( pExec->IsWaitingForPath() )
+		// Only eligible movement may wait here. Normal retirement is driven
+		// by the animation boundary, not the executor's finish-state flag.
+		if ( IsWaitingForPath() )
 			break;
 		if ( bCallTimeLabel && tCur >= animator.GetTimeLabel1() )
 			bCallTimeLabel = pExec->TimeLabelReached();
@@ -1072,9 +1072,9 @@ void CUnitServer::Segment()
 		else
 			break;
 		++nDoNotFreeze;
-		if ( nDoNotFreeze > 100 )
-			__debugbreak(); // somehow we freezed here?
-		if ( nDoNotFreeze > 150 )
+		if ( nDoNotFreeze > 10 )
+			DebugTrace( "CUnitServer::Segment: ERROR: Unit server freezes the game!\n" );
+		if ( nDoNotFreeze >= 13 )
 			break;
 	}
 	if ( IsValid(pAutoRunCmd) && ( !IsPerformingAction() )  )
@@ -1083,6 +1083,9 @@ void CUnitServer::Segment()
 		pAutoRunCmd = 0;
 		Do( new CCmdSetCommand( this, new CCmdContinue ) );
 	}
+	// An automatic command may remove the unit (retail 0x7c3af8).
+	if ( !IsValid( this ) )
+		return;
 	CDumbUnitServer::Segment();
 	if ( GetWorld()->IsRealTime() )
 	{
