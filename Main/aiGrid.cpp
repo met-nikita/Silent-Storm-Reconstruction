@@ -665,10 +665,12 @@ void CNodesLayer::GetSamePoints( const SPathPlace& p, vector<SPathPlace> *pRes )
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-int CNodesLayer::GetSamePoints( const SPathPlace& p, SPathPlace *places )
+int CNodesLayer::GetGeometricSamePoints( const SPathPlace& p, SPathPlace *places )
 {
+	// Zone connectivity describes coincident geometry, not usable destinations.
+	// Keep navigation filtering in GetSamePoints / IsLinkedSame.
 	STile &t1 = tiles[ p.GetY() ][ p.GetX() ];
-	if ( ( t1.nFlags & TF_HAS_SAME ) == 0 && t1.HasNavigationLinks() )
+	if ( ( t1.nFlags & TF_HAS_SAME ) == 0 )
 		return 0;
 	int nP = 0;
 	for ( int i = 0; i < N_MAX_FLOORS * N_MAX_LAYERS_PER_FLOOR; ++i )
@@ -679,7 +681,7 @@ int CNodesLayer::GetSamePoints( const SPathPlace& p, SPathPlace *places )
 		if ( pL == this )
 			continue;
 		STile &t2 = pL->tiles[ p.GetY() ][ p.GetX() ];
-		if ( t2.IsLinkedSame( t1 ) )
+		if ( t2.nHeight == t1.nHeight && t2.nDisplacement == t1.nDisplacement )
 		{
 			places[ nP ] = SPathPlace( p.GetX(), p.GetY(), pL->nLayer );
 			++nP;
