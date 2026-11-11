@@ -348,6 +348,9 @@ void CMapBuilder::AddSimpleElements( SMapInfo *pDst, SMapBuilding *pB, NDb::CTem
 							ds.ptAlignTo = CVec2( pos.ptPos.x, pos.ptPos.y );
 						pDst->deploySpots.push_back( ds );
 					}
+					// Retail keeps deployment markers, but does not place zero-scale objects.
+					if ( fabs( pFin->ptScale.x ) < 1e-12f || fabs( pFin->ptScale.y ) < 1e-12f || fabs( pFin->ptScale.z ) < 1e-12f )
+						continue;
 					if ( IsValid( pObject->pModels[0] ) )
 					{
 						SMapElement me;
