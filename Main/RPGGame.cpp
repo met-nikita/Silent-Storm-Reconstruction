@@ -174,10 +174,8 @@ static void AddGridToCovers( CCoverInfo *pRes, const NAI::CFastRenderer &res, co
 	for ( int i = 0; i < res.resGrid.GetXSize(); ++i )
 		fputc( '-', f );
 	fputc( '\n', f );
-	for ( int y = res.resGrid.GetYSize() - 1; y >= 0; --y )
-#else
-	for ( int y = 0; y < res.resGrid.GetYSize(); ++y )
 #endif
+	for ( int y = res.resGrid.GetYSize() - 1; y >= 0; --y )
 	{
 		for ( int x = 0; x < res.resGrid.GetXSize(); ++x )
 		{
