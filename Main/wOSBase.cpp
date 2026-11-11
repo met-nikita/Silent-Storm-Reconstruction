@@ -723,6 +723,7 @@ void CAnimObjectServerBase::GetApproaches( vector<NAI::SPathPlace> *pRes, NAI::I
 	pRes->clear();
 	char pszName[16];
 	vector<NAI::SPathPlace> tmp;
+	vector<NAnimation::SBonePose> bones;
 	for ( int i = 1; i < 10; ++i )
 	{
 		sprintf( pszName, "Unit%d", i );
@@ -744,6 +745,12 @@ void CAnimObjectServerBase::GetApproaches( vector<NAI::SPathPlace> *pRes, NAI::I
 			bone.rot = rot * bone.rot;
 		}
 
+		bones.push_back( bone );
+	}
+	// Retail Steam 0x7860f0 resolves every UnitN bone before assigning nearby tiles.
+	for ( int i = 0; i < bones.size(); ++i )
+	{
+		const NAnimation::SBonePose &bone = bones[i];
 		CVec3 axis = bone.rot.GetXAxis();
 		float fAngle = atan2( axis.y, axis.x );
 		vector<NAI::SPathPlace> places;
@@ -757,17 +764,32 @@ void CAnimObjectServerBase::GetApproaches( vector<NAI::SPathPlace> *pRes, NAI::I
 			p = places[k];
 			p.SetPose( NAI::CM_STAND );
 			p.SetDirection( pNet->GetClosestDir( p.GetLayer(), fAngle ) );
-			if ( !pNet->IsNativePassable( p ) )
+			if ( pNet->GetPassability( p ) == NAI::AIP_NOT_PASSABLE )
 			{
 				p.SetPose( NAI::CM_CROUCH );
-				if ( !pNet->IsNativePassable( p ) )
+				if ( pNet->GetPassability( p ) == NAI::AIP_NOT_PASSABLE )
 					continue;
 			}
 			NAI::SPosition pos;
 			pos.SetNetwork( pNet );
 			pos.p = p;
-			CVec3 vDiff = bone.pos - pos.GetCP();
+			CVec3 pt = pos.GetCP();
+			CVec3 vDiff = bone.pos - pt;
 			float fDist = vDiff.x * vDiff.x + vDiff.y * vDiff.y;
+			bool bCloserToOtherBone = false;
+			for ( int j = 0; j < bones.size(); ++j )
+			{
+				if ( j == i )
+					continue;
+				CVec3 otherDiff = bones[j].pos - pt;
+				if ( otherDiff.x * otherDiff.x + otherDiff.y * otherDiff.y < fDist )
+				{
+					bCloserToOtherBone = true;
+					break;
+				}
+			}
+			if ( bCloserToOtherBone )
+				continue;
 			float fVertDist = vDiff.z;
 			if ( fVertDist < -0.25f )
 				continue; 
@@ -790,7 +812,7 @@ void CAnimObjectServerBase::GetApproaches( vector<NAI::SPathPlace> *pRes, NAI::I
 		if ( p.GetPose() == NAI::CM_CROUCH )
 			continue;
 		p.SetPose( NAI::CM_CROUCH );
-		if ( pNet->IsNativePassable( p ) )
+		if ( pNet->GetPassability( p ) != NAI::AIP_NOT_PASSABLE )
 			pRes->push_back( p );
 	}
 }
