@@ -1761,12 +1761,12 @@ void CUnitAnimator::ActivateItem( const NAI::SUnitPosition &cmdPos,
 	bActiveItem = !bHide;
 	if ( bHide )
 		eAWT = NDb::WT_DEFAULT;
+	SetWeaponAnimation( eAWT );
+	CalculateAnimFlags();
 	bool bTransit = false;
 	CPtr<NAnimation::CAnimation> pAnim;
 	if ( bHeavy )
 	{
-		SetWeaponAnimation( eAWT );
-		CalculateAnimFlags();
 		if ( bBackpack )
 			pAnim = pAnimator->CreateAnimation(
 				pSkeleton->GetAnimation( NDb::CAnimation::GET_BACKPACK, nAnimFlagsPoseWeapon, 0, nAnimFlagsClassSex, pSide ),
@@ -1786,8 +1786,6 @@ void CUnitAnimator::ActivateItem( const NAI::SUnitPosition &cmdPos,
 			pAnim = pAnimator->CreateAnimation(
 				pSkeleton->GetAnimation( NDb::CAnimation::ACTIVATE, nAnimFlagsPoseWeapon, 
 					pszActivateAnimParams[place], nAnimFlagsClassSex, pSide ), tEnd );
-		SetWeaponAnimation( eAWT );
-		CalculateAnimFlags();
 		if ( eAnimationWeaponType != NDb::WT_DEFAULT )
 			bTransit = true;
 	}
@@ -2005,12 +2003,12 @@ void CUnitAnimator::PlayAnimation( const NAI::SUnitPosition &cmdPos,
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CUnitAnimator::PlayAnimation( const NAI::SUnitPosition &cmdPos, 
-	int nType, const char *pszParams, bool bInstantly )
+	int nType, const char *pszParams, bool bInstantly, bool bStandFirst )
 {
 	CPtr<NAnimation::CAnimation> pAnim = pAnimator->CreateAnimation(
 		pSkeleton->GetAnimation( (NDb::CAnimation::EType)nType, nAnimFlagsPoseWeapon, pszParams, 
 			nAnimFlagsClassSex, pSide ), tEnd );
-	PlayAnimation( cmdPos, pAnim, bInstantly );
+	PlayAnimation( cmdPos, pAnim, bInstantly, bStandFirst );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // retail @0x33f4c0: play the DB clip, then -- if bFreezeAfterLastFrame -- BAN the internal idle so
@@ -2038,7 +2036,7 @@ void CUnitAnimator::OpenWindowDoor( const NAI::SUnitPosition &cmdPos )
 // @0x3409d0 -- single-step clip, no trailing IdleOn/Stand
 void CUnitAnimator::MoveOneStep( const NAI::SUnitPosition &cmdPos )
 {
-	PlayAnimation( cmdPos, NDb::CAnimation::MOVE_ONE_STEP );
+	PlayAnimation( cmdPos, NDb::CAnimation::MOVE_ONE_STEP, 0, false, false );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // @0x33f5a0 -- kneel-and-place: MINE_TILE (ground mine) or MINE_OBJECT (object/door trap)

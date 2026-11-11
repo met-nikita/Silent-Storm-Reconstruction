@@ -117,7 +117,7 @@ private:
 	void PlayAnimation( const NAI::SUnitPosition &cmdPos, 
 		NAnimation::CAnimation *pAnimation, bool bInstantly = false, bool bStandFirst = true );
 	void PlayAnimation( const NAI::SUnitPosition &cmdPos,
-		int nType, const char *pszParams = 0, bool bInstantly = false );
+		int nType, const char *pszParams = 0, bool bInstantly = false, bool bStandFirst = true );
 	void MoveOneStep( const NAI::SUnitPosition &cmdPos );	// @0x3409d0 -- MOVE_ONE_STEP clip
 	void DefaultAction( const NAI::SUnitPosition &cmdPos );
 	NAnimation::CAnimator* PutOnTerrain( NAnimation::CAnimator *pAnim, bool bSpecial = false );
