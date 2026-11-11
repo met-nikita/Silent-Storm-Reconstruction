@@ -665,9 +665,13 @@ CUnit::EState CUnitServer::GetState()
 		case NDb::WT_SUB_MACHINE_GUN: return ST_NORMAL_SUB_MACHINE_GUN;
 		case NDb::WT_KNIFE: return ST_NORMAL_KNIFE;
 		case NDb::WT_PLAZMAGUN:
+		case NDb::WT_PK_PLAZMAGUN:
+		case NDb::WT_BOSS_PLAZMAGUN:
+		case NDb::WT_TERROR_SHOOTER:
 		case NDb::WT_MACHINE_GUN: return ST_NORMAL_HAND_MACHINE_GUN;
 		case NDb::WT_RLAUNCHER: return ST_NORMAL_RLAUNCHER;
 		case NDb::WT_MINE_DETECTOR:
+		case NDb::WT_TERROR_SPECIAL_GUN:
 		case NDb::WT_DEFAULT:
 			break;
 		default:
