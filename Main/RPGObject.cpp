@@ -75,7 +75,7 @@ void CObject::SetDestroyStage( int _nStage )
 {
 	ASSERT( _nStage >= 0 && _nStage <= nDestroyStages );
 	int nTmpStage = Clamp( _nStage, 0, nDestroyStages );
-	nVP = nMaxVP - ( nDestroyStages > 0 ? ( nTmpStage * nMaxVP ) / nDestroyStages : 0 );
+	nVP = nMaxVP - ( nDestroyStages > 0 ? Float2Int( double( nTmpStage * nMaxVP ) / nDestroyStages + 0.5f ) : 0 );
 	nStage = nTmpStage;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
