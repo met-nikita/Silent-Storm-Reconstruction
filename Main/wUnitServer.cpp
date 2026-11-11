@@ -18,6 +18,7 @@
 #include "..\Misc\RandomGen.h"
 #include "RPGUnit.h"
 #include "aiPath.h"
+#include "aiNearestPosition.h"
 #include "aiGrid.h"               // forced relocation requires a tile with movement exits
 #include "aiMap.h"                // NAI::IAIMap::GetObjectBound (mine-LOS probe pull-back)
 #include "scScenarioTracker.h"
@@ -871,6 +872,18 @@ void CUnitServer::ForcedMove()
 	KillUnit( CVec3(0,0,1) );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// Retail 0x7c0660: a rebuilt layer may encode the same physical support elsewhere.
+static bool FindSupportAtHeight( const NAI::SPosition &from, float fHeight, NAI::SPathPlace *pOut )
+{
+	CVec3 oldSupport = from.GetCP();
+	oldSupport.z = fHeight;
+	NAI::SPosition nearest = NAI::GetNearestNativePosition( oldSupport, from.GetNetwork() );
+	if ( !nearest.IsValid() || fabs( nearest.GetCP() - oldSupport ) >= 0.1f )
+		return false;
+	*pOut = nearest.p;
+	return true;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 void CUnitServer::OnTBSEvent( ETBSEvent event )
 {
 	switch ( event )
@@ -930,9 +943,25 @@ void CUnitServer::OnTBSEvent( ETBSEvent event )
 					float fCurrentHeight = GetPosition().GetCP().z;
 					NAI::SPathPlace plCur = GetPosition().pos.p;
 					if ( plLast == plCur && fabs( fLastHeight - fCurrentHeight ) > 0.01f )
-						Fall();
+					{
+						if ( FindSupportAtHeight( GetPosition().pos, fLastHeight, &plCur ) )
+						{
+							NAI::SUnitPosition supported( GetPosition() );
+							plCur.SetPose( supported.pos.p.GetPose() );
+							plCur.SetDirection( supported.pos.p.GetDirection() );
+							supported.pos.p = plCur;
+							SetPosition( supported );
+							// SetPosition reserves the new tile. Exclude our own lock
+							// from the support recheck, as in the initial query above.
+							pNet->Unlock( this );
+						}
+						else
+							Fall();
+					}
 					fLastHeight = fCurrentHeight;
 					plLast = plCur;
+					if ( pNet->GetPassability( GetPosition().pos.p ) != NAI::AIP_YES )
+						ForcedMove();
 					pNet->Lock( this, GetPosition().pos.p );
 				}
 			}
