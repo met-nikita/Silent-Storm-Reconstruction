@@ -241,10 +241,10 @@ EToHitType GetToHitType( const NWorld::CUnit *pAttacker );
 // Jan03 nBullet cursor does not exist in retail); callers pass their burst-loop index.
 int GetToHit( const NWorld::CUnit *pAttacker, NAI::EPose curPose, int nDistance, const CVec3 &ptAttacker,
 	const NAI::SPosition &posTarget, NAI::EHitLocation eHL, int nExtraAP, const NWorld::CUnit *pTarget,
-	const vector<int> &accessibleHLs, int nHitCover, bool bFirstRound,
+	const vector<int> &accessibleHLs, float fHitCover, bool bFirstRound,
 	const CVec3 &ptIllumination = CVec3(1,1,1), bool bBackstab = false, int nBullet = 0, bool bNight = false );
 int GetTileToHit( const NWorld::CUnit *pAttacker, NAI::EPose curPose, int nDistance, const CVec3 &ptAttacker,
-	CVec3 ptTilePos, NAI::ETileHitLocation eHitLocation, int nExtraAP, int nHitCover, bool bFirstRound,
+	CVec3 ptTilePos, NAI::ETileHitLocation eHitLocation, int nExtraAP, float fHitCover, bool bFirstRound,
 	const CVec3 &ptIllumination = CVec3(1,1,1), int nBullet = 0 );
 int GetGrenadeToHit( const NWorld::CUnit *pAttacker, NAI::EPose curPose, int nDistance, const CVec3 &ptAttacker,
 	bool bFirstRound, CVec3 ptTilePos, const CVec3 &ptIllumination = CVec3(1,1,1) );
