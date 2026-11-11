@@ -934,9 +934,10 @@ CCommandExecute* CreateExecutor( CUnitServer *pUS, CCmd *pCmd, EUnitCommandResul
 		vector<NAI::SPathPlace> dst;
 		dst.push_back(pCmdPath->ptDst.p);
 		CPtr<NAI::CPath> pPath = FindPath(pWorld->GetPathNetwork(), pUS,
-			position.pos.p, dst, 0, true, pCmdPath->eParams, pUS->IsStrafing(), true);
+			position.pos.p, dst, 0, true, pCmdPath->eParams, pUS->IsStrafing(), pCmdPath->bCanFindNotExact);
 		if (IsValid(pPath))
 			return CreateMoveExecutor(pUS, pPath, pCmdPath->eParams, pCmdPath->needActiveItem, pError);
+		*pError = UCR_PATH_NOT_FOUND;
 		return 0;
 	}
 	else {
