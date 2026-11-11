@@ -1645,41 +1645,58 @@ int CUnitServer::ProcessAttack( NWorld::IWorld *pWorld, int nUserID, NRPG::CAtta
 {
 	if ( bIsPKWhichIsWeared )
 		return 0;
+	CWorld *pOwnerWorld = GetWorld();
+	CPtr<CCannon> pCannon = animator.GetCannon();
 	bool isDead = GetUnitRPG()->IsDead();
 	bool isUnconscious = IsUnconscious();
 	CUnitServer *pAttacker = IsValid( pAttack->pAttacker ) ?
 		GetWorld()->GetUnitServer( pAttack->pAttacker ) : 0;
+	const NDb::EDiplomacyState eAttackerRelation = IsValid( pAttacker ) ?
+		pAttacker->GetDiplomacyState( this ) : NDb::DS_NEUTRAL;
 	// Retail v1.2 0x7c3845..0x7c3892: snapshot the hostile attacker's
 	// eligible squad and reward before damage can change the units or diplomacy.
 	list< CPtr<CUnitServer> > xpUnits;
 	float fXP = 0;
-	if ( IsValid( pAttacker ) && pAttacker->GetDiplomacyState( this ) == NDb::DS_ENEMY &&
+	if ( IsValid( pAttacker ) && eAttackerRelation == NDb::DS_ENEMY &&
 		pAttacker->GetTBSPlayer() )
 	{
 		pAttacker->GetTBSPlayer()->GetUnitsThatCanFight( &xpUnits );
 		fXP = GetUnitRPG()->GetXP( xpUnits.size() );
-	}
-	int nRet = CDumbUnitServer::ProcessAttack( pWorld, nUserID, pAttack, vDir, pArmor );
-	if ( !IsValid( this ) )
-	{
-		// Retail 0x7c3a93..0x7c3abc also pays the prepared reward if damage
-		// removes the target entirely; do not access the invalid target here.
-		for ( list< CPtr<CUnitServer> >::iterator i = xpUnits.begin(); i != xpUnits.end(); ++i )
-			(*i)->GetUnitRPG()->GetRPGUnit()->AddXP( fXP );
-		return nRet;
 	}
 	CUnitServer *pPKUnit = 0;
 	if ( IsWearingPK() )
 		pPKUnit = pWearingPK;
 	if ( IsEmptyPK() )
 		pPKUnit = this;
+	const bool bWasPKDisabled = !pPKUnit ||
+		pPKUnit->GetUnitRPG()->GetRPGUnit()->Skills( NDb::ST_VP ) < 0;
+	bool bPKDisabled = false;
+	int nRet = CDumbUnitServer::ProcessAttack( pWorld, nUserID, pAttack, vDir, pArmor );
+	if ( !IsValid( this ) )
+	{
+		if ( IsValid( pAttacker ) && eAttackerRelation != NDb::DS_NEUTRAL )
+			pAttacker->GetUnitRPG()->GetRPGUnit()->AddMedalPoints( pOwnerWorld->GetGlobalGame(),
+				eAttackerRelation == NDb::DS_ALLY ? NRPG::MPC_KILLED_ALLY : NRPG::MPC_KILLED_ENEMY, 0 );
+		// Retail 0x7c3a93..0x7c3abc also pays the prepared reward if damage
+		// removes the target entirely; do not access the invalid target here.
+		for ( list< CPtr<CUnitServer> >::iterator i = xpUnits.begin(); i != xpUnits.end(); ++i )
+			(*i)->GetUnitRPG()->GetRPGUnit()->AddXP( fXP );
+		return nRet;
+	}
+	// Retail 0x7c3fa9..0x7c4093: frame hits on non-AI units; heroes get priority.
+	if ( nRet > 0 && ( !IsValid( GetPlayer() ) || !NAI::IsAIPlayer( GetPlayer() ) ) )
+	{
+		const float fImportance = GetRPG()->IsHero() ? 1000.0f : float( nRet / 10 + 1 );
+		pOwnerWorld->AddUICommand( new CUICmdUnitCamera( IsValid( pAttacker ) ? pAttacker : this,
+			PR_OUR_UNIT_IS_HIT, false, fImportance, this ) );
+	}
 	NDb::CPanzerklein *pPK = 0;
 	if ( pPKUnit )
 		pPK = pPKUnit->GetUnitRPG()->GetRPGPers()->pPanzerklein;
 	if ( pPK )
 	{	
 		NRPG::CDynamicSkill &pkVP = pPKUnit->GetUnitRPG()->GetRPGUnit()->Skills( NDb::ST_VP );
-		if ( pPK->pSelfExplosion && pkVP < 0 )
+		if ( pPK->pSelfExplosion && pkVP <= 0 )
 		{
 			GetWorld()->AddGrenadeExplosion( GetPosition().GetCP(), pPK->pSelfExplosion );
 			if ( IsEmptyPK() )
@@ -1694,8 +1711,14 @@ int CUnitServer::ProcessAttack( NWorld::IWorld *pWorld, int nUserID, NRPG::CAtta
 				}
 			}
 		}
-		if ( pkVP < 0 )
+		if ( pkVP <= 0 )
+		{
 			animator.IdleBan( NAnimation::E_NO_IDLE_WHEN_STUNNED, true );
+			bPKDisabled = true;
+			if ( !bWasPKDisabled && IsValid( pAttacker ) && eAttackerRelation != NDb::DS_NEUTRAL )
+				pAttacker->GetUnitRPG()->GetRPGUnit()->AddMedalPoints( pOwnerWorld->GetGlobalGame(),
+					eAttackerRelation == NDb::DS_ALLY ? NRPG::MPC_DISABLED_ALLY_PK : NRPG::MPC_DISABLED_ENEMY_PK, 0 );
+		}
 	}
 
 	if ( !isDead && GetUnitRPG()->IsDead() )
@@ -1707,6 +1730,12 @@ int CUnitServer::ProcessAttack( NWorld::IWorld *pWorld, int nUserID, NRPG::CAtta
 					pGlobalPlayer->deployData.unitsDeployData[ GetUnitRPG()->GetRPGUnit() ].bCorpseAlive = false;
 		}
 		GetWorld()->GetGlobalGame()->pScenarioTracker->OnScenarioClueDestroyed( this->GetUnitRPG()->GetRPGPersID(), true );
+		if ( IsValid( pAttacker ) && eAttackerRelation != NDb::DS_NEUTRAL )
+		{
+			const NRPG::EMedalPointCases eCase = eAttackerRelation == NDb::DS_ALLY ? NRPG::MPC_KILLED_ALLY :
+				!bWasPKDisabled && !bPKDisabled ? NRPG::MPC_KILLED_ENEMY_NOT_DISABLED_PK : NRPG::MPC_KILLED_ENEMY;
+			pAttacker->GetUnitRPG()->GetRPGUnit()->AddMedalPoints( pOwnerWorld->GetGlobalGame(), eCase, 0 );
+		}
 	}
 	// Retail v1.2 0x7c3e2d..0x7c3e64: notify the scenario on a new knockout,
 	// even when discovery already ran before the attack.
@@ -1722,6 +1751,12 @@ int CUnitServer::ProcessAttack( NWorld::IWorld *pWorld, int nUserID, NRPG::CAtta
 		// not subsequent attacks that kill an already-unconscious body.
 		for ( list< CPtr<CUnitServer> >::iterator i = xpUnits.begin(); i != xpUnits.end(); ++i )
 			(*i)->GetUnitRPG()->GetRPGUnit()->AddXP( fXP );
+		// Retail 0x7c455e: release the snapshotted mounted gun after incapacitation.
+		if ( IsValid( pCannon ) )
+		{
+			GetUnitRPG()->SetCannonItem( 0 );
+			pCannon->SetCurrentUnit( 0 );
+		}
 	}
 	return nRet;
 }
