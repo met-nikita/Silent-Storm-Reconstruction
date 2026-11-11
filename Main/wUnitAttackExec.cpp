@@ -53,12 +53,11 @@ bool IsWithinHumanReach( const CVec3 &ptFrom, const CVec3 &ptTarget, float fPlan
 	return true;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// retail @0x3a1db0: reach gate for a melee swing -- F_MELEE_DISTANCE, doubled when the unit
-// carries a reach extender (docked PK cannon).
+// Retail 0x7a2660: a worn Panzerklein doubles melee reach.
 bool CanMeleeAttack( CUnitServer *pUS, const NAI::SUnitPosition &from, const CVec3 &ptTarget )
 {
 	float fReach = F_MELEE_DISTANCE;
-	if ( IsValid( pUS ) && IsValid( pUS->animator.GetCannon() ) )
+	if ( IsValid( pUS ) && IsValid( pUS->GetWearingDBPK() ) )
 		fReach += fReach;
 	return IsWithinHumanReach( from.GetCP(), ptTarget, fReach );
 }

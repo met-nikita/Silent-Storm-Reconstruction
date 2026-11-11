@@ -121,18 +121,18 @@ void GetMeleeAttackPlaces( CUnitServer *pUS, const CVec3 &ptTarget, vector<NAI::
 {
 	NAI::IPathNetwork *pNet = pUS->GetWorld()->GetPathNetwork();
 	SSphere s;
-	s.ptCenter = pUS->GetPosition().GetCP();
+	s.ptCenter = ptTarget;
 	s.fRadius = 5; // CRAP need more grounded number then this
 	vector<NAI::SPathPlace> res;
 	pNet->GetNearPlaces( s, &res );
 	NAI::SUnitPosition from( pUS->GetPosition() );
 	for ( int k = 0; k < res.size(); ++k )
 	{
-		if ( !pNet->IsNativePassable( res[k] ) )
+		if ( pNet->GetPassability( res[k] ) == NAI::AIP_NOT_PASSABLE )
 			continue;
 		from.pos.p = res[k];
 		float fDist = F_MELEE_DISTANCE;
-		if ( pUS->IsWearingPK() )
+		if ( IsValid( pUS->GetWearingDBPK() ) )
 			fDist *= 2;
 		if ( IsWithinHumanReach( from.GetCP(), ptTarget, fDist ) )
 			GetDirectedPoints( pNet, from.pos.p, ptTarget, pRes );
