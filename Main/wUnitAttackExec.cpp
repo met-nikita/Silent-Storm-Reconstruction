@@ -1855,11 +1855,10 @@ void CExecMelee::PerformAttack( const vector<NRPG::CAttackPortion> &attack, cons
 		NRPG::PerformMeleeAttackPortion( pWorld, pWorld->GetAIMap(), *i, ray, ignores, pFilter );
 	}
 
-	if ( !attack.empty() )
-	{
-		NDb::SAISound sound = { NDb::GetAISound( 19 ), 0, 1.0f };   // retail @0x3a4ed0: no silencer on melee
-		pUS->GetWorld()->MakeAISound( sound, pUS, 0 );
-	}
+	NDb::SAISound sound = { NDb::GetAISound( 19 ), 0, 1.0f };
+	pWorld->MakeAISound( sound, pUS, 0 );
+	pWorld->MakeSound( pUS->GetPosition().GetCP(),
+		NDb::GetSound( IsValid( pUS->GetWearingDBPK() ) ? 0x4059 : 0x3285 ) );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CExecMeleeTile
