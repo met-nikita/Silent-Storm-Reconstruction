@@ -480,6 +480,12 @@ void CPathConflictsRemover::TryToSetNewPath()
 		FullCancel();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+bool CUnitServer::CanVacatePathTile()
+{
+	CPathConflictsRemover *pRemover = GetPathConflictsRemover();
+	return pRemover && !pRemover->IsWaitingForPath();
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 // @0x3cc280 -- decide whether we may defer to the unit locking us. If it has no remover of its own it
 // cannot step aside, so we reroute ourselves and report handled; otherwise we may pass only once it is
 // no longer waiting for a path.

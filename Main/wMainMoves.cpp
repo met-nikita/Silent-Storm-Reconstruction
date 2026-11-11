@@ -75,7 +75,7 @@ void SelectFindPathUnits( CUnit *pWho, list<CObjectBase*> *pRes )
 		ASSERT( pUS );
 		if ( IsValid( pUS ) )
 		{
-			if ( pUS->CanFight() && !pUS->IsMoving() )
+			if ( pUS->CanFight() && !pUS->CanVacatePathTile() )
 				vis.push_back( *i );
 			if ( pUS->IsEmptyPK() || pUS->GetWearingDBPK() )
 				vis.push_back( *i );

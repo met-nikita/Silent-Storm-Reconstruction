@@ -60,14 +60,17 @@ void CMultiMovesTable::PrepareAllPaths( list<SPathPlace> *pRes,
 	CWaveCountCostsMajor<CMovesEnumerator, SPathPlace, WORD, SAlways, CMultiMovesTable, 16>
 		counter( this, &constraints, &enumerator, src );
 	counter.Count( nPriceLimit );
-	pNet->UnlockSelected();
-	if ( pRes == 0 )
-		return;
-	pRes->clear();
-	for ( CMultiMovesTable::CMovesHash::iterator k = data.begin(); k != data.end(); ++k )
+	if ( pRes )
 	{
-		pRes->push_back( k->first );
+		pRes->clear();
+		for ( CMultiMovesTable::CMovesHash::iterator k = data.begin(); k != data.end(); ++k )
+		{
+			EPassable pass = pNet->GetPassability( k->first );
+			if ( pass == AIP_YES || pass == AIP_DOOR )
+				pRes->push_back( k->first );
+		}
 	}
+	pNet->UnlockSelected();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 }

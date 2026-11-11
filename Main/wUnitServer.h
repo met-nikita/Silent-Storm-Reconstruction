@@ -276,6 +276,7 @@ public:
 	// The path-conflict remover of this unit's current executor (pExec -> IExecMove), or null.
 	// Used by CPathConflictsRemover::CheckLockerState to walk the who-locks-whom chain.
 	CPathConflictsRemover* GetPathConflictsRemover();
+	bool CanVacatePathTile(); // Running, affordable movement that is not waiting for a route.
 	// retail @0x3c32e0: takes the SAISound descriptor (record + tile type + silencer)
 	bool CanHearSound( const CVec3 &ptFrom, const NDb::SAISound &sound, CUnitServer *pWho );
 	void CallTimeLabel() { bCallTimeLabel = true; }
