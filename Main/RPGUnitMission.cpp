@@ -27,6 +27,7 @@
 
 #include "RPGUnitMission.h"
 #include "RPGAttackSession.h"
+#include "ModManager.h"
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 namespace NRPG
 {
@@ -42,7 +43,7 @@ struct SCriticalType
 };
 typedef vector<SCriticalType> TCriticalSet;
 static vector<TCriticalSet> criticalBar( NDb::N_CL ); //[NDb::N_CL];
-static bool bCBarInitialized = false;
+static int nCriticalBarVersion = -1;
 int Round( float f ) { return int( f + 0.5f ); }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // EToHitType moved to RPGUnitMission.h -- the composite tile to-hit / cover entry points
@@ -2034,10 +2035,12 @@ float CUnitMission::GetCriticalDmgModifier( NWorld::IWorld *pWorld, NAI::EHitLoc
 	if ( nCriticalProbability == 0 )
 		return 0;
 	static SRand rand;
-	if ( !bCBarInitialized )
+	if ( nCriticalBarVersion != CModManager::GetBaseVersion() )
 	{
+		nCriticalBarVersion = CModManager::GetBaseVersion();
+		for ( int i = 0; i < criticalBar.size(); ++i )
+			criticalBar[i].clear();
 		InitializeCriticals();
-		bCBarInitialized = true;
 	}
 	const int nRoll = rand.Get( 100 );
 	float fCriticalResist = pPanzerklein ? 1.f - pPanzerklein->fCriticalResist : 1.f;
