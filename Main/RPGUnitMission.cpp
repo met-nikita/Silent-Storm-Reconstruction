@@ -2189,7 +2189,10 @@ bool CUnitMission::LoadWeapon( IWeaponItemInfo *pWeapon, IClipItem *pClip )
 	if ( !pWeaponItem->CanLoad( pClip ) )
 		return false;
 
-	if ( pWeaponItem->HasAmmo() && !pWeaponItem->Unload( pRPGUnit->GetInventory() ) )
+	// Matching ammunition tops up the installed clip; only a color change unloads it.
+	if ( pWeaponItem->HasAmmo() &&
+		pWeaponItem->GetInnerClip()->GetDBAmmo()->color != pClip->GetDBAmmo()->color &&
+		!pWeaponItem->Unload( pRPGUnit->GetInventory() ) )
 		return false;
 
 	return pWeaponItem->Load( pClip );

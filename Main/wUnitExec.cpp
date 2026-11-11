@@ -557,7 +557,7 @@ void CExecLoadWeapon::Run()
 bool CExecLoadWeapon::TimeLabelReached()
 {
 	CDynamicCast<NRPG::IClipItem> pClipItem( sClip.pItem );
-	if ( IsValid( pClipItem ) && pUS->GetUnitRPG()->LoadWeapon( pWeapon, pClipItem ) && ( pClipItem->GetQuantity() == 0 ) )
+	if ( IsValid( pClipItem ) && pUS->GetUnitRPG()->LoadWeapon( pWeapon, pClipItem ) && ( pClipItem->GetIncQuantity() == 0 ) )
 	{
 		NRPG::IInventory *pInventory = pUS->GetUnitRPG()->GetInventory();
 		switch( sClip.eType )
