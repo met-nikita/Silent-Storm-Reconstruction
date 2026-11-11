@@ -590,11 +590,7 @@ void CAILogCollectSnipeAP::GetCommands( list< CPtr<NWorld::CCommand> > *Commands
 	NWorld::CUnitServer *pUS = pAIUnit->GetUnitServer();
 	if ( !IsValid( pUS ) )
 		return;
-	// Release emits CCmdCollectSnipeAP{ CSAP_PRECISE, nAP } (an exact AP amount); the dev command carries only
-	// the ECollectSnipeAP mode (no nAP / no CSAP_PRECISE), so the closest faithful mode is CSAP_ALL (collect all
-	// currently available AP). The exact-nAP refinement is a documented release divergence; the computed nAP is
-	// still carried on this record for save/load fidelity.
-	NWorld::CCmd *pCmd = new NWorld::CCmdCollectSnipeAP( NWorld::CSAP_ALL );
+	NWorld::CCmd *pCmd = new NWorld::CCmdCollectSnipeAP( NWorld::CSAP_PRECISE, nAP );
 	Commands->push_back( new NWorld::CCmdSetCommand( pUS, pCmd ) );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////

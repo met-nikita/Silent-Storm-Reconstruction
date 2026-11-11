@@ -597,7 +597,8 @@ enum ECollectSnipeAP
 	CSAP_1AP,
 	CSAP_10AP,
 	CSAP_MAX,
-	CSAP_ALL
+	CSAP_ALL,
+	CSAP_PRECISE
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CCmdCollectSnipeAP: public CCmd
@@ -606,10 +607,11 @@ class CCmdCollectSnipeAP: public CCmd
 public:
 	ZDATA
 	ECollectSnipeAP eAP;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&eAP); return 0; }
+	int nAP;
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&eAP); f.Add(3,&nAP); return 0; }
 	//
-	CCmdCollectSnipeAP() {}
-	CCmdCollectSnipeAP( ECollectSnipeAP _eAP ): eAP( _eAP ) {}
+	CCmdCollectSnipeAP(): eAP(CSAP_1AP), nAP(0) {}
+	CCmdCollectSnipeAP( ECollectSnipeAP _eAP, int _nAP = 0 ): eAP( _eAP ), nAP( _nAP ) {}
 	virtual bool IsSkippable() const { return false; }
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////

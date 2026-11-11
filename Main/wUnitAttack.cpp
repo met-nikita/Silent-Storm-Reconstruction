@@ -1008,7 +1008,7 @@ CCommandExecute* CreateActionExecutor( CUnitServer *pUS, CCmd *pCmd, EUnitComman
 																	else {
 																		CDynamicCast<CCmdCollectSnipeAP> pCollectSnipeAP(pCmd);
 																		if (pCollectSnipeAP)
-																			return CreateSimpleAction(pUS, new CExecCollectSnipeAP(pUS, pCollectSnipeAP->eAP), pError);
+																			return CreateSimpleAction(pUS, new CExecCollectSnipeAP(pUS, pCollectSnipeAP->eAP, pCollectSnipeAP->nAP), pError);
 																		else {
 																			CDynamicCast<CCmdTalk> pTalk(pCmd);
 																			if (pTalk)

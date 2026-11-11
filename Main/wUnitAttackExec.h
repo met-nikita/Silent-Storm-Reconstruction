@@ -655,12 +655,13 @@ class CExecCollectSnipeAP: public CCommandExecute
 private:
 	ZDATA_( CCommandExecute )
 	ECollectSnipeAP eAP;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(1,( CCommandExecute *)this); f.Add(2,&eAP); return 0; }
+	int nAP;
+	ZEND int operator&( CStructureSaver &f ) { f.Add(1,( CCommandExecute *)this); f.Add(2,&eAP); f.Add(3,&nAP); return 0; }
 	//
 	int GetResiduaryAP() const;
 public:
-	CExecCollectSnipeAP () {}
-	CExecCollectSnipeAP ( CUnitServer *pUnitServer, ECollectSnipeAP eAP );
+	CExecCollectSnipeAP (): eAP(CSAP_1AP), nAP(0) {}
+	CExecCollectSnipeAP ( CUnitServer *pUnitServer, ECollectSnipeAP eAP, int nAP = 0 );
 
 	virtual EUnitCommandResult CanDoIt( const NAI::SUnitPosition &from, bool bIgnoreTarget = false ) const;
 	virtual int GetStartAP() const;

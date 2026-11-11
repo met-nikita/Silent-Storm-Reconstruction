@@ -3359,8 +3359,8 @@ void CExecSnipeAim::AnimationFinished()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CExecCollectSnipeAP
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CExecCollectSnipeAP::CExecCollectSnipeAP ( CUnitServer *_pUnitServer, ECollectSnipeAP _eAP ): 
-	CCommandExecute(_pUnitServer), eAP( _eAP )
+CExecCollectSnipeAP::CExecCollectSnipeAP ( CUnitServer *_pUnitServer, ECollectSnipeAP _eAP, int _nAP ):
+	CCommandExecute(_pUnitServer), eAP( _eAP ), nAP( _nAP )
 {
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -3390,11 +3390,11 @@ EUnitCommandResult CExecCollectSnipeAP::CanDoIt( const NAI::SUnitPosition &from,
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 int CExecCollectSnipeAP::GetStartAP() const
 {
-	// @0x3a8aa0 -- retail returns the fixed 1AP/10AP amounts UNCLAMPED; the residuary cap (Min)
-	// applies ONLY to the CSAP_MAX / CSAP_ALL paths. (CSAP_PRECISE -> this->nAP is a release-only
-	// mode deliberately omitted from this build; see AILog.cpp -- so it falls through to 0.)
+	// Retail 0x7a9570: fixed and precise amounts are not clamped.
 	switch( eAP )
 	{
+		case CSAP_PRECISE:
+			return nAP;
 		case CSAP_1AP:
 			return 1;
 		case CSAP_10AP:
