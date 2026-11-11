@@ -60,6 +60,7 @@ protected:
 	ZDATA_(CCommandExecute)
 	SItem sClip;
 	CPtr<NRPG::IWeaponItemInfo> pWeapon;
+	bool LoadClip();
 public:
 	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CCommandExecute*)this); f.Add(2,&sClip); f.Add(3,&pWeapon); return 0; }
 	CExecLoadWeapon();
