@@ -562,12 +562,15 @@ void CUnitMission::RegisterAction( EAction action )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 int CUnitMission::GetFallDamage( float fHDiff ) 
 {
-	// crap
+	// Retail Steam 0x6beee0: zero range consumes no RNG, qualifying falls
+	// still cause at least two damage. FallFromHigh owns the height threshold.
 	int nHit = ( fHDiff - 2.8f ) * 50;
+	int nRange = nHit / 4;
 	int nRet = 0;
-	for ( int i = 0; i < 3; ++i )
-		nRet += random.Get( 0, nHit / 4 ); 
-	return nRet;
+	if ( nRange != 0 )
+		for ( int i = 0; i < 3; ++i )
+			nRet += random.Get( 0, nRange );
+	return Max( nRet, 2 );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CUnitMission::SpendAP( int nAP )
@@ -631,6 +634,7 @@ void CUnitMission::StartNewTurn( const CVec3 &ptCP )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CUnitMission::StartRealTime()
 {
+	nTurnCounter = 0; // Retail Steam 0x6bfa72.
 	ResetUnitParameters();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
