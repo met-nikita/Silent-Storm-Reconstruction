@@ -108,6 +108,7 @@ void CGrassAnimator::Recalc()
 		const SGrassLayer &gl = pGrassTracker->GetGrassLayer( nLayer );
 		pValue = pRealValue;
 		pRealValue->positions = pGrassPos->GetValue()->positions;
+		pRealValue->rndForPosition = pGrassPos->GetValue()->rndForPosition;
 		pRealValue->colors.resize( pRealValue->positions.size() );
 		pRealValue->waveAmps.resize( pRealValue->positions.size() );
 		pRealValue->scale = pDBGrass->ptScale;

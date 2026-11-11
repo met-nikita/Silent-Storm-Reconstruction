@@ -21,7 +21,8 @@ const int N_SAMPLES_PER_TILE = 4;//16;
 bool CGrassPosCalcer::NeedUpdate() 
 { 
 	bool bUpd = IsValid( pSectorUpdate ) ? pSectorUpdate.Refresh() : false;
-	return pInfo.Refresh() || bUpd;
+	bool bInfoChanged = pInfo.Refresh();
+	return bInfoChanged || bUpd || ( IsValid( pValue ) && pValue->rndForPosition.size() != pValue->positions.size() );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CGrassPosCalcer::Recalc()
@@ -38,21 +39,30 @@ void CGrassPosCalcer::Recalc()
 	res.InitParallel( CVec2( nXBeg * FP_GRID_STEP, nYBeg * FP_GRID_STEP ), 0, FP_GRID_STEP / N_SAMPLES_PER_TILE, CTRect<int>( 0, 0, N_GRASS_SECTOR_SIZE * N_SAMPLES_PER_TILE, N_GRASS_SECTOR_SIZE * N_SAMPLES_PER_TILE ) );
 	pAIMap->TraceGrid( &res, NWorld::TS_TERRAINS );
 
-	SRand rnd( (nOriginLayer << 24) ^ (nYBeg << 14) ^ nXBeg );
+	// Retail uses wrapping 32-bit seeds independently for each density cell.
+	static const unsigned int seeds[8] = { 34737283, 12387358, 9904334, 2385432, 48514, 19343214, 94951343, 13413545 };
+	const unsigned int nBase = ( ( (unsigned(nOriginLayer) << 10) ^ unsigned(nYBeg) ) << 14 ) ^
+		( unsigned(nOriginLayer) * 0x51ded7fu ) ^ unsigned(nXBeg);
 	for ( int j = nYBeg; j < nYTo; ++j )
 		for ( int i = nXBeg; i < nXTo; ++i )
 		{
-			float lb = layer.grass[j][i] / 255.f;
-			float lt = layer.grass[j+1][i] / 255.f;
-			float rb = layer.grass[j][i+1] / 255.f;
-			float rt = layer.grass[j+1][i+1] / 255.f;
+			const unsigned int xCell = i, yCell = j;
+			unsigned int nSeed = ( seeds[(xCell*xCell) & 7] ^ xCell ) + yCell*yCell +
+				seeds[yCell & 7] + xCell * 0x8bfe2u + nBase;
+			// Explicit arithmetic shift preserves retail's negative-seed mixing.
+			nSeed ^= (nSeed >> 16) | ( (nSeed & 0x80000000u) ? 0xffff0000u : 0u );
+			SRand rnd( (int)nSeed );
+			float lb = layer.grass[j][i] * (1.f / 255.f);
+			float lt = layer.grass[j+1][i] * (1.f / 255.f);
+			float rb = layer.grass[j][i+1] * (1.f / 255.f);
+			float rt = layer.grass[j+1][i+1] * (1.f / 255.f);
 			/*
 			float lbh = info.heightMap[j][i] * FP_TERRAIN_H_SCALE;
 			float lth = info.heightMap[j+1][i] * FP_TERRAIN_H_SCALE;
 			float rbh = info.heightMap[j][i+1] * FP_TERRAIN_H_SCALE;
 			float rth = info.heightMap[j+1][i+1] * FP_TERRAIN_H_SCALE;
 			*/
-			int nParticles = Float2Int((lb + lt + rb + rt) / 4 * layer.fMaxDensity);
+			int nParticles = Float2Int( (double(rt) + rb + lt + lb) * layer.fMaxDensity * 0.25f );
 			for ( int nP = 0; nP < nParticles; ++nP )
 			{
 				int nSamples = 64;
@@ -74,6 +84,7 @@ void CGrassPosCalcer::Recalc()
 				{
 					pos.z = exits.front().z;//(1-x) * (1-y) * lbh + x * (1-y) * rbh + (1-x) * y * lth + x * y * rth;// + scale.y * 0.5f;
 					pValue->positions.push_back( pos );
+					pValue->rndForPosition.push_back( rnd.seed.nSeed );
 				}
 			}
 		}
@@ -91,6 +102,10 @@ void CGrassPosCalcer::Recalc()
 		{
 			pos.z = exits.front().z;
 			pValue->positions.push_back( pos );
+			float fSeed = double(pos.z) * 1212324.0f + double(pos.y) * 132413416.0f + pos.x;
+			unsigned int nSeed;
+			memcpy( &nSeed, &fSeed, sizeof(nSeed) );
+			pValue->rndForPosition.push_back( int(nSeed ^ nBase) );
 		}
 	}
 }

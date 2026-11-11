@@ -134,6 +134,7 @@ public:
 	CVec2 scale;
 	float fScaleRange;
 	vector<CVec3> positions;
+	vector<int> rndForPosition;
 	vector<NGfx::SPixel8888> colors;
 	vector<float> waveAmps;
 

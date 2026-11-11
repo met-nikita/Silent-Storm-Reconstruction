@@ -20,7 +20,8 @@ class CGrassPosition: public CObjectBase
 public:
 	ZDATA
 	vector<CVec3> positions;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&positions); return 0; }
+	vector<int> rndForPosition;
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&positions); f.Add(3,&rndForPosition); return 0; }
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CGrassPosCalcer: public CPtrFuncBase<CGrassPosition>

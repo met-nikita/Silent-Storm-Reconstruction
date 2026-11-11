@@ -276,7 +276,7 @@ void CGrassParticleEffect::AddParticles( IParticleOutput *pRender )
 		float fAmp = waveAmps[ nParticle ];
 		if ( fAmp > 0 )
 			rot += fAmp * sin( fRandom * FP_2PI + fTEffect * (5 + fRandom * 10) );
-		unsigned int nSeed = (nParticle * 713) ^ (*(int*)&pos.x);
+		unsigned int nSeed = rndForPosition[nParticle];
 		nSprite = (int)( nSeed % (nGrassSize * nGrassSize ) );
 		//nSprite = (int)( random.Get() & 0xffffff ) % (nGrassSize * nGrassSize );
 
