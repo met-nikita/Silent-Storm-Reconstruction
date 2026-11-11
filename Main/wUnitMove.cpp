@@ -780,6 +780,8 @@ void CExecMove::DoCommand()
 							CheckDoors( pChangePose->pos );
 							if (TestSingleGameMove(pChangePose))
 							{
+								if ( position.GetPose() != pChangePose->pos.GetPose() )
+									pUS->GetWorld()->AddUICommand( new CUICmdUnitCamera( pUS, PR_UNIT_ACTION, false, 1.0f, 0 ) );
 								animator.ChangePose(position, pChangePose->pos);
 								pCurCmd = pCmd;
 								DoGameMove(pChangePose->pos);
@@ -791,6 +793,12 @@ void CExecMove::DoCommand()
 							CDynamicCast<CCmdActivateItem> pActivateItem(pCmd);
 							if (pActivateItem)
 							{
+								// Retail 0x7bbcb5: mounted weapons own the hand animation.
+								if ( animator.GetCannon() )
+								{
+									pCurCmd = pCmd;
+									return;
+								}
 								ASSERT(!animator.IsActiveItem());
 								pCurCmd = pCmd;
 								NRPG::IUnitMission* pRPG = pUS->GetUnitRPG();

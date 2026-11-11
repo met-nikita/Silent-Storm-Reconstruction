@@ -264,6 +264,9 @@ void CExecQueue::GetPathPoints( list<SPathPoint> *pRes )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CExecQueue::SetNewPath( NAI::CPath *pPath, NAI::EFindPathParams _eParams, ENeedActiveItem eActive )
 {
+	// Retail 0x7bf7ab: leave the mounted action queue intact.
+	if ( pUS->animator.GetCannon() )
+		return;
 	// An accepted replacement order supersedes the pending cancellation.
 	bCancelled = false;
 	CObj<CCommandExecute> pHold = execList.front(); 
