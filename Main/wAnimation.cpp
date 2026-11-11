@@ -1043,14 +1043,14 @@ void CUnitAnimator::Attack( const NAI::SUnitPosition &cmdPos, const CRay &ray, b
 		else
 		{
 			CVec3 cross = aimDir ^ shootDir;
-			tTransit = asin( fabs(cross) ) / F_DEFAULT_AIM_SPEED * 1000;
+			tTransit = asin( fabs(cross) ) * 1250.0f;
 		}
 	}
 	else if ( bAimedStrafe )
 	{
 		CVec3 dir( cos(fCurAngle), sin(fCurAngle), 0 );
 		CVec3 cross = dir ^ shootDir;
-		tTransit = asin( fabs(cross) ) / F_DEFAULT_AIM_SPEED * 1000 + N_DEFAULT_TRANSIT_TIME;
+		tTransit = asin( fabs(cross) ) * 1250.0f + N_DEFAULT_TRANSIT_TIME;
 	}
 	else
 	{
@@ -2226,7 +2226,7 @@ void CUnitAnimator::AttackCannon( const NAI::SUnitPosition &cmdPos, const CRay &
 	if ( !bInstant )
 	{
 		CVec3 cross = aimDir ^ shootDir;
-		tTransit = asin( fabs(cross) ) / F_DEFAULT_AIM_SPEED * 1000;
+		tTransit = asin( fabs(cross) ) * 1250.0f;
 	}
 
 	aimDir = shootDir;
