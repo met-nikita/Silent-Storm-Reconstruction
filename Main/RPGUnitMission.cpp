@@ -1839,7 +1839,9 @@ int CUnitMission::CheckInterrupt( const IUnitMission *pEnemy, bool bIsMutual, bo
 	csRPG << CC_YELLOW << GetName() << CC_WHITE << " interrupt "<< CC_YELLOW << pEnemy->GetName() << CC_WHITE
 		  << " probability " << nProbability << "% Check:" << nCheck << endl;
 	UseSkill( NDb::ST_INTERRUPT );
-	return nProbability - nCheck;
+	if ( nCheck > nProbability )
+		return -1;
+	return pRPGUnit->Skills( NDb::ST_INTERRUPT );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CUnitMission::Kill()
