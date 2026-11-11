@@ -2043,6 +2043,9 @@ void CUnitServer::SetPlayer( CPlayer *_pPlayer )
 	pPlayer = _pPlayer;
 	// Retail 0x7c1340: the medal relation query uses the mission's owner ID.
 	GetUnitRPG()->SetScenarioPlayerID( IsValid( pPlayer ) ? pPlayer->GetScenarioPlayerID() : -1 );
+	const bool bAI = NAI::IsAIPlayer( pPlayer );
+	GetUnitRPG()->GetRPGUnit()->SetCheat( 0x80, bAI ); // Retail AI severe-wound policy.
+	GetUnitRPG()->SetIsAIPlayer( bAI );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CUnitServer::SetDialog( const string &szDialogCode )

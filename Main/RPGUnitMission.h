@@ -208,6 +208,7 @@ public:
 	// Retail 0x6c0cf0 / 0x6c5e30: live weapon familiarity and attack-scoped aura evasion.
 	virtual float GetWeaponAdaptation() const { return 0; }
 	virtual void SetAuraPerkICModifier( float f ) {}
+	virtual void SetIsAIPlayer( bool b ) {}
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 float GetCubesArea( const CVec3 &ptPos, vector<CVec3> *pCubes );
