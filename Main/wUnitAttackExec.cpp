@@ -1586,7 +1586,7 @@ void CExecShoot::SelectPointRay()
 		CPtr<CWorld> pWorld = pUS->GetWorld();
 		// Retail RealCalcTileCovers uses the left-hand origin on odd-numbered bullets.
 		CObj<NRPG::CCoverInfo> pCover = pWorld->GetGame()->CalcCoversForTile( pUS->GetAttackOrigin( pUS->GetPosition(), ( nBulletGone & 1 ) != 0 ),
-			attack, pUS, ptAnimTarget, pUS->GetMinClearDistance() );
+			attack, pUS, ptAnimTarget, pUS->GetMinClearDistance(), 30.f, NWorld::TS_COVER | NWorld::TS_ITEM_BLOCKER | NWorld::TS_FRAGMENTED );
 		float fHit = NRPG::CheckTileToHit( pUS, ptAnimTarget,
 			GetExtraAP(), NAI::THL_LOWER, pCover, pUS->GetUnitRPG()->IsFirstTurn(), &nTmpToHit, nBulletGone );   // retail: no eHL member, tile always THL_LOWER; the exec's burst cursor is the bullet index
 		// retail @0x3a4720 tail (NRPG::AttackPointRanged @0x2b62b0): the solver rebuilds the FULL
@@ -1647,7 +1647,7 @@ void CExecShootObject::SelectRay()
 	attack = portions[0];
 	CObj<NRPG::CCoverInfo> pCover = pWorld->GetGame()->CalcCovers(
 		pUS->GetAttackOrigin( pUS->GetPosition(), (nBulletGone & 1) != 0 ),
-		attack, pUS, pTarget, -1, pUS->GetMinClearDistance() );
+		attack, pUS, pTarget, -1, pUS->GetMinClearDistance(), false, 30.f, NWorld::TS_COVER | NWorld::TS_ITEM_BLOCKER | NWorld::TS_FRAGMENTED );
 	int nTmpToHit;
 	// AttackObjectRanged uses tile accuracy for non-units, but object hull cover.
 	float fHit = NRPG::CheckTileToHit( pUS, ptTarget, GetExtraAP(), NAI::THL_LOWER,
@@ -1737,7 +1737,7 @@ void CExecShootUnit::SelectRay() // false, when it is the last shot
 		// Retail v1.2 0x7a4e37: carry the requested part into the bullet damage portion.
 		attack.eWantedHL = eHL;
 		// Retail RealCalcCovers applies the same alternating origin to unit shots.
-		CObj<NRPG::CCoverInfo> pCover = pWorld->GetGame()->CalcCovers( pUS->GetAttackOrigin( pUS->GetPosition(), ( nBulletGone & 1 ) != 0 ), attack, pUS, pTarget, eHL, pUS->GetMinClearDistance() );
+		CObj<NRPG::CCoverInfo> pCover = pWorld->GetGame()->CalcCovers( pUS->GetAttackOrigin( pUS->GetPosition(), ( nBulletGone & 1 ) != 0 ), attack, pUS, pTarget, eHL, pUS->GetMinClearDistance(), false, 30.f, NWorld::TS_COVER | NWorld::TS_ITEM_BLOCKER | NWorld::TS_FRAGMENTED );
 		float fHit = NRPG::CheckToHit( pUS, pTarget, GetExtraAP(), eHL, accessibleHLs, pCover, pUS->GetUnitRPG()->IsFirstTurn(), &nTmpToHit, nBulletGone );
 		// retail @0x3a49b0 tail (NRPG::AttackObjectRanged @0x2b6560): rebuild the full SAttackRayInfo
 		// carrier (12-arg ctor @0x291330 semantics; pTarget rides the trailing ctor arg).
@@ -1920,8 +1920,8 @@ void CExecMeleeObject::OnLabel()
 		const CVec3 &ptAim = bObject ? ptCurrent : ptTarget;
 		CVec3 ptAttackPos = NRPG::GetMeleeAttackPos( pUS, ptAim );
 		CObj<NRPG::CCoverInfo> pCover = bObject
-			? pWorld->GetGame()->CalcCovers( ptAttackPos, attack[0], pUS, pTarget, -1, 0 )
-			: pWorld->GetGame()->CalcCoversForTile( ptAttackPos, attack[0], pUS, ptTarget, 0 );
+			? pWorld->GetGame()->CalcCovers( ptAttackPos, attack[0], pUS, pTarget, -1, 0, false, 30.f, NWorld::TS_COVER | NWorld::TS_ITEM_BLOCKER | NWorld::TS_FRAGMENTED )
+			: pWorld->GetGame()->CalcCoversForTile( ptAttackPos, attack[0], pUS, ptTarget, 0, 30.f, NWorld::TS_COVER | NWorld::TS_ITEM_BLOCKER | NWorld::TS_FRAGMENTED );
 		int nToHit;
 		float fHit = NRPG::CheckTileToHit( pUS, ptAim, GetExtraAP(), NAI::THL_LOWER,
 			pCover, pUS->GetUnitRPG()->IsFirstTurn(), &nToHit );
@@ -2011,7 +2011,7 @@ void CExecMeleeUnit::OnLabel()
 		// after a mid-swing load the set comes from the save, not from a fresh AIMap query).
 		// cover+to-hit+peek inlined from AttackObjectRanged, matching the CExecShootUnit::SelectRay port.
 		CVec3 ptAttackPos = NRPG::GetMeleeAttackPos( pUS, ptTarget );
-		CObj<NRPG::CCoverInfo> pCover = pWorld->GetGame()->CalcCovers( ptAttackPos, attack[0], pUS, pTarget, hlInfo.eHL, 0 );
+		CObj<NRPG::CCoverInfo> pCover = pWorld->GetGame()->CalcCovers( ptAttackPos, attack[0], pUS, pTarget, hlInfo.eHL, 0, false, 30.f, NWorld::TS_COVER | NWorld::TS_ITEM_BLOCKER | NWorld::TS_FRAGMENTED );
 		//
 		int nToHit;
 		float fHit = NRPG::CheckToHit( pUS, pTarget,
@@ -2298,7 +2298,7 @@ void CExecLaunchRocket::LaunchRocket( )
 	{
 		int nToHit = pToHitCalcer->GetToHit();
 		CObj<NRPG::CCoverInfo> pCover = pUS->GetWorld()->GetGame()->CalcCoversForTile( pUS->GetAttackOrigin( pUS->GetPosition() ),
-			attack[0], pUS, ptAnimTarget, pUS->GetMinClearDistance() );
+			attack[0], pUS, ptAnimTarget, pUS->GetMinClearDistance(), 30.f, NWorld::TS_COVER | NWorld::TS_ITEM_BLOCKER | NWorld::TS_FRAGMENTED );
 		//
 		if ( !NRPG::PeekRayForRocket( pCover, &r, random.Get( 1, 100 ) <= nToHit ) )
 		{
@@ -3527,14 +3527,14 @@ void CExecThrowKnife::ThrowKnife()
 	{
 		vector<int> accessibleHLs;
 		pCover = pWorld->GetGame()->CalcCovers( pUS->GetAttackOrigin( pUS->GetPosition() ),
-			attack.front(), pUS, pTarget, eHL, pUS->GetMinClearDistance() );
+			attack.front(), pUS, pTarget, eHL, pUS->GetMinClearDistance(), false, 30.f, NWorld::TS_COVER | NWorld::TS_ITEM_BLOCKER | NWorld::TS_FRAGMENTED );
 		fHit = NRPG::CheckToHit( pUS, pTarget, 0, eHL, accessibleHLs, pCover,
 			pUS->GetUnitRPG()->IsFirstTurn(), &nToHit, 0 );
 	}
 	else
 	{
 		pCover = pWorld->GetGame()->CalcCoversForTile( pUS->GetAttackOrigin( pUS->GetPosition() ),
-			attack.front(), pUS, ptTarget, pUS->GetMinClearDistance() );
+			attack.front(), pUS, ptTarget, pUS->GetMinClearDistance(), 30.f, NWorld::TS_COVER | NWorld::TS_ITEM_BLOCKER | NWorld::TS_FRAGMENTED );
 		fHit = NRPG::CheckTileToHit( pUS, ptTarget, 0, NAI::THL_LOWER, pCover,
 			pUS->GetUnitRPG()->IsFirstTurn(), &nToHit, 0 );
 	}

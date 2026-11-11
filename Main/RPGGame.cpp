@@ -110,9 +110,11 @@ public:
 		pAIMap(_pAIMap), pNet(_pNet) { if ( _pAIMap ) pVision = CreateVisionTracker( _pAIMap, terrainInfo ); }
 	virtual CCoverInfo* CalcCovers( const CVec3 &src, const CAttackPortion &attack, 
 		NWorld::CUnit *pIgnore, CObjectBase *pDest, int nTargetUserID, float fMinClearDistance,
-		bool bAIMode = false, float fTraceDistance = 30.f );
+		bool bAIMode = false, float fTraceDistance = 0.f,
+		int nTraceFlags = NWorld::TS_COVER | NWorld::TS_ITEM_BLOCKER );
 	virtual CCoverInfo* CalcCoversForTile( const CVec3 &src, const CAttackPortion &attack, NWorld::CUnit *pIgnore,
-		const CVec3 &ptTarget, float fMinClearDistance );
+		const CVec3 &ptTarget, float fMinClearDistance, float fTraceDistance = 0.f,
+		int nTraceFlags = NWorld::TS_COVER | NWorld::TS_ITEM_BLOCKER );
 	virtual void ProcessMeleeAttackPortion( const CAttackPortion &a, const CRay &ray, const vector<IAttackable*> &ignores );
 	virtual void ProcessRangedAttackPortion( const CAttackPortion &a, const CRay &ray, const vector<IAttackable*> &ignores, vector<STrailPoint> *pTrail, float fMaxRange );
 	virtual EAttackResult ProcessThrowingAttackPortion( CAttackPortion *pA, IAttackable *pTarget, NDb::CRPGArmor *pArmor, int nUserID );
@@ -363,7 +365,7 @@ float CGame::GetCoverForAIUnit( CVec3 ptFrom, NWorld::CUnit *pIgnore,
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // nTargetUserID == -1 means without hit location targeting
 CCoverInfo* CGame::CalcCovers( const CVec3 &src, const CAttackPortion &attack, NWorld::CUnit *pIgnore,
-	CObjectBase *pDest, int nTargetUserID, float fMinClearDistance, bool bAIMode, float fTraceDistance )
+	CObjectBase *pDest, int nTargetUserID, float fMinClearDistance, bool bAIMode, float fTraceDistance, int nTraceFlags )
 {
 	const float F_VIEW_BOUND = 2.f;			// grid diameter
 	const int N_LOW_HALF_GRID = 5;
@@ -399,9 +401,6 @@ CCoverInfo* CGame::CalcCovers( const CVec3 &src, const CAttackPortion &attack, N
 	viewSquare.y = F_VIEW_BOUND * 0.5f * fProjectionScale;
 	NAI::CFastRenderer &res = pRes->grids[0], &resLow = pRes->grids[1];
 	res.InitProjective( src, ptProjectionTarget, viewSquare, N_HALF_GRID );
-	// AttackObjectRanged v1.2 0x6b6620 requests 0x8210: hit geometry, cover and muzzle blockers.
-	const int nTraceFlags = NWorld::TS_COVER | NWorld::TS_WEAPON_BLOCKER |
-		( bAIMode ? 0 : NWorld::TS_FRAGMENTED ); // retail AI probe: 0x8200
 	pAIMap->TraceGrid( &res, nTraceFlags, NAI::IAIMap::STH_SORT_INTERVALS );
 	AddGridToCovers( pRes, res, vTargetDir, pIgnore->GetAttackIgnore(), CastToObjectBase(pDest), nTargetUserID, fDistance, attack, fMinClearDistance, 0 );
 	// add low res grid
@@ -410,7 +409,7 @@ CCoverInfo* CGame::CalcCovers( const CVec3 &src, const CAttackPortion &attack, N
 		viewSquare.x = fSquareLimit * fProjectionScale;
 		viewSquare.y = Max( F_VIEW_BOUND * 0.5f, fSquareLimit ) * fProjectionScale;
 		resLow.InitProjective( src, ptProjectionTarget, viewSquare, N_LOW_HALF_GRID );
-		pAIMap->TraceGrid( &resLow, NWorld::TS_FRAGMENTED | NWorld::TS_COVER | NWorld::TS_WEAPON_BLOCKER, NAI::IAIMap::STH_SORT_INTERVALS );
+		pAIMap->TraceGrid( &resLow, nTraceFlags, NAI::IAIMap::STH_SORT_INTERVALS );
 		AddGridToCovers( pRes, resLow, vTargetDir, pIgnore->GetAttackIgnore(), CastToObjectBase(pDest), nTargetUserID, fDistance, attack, fMinClearDistance, 1 );
 	}
 	pRes->src = src;
@@ -418,7 +417,7 @@ CCoverInfo* CGame::CalcCovers( const CVec3 &src, const CAttackPortion &attack, N
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CCoverInfo* CGame::CalcCoversForTile( const CVec3 &src, const CAttackPortion &attack, NWorld::CUnit *pIgnore,
-	const CVec3 &ptTarget, float fMinClearDistance )
+	const CVec3 &ptTarget, float fMinClearDistance, float fTraceDistance, int nTraceFlags )
 {
 	// trace some rays and calc covers
 	// Retail v1.2 0x693dd9: stop the penetration test 0.625 before the tile.
@@ -429,7 +428,7 @@ CCoverInfo* CGame::CalcCoversForTile( const CVec3 &src, const CAttackPortion &at
 	CVec3 vTargetDir = ptTarget - ptFrom;
 	float fDistance = fabs( vTargetDir ) - fDelta;
 	Normalize( &vTargetDir );
-	float fProjectionDistance = Max( 0.1f, Max( float(N_WEAPONTRAIL_MAXDISTANCE), fDistance + 2 ) );
+	float fProjectionDistance = Max( 0.1f, Max( fTraceDistance, fDistance + 2 ) );
 	CVec3 ptRealTarget = src + vTargetDir * fProjectionDistance;
 	float fProjectionScale = fProjectionDistance / fDistance;
 	CVec2 viewSquare;
@@ -437,7 +436,7 @@ CCoverInfo* CGame::CalcCoversForTile( const CVec3 &src, const CAttackPortion &at
 	viewSquare.x = F_TILE_HALF_VIEW_BOUND * fProjectionScale;
 	viewSquare.y = F_TILE_HALF_VIEW_BOUND * fProjectionScale;
 	resLow.InitProjective( src, ptRealTarget, viewSquare, N_TILE_LOW_HALF_GRID );
-	pAIMap->TraceGrid( &resLow, NWorld::TS_FRAGMENTED | NWorld::TS_COVER | NWorld::TS_WEAPON_BLOCKER, NAI::IAIMap::STH_SORT_INTERVALS );
+	pAIMap->TraceGrid( &resLow, nTraceFlags, NAI::IAIMap::STH_SORT_INTERVALS );
 	AddGridToCovers( pRes, resLow, vTargetDir, pIgnore->GetAttackIgnore(), 0, -1,
 		Min( fDistance, float(N_WEAPONTRAIL_MAXDISTANCE) ), attack, fMinClearDistance, 0 );
 	pRes->src = src;

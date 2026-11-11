@@ -5,6 +5,7 @@
 #endif // _MSC_VER > 1000
 #include "../DBFormat/DataFormat.h"
 #include "../DBFormat/DataRPG.h"
+#include "wTSFlags.h"
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 namespace NAI
 {
@@ -97,9 +98,11 @@ public:
 	// while firing keeps the full trail geometry beyond the target.
 	virtual CCoverInfo* CalcCovers( const CVec3 &src, const CAttackPortion &attack, 
 		NWorld::CUnit *pIgnore, CObjectBase *pDest, int nTargetUserID, float fMinClearDistance,
-		bool bAIMode = false, float fTraceDistance = 30.f ) = 0;
+		bool bAIMode = false, float fTraceDistance = 0.f,
+		int nTraceFlags = NWorld::TS_COVER | NWorld::TS_ITEM_BLOCKER ) = 0;
 	virtual CCoverInfo* CalcCoversForTile( const CVec3 &src, const CAttackPortion &attack, NWorld::CUnit *pIgnore,
-	const CVec3 &ptTarget, float fMinClearDistance ) = 0;
+	const CVec3 &ptTarget, float fMinClearDistance, float fTraceDistance = 0.f,
+		int nTraceFlags = NWorld::TS_COVER | NWorld::TS_ITEM_BLOCKER ) = 0;
 	virtual void ProcessMeleeAttackPortion( const CAttackPortion &a, const CRay &ray, const vector<IAttackable*> &ignores ) = 0;
 	// retail keeps the per-attack range cap on SAttackRayInfo.fMaxRange (TraceLooseRaySegment @0x292010
 	// gates fEnter/fExit on it and places the terminal trail point at origin+dir*fMaxRange); this tree's
