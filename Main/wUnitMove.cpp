@@ -1217,6 +1217,13 @@ void CExecMove::ConvertPath( NAI::CPath *pPath, ENeedActiveItem eActive )
 				commandsQueue.push_back( new CCmdDeactivateItem( pUS, nSlot ) );
 				bActive = false;
 			}
+			// Retail 0x7ba47e: finish walking before starting the climb.
+			if ( pLastMove )
+			{
+				commandsQueue.push_back( new CCmdEndMove( pLastMove ) );
+				pLastMove = 0;
+			}
+			bMoving = false;
 			// climb
 			NAI::ETransitionType type = NAI::GetTransitionType( pNet, prev, cur );
 			bool bReal = true;
@@ -1286,8 +1293,17 @@ void CExecMove::ConvertPath( NAI::CPath *pPath, ENeedActiveItem eActive )
 		pLastMove = new CCmdMove( pUS, pos, true, pPath->bStrafePath );
 		commandsQueue.push_back( pLastMove );
 	}
-	if ( bMoving )
-		commandsQueue.push_back( new CCmdEndMove( pLastMove ) );
+	if ( bMoving && pLastMove )
+	{
+		// Retail 0x7bac50: end the final step before subsequent pose/turn commands.
+		// Keep our final inter-grid step/ender pairing: retail could lose that step.
+		for ( list<CObj<CCommand> >::reverse_iterator i = commandsQueue.rbegin(); i != commandsQueue.rend(); ++i )
+			if ( CDynamicCast<CCmdMove>( *i ) )
+			{
+				commandsQueue.insert( i.base(), new CCmdEndMove( pLastMove ) );
+				break;
+			}
+	}
 
 	if ( eActive == ITEM_ACTIVE && !bActive && !bInactivePose )
 		commandsQueue.push_back( new CCmdActivateItem( pUS, nSlot ) );
