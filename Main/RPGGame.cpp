@@ -948,7 +948,7 @@ static int GetRandomForToHit( const NWorld::CUnit *pAttacker )
 	//
 	static int nLastRndForToHit = 200;
 	int nRnd;
-	while ( abs( (nRnd = random.Get(0,100)) - nLastRndForToHit ) < 6 );
+	while ( abs( (nRnd = random.Get(1,100)) - nLastRndForToHit ) < 6 );
 	return nLastRndForToHit = nRnd;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
