@@ -267,7 +267,7 @@ void CVisionTracker::CalcGrassInfo( const STerrainInfo &info )
 			int x = Clamp( Float2Int( layer.blades[nBlade].x * FP_INV_GRID_STEP ), 0, nWidth - 1 );
 			int y = Clamp( Float2Int( layer.blades[nBlade].y * FP_INV_GRID_STEP ), 0, nHeight - 1 );
 			int nValue = grassHeight[y][x] + 10;
-			grassHeight[y][x] = (char)Min( nValue, 255 );
+			grassHeight[y][x] = (char)Clamp( nValue, 0, 255 );
 		}
 	}
 	for ( int y = 0; y < nHeight; ++y )
