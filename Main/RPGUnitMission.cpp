@@ -638,6 +638,13 @@ void CUnitMission::StartRealTime()
 	ResetUnitParameters();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// Retail action costs are records, including movement/stance coefficients.
+static int GetBaseActionAP( int nRecordID )
+{
+	NDb::CRPGAP *pAP = NDb::GetRPGAP( nRecordID );
+	return pAP ? pAP->nAP : 0;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 int CUnitMission::GetActionAP( NAI::EPose curPose, EAction action ) const
 {
 	// ORIGINAL RETAIL BUG FIXED: paid costs have a 1-AP floor AFTER skill and
@@ -647,7 +654,7 @@ int CUnitMission::GetActionAP( NAI::EPose curPose, EAction action ) const
 	switch ( action )
 	{
 		case AC_NONE: return 0;
-		case AC_HIDE: return 14;
+		case AC_HIDE: return GetBaseActionAP( 14 );
 		case AC_PREPARE: 
 		{
 			// Retail v1.2 0x6c0f81..0x6c1010: base preparation depends on the
@@ -685,14 +692,14 @@ int CUnitMission::GetActionAP( NAI::EPose curPose, EAction action ) const
 				nAP = int( ( 1.0 - double( fParam ) ) * nAP );
 			return Max( 1, nAP );
 		}
-		case AC_CLIMB_1: return 10;
-		case AC_CLIMB_2: return 12;
-		case AC_CLIMB_3: return 14;
-		case AC_CLIMB_4: return 15;
-		case AC_JUMP: return 10;
-		case AC_TAKE_CORPSE: return 12;
-		case AC_TRAP_OBJECT: return 30;
-		case AC_DISARM_TRAP: return 30;
+		case AC_CLIMB_1: return GetBaseActionAP( 15 );
+		case AC_CLIMB_2: return GetBaseActionAP( 16 );
+		case AC_CLIMB_3: return GetBaseActionAP( 17 );
+		case AC_CLIMB_4: return GetBaseActionAP( 18 );
+		case AC_JUMP: return GetBaseActionAP( 19 );
+		case AC_TAKE_CORPSE: return GetBaseActionAP( 1 );
+		case AC_TRAP_OBJECT: return GetBaseActionAP( 2 );
+		case AC_DISARM_TRAP: return GetBaseActionAP( 3 );
 		case AC_SET_MINE: 
 			{
 				NRPG::IInventoryItem *pItem = pRPGUnit->GetInventory()->GetActive();
@@ -702,7 +709,7 @@ int CUnitMission::GetActionAP( NAI::EPose curPose, EAction action ) const
 			}
 			return 0;
 		case AC_DISARM_MINE:
-			return 30;
+			return GetBaseActionAP( 4 );
 
 		case AC_FIRSTAID: 
 			{
@@ -733,9 +740,9 @@ int CUnitMission::GetActionAP( NAI::EPose curPose, EAction action ) const
 		case AC_RELOAD:
 			return pRPGUnit->GetWeaponReloadActionAP();
 		case AC_OPEN_CLOSE:
-			return 4;
+			return GetBaseActionAP( 20 );
 		case AC_APPROACH_CANNON:
-			return 4;
+			return GetBaseActionAP( 6 );
 
 		case AC_POSE_CRAWL:
 		case AC_POSE_CROUCH:
@@ -746,7 +753,7 @@ int CUnitMission::GetActionAP( NAI::EPose curPose, EAction action ) const
 				action = AC_POSE_WALK;
 			if ( curPose == NAI::RUN )
 				curPose = NAI::WALK;
-			int nCoeff = 4;
+			int nCoeff = GetBaseActionAP( 21 );
 			//
 			float fParam;
 			if ( HasPerk( N_PERK_CHEAP_CHANGE_POSE, &fParam ) )
@@ -756,22 +763,22 @@ int CUnitMission::GetActionAP( NAI::EPose curPose, EAction action ) const
 			return nChanges == 0 ? 0 : Max( 1, nChanges * nCoeff );
 		}
 		case AC_LADDER:
-			return 2;
+			return GetBaseActionAP( 22 );
 		case AC_LADDER_MOVE:
-			return 2;
+			return GetBaseActionAP( 23 );
 		case AC_END_SHOOT:
 			return 0;
 		case AC_ENTER_PK:
-			return 10;
+			return GetBaseActionAP( 7 );
 		case AC_LEAVE_PK:
-			return 6;
+			return GetBaseActionAP( 8 );
 		case AC_ROTATE:
 			{
 				float fParam;
 				if ( HasPerk( N_PERK_CHEAP_ROTATE, &fParam ) )
 					return fParam == 0 ? 0 : Max( 1, int( fParam ) );
 				else
-					return curPose == NAI::CRAWL? 4 : 2;
+					return GetBaseActionAP( curPose == NAI::CRAWL ? 24 : 25 );
 			}
 		// @0x2c0bd0 -- retail sources these from the RPGAP DB table (NDb::GetRPGAP, ids 11/12/13)
 		case AC_ITEM_TAKE:
@@ -828,7 +835,7 @@ int CUnitMission::GetActionAP( NAI::EPose curPose, EAction action ) const
 		case NAI::WALK:
 		case NAI::RUN:
 		{
-			int nPose = ( NAI::RUN - curPose + 1 ) * 2;
+			int nPose = ( NAI::RUN - curPose + 1 ) * GetBaseActionAP( 26 );
 			float fCorpseAP;
 			if ( ( action == AC_MOVE_CORPSE_SIDE || action == AC_MOVE_CORPSE_DIAGONAL ) &&
 				HasPerk( N_PERK_CORPSE_TRACKER, &fCorpseAP ) )
