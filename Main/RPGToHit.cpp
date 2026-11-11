@@ -375,7 +375,9 @@ float CToHitCalcer::GetFRMult()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 float CToHitCalcer::GetAllMult()
 {
-	return Max( 0.f, GetAllAdd() * GetLight() * GetFRMult() );
+	float fRes = GetAllAdd();
+	fRes *= GetFRMult();
+	return Max( 0.f, fRes * GetLight() );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 float CToHitCalcer::GetSnipeAdd()
@@ -394,22 +396,22 @@ float CToHitCalcer::GetTArea()
 float CToHitCalcer::GetCA()
 {
 	float fTArea = GetTArea();
-	float fTCover = fHitCover / 100.f;
+	float fTCover = fHitCover * 0.01f;
 	// Retail v1.2 0x6b7053..0x6b707e: perk 72 scales cover, preserving area.
 	float fCoverMultiplier;
 	if ( pUnitMission->HasPerk( 0x48, &fCoverMultiplier ) )
 		fTCover *= fCoverMultiplier;
 	float fScopeFactor = sWeaponInfo.fScopeFactor; // 20 - normal weapon // 100 - sniper rifle
 	float fDistCoeff = DistanceFunc( nDistance, fScopeFactor );
-	return ( (100-fDistCoeff)*(fTCover*fTArea)+fDistCoeff ) / 100.0f;
+	return ( (100-fDistCoeff)*(fTCover*fTArea)+fDistCoeff ) * 0.01f;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 float CToHitCalcer::GetAllAdd()
 {
 	// Retail 0x6b8410: keep the stored-float sums and the familiarity/quality tail in order.
 	float fRes = GetSMove() + GetRS();
-	fRes += GetStance();
 	fRes += GetD2();
+	fRes += GetStance();
 	fRes = double( fRes ) + pUnitMission->GetWeaponAdaptation() + sWeaponInfo.nQuality;
 	//
 	if ( IsValid( pWeaponItem ) )
@@ -561,7 +563,10 @@ int CUnitToHitCalcer::GetToHit()
 	float fDef = 0;
 	if ( !bBackStab )
 		fDef = GetTAuraEvasionAdd() + pTarget->GetUnitRPG()->GetIC() / pUnitMission->GetToHitConstants()->fICModifier;
-	fToHit = GetAllMult() * GetCA() + GetCarefulShootPerk() + GetAuraToHitAdd() - fDef - GetWeatherPenalty();
+	float fAttack = GetCA();
+	fAttack *= GetAllMult();
+	fAttack += GetCarefulShootPerk();
+	fToHit = double( fAttack ) + GetAuraToHitAdd() - GetWeatherPenalty() - fDef;
 	fToHit = Clamp( fToHit, 2.0f, 100.0f );
 	// v1.2 0x6b8796..0x6b87ae: the same RC=11 (truncate) fistp as CToHitCalcer::GetToHit.
 	return int( fToHit );
