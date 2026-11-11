@@ -34,8 +34,12 @@ void CSimpleExecQueue::AddFrontExecutor( CCommandExecute *pExec )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 int CSimpleExecQueue::GetStartAP() const 
 { 
-	if ( !execList.empty() )
-		return execList.front()->GetStartAP();
+	for ( list<CObj<CCommandExecute> >::const_iterator i = execList.begin(); i != execList.end(); ++i )
+	{
+		int nAP = (*i)->GetStartAP();
+		if ( nAP != 0 )
+			return nAP;
+	}
 	return 0;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////

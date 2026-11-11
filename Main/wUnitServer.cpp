@@ -1742,8 +1742,8 @@ bool CUnitServer::IsMoving() const
 int CUnitServer::GetCarefulShotExtraAP()
 {
 	CDynamicCast<NRPG::IWeaponItem> pWeaponItem( GetUnitRPG()->GetWeaponItem() );
-		if ( IsValid( pWeaponItem ) && pWeaponItem->GetShootMode() != NDb::SM_Careful )
-			return 0;
+	if ( !IsValid( pWeaponItem ) || pWeaponItem->GetShootMode() != NDb::SM_Careful )
+		return 0;
 	//
 	int nRes = 0;
 	//
