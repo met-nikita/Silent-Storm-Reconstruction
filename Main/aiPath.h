@@ -51,7 +51,7 @@ public:
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CPath* FindPath( IPathNetwork *pNet, const SPathPlace &src, const vector<SPathPlace> &dst, const int *pCosts, int nPriceLimit, 
 	bool bStrafe, const list<CObjectBase*> &accountUnits, CObjectBase *pSearcher, bool bCheckSuicide = false,
-	bool bMoveOnly = false, EFindPathParams eParams = PF_DEFAULT, bool bCanFindNotExactPath = false );
+	bool bMoveOnly = false, EFindPathParams eParams = PF_DEFAULT, bool bCanFindNotExactPath = false, bool bNoHeadCell = false );
 bool CutPath( CPath *pPath, const SPathPlace &from );
 bool IsValidPath( const CPath &path );
 bool IsPathComplete( const CPath &path, const SPathPlace &sPlace );

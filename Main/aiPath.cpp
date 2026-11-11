@@ -466,11 +466,12 @@ public:
 	// retail SPathFinder = { int nAPCost }: the wave cost of the reached place, consumed by the
 	// door-free re-route comparison in NAI::FindPath (retail @0x8bd80).
 	int nAPCost;
-	SPathFinder2(): nAPCost( 0 ) {}
+	bool bNoHeadCell;
+	SPathFinder2(): nAPCost( 0 ), bNoHeadCell( false ) {}
 	// bNoClimb (retail FinderFindPath 9th arg): freeze climb moves -- set only by the re-route.
 	CPath* FindPath( CPathNetwork *pNet, const SPathPlace &src, const vector<SPathPlace> &dst, const int *pCosts,
 		int nPriceLimit, bool bCheckSuicide, bool bMoveOnly, EFindPathParams eParams, bool bCanFindNotExactPath,
-		bool bCountAsBigUnit, bool bNoClimb = false );
+		bool bCountAsBigUnit, bool bNoClimb = false, bool bSkipHeadCell = false );
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void SPathFinder2::AddFinalLay( CLayerColorConstraints &constraints, const SPathPlace &_p )
@@ -480,6 +481,8 @@ void SPathFinder2::AddFinalLay( CLayerColorConstraints &constraints, const SPath
 	constraints.AddFinalPoint( p, _p );
 	p.SetMoving( 0 );
 	constraints.AddFinalPoint( p, _p );
+	if ( bNoHeadCell )
+		return;
 	SPathPlace prev( HeadPlace( _p) );
 
 	p = prev;
@@ -525,9 +528,74 @@ static int CalcPathObstacles( const CPath &path )
 	return n;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// Steam 0x489790: turn before the final pose transition on an exact pose/direction route.
+static void PreferTurnBeforeFinalPose( vector<SPathPlace> *pPoints )
+{
+	if ( pPoints->size() < 3 )
+		return;
+	const SPathPlace &a = (*pPoints)[pPoints->size() - 3];
+	SPathPlace &b = (*pPoints)[pPoints->size() - 2];
+	const SPathPlace &c = pPoints->back();
+	if ( a.IsIntegral() && b.IsIntegral() && c.IsIntegral() &&
+		a.GetX() == b.GetX() && b.GetX() == c.GetX() && a.GetY() == b.GetY() && b.GetY() == c.GetY() &&
+		a.GetDirection() == b.GetDirection() && b.GetPose() == c.GetPose() &&
+		c.GetDirection() != b.GetDirection() && a.GetPose() != b.GetPose() )
+	{
+		b.SetPose( a.GetPose() );
+		b.SetDirection( c.GetDirection() );
+	}
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// Steam 0x48a490: smoothing a strafe route can leave a final turn to perform.
+static void CompleteStrafeDirection( const vector<SPathPlace> &dst, CPath *pPath )
+{
+	if ( pPath->points.empty() )
+		return;
+	const SPathPlace &last = pPath->points.back();
+	SPathPlace best;
+	int nBestDiff = 100;
+	for ( int i = 0; i < dst.size(); ++i )
+	{
+		const SPathPlace &goal = dst[i];
+		if ( last.GetX() != goal.GetX() || last.GetY() != goal.GetY() || last.GetLayer() != goal.GetLayer() )
+			continue;
+		int nDiff = abs( int(last.GetDirection()) - int(goal.GetDirection()) );
+		if ( nDiff == 0 )
+			return;
+		if ( nDiff > 4 )
+			nDiff = 8 - nDiff;
+		if ( nDiff < nBestDiff )
+		{
+			nBestDiff = nDiff;
+			best = goal;
+		}
+	}
+	if ( nBestDiff < 8 )
+		pPath->points.push_back( best );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+static void FilterPathDestinations( IPathNetwork *pNet, const vector<SPathPlace> &candidates,
+	bool bCanFindNotExactPath, vector<SPathPlace> *pResult )
+{
+	pResult->clear();
+	for ( int i = 0; i < candidates.size(); ++i )
+	{
+		const SPathPlace &p = candidates[i];
+		if ( p.IsFinal() ) // Flying positions encode height here, not a navigation tile.
+			continue;
+		if ( !bCanFindNotExactPath )
+		{
+			EPassable state = pNet->GetPassability( p );
+			if ( state == AIP_NOT_PASSABLE || state == AIP_LOCKED )
+				continue;
+		}
+		pResult->push_back( p );
+	}
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 CPath* FindPath( IPathNetwork *_pNet, const SPathPlace &src, const vector<SPathPlace> &_dst, const int *pCosts,
 	int nPriceLimit, bool bStrafe, const CUnitsContainer &accountUnits, CObjectBase *pSearcher, bool bCheckSuicide,
-	bool bMoveOnly, EFindPathParams eParams, bool bCanFindNotExactPath )
+	bool bMoveOnly, EFindPathParams eParams, bool bCanFindNotExactPath, bool bNoHeadCell )
 {
 	// retail @0x8bd80: a 3D/final src (flying unit) never paths -- its bits are not a tile address
 	if ( src.IsFinal() )
@@ -541,20 +609,11 @@ CPath* FindPath( IPathNetwork *_pNet, const SPathPlace &src, const vector<SPathP
 
 	_pNet->LockSelected( accountUnits );
 	vector<SPathPlace> dst;
-	for ( int k = 0; k < _dst.size(); ++k )
-	{
-		if ( _pNet->IsValidDestination( _dst[k] ) ) 
-			dst.push_back( _dst[k] );
-	}
+	FilterPathDestinations( _pNet, _dst, bCanFindNotExactPath, &dst );
 	if ( dst.empty() )
 	{
-		if ( bCanFindNotExactPath )
-			dst = _dst; // even if there is nowhere passable here, we can still "crawl up" to the nearest passable point...
-		else
-		{
-			_pNet->UnlockSelected();
-			return 0;
-		}
+		_pNet->UnlockSelected();
+		return 0;
 	}
 	
 	CPath *pRes;
@@ -570,7 +629,7 @@ CPath* FindPath( IPathNetwork *_pNet, const SPathPlace &src, const vector<SPathP
 	SPathFinder2 pth;
 	SPathPlace a( src );
 	a.SetMoving( 0 );
-	pRes = pth.FindPath( pNet, a, dst, pCosts, nPriceLimit, bCheckSuicide, bMoveOnly, eParams, bCanFindNotExactPath, bCountAsBigUnit );
+	pRes = pth.FindPath( pNet, a, dst, pCosts, nPriceLimit, bCheckSuicide, bMoveOnly, eParams, bCanFindNotExactPath, bCountAsBigUnit, false, bNoHeadCell );
 
 	// retail @0x8bd80: a path that has to operate doors (CalcPathObstacles > 0, only when
 	// !bCheckSuicide) triggers a RE-ROUTE with flippers frozen (bDoNotFlipAnything + bNoClimb,
@@ -583,7 +642,7 @@ CPath* FindPath( IPathNetwork *_pNet, const SPathPlace &src, const vector<SPathP
 		{
 			int nFirstAP = pth.nAPCost;
 			pNet->SetDoNotFlipAnything( true );
-			CObj<CPath> p2 = pth.FindPath( pNet, a, dst, pCosts, nPriceLimit, false, bMoveOnly, eParams, false, bCountAsBigUnit, true );
+			CObj<CPath> p2 = pth.FindPath( pNet, a, dst, pCosts, nPriceLimit, false, bMoveOnly, eParams, false, bCountAsBigUnit, true, bNoHeadCell );
 			pNet->SetDoNotFlipAnything( false );
 			if ( IsValid( p2 ) && p2->actions.empty() && pth.nAPCost < nFirstAP + nObstacles )
 				*pRes = *p2;	// retail CPath::operator= @0x8d430 -- the door-free path wins
@@ -603,6 +662,8 @@ CPath* FindPath( IPathNetwork *_pNet, const SPathPlace &src, const vector<SPathP
 		// (each replacement is passability/transition-checked before commit), so behaviour
 		// only improves a found path's geometry; no new deps. (deferred-leg wiring)
 		SmoothenPath( *pRes );
+		if ( bStrafe && ( eParams & PF_USE_DIR ) && !bCanFindNotExactPath )
+			CompleteStrafeDirection( dst, pRes );
 	}
 	_pNet->UnlockSelected();
 	if ( pRes )
@@ -655,8 +716,9 @@ bool IsPathComplete( const CPath &path, const SPathPlace &sPlace )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CPath* SPathFinder2::FindPath( CPathNetwork *pNet, const SPathPlace &src, const vector<SPathPlace> &dst,
 	const int *pCosts, int nPriceLimit, bool bCheckSuicide, bool bMoveOnly, EFindPathParams eParams,
-	bool bCanFindNotExactPath, bool bCountAsBigUnit, bool bNoClimb )
+	bool bCanFindNotExactPath, bool bCountAsBigUnit, bool bNoClimb, bool bSkipHeadCell )
 {
+	bNoHeadCell = bSkipHeadCell;
 	nAPCost = 0;
 #ifdef _DEBUG
 	for ( int i = 0; i < N_MOVE_TYPES; ++i )
@@ -719,7 +781,7 @@ CPath* SPathFinder2::FindPath( CPathNetwork *pNet, const SPathPlace &src, const 
 		SPathPlace cur( *i );
 		if ( eParams & PF_USE_DIR )
 		{
-			if ( i->GetPose() == CM_STAND || i->GetPose() == CM_CROUCH )
+			if ( i->GetPose() != CM_LAY )
 				AddFinal( constraints, cur, 0, eParams );
 			else
 				AddFinalLay( constraints, cur );
@@ -858,6 +920,8 @@ CPath* SPathFinder2::FindPath( CPathNetwork *pNet, const SPathPlace &src, const 
 		last.SetMoving( 0 ); parent.SetMoving( 0 );
 		pRes->points.push_back( parent );
 	}
+	if ( eParams == PF_USE_POSEDIR )
+		PreferTurnBeforeFinalPose( &pRes->points );
 	return pRes;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
