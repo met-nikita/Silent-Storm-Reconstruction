@@ -81,7 +81,7 @@ void CSkilledObject::AddXP( float fXPToAdd )
 // CDynamicSkill (retail modifier-list model; RPGUnit.obj)
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // x87 round-to-nearest for the skill math (retail Update/Upgrade fistp under the default CW).
-static inline int SkillRound( float f ) { return int( f + ( f < 0 ? -0.5f : 0.5f ) ); }
+static inline int SkillRound( float f ) { return Float2Int( f ); }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // retail @0x2bbb20: recompute the cap from base+XP and every live modifier, sweeping dead
 // (released) modifier entries out of the weak list, then clamp the live value DOWN to the cap.
@@ -180,11 +180,11 @@ bool CDynamicSkill::Upgrade( float fAddToProgress, float fCap )
 	return false;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// retail CWorld::CreateAIUnits @0x36b2b0 (inline): cap = ROUND(current * coeff); live value
+// Retail Steam CWorld::CreateAIUnits 0x76bf3b/0x76bfac: truncate current * coeff; live value
 // clamped to the new cap (a direct write past Update -- faithful to the retail flow).
 void CDynamicSkill::ScaleForDifficulty( float fCoeff )
 {
-	int nScaled = SkillRound( float( int( *this ) ) * fCoeff );
+	int nScaled = int( float( int( *this ) ) * fCoeff );
 	nMaxValue = nScaled;
 	if ( nValue < nScaled )
 		nScaled = nValue;
