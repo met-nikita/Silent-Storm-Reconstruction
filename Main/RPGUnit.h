@@ -78,19 +78,12 @@ private:
 	bool bFreezedToMax;
 	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&nBaseValue); f.Add(3,&nXPValue); f.Add(4,&fProgress); f.Add(5,&nMaxValue); f.Add(6,&nValue); f.Add(7,&modifiers); f.Add(8,&bFreezedToMax); return 0; } // retail @0x2bdc40
 public:
-	// dev-compat two-arg ctor expressed in the retail member model (retail's own ctor
-	// @0x2bd380 takes just the base value and leaves the cell empty; dev creation sites
-	// construct full cells, so the XP part is derived from the requested set value).
-	CDynamicSkill( int nSetValue = 0, int nBaseStatValue = 0 ):
-		nBaseValue(nBaseStatValue), nXPValue( nSetValue - nBaseStatValue ), fProgress( 0 ),
-		nMaxValue( nSetValue ), nValue( nSetValue ), bFreezedToMax( false )
+	// Retail Steam 0x6bd4e0: the base is known, but the live cell starts empty.
+	explicit CDynamicSkill( int nBaseStatValue = 0 ):
+		nBaseValue(nBaseStatValue), nXPValue( 0 ), fProgress( 0 ),
+		nMaxValue( 0 ), nValue( 0 ), bFreezedToMax( false )
 	{
-		if ( nXPValue < 0 )
-		{
-			nXPValue = 0;
-			nMaxValue = nBaseValue;
-			nValue = nBaseValue;
-		}
+		Update();
 	}
 
 	void Update();                          // retail @0x2bbb20: recompute nMaxValue, sweep dead modifiers, clamp nValue down
@@ -160,6 +153,7 @@ public:
 	CSkilledObject(): fXP(0) {}
 
 	CDynamicSkill& Skills( const int eSkill ) { return *skills[eSkill]; }
+	void InitSkills( const NDb::SRPGSkills &base, const NDb::SRPGSkills &caps, float fBaseXP );
 	void AddXP( float fXPToAdd );                         // retail @0x2bbde0
 	bool UseSkill( int eSkill, float fLearningFactor );
 	void UpdateSkills();                                  // retail @0x2bbcc0
