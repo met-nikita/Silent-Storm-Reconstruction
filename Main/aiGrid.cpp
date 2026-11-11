@@ -1992,6 +1992,9 @@ void CPathNetwork::DisableLocks( CObjectBase *pUnit )
 			if ( k->second.bLocked && IsLockerUnit( k->first ) )
 				for ( unsigned int n = 0; n < k->second.places.size(); ++n )
 					LockUnlockPoint( k->second.places[n], true );
+		// A selected mine remains an obstacle when a query releases an owner.
+		for ( vector<SPathPlace>::const_iterator p = mineTempLocks.begin(); p != mineTempLocks.end(); ++p )
+			LockUnlockPoint( *p, true );
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -2091,8 +2094,10 @@ void CPathNetwork::LockSelected( const list<CObjectBase*> &selected )
 				CDynamicCast<NWorld::CMine> pMine(pLocker);
 				if (pMine)
 				{
-					//mineTempLocks.push_back( pMine->GetPlace().p );
-					//LockUnlockPoint( pMine->GetPlace().p, true );
+					// Retail 0x446e20: append every mine, across all nearby layers.
+					SSphere area( pMine->GetPlace(), 0.5f );
+					for ( unsigned int n = 0; n < layers.size(); ++n )
+						layers[n]->AddNearPoints( area, &mineTempLocks, false );
 				}
 				else
 				{
@@ -2101,10 +2106,16 @@ void CPathNetwork::LockSelected( const list<CObjectBase*> &selected )
 			}
 		}
 	}
+	for ( vector<SPathPlace>::const_iterator it = mineTempLocks.begin(); it != mineTempLocks.end(); ++it )
+		LockUnlockPoint( *it, true );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CPathNetwork::UnlockSelected()
 {
+	// Clear temporary boolean flags before restoring overlapping unit owners.
+	for ( vector<SPathPlace>::iterator it = mineTempLocks.begin(); it != mineTempLocks.end(); ++it )
+		LockUnlockPoint( *it, false );
+	mineTempLocks.clear();
 	for ( CLocksHash::iterator i = lockedPlaces.begin(); i != lockedPlaces.end(); )
 	{
 		// Lock may erase a stale corpse record; advance before that happens.
@@ -2113,9 +2124,6 @@ void CPathNetwork::UnlockSelected()
 	}
 	for ( vector<SFlipper>::iterator it = flippers.begin(); it != flippers.end(); ++it )
 		it->nFixedFlags &= ~F_VISIBLE_TRAP;
-	for ( vector<SPathPlace>::iterator it = mineTempLocks.begin(); it != mineTempLocks.end(); ++it )
-		LockUnlockPoint( *it, false );
-	mineTempLocks.clear();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CObjectBase* CPathNetwork::GetWhoLocksThisPlace( const SPathPlace &p ) const
