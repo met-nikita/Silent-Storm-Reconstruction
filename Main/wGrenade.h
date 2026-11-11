@@ -21,11 +21,11 @@ class CUnitServer;
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 IDynamicObject *CreateGrenadeServer( CWorld *pWorld, const CVec3 &vFrom, const CVec3 &vSpeed,
 		STime tThrow, float fTFly, NDb::CModel *pModel, NDb::CRPGGrenade *_pRPGGrenade,
-		CUnitServer *_pUnitServer = 0 );
+		CUnitServer *_pUnitServer = 0, const CQuat &rotation = QNULL );
 // engineer-grenade flavour (retail eng server ctor @0x75cc50; carries the thrower's ENG skill)
 IDynamicObject *CreateGrenadeServer( CWorld *pWorld, const CVec3 &vFrom, const CVec3 &vSpeed,
 		STime tThrow, float fTFly, NDb::CModel *pModel, NDb::CRPGEngGrenade *_pRPGEngGrenade,
-		CUnitServer *_pUnitServer, int _nThrowerEngSkill );
+		CUnitServer *_pUnitServer, int _nThrowerEngSkill, const CQuat &rotation = QNULL );
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 IDynamicObject *CreateClickOfDeath( IWorld *pWorld, CActionCounter *pC, CObjectBase *pTarget, int _nUserID, const CRay &ray );
 ////////////////////////////////////////////////////////////////////////////////////////////////////

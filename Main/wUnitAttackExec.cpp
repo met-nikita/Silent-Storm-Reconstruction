@@ -2153,11 +2153,19 @@ void CExecThrowGrenade::ThrowGrenade()
 		pUS->GetWorld()->MakeSound( pUS->GetPosition().GetCP(), NDb::GetSound( 16459 ) );
 	}
 
+	CVec3 dir = grenadeParams.vel;
+	Normalize( &dir );
+	SHMatrix matrix;
+	MakeMatrix( &matrix, VNULL3, dir );
+	CQuat rotation;
+	rotation.FromEulerMatrix( matrix );
+	rotation = rotation * CQuat( -FP_PI2, V3_AXIS_X );
+
 	// retail @0x764140: BOTH records go to the world -- CWorld::ThrowGrenade dispatches an
 	// engineer grenade (null regular record) to the contact-fused eng grenade server.
 	CObjectBase *pBullet = pUS->GetWorld()->ThrowGrenade( grenadeParams.ptStart, grenadeParams.vel,
 		pUS->animator.GetTimeLabel1(), grenadeParams.fT, item.pModel,
-		pGrenade->GetDBGrenade(), pUS, pGrenade->GetDBEngGrenade() );
+		pGrenade->GetDBGrenade(), pUS, pGrenade->GetDBEngGrenade(), rotation );
 	NRPG::IUnitMissionForMedals *pMedals = dynamic_cast<NRPG::IUnitMissionForMedals*>( pRPG );
 	if ( pMedals )
 		pMedals->AddWaitForBullet( pBullet );

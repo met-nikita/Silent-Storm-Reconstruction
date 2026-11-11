@@ -41,16 +41,16 @@ public:
 	CGrenadeServer() {}
 	CGrenadeServer( CWorld *pWorld, const CVec3 &vFrom, const CVec3 &vSpeed,
 		STime tThrow, float fTFly, NDb::CModel *pModel, NDb::CRPGGrenade *_pRPGGrenade,
-		CUnitServer *_pUnitServer = 0 );
+		CUnitServer *_pUnitServer, const CQuat &rotation );
 	// retail @0x75cc50: the engineer-grenade flavour (pRPGGrenade stays null, thrower's ENG skill)
 	CGrenadeServer( CWorld *pWorld, const CVec3 &vFrom, const CVec3 &vSpeed,
 		STime tThrow, float fTFly, NDb::CModel *pModel, NDb::CRPGEngGrenade *_pRPGEngGrenade,
-		CUnitServer *_pUnitServer, int _nThrowerEngSkill );
+		CUnitServer *_pUnitServer, int _nThrowerEngSkill, const CQuat &rotation );
 	//
 	bool Segment();
 	virtual void Visit( IRenderVisitor *p );
 private:
-	void InitGrenade( const CVec3 &vFrom, const CVec3 &vSpeed, STime tThrow, float fTDelay );   // retail @0x75c8f0 shared init
+	void InitGrenade( const CVec3 &vFrom, const CVec3 &vSpeed, STime tThrow, float fTDelay, const CQuat &rotation );   // retail @0x75c8f0 shared init
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CClickOfDeath : public IDynamicObject
@@ -74,25 +74,25 @@ public:
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CGrenadeServer::CGrenadeServer( CWorld *_pWorld, const CVec3 &vFrom,
 	const CVec3 &vSpeed, STime tThrow, float fTDelay, NDb::CModel *_pModel,
-	NDb::CRPGGrenade *_pRPGGrenade, CUnitServer *_pUnitServer )
+	NDb::CRPGGrenade *_pRPGGrenade, CUnitServer *_pUnitServer, const CQuat &rotation )
 : pWorld(_pWorld), pModel(_pModel), pRPGGrenade(_pRPGGrenade), pUnitServer(_pUnitServer)//tExplode(_tExplode)//, pItem(_pItem)
 {
-	InitGrenade( vFrom, vSpeed, tThrow, fTDelay );
+	InitGrenade( vFrom, vSpeed, tThrow, fTDelay, rotation );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // retail @0x75cc50: the engineer-grenade server -- no regular record, the eng record + the
 // thrower's ENGINEERING skill (feeds the eng explosion), same shared InitGrenade.
 CGrenadeServer::CGrenadeServer( CWorld *_pWorld, const CVec3 &vFrom,
 	const CVec3 &vSpeed, STime tThrow, float fTDelay, NDb::CModel *_pModel,
-	NDb::CRPGEngGrenade *_pRPGEngGrenade, CUnitServer *_pUnitServer, int _nThrowerEngSkill )
+	NDb::CRPGEngGrenade *_pRPGEngGrenade, CUnitServer *_pUnitServer, int _nThrowerEngSkill, const CQuat &rotation )
 : pWorld(_pWorld), pModel(_pModel), pRPGEngGrenade(_pRPGEngGrenade), pUnitServer(_pUnitServer)
 {
 	nThrowerEngSkill = _nThrowerEngSkill;
-	InitGrenade( vFrom, vSpeed, tThrow, fTDelay );
+	InitGrenade( vFrom, vSpeed, tThrow, fTDelay, rotation );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // retail NWorld::InitGrenade @0x75c8f0 -- the shared launch body of both ctors.
-void CGrenadeServer::InitGrenade( const CVec3 &vFrom, const CVec3 &vSpeed, STime tThrow, float fTDelay )
+void CGrenadeServer::InitGrenade( const CVec3 &vFrom, const CVec3 &vSpeed, STime tThrow, float fTDelay, const CQuat &rotation )
 {
 	// launch actual item
 	vector<SMassSphere> spheres;
@@ -114,7 +114,7 @@ void CGrenadeServer::InitGrenade( const CVec3 &vFrom, const CVec3 &vSpeed, STime
 	// The fuse below stays keyed to the raw tThrow (release label), as retail computes it.
 	STime tFlightStart = Min( tThrow, pWorld->GetTime()->GetValue() );
 	// retail @0x75c9cd: bMassCenter=true, PH_GRENADE_ATTACK, no item (the case name is fixed)
-	pSphereSet->Init( tFlightStart, vFrom, QNULL, vSpeed, true, NAnimation::PH_GRENADE_ATTACK, 0 );
+	pSphereSet->Init( tFlightStart, vFrom, rotation, vSpeed, true, NAnimation::PH_GRENADE_ATTACK, 0 );
 
 	pRealAnimator = pSphereSet;
 
@@ -201,17 +201,17 @@ bool CClickOfDeath::Segment()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 IDynamicObject *CreateGrenadeServer( CWorld *pWorld, const CVec3 &vFrom, const CVec3 &vSpeed,
 		STime tThrow, float fTFly, NDb::CModel *pModel, NDb::CRPGGrenade *_pRPGGrenade,
-		CUnitServer *_pUnitServer )
+		CUnitServer *_pUnitServer, const CQuat &rotation )
 {
-	return new CGrenadeServer( pWorld, vFrom, vSpeed, tThrow, fTFly, pModel, _pRPGGrenade, _pUnitServer );
+	return new CGrenadeServer( pWorld, vFrom, vSpeed, tThrow, fTFly, pModel, _pRPGGrenade, _pUnitServer, rotation );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // engineer-grenade flavour (retail eng server ctor @0x75cc50)
 IDynamicObject *CreateGrenadeServer( CWorld *pWorld, const CVec3 &vFrom, const CVec3 &vSpeed,
 		STime tThrow, float fTFly, NDb::CModel *pModel, NDb::CRPGEngGrenade *_pRPGEngGrenade,
-		CUnitServer *_pUnitServer, int _nThrowerEngSkill )
+		CUnitServer *_pUnitServer, int _nThrowerEngSkill, const CQuat &rotation )
 {
-	return new CGrenadeServer( pWorld, vFrom, vSpeed, tThrow, fTFly, pModel, _pRPGEngGrenade, _pUnitServer, _nThrowerEngSkill );
+	return new CGrenadeServer( pWorld, vFrom, vSpeed, tThrow, fTFly, pModel, _pRPGEngGrenade, _pUnitServer, _nThrowerEngSkill, rotation );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 IDynamicObject *CreateClickOfDeath( IWorld *pWorld, CActionCounter *pC, CObjectBase *pTarget, int _nUserID, const CRay &ray )
