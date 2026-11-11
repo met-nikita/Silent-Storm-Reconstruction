@@ -219,7 +219,7 @@ bool CBulletServer::Segment()
 		{
 			CRay ray;
 			int nLast = trailpointsSet.size() - 1;
-			ray.ptOrigin = trailpointsSet[0].vPosition;
+			ray.ptOrigin = pShooter->GetAttackOrigin( pShooter->GetPosition() );
 			ray.ptDir = trailpointsSet[nLast].vPosition - ray.ptOrigin;
 			float fDistance = fabs( ray.ptDir );   // shooter -> last-trail-point length, BEFORE normalize
 			Normalize( &( ray.ptDir ) );
