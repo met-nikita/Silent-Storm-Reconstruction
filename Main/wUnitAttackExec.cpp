@@ -1127,8 +1127,8 @@ bool CExecAttack::CreateAttack( vector<NRPG::CAttackPortion> *pAttack, CUnitServ
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CExecShoot
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CExecShoot::CExecShoot( CUnitServer *_pUS, int _nExtraAP ): 
-	CExecAttack(_pUS), nExtraAP(_nExtraAP)
+CExecShoot::CExecShoot( CUnitServer *_pUS, int _nExtraAP, bool _bOnlyPrepareToShoot ): 
+	CExecAttack(_pUS), nExtraAP(_nExtraAP), bOnlyPrepareToShoot(_bOnlyPrepareToShoot)
 {
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1176,8 +1176,7 @@ void CExecShoot::OnLabel()
 	if ( bAttackCanceled )
 	{
 		// ---- END the shot ---- (retail @0x3a8b40: stop a still-held long-burst SFX first, then
-		//   AC_END_SHOOT + CheckShotResult. The retail weapon-empty notify / UpdateVision world
-		//   sinks remain deferred -- see the header.)
+		//   AC_END_SHOOT, result, ammunition feedback, and visibility refresh.)
 		if ( IsValid( longBurstSnd.pLongBurstSnd ) && GetShootMode() == NDb::SM_LongBurst )
 		{
 			longBurstSnd.pLongBurstSnd->EndSound();
@@ -1185,6 +1184,11 @@ void CExecShoot::OnLabel()
 		}
 		pUS->DoAction( NRPG::AC_END_SHOOT );
 		CheckShotResult();
+		NRPG::IWeaponItem *pWeapon = pUS->GetUnitRPG()->GetWeaponItem();
+		if ( IsValid( pWeapon ) && pWeapon->GetAmmoQuantity() <= 0 )
+			pUS->GetWorld()->GetGlobalAck()->OnLastPieceOfAmmo( pUS );
+		if ( bUpdateVision )
+			pUS->GetWorld()->UpdateVisible( false );
 	}
 	else
 	{
@@ -1507,12 +1511,8 @@ void CExecShoot::OnBulletGo()
 	}
 
 	bAttackCanceled = true;   // nothing more to fire -> OnLabel ENDs the shot next tick
-	if ( IsValid( longBurstSnd.pLongBurstSnd ) && GetShootMode() == NDb::SM_LongBurst )
-	{
-		longBurstSnd.pLongBurstSnd->EndSound();
-		longBurstSnd.pLongBurstSnd = 0;
-	}
 }
+
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // @0x3a8d20 -- per-tick timed-bullet driver. Samples world-time ONCE; as it crosses tNextBulletPrepare it
 // chambers/flashes the next bullet, and as it crosses tNextBulletGo it fires (OnBulletGo). Overrides the
@@ -1601,8 +1601,8 @@ void CExecShoot::SelectPointRay()
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CExecShootObject::CExecShootObject( CUnitServer *_pUS, CObjectBase *_pTarget, int nExtraAP ):
-	CExecShoot( _pUS, nExtraAP ), pTarget( _pTarget )
+CExecShootObject::CExecShootObject( CUnitServer *_pUS, CObjectBase *_pTarget, int nExtraAP, bool bOnlyPrepareToShoot ):
+	CExecShoot( _pUS, nExtraAP, bOnlyPrepareToShoot ), pTarget( _pTarget )
 {
 	ptAnimTarget = pUS->GetPosition().GetCP();
 	if ( IsValid( pTarget ) )
@@ -1677,8 +1677,8 @@ void CExecShootObject::CheckShotResult()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CExecShootUnit
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CExecShootUnit::CExecShootUnit( CUnitServer *_pUS, NWorld::CUnitServer *_pTarget, NAI::EHitLocation _eHL, int _nExtraAttackAP ):
-		CExecShoot( _pUS, _nExtraAttackAP ), pTarget(_pTarget), eHL(_eHL)
+CExecShootUnit::CExecShootUnit( CUnitServer *_pUS, NWorld::CUnitServer *_pTarget, NAI::EHitLocation _eHL, int _nExtraAttackAP, bool _bOnlyPrepareToShoot ):
+		CExecShoot( _pUS, _nExtraAttackAP, _bOnlyPrepareToShoot ), pTarget(_pTarget), eHL(_eHL)
 { 
 	if ( IsValid( pTarget ) )
 	{
@@ -1758,6 +1758,8 @@ void CExecShootUnit::CheckShotResult()
 	//
 	if ( !bMissed )
 	{
+		if ( IsValid( pTarget ) )
+			pTarget->MarkInterrupted( pUS );
 		if ( nToHit > 30 )
 			pWorld->GetGlobalAck()->OnTargetHit( pUS );
 		else

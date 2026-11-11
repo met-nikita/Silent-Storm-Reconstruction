@@ -792,9 +792,9 @@ CCommandExecute* CreateActionExecutor( CUnitServer *pUS, CCmd *pCmd, EUnitComman
 							*pError = UCR_CANT_SEE_TARGET;
 							return 0;
 						}
-						return CreateActionQueueOrReload(pUS, pAttackObject.GetPtr(), new CExecShootUnit(pUS, pUnitTarget, pAttackObject->eHL, pAttackObject->nExtraAttackAP), pError);
+						return CreateActionQueueOrReload(pUS, pAttackObject.GetPtr(), new CExecShootUnit(pUS, pUnitTarget, pAttackObject->eHL, pAttackObject->nExtraAttackAP, pAttackObject->bOnlyPrepareToShoot), pError);
 					case AT_CANNON:
-						return CreateSimpleActionOrReload(pUS, pAttackObject.GetPtr(), new CExecShootUnit(pUS, pUnitTarget, pAttackObject->eHL, pAttackObject->nExtraAttackAP), pError);
+						return CreateSimpleActionOrReload(pUS, pAttackObject.GetPtr(), new CExecShootUnit(pUS, pUnitTarget, pAttackObject->eHL, pAttackObject->nExtraAttackAP, pAttackObject->bOnlyPrepareToShoot), pError);
 					case AT_THROW:
 						// Retail v1.2 0x79dc83 / 0x79dd35: turn toward the target
 						// before throwing. A targetless order-bar query falls through
@@ -807,7 +807,7 @@ CCommandExecute* CreateActionExecutor( CUnitServer *pUS, CCmd *pCmd, EUnitComman
 
 				if ( IsValid( pAttackObject->pTarget ) && (eType == AT_SHOOT || eType == AT_CANNON) )
 				{
-					CExecShootObject *pShot = new CExecShootObject( pUS, pAttackObject->pTarget, pAttackObject->nExtraAttackAP );
+					CExecShootObject *pShot = new CExecShootObject( pUS, pAttackObject->pTarget, pAttackObject->nExtraAttackAP, pAttackObject->bOnlyPrepareToShoot );
 					if ( eType == AT_CANNON )
 						return CreateSimpleActionOrReload( pUS, pAttackObject.GetPtr(), pShot, pError );
 					return CreateActionQueueOrReload( pUS, pAttackObject.GetPtr(), pShot, pError );
