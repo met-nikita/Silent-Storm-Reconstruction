@@ -1,4 +1,5 @@
 #include "StdAfx.h"
+#include "..\Misc\RetailSort.h"
 #include "DG.h"
 #include "GfxBuffers.h"
 #include "2DSceneSW.h"
@@ -356,7 +357,7 @@ bool CTerrainTexture::CalcNewTexture( int nSize )
 				continue;
 			tilesList.push_back( pTile );
 		}
-		sort( tilesList.begin(), tilesList.end(), STerrainTileSort() );
+		NRetail::Sort( tilesList.begin(), tilesList.end(), STerrainTileSort() );
 	}
 
 	CPtr<ISW2DScene> p2DScene = Make2DSWScene();

@@ -1,4 +1,5 @@
 #include "StdAfx.h"
+#include "..\Misc\RetailSort.h"
 #include "MapBuildTerrain.h"
 #include "TerrainInfo.h"
 #include "Grid.h"
@@ -182,7 +183,7 @@ void LoadTerrSpots( int nVarID, STerrainInfo *pTerr, SRand *pRand, const vector<
 	pTerr->spots.clear();
 	NDb::CTemplVariant *pVariant = NDb::GetTemplVariant( nVarID );
 	vector< CPtr<NDb::CRndTerrainSpot> > spots = pVariant->terrainSpots;
-	sort( spots.begin(), spots.end(), SpotCmp );
+	NRetail::Sort( spots.begin(), spots.end(), SpotCmp );
 
 	for ( int k = 0; k < spots.size(); ++k )
 	{
