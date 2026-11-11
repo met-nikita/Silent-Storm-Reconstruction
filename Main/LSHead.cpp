@@ -372,6 +372,7 @@ void CHeadAnimator::Recalc()
 			fr.nFrameTime = nSeqTime - 1;
 			frames.push_back( fr );
 			bDeathMask = true;
+			// Intentional retail-bug fix: mesh refresh must not append another death idle.
 			bIdleActive = true;
 			++it;
 		}
