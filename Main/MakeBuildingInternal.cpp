@@ -122,7 +122,10 @@ void CSolidAndWallMap::MakeSolidMap( SRand *pRand, const vector<SBuildFragment> 
 					int nClipGroupID = gids[fr.nFragmentID];
 					nClipGroupID = 0 == nClipGroupID ? fr.nFragmentID : nClipGroupID;
 					if ( solidMap.find( nClipGroupID ) == solidMap.end() )
+					{
 						solidMap.insert( pair<int, CNodeMap<SSolidElement> >( nClipGroupID, pattern ) );
+						solidOrder.Insert( nClipGroupID );
+					}
 					CNodeMap<SSolidElement> &smap = solidMap.find( nClipGroupID )->second;
 					// объединение этажей для клиппинга
 					SFloorGroup &fgroup = linkedfloors[nClipGroupID];
@@ -297,6 +300,7 @@ void CSolidAndWallMap::Recalc()
 {
 	CBuildInfo *pBI = pBuildInfo->GetValue();
 	solidMap.clear();
+	solidOrder.Clear();
 	neighbs.clear();
 	bottom.Clear();
 	wallGrid.Clear();

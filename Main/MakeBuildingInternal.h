@@ -5,6 +5,7 @@
 #endif // _MSC_VER > 1000
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 #include "MakeBuilding.h"
+#include "..\Misc\RetailHashOrder.h"
 #include "BuildingInfo.h"
 namespace NDb
 {
@@ -125,6 +126,7 @@ class CSolidAndWallMap : public CVersioningBase
 {
 	OBJECT_NOCOPY_METHODS(CSolidAndWallMap);
 	unordered_map<int, CNodeMap<SSolidElement> > solidMap;
+	NRetail::CIntHashOrder solidOrder;
 	CArray2D<float> bottom;
 	CNodeMap<SGridNode> wallGrid;
 	vector<SLRNeighbs> neighbs;
@@ -147,6 +149,7 @@ public:
 	CSolidAndWallMap( CPtrFuncBase<CBuildInfo> *_pBuildInfo, const SRandomSeed &_seed )
 		: pBuildInfo(_pBuildInfo), seed(_seed) {}
 	const unordered_map<int, CNodeMap<SSolidElement> >& GetSolidMap() const { return solidMap; }
+	const vector<int>& GetSolidOrder() const { return solidOrder.GetKeys(); }
 	const CNodeMap<SGridNode>& GetWallGrid() const { return wallGrid; }
 	const vector<SLRNeighbs>& GetNeighbs() const { return neighbs; }
 	const CArray2D<float>& GetBottom() const { return bottom; }
