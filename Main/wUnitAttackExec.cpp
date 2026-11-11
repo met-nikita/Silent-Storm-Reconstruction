@@ -498,10 +498,10 @@ EUnitCommandResult CanUnitLaunchRocket( CUnitServer *pUS,
 		return UCR_TARGET_OUT_OF_RANGE;
 	//
 	vector<NRPG::CAttackPortion> attack;
-	pUS->GetUnitRPG()->CreateAttack( &attack, false );
-	if ( attack.empty() )
+	if ( !pUS->GetUnitRPG()->CreateAttack( &attack, false, true ) || attack.empty() )
 		return UCR_GENERAL_FAILURE;
 	//
+	attack.front().nK = 1;
 	CObj<NRPG::CCoverInfo> pCover = pUS->GetWorld()->GetGame()->CalcCoversForTile( pUS->GetAttackOrigin( from ), 
 		attack[0], pUS, ptTarget, pUS->GetMinClearDistance() );
 	if ( !NRPG::CanShoot( pCover ) )
@@ -2272,48 +2272,44 @@ void CExecLaunchRocket::Start()
 void CExecLaunchRocket::LaunchRocket( )
 {
 	vector<NRPG::CAttackPortion> attack;
-	pUS->GetUnitRPG()->CreateAttack( &attack, true );
-	if ( attack.empty() )
+	if ( !pUS->GetUnitRPG()->CreateAttack( &attack, true, true ) || attack.empty() )
 		return;
 	//
 	NRPG::IWeaponItem *pWeapon = pUS->GetUnitRPG()->GetWeaponItem();
 	NRPG::IClipItem *pRocket = pUS->GetUnitRPG()->GetWeaponItem()->GetInnerClip();
-	NDb::CRPGItem *pRPGRocket = pRocket->GetDBItem();
 	float fSpeed = pWeapon->GetDBWeapon()->fTrailSpeed;
 	SRand rnd;
 	CPtr<NDb::CModel> pModel = pWeapon->GetDBWeapon()->pTrailEffect->CreateModel( &rnd );
 	CPtr<NDb::CEffect> pEffect;
 	if ( pWeapon->GetDBWeapon()->pTrailParticle )
 		pEffect = pWeapon->GetDBWeapon()->pTrailParticle->GetEffect( &rnd );
-	CPtr<NRPG::CRLauncherToHitCalcer> pToHitCalcer;
-	int nDistance = fabs( ptAnimTarget - pUS->GetPosition().GetCP() ) / FP_GRID_STEP;
-	pToHitCalcer = new NRPG::CRLauncherToHitCalcer( pUS,
-		pUS->GetPosition().GetPose(), nDistance, pUS->GetPosition().GetCP(), 100.f, nExtraAP,
-		pUS->GetWorld()->IsFirstTurn(), false, CVec3(1,1,1), ptAnimTarget );
-	//
 	CRay r( rayInfo.GetRay() );
 	if ( !IsAccidental() )
 	{
-		int nToHit = pToHitCalcer->GetToHit();
-		CObj<NRPG::CCoverInfo> pCover = pUS->GetWorld()->GetGame()->CalcCoversForTile( pUS->GetAttackOrigin( pUS->GetPosition() ),
-			attack[0], pUS, ptAnimTarget, pUS->GetMinClearDistance(), 30.f, NWorld::TS_COVER | NWorld::TS_ITEM_BLOCKER | NWorld::TS_FRAGMENTED );
-		//
-		if ( !NRPG::PeekRayForRocket( pCover, &r, random.Get( 1, 100 ) <= nToHit ) )
-		{
-			ASSERT( 0 );
-			return;
-		}
+		// RealCalcTileCovers tests rocket obstruction with unit penetration.
+		NRPG::CAttackPortion coverAttack = attack.front();
+		coverAttack.nK = 1;
+		const CVec3 vOrigin = pUS->GetAttackOrigin( pUS->GetPosition() );
+		CObj<NRPG::CCoverInfo> pCover = pUS->GetWorld()->GetGame()->CalcCoversForTile( vOrigin,
+			coverAttack, pUS, ptAnimTarget, pUS->GetMinClearDistance(), 30.f, NWorld::TS_COVER | NWorld::TS_ITEM_BLOCKER | NWorld::TS_FRAGMENTED );
+		int nToHit;
+		// Retail AttackPointRanged consumes the shared hit roll, then a separate rocket roll.
+		NRPG::CheckTileToHit( pUS, ptAnimTarget, nExtraAP, NAI::THL_LOWER, pCover,
+			pUS->GetUnitRPG()->IsFirstTurn(), &nToHit, 0 );
+		bool bHit = random.Get( 1, 100 ) <= nToHit;
+		r.ptOrigin = vOrigin;
+		r.ptDir = CVec3( 0, 0, 1 ); // finite retail fallback when no ray can be selected
+		NRPG::PeekRayForRocket( pCover, &r, bHit );
+		rayInfo = NRPG::SAttackRayInfo( attack.front(), vOrigin, r.ptDir, pUS, pUS->GetPosition(),
+			0, nExtraAP, bHit, pUS->GetMinClearDistance(), 30.f, 0 );
 	}
 	//
 	CVec3 speed = r.ptDir * fSpeed;
-	r.ptOrigin += r.ptDir * pUS->GetMinClearDistance();
 	rayInfo.vOrigin = r.ptOrigin;   // persist the launched ray back into the carrier (retail keeps rayInfo current)
 	rayInfo.vDir = r.ptDir;
-	STime tThrow = pUS->animator.GetTimeLabel1();
-	if ( IsAccidental() )
-		tThrow = pUS->GetWorld()->GetTime()->GetValue();
+	STime tThrow = pUS->GetWorld()->GetTime()->GetValue();
 	CObjectBase *pBullet = pUS->GetWorld()->LaunchRocket( r.ptOrigin, speed, tThrow,
-		pToHitCalcer->GetMaxDistance() * FP_GRID_STEP, pModel, attack.front(), pRocket, pUS, pEffect );
+		pWeapon->GetDBWeapon()->nMaxRange * FP_GRID_STEP, pModel, attack.front(), pRocket, pUS, pEffect );
 	NRPG::IUnitMissionForMedals *pMedals = dynamic_cast<NRPG::IUnitMissionForMedals*>( pUS->GetUnitRPG() );
 	if ( pMedals )
 		pMedals->AddWaitForBullet( pBullet );
