@@ -350,7 +350,7 @@ static bool FindGrenadeParams( CUnitServer *pUS, NRPG::IGrenadeItem *pGrenade, c
 	vector<CVec3> startPoints;
 	startPoints.push_back( from );
 	startPoints.push_back( from + rightSide ); // right side
-	startPoints.push_back( from + leftSide ); // left side
+	startPoints.push_back( from + ( pUS->IsFlyingBoss() ? CVec3( -fX, -fY, 0.5f ) : leftSide ) );
 	
 	bool bFound = false;
 	int nSide = 0;
@@ -2115,8 +2115,8 @@ void CExecThrowGrenade::ThrowGrenade()
 	if ( !IsValid( pGrenade ) )
 		return;
 
-	if ( !FindGrenadeParams( pUS, pGrenade, pUS->GetPosition(), ptTarget, &grenadeParams ) )
-		return;
+	// Run already found a valid arc; a failed release-time refresh retains it (retail 0x7ad580).
+	FindGrenadeParams( pUS, pGrenade, pUS->GetPosition(), ptTarget, &grenadeParams );
 	CheckToHitAndDelay( pGrenade );
 
 	pUS->TearOffItem( &item, (NDb::ESlot)pInventory->GetActiveSlot(),
