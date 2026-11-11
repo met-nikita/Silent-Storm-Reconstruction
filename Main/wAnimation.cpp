@@ -212,7 +212,7 @@ CUnitAnimator::CUnitAnimator( CFuncBase<STime> *_pTime, const NAI::SUnitPosition
 	pAnimState->state.pTerrain = pTerrainFunc;
 	pAnimState->state.cIdleBannedFlags = 0;
 	eAnimationWeaponType = NDb::WT_DEFAULT;
-	bHasPKSkeleton = false;
+	bHasPKSkeleton = IsValid( pPers ) && IsValid( pPers->pPanzerklein );
 	pFloor = new NGScene::CCInt(-5);
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////

@@ -888,24 +888,13 @@ CObjectBase* CGameView::CreateLSHead( NDb::CComplexHead *pCHead, CPtrFuncBase<CO
 	// param_1, the per-unit CHeadInfo) -- so an AdvFaceGen hair/eye-glasses choice survives save/load
 	// instead of reverting to the shared CComplexHead default. Standalone / editor-preview callers pass no
 	// CHeadInfo (pHeadInfo == 0) and keep reading the bare CComplexHead record (the live preview wants the
-	// in-memory-mutated shared record). pHairInCap (helmet hair) is a dev-only CComplexHead field with no
-	// per-unit CHeadInfo slot, so the cap branch keeps sourcing it from pCHead.
+	// in-memory-mutated shared record). Retail uses the same hair with and without a cap.
 	// NOTE the source pointer types differ -- CComplexHead uses CPtr<CTRndModel>, CHeadInfo uses
 	// CDBPtr<CTRndModel> -- so each model is resolved to a raw NDb::CTRndModel* (operator T*) before use.
 	NDb::CTRndModel *pHair = pHeadInfo ? (NDb::CTRndModel*)pHeadInfo->GetHair() : (NDb::CTRndModel*)pCHead->pHair;
 
-	if ( bInterface || !bHasCap )
-	{
-		if ( IsValid( pHair ) )
-			models.push_back( pHair->CreateModel(&rnd) );
-	}
-	else
-	{
-		if ( IsValid( pCHead->pHairInCap ) )
-			models.push_back( pCHead->pHairInCap->CreateModel(&rnd) );
-		else if ( IsValid( pHair ) )
-			models.push_back( pHair->CreateModel(&rnd) );
-	}
+	if ( IsValid( pHair ) )
+		models.push_back( pHair->CreateModel(&rnd) );
 
 	for ( int i = 0; i < NDb::N_HEAD_MESHES; ++i )
 	{

@@ -177,8 +177,6 @@ void GetItemsBindPlaces( vector<IRenderVisitor::SBoundMesh> *pRes, NRPG::IUnitMi
 		NDb::CRPGItem *pLeftHandItem = pPanzerklein->pLeftHandItem;
 		AttachItem( pRes, &rnd, UIT_PK_LEFT_HAND, pLeftHandItem->pModel, bIsPK );
 	}
-	bool bHeavy = false;
-	unordered_map< int, int > slotItems; // slot number or -1 for active weapon
 	NRPG::IInventoryItem *pActiveIItem = pInventory->GetActive();
 	NDb::CRPGItem *pActiveItem = 0;
 	if ( pActiveIItem )
@@ -202,47 +200,22 @@ void GetItemsBindPlaces( vector<IRenderVisitor::SBoundMesh> *pRes, NRPG::IUnitMi
 				// Retail v1.2 0x61e434: a holstered active heavy weapon has no visible mesh.
 				if ( !bUndrawWeapon && !bNoHeavyWeapon )
 					AttachItem( pRes, &rnd, UIT_WEAPON_HEAVY, pActiveItem->pModel, bIsPK, pActiveIItem );
-				bHeavy = true;
 			}
 			else if ( !bUndrawWeapon )
 				AttachItem( pRes, &rnd, UIT_HAND, pActiveItem->pModel, bIsPK, pActiveIItem );
 		}
 	}
-	if ( !pActiveItem && bIsPK )
-	{
-		for ( int i = 0; i < NDb::N_SLOTS; ++i )
-		{
-			NRPG::IInventoryItem *pIItem = pInventory->Get( (NDb::ESlot)i );
-			if ( !pIItem )
-				continue;
-			NDb::CRPGItem *pItem = pIItem->GetDBItem();
-			if ( pItem->subType != NDb::SUBTYPE_GRENADE_SMALL && pItem->subType != NDb::SUBTYPE_GRENADE_LARGE )
-			{
-				AttachItem( pRes, &rnd, UIT_HAND, pItem->pModel, bIsPK, pIItem );
-				break;
-			}
-		}
-	}
+	if ( !bIsPK && ( !pActiveItem || pActiveItem->subType != NDb::SUBTYPE_HEAVY ) )
 	for ( int i = 0; i < NDb::N_SLOTS; ++i )
 	{
 		NRPG::IInventoryItem *pIItem = pInventory->Get( (NDb::ESlot)i );
-		if ( !pIItem )
+		if ( !pIItem || pInventory->GetActiveSlot() == i )
 			continue;
 		NDb::CRPGItem *pItem = pIItem->GetDBItem();
-		if ( pInventory->GetActiveSlot() == i )
-			continue;
-		if ( pItem->subType == NDb::SUBTYPE_HEAVY && !bHeavy )
-		{
-			// Retail v1.2 0x61e491 applies the same flag to off-hand heavy meshes.
-			if ( pItem->bPlaceInHand && !bNoHeavyWeapon )
-				AttachItem( pRes, &rnd, UIT_WEAPON_HEAVY, pItem->pModel, bIsPK, pIItem );
-			bHeavy = true;
-		}
-		else
-			slotItems[ pItem->subType ] = i;
+		if ( pItem->subType == NDb::SUBTYPE_HEAVY && pItem->bPlaceInHand && !bNoHeavyWeapon )
+			AttachItem( pRes, &rnd, UIT_WEAPON_HEAVY,
+				IsValid( pItem->pModelInactive ) ? pItem->pModelInactive : pItem->pModel, bIsPK, pIItem );
 	}
-	if ( pActiveItem && pActiveItem->subType != NDb::SUBTYPE_HEAVY )
-		slotItems[ pActiveItem->subType ] = -1;
 	if ( !pDBUniform )
 		return;
 	// do not use any item twice
@@ -270,94 +243,50 @@ void GetItemsBindPlaces( vector<IRenderVisitor::SBoundMesh> *pRes, NRPG::IUnitMi
 			}
 			continue;
 		}
-		if ( pActiveItem && pActiveItem->subType == subType )
+		if ( pActiveItem && pActiveItem->subType == subType && !slotsUsed[0] &&
+			( bUndrawWeapon || subType == NDb::SUBTYPE_PISTOL || subType == NDb::SUBTYPE_KNIFE ) )
 		{
-			if ( bUndrawWeapon )
+			slotsUsed[0] = true;
+			placesUsed[i] = 1;
+			AttachItem( pRes, &rnd, uit, pActiveItem->GetItemModel( !bUndrawWeapon, pDBUniform ), bIsPK );
+			continue;
+		}
+		for ( int slot = 0; slot < NDb::N_SLOTS; ++slot )
+		{
+			if ( slot == pInventory->GetActiveSlot() || slotsUsed[slot + 1] )
+				continue;
+			NRPG::IInventoryItem *pItem = pInventory->Get( (NDb::ESlot)slot );
+			if ( pItem && pItem->GetDBItem()->subType == subType )
 			{
+				slotsUsed[slot + 1] = true;
 				placesUsed[i] = 1;
-				AttachItem( pRes, &rnd, uit, pActiveItem->GetItemModel( false, pDBUniform ), bIsPK );
-			}
-			else if ( subType == NDb::SUBTYPE_PISTOL || subType == NDb::SUBTYPE_KNIFE )
-			{
-				placesUsed[i] = 1;
-				AttachItem( pRes, &rnd, uit, pActiveItem->GetItemModel( true, pDBUniform ), bIsPK );
-			}
-			else
-			{
-				NDb::CRPGItem *pResultItem = 0;
-				int nMaxPriority = -1;
-				int nResultIt = -1;
-				const vector<NRPG::SBackPackItem> &bpItems = pInventory->GetItems();
-				for ( int it = 0; it < bpItems.size(); ++it )
-				{
-					if ( itemsUsed[ it ] )
-						continue;
-					NDb::CRPGItem *pI = bpItems[it].pItem->GetDBItem();
-					if ( pI == pActiveItem )
-					{
-						if ( slotsUsed[ 0 ] )
-							continue;
-						slotsUsed[ 0 ] = true;
-						pResultItem = pActiveItem;
-						break;
-					}
-					else if ( pI->subType == subType && pI->nSubTypePriority > nMaxPriority )
-					{
-						pResultItem = pI;
-						nResultIt = it;
-						nMaxPriority = pI->nSubTypePriority;
-					}
-				}
-				if ( pResultItem )
-				{
-					if ( nResultIt >= 0 )
-						itemsUsed[ nResultIt ] = 1;
-					placesUsed[i] = 1;
-					AttachItem( pRes, &rnd, uit, pResultItem->GetItemModel( false, pDBUniform ), bIsPK );
-				}
+				AttachItem( pRes, &rnd, uit, pItem->GetDBItem()->GetItemModel( false, pDBUniform ), bIsPK );
+				break;
 			}
 		}
-		else
+		if ( placesUsed[i] )
+			continue;
+		NDb::CRPGItem *pResultItem = 0;
+		int nMaxPriority = -1;
+		int nResultIt = -1;
+		const vector<NRPG::SBackPackItem> &bpItems = pInventory->GetItems();
+		for ( int it = 0; it < bpItems.size(); ++it )
 		{
-			if ( slotItems.find(subType) != slotItems.end() )
+			if ( itemsUsed[it] )
+				continue;
+			NDb::CRPGItem *pItem = bpItems[it].pItem->GetDBItem();
+			if ( pItem->subType == subType && pItem->nSubTypePriority > nMaxPriority )
 			{
-				NDb::CRPGItem *pRPGItem;
-				if ( slotItems[subType] >= 0 )
-					pRPGItem = pInventory->Get( (NDb::ESlot)slotItems[subType] )->GetDBItem();
-				else
-					pRPGItem = pActiveItem;
-				if ( slotsUsed[ slotItems[subType] + 1 ] )
-					continue;
-				slotsUsed[ slotItems[subType] + 1 ] = true;
-				placesUsed[i] = 1;
-				AttachItem( pRes, &rnd, uit, pRPGItem->GetItemModel( false, pDBUniform ), bIsPK );
+				pResultItem = pItem;
+				nResultIt = it;
+				nMaxPriority = pItem->nSubTypePriority;
 			}
-			else
-			{
-				NDb::CRPGItem *pResultItem = 0;
-				int nMaxPriority = -1;
-				int nResultIt = -1;
-				const vector<NRPG::SBackPackItem> &bpItems = pInventory->GetItems();
-				for ( int it = 0; it < bpItems.size(); ++it )
-				{
-					if ( itemsUsed[ it ] )
-						continue;
-					NDb::CRPGItem *pI = bpItems[it].pItem->GetDBItem();
-					if ( pI->subType == subType && pI->nSubTypePriority > nMaxPriority )
-					{
-						pResultItem = pI;
-						nResultIt = it;
-						nMaxPriority = pI->nSubTypePriority;
-					}
-				}
-				if ( pResultItem )
-				{
-					if ( nResultIt >= 0 )
-						itemsUsed[ nResultIt ] = 1;
-					placesUsed[i] = 1;
-					AttachItem( pRes, &rnd, uit, pResultItem->GetItemModel( false, pDBUniform ), bIsPK );
-				}
-			}
+		}
+		if ( pResultItem )
+		{
+			itemsUsed[nResultIt] = 1;
+			placesUsed[i] = 1;
+			AttachItem( pRes, &rnd, uit, pResultItem->GetItemModel( false, pDBUniform ), bIsPK );
 		}
 	}
 }
