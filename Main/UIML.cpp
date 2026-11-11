@@ -22,7 +22,7 @@ namespace NUI
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // SFontInfo + GetFontFormatInfo -- retail NUI::GetFontFormatInfo @0x321200 (a FREE function in the
 // retail binary, shared by the ML text leaves): resolve the viewport-scaled font.
-// Retail deltas vs the old dev member version: the point-size is ROUNDED (not truncated), there is
+// Retail truncates the scaled point size (Steam 0x721A18..1A3E). There is
 // no ASSERT arm for a flag-less size, and the resolved size is clamped up to nMinFontSize
 // (`if (size <= nMinFontSize) size = nMinFontSize` -- the SState "minfontsize" support).
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -41,7 +41,7 @@ static void GetFontFormatInfo( NGScene::I2DGameView *pView, const NGScene::SFont
 
 	sSearch.nSize = sFont.nSize & FONT_SIZE_MASK;
 	if ( sFont.nSize & FONT_SIZE_POINTS )
-		sSearch.nSize = Float2Int( float( sFont.nSize & FONT_SIZE_MASK ) * vScreen.x / 1024.0f );   // retail ROUND @0x72123c
+		sSearch.nSize = int( float( sFont.nSize & FONT_SIZE_MASK ) * vScreen.x / 1024.0f );
 	// FONT_SIZE_PIXELS (and a flag-less size): the raw masked value -- retail has no ASSERT arm.
 	if ( sSearch.nSize <= nMinFontSize )   // retail clamp to the SState minimum @0x721250
 		sSearch.nSize = nMinFontSize;

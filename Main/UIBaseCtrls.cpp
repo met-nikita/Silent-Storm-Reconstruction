@@ -160,12 +160,12 @@ void CText::Draw( const STime &sTime, NGScene::I2DGameView *pView )
 	CWindow::Draw( sTime, pView );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// retail UpdateText @0x312480: the layout width in screen pixels (ROUNDED in retail); regenerate
+// Retail UpdateText truncates the layout width in screen pixels (Steam 0x712C8E); regenerate
 // only on change.
 void CText::UpdateText( NGScene::I2DGameView *pView )
 {
 	CVec2 vScreenRect = pView->GetViewportSize();
-	int nNewSize = Float2Int( float( GetSize().x ) * vScreenRect.x / 1024.0f );
+	int nNewSize = int( float( GetSize().x ) * vScreenRect.x / 1024.0f );
 	if ( nNewSize != nSize )
 	{
 		nSize = nNewSize;
