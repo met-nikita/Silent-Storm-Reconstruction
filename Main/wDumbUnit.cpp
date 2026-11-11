@@ -1009,7 +1009,7 @@ void CDumbUnitServer::PlaceOnPassablePlace()
 		selected.push_back( units[i] );
 	selected.remove( this );
 	pNet->LockSelected( selected );
-	bool bPassable = bBigUnit? NAI::BigLockerPassableState( pNet, position.pos.p ) == NAI::AIP_YES : pNet->IsPassable( position.pos.p );
+	bool bPassable = bBigUnit? NAI::BigLockerPassableState( pNet, position.pos.p ) == NAI::AIP_YES : pNet->GetPassability( position.pos.p ) == NAI::AIP_YES;
 	if ( bPassable )
 	{
 		bLocksTwoPlaces = false;
@@ -1030,7 +1030,7 @@ void CDumbUnitServer::PlaceOnPassablePlace()
 			places[k].SetPose( NAI::CM_STAND );
 			// Retail tests the candidate orientation supplied by GetNearPlaces;
 			// the unit's original orientation is restored only after selection.
-			bool bPassable = bBigUnit? NAI::BigLockerPassableState( pNet, places[k] ) == NAI::AIP_YES : pNet->IsPassable( places[k] );
+			bool bPassable = bBigUnit? NAI::BigLockerPassableState( pNet, places[k] ) == NAI::AIP_YES : pNet->GetPassability( places[k] ) == NAI::AIP_YES;
 			if ( bPassable && pNet->GetFloor( places[k].GetLayer() ) <= nStartFloor )
 			{
 				NAI::SPosition pos( position.pos );
