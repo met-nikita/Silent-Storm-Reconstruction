@@ -189,7 +189,7 @@ bool CKnifeServer::Segment()
 	switch ( res )
 	{
 		case NRPG::AR_STUCK:
-			pWorld->AddFrozenItem( pWorld->GetAIMap(), ray.ptOrigin + ray.ptDir * fCollDist, nextRot, pIItem );
+			pWorld->AddFrozenItem( pWorld->GetAIMap(), ray.ptOrigin + ray.ptDir * fCollDist, nextRot, pIItem, 0, nCollFloor );
 			return true;
 		case NRPG::AR_BOUNCE:
 			// retail @0x35fe50: the bounce drop-back constant is 0.2f (Jan03 used 0.1f); all three
