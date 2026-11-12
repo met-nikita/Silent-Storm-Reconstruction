@@ -670,7 +670,13 @@ bool PrepareAttackRay( NAI::IAIMap *pAIMap, CCoverInfo *pCover, SAttackRayInfo *
 	pInfo->trailPoints.clear();
 	pInfo->bTargetIsHit = false;
 	if ( !RealPeekRay( pCover, &ray, fHit, &bMissed, pInfo->nBullet >= 1, &selected ) )
+	{
+		// Retail AttackPointRanged 0x6b6332 / AttackObjectRanged 0x6b66f1:
+		// an empty ray list still produces an upward miss from the attack origin.
+		pInfo->vOrigin = pCover->src;
+		pInfo->vDir = CVec3( 0, 0, 1 );
 		return false;
+	}
 	pInfo->vOrigin = ray.ptOrigin;
 	pInfo->vDir = ray.ptDir;
 	pInfo->bTargetIsHit = !bMissed;
