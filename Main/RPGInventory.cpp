@@ -259,6 +259,9 @@ IInventoryItem *CInventory::TakeOff( NDb::ESlot where )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CInventory::Activate( NDb::ESlot where )
 {
+	// Retail Steam 0x69d770: a single-slot suit cannot activate its unused hand.
+	if ( IsValid( pPK ) && pPK->bSingleSlot && where == NDb::SLOT_2 )
+		return false;
 	nActiveSlot = where;
 	return true;
 }
