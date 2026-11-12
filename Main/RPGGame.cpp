@@ -9,6 +9,7 @@
 #include "wInterface.h"
 #include "RPGUnitMission.h"
 #include "RPGItemInfo.h"
+#include "RPGInventory.h"
 #include "RPGToHit.h"
 #include "..\DBFormat\DataRPG.h"
 #include "..\DBFormat\DataMap.h"   // NDb::EDiplomacyState / DS_ALLY -- friendly-fire ally check in cover penetration
@@ -724,7 +725,9 @@ void PrepareRocketAttackRay( NAI::IAIMap *pAIMap, CCoverInfo *pCover, SAttackRay
 	// separate rocket roll, and build the cached hit trail (including collateral rolls).
 	CCoverInfo::SRay selected;
 	selected.nGrid = selected.nX = selected.nY = 0;
-	CRay ray( pCover->src, CVec3( 0, 0, 1 ) );
+	CRay ray;
+	ray.ptOrigin = pCover->src;
+	ray.ptDir = CVec3( 0, 0, 1 );
 	bool bMissed;
 	float fHit = ( ( bHit && !pCover->hitRays.empty() ) || pCover->looseRays.empty() ) ? 2.f : 0.f;
 	RealPeekRay( pCover, &ray, fHit, &bMissed, false, &selected );
