@@ -160,7 +160,7 @@ CCommandExecute* CUnitStateNormal::CreateExecutor( CCmd *pCmd, EUnitCommandResul
 		if (pSAI)
 			return 0;
 		CDynamicCast<CCmdMoveInventoryItem> pMII(pCmd);
-		if (pMII)
+		if ( pMII && pMII->GetSource().pUnit == pMII->GetTarget().pUnit )
 			return 0;
 	}
 	else
