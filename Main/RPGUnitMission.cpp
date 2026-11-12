@@ -1215,6 +1215,9 @@ void CUnitMission::WearBrokenPK()
 CReceivedDmg CUnitMission::ProcessAttack( NWorld::IWorld *pWorld, int nUserID, CAttackPortion *pAttack,
 	NDb::CRPGArmor *pRealArmor )
 {
+	// Retail Steam 0x6c3e29..0x6c3e53 rejects the hit before damage or criticals.
+	if ( pRPGUnit->IsCheatEnabled( CHEAT_GODMODE ) )
+		return CReceivedDmg();
 	if ( GetRPGPers()->pPanzerklein ) // this is a PK on the zone and not on the pers, i.e. this pers is itself a PK
 	{
 		if ( !pPanzerklein )
