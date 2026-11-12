@@ -12,6 +12,7 @@
 #include "..\DBFormat\DataRPG.h"
 #include "aiMap.h"
 #include "RPGAttackMech.h"
+#include "RPGUnitInfo.h"
 #include "wUnitServer.h"    // complete CUnitServer: the thrower->CObjectBase cast (CASphereSet pIgnore) needs the real bases
 
 namespace NWorld
