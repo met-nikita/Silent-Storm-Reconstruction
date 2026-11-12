@@ -186,6 +186,7 @@ static void AddGridToCovers( CCoverInfo *pRes, const NAI::CFastRenderer &res, co
 		if ( pCannon )
 			pAttackerSrv = CDynamicCast<NWorld::CUnitServer>( pCannon->GetCurrentUnit() );
 	}
+	const bool bRocketSafety = pAttackerSrv && GetToHitType( pAttackerSrv ) == TH_RLAUNCHER;
 #ifdef OUTPUT_GRID_TO_FILE
 	FILE *f;
 	if ( res.resGrid.GetXSize() > 10 )
@@ -257,7 +258,7 @@ static void AddGridToCovers( CCoverInfo *pRes, const NAI::CFastRenderer &res, co
 			{
 				// Retail loose-ray clearance is consumed by the AI rocket safety probe.
 				float fTestDistance = pTarget ? fDistance : fDistance / fRayProjection;
-				if ( GetRocketMissClearance( res.resGrid[y][x], fTestDistance, fMinClearDistance ) > 3.f )
+				if ( bRocketSafety && GetRocketMissClearance( res.resGrid[y][x], fTestDistance, fMinClearDistance ) > 3.f )
 					++pRes->nFarLooseRays;
 				pRes->looseRays.push_back(ray);
 #ifdef OUTPUT_GRID_TO_FILE
@@ -351,7 +352,7 @@ static void AddGridToCovers( CCoverInfo *pRes, const NAI::CFastRenderer &res, co
 			else
 			{
 				// Ally-intercepted center rays keep CanHitTarget's last entry distance.
-				if ( fResMaxEnter > 3.f )
+				if ( bRocketSafety && fResMaxEnter > 3.f )
 					++pRes->nFarLooseRays;
 				pRes->looseRays.push_back( ray );
 			}
