@@ -2478,7 +2478,8 @@ void CUnitMission::DoRegenerations( NWorld::IWorld *pWorld, int *pnBleed )
 	fa.fdVP = pPanzerklein->fRegenerationValue;
 	fa.nMaxVP = N_MAX_VP;
 	HealVP( fa );
-	HealCriticals( N_MAX_DC );
+	// Retail Steam 0x6c4b61: regeneration does not bypass bleeding critical DC.
+	HealCriticals( N_MAX_DC, false );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CUnitMission::IsHero() const
