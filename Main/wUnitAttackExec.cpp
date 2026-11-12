@@ -2027,7 +2027,11 @@ void CExecMeleeUnit::OnLabel()
 		// accessible-HL recompute are GONE (a called shot already narrowed the set in SelectTargetHLs;
 		// after a mid-swing load the set comes from the save, not from a fresh AIMap query).
 		// cover+to-hit+peek inlined from AttackObjectRanged, matching the CExecShootUnit::SelectRay port.
-		CVec3 ptAttackPos = NRPG::GetMeleeAttackPos( pUS, ptTarget );
+		// Steam 0x6b4671..0x6b4683 resolves the body part again at impact.
+		// Start's cached point only drives the swing animation.
+		CVec3 ptImpactTarget( VNULL3 );
+		pWorld->GetAIMap()->GetUnitHLPos( &ptImpactTarget, pWorld->GetAIMap()->GetHull( pTarget ), hlInfo.eHL );
+		CVec3 ptAttackPos = NRPG::GetMeleeAttackPos( pUS, ptImpactTarget );
 		CObj<NRPG::CCoverInfo> pCover = pWorld->GetGame()->CalcCovers( ptAttackPos, attack[0], pUS, pTarget, hlInfo.eHL, 0, false, 30.f, NWorld::TS_COVER | NWorld::TS_ITEM_BLOCKER | NWorld::TS_FRAGMENTED );
 		//
 		int nToHit;
