@@ -639,7 +639,10 @@ static EUnitCommandResult CanMoveInventoryItem( CUnitServer *pUS, CCmdMoveInvent
 		return UCR_INVALID_COMMAND;
 	}
 
-	ASSERT( IsValid( pItem ) );
+	if ( !IsValid( pItem ) )
+		return UCR_INVALID_COMMAND;
+	if ( pItem->IsLocked( CastToObjectBase( pUS ) ) )
+		return UCR_GENERAL_FAILURE;
 
 	// retail v1.1 @0x7aa1c0: hints do not need a free destination because MoveInventoryItem
 	// consumes them instead of placing them in the inventory.
@@ -3667,7 +3670,10 @@ CExecMoveInventoryItem::CExecMoveInventoryItem( CUnitServer *_pUS, CCmdMoveInven
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 EUnitCommandResult CExecMoveInventoryItem::CanDoIt( const NAI::SUnitPosition &from, bool bIgnoreTarget )
 {
-	return CanMoveInventoryItem( pUS, pCmd );
+	pCmd->Unlock();
+	EUnitCommandResult result = CanMoveInventoryItem( pUS, pCmd );
+	pCmd->Lock( pUS );
+	return result;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CExecMoveInventoryItem::Run()
