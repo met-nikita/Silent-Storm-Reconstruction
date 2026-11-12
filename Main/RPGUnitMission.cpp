@@ -1492,7 +1492,7 @@ int GetToHit( const NWorld::CUnit *pAttacker, NAI::EPose curPose, int nDistance,
 	{
 		case TH_THROWING:
 			pToHitCalcer = new CThrowKnifeUnitToHitCalcer( pUS, curPose, nDistance, ptAttacker, fHitCover,
-				bFirstRound, bNight, ptIllumination, pUSTarget, hl, posTarget, nExtraAP, bBackstab );
+				bFirstRound, bNight, CVec3(1,1,1), pUSTarget, hl, posTarget, nExtraAP, bBackstab );
 			break;
 		case TH_MELEE:
 			if ( fHitCover <= 0 )
