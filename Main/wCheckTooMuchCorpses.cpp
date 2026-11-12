@@ -1,5 +1,6 @@
 #include "StdAfx.h"
 #include "wUnitServer.h"
+#include "wCheckTooMuchCorpses.h"
 #include "aiPosition.h"
 #include "..\Misc\2Darray.h"
 
@@ -36,13 +37,7 @@
 //                                    IsPossessed"; the real methods were resolved from
 //                                    the Game.exe vtables.)
 //
-// PARITY SURFACE ONLY -- nothing calls these yet (behaviour-neutral). The release
-// CDumbUnitServer::IsAddedToVisitor() also tested bNotAddedToVisitors, so a freshly
-// marked corpse dropped out of the candidate scan on the next pass; the dev
-// IsAddedToVisitor() currently returns only !bIsPKWhichIsWeared, so that skip is a no-op
-// here until the method is converged -- left as-is on purpose (not touching the shared
-// visitor path). Wiring the guarded CheckTooMuchCorpses() into CWorld::UpdateVisible is a
-// deliberate follow-up so this first commit stays green.
+// Called by CWorld::UpdateVisible once the ground grid has valid bounds.
 // =====================================================================================
 
 namespace NWorld

@@ -506,6 +506,7 @@ public:
 	virtual void SetOnLayer( SObjectPosition *pRes, int nLayer, const CVec3 &pos );
 	virtual bool SetOnFloor( SPosition *pRes, int nFloor, const CVec3 &pos );
 	virtual int GetNumLayers() const { return layers.size(); }
+	virtual bool GetMinMaxPoint( CVec3 *pMin, CVec3 *pMax ) const;
 	virtual void GetPassability( CArray2D<bool> *pRes, int nLayer );
 	virtual void GetNetworkFragment( const SPosition &pos, bool bOneColorOnly, vector<SShowPoint> *pKnots, vector<SShowLink> *pLinks );
 	virtual int GetFloor( int nLayer ) const;

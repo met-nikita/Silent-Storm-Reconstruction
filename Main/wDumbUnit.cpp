@@ -153,9 +153,7 @@ int CDumbUnitServer::GetFloor()
 bool CDumbUnitServer::IsAddedToVisitor()
 {
 	// @0x34ec20 -- retail also excludes a unit flagged OUT of the visitor set by the
-	// wCheckTooMuchCorpses corpse-density failsafe (MarkNotAddedToVisitors). Converges
-	// the dev no-op noted in wCheckTooMuchCorpses.cpp; behavior-neutral until
-	// CheckTooMuchCorpses() is wired into CWorld::UpdateVisible.
+	// wCheckTooMuchCorpses corpse-density failsafe (MarkNotAddedToVisitors).
 	if ( bIsPKWhichIsWeared )
 		return false;
 	if ( bNotAddedToVisitors )

@@ -2746,6 +2746,18 @@ void CPathNetwork::Freeze( bool _bFreeze )
 			(*it)->pGroup->bFreeze = bFreeze;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+bool CPathNetwork::GetMinMaxPoint( CVec3 *pMin, CVec3 *pMax ) const
+{
+	if ( layers.empty() || !IsValid( layers[0] ) )
+		return false;
+	const CNodesLayer &layer = *layers[0];
+	if ( layer.tiles.GetXSize() == 0 || layer.tiles.GetYSize() == 0 )
+		return false;
+	*pMin = GetCP( SPathPlace( 0, 0, 0 ) );
+	*pMax = GetCP( SPathPlace( layer.tiles.GetXSize() - 1, layer.tiles.GetYSize() - 1, 0 ) );
+	return true;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 SPathPlace CPathNetwork::GetDeployPlace( const SPathPlace &start, int nDisplacement )
 {
 	SPathPlace res( start );

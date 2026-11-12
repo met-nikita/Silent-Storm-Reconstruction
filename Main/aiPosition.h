@@ -338,6 +338,7 @@ public:
 	virtual bool SetOnFloor( SPosition *pRes, int nFloor, const CVec3 &pos ) = 0;
 	//virtual void GetMoves( const SPathPlace &src, bool bCheckSuicide, bool bMoveOnly, vector<SMove> *pRes ) = 0;
 	virtual int GetNumLayers() const = 0;
+	virtual bool GetMinMaxPoint( CVec3 *pMin, CVec3 *pMax ) const = 0;
 	virtual void GetPassability( CArray2D<bool> *pRes, int nLayer ) = 0;
 	virtual void GetNetworkFragment( const SPosition &pos, bool bOneColorOnly, vector<SShowPoint> *pKnots, vector<SShowLink> *pLinks ) = 0;
 	virtual int GetFloor( int nLayer ) const = 0;
