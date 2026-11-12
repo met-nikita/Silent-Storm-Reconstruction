@@ -768,13 +768,13 @@ void CUnitAnimator::Move(
 			STime tBegin = tEnd;
 			if ( fStartLeft < fMoveDistance )
 			{
-				tEnd += fStartLeft * 1000 / pStartAnim->GetVelocity();
+				tEnd += fStartLeft / pStartAnim->GetVelocity() * 1000;
 				tAnim = 0;
 				fMoveDistance -= fStartLeft;
 			}
 			else
 			{
-				STime t = fMoveDistance * 1000 / pStartAnim->GetVelocity();
+				STime t = fMoveDistance / pStartAnim->GetVelocity() * 1000;
 				tEnd += t;
 				tAnim += t;
 				fStartLeft -= fMoveDistance;
@@ -825,7 +825,7 @@ void CUnitAnimator::Move(
 		pSeq->Insert( tEnd, pCycleAnim );
 
 		STime tBegin = tEnd;
-		STime t = fMoveDistance * 1000 / fVelocity;
+		STime t = fMoveDistance / fVelocity * 1000;
 		tEnd += t;
 		tAnim += t;
 		fStartLeft = 0;

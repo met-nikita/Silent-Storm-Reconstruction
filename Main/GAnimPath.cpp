@@ -51,18 +51,18 @@ float CPathInterpolator::SmoothIteration()
 	for ( int i = 0; i < points.size() - 1; ++i )
 	{
 		SPathPoint point;
-		point.ptPos.x = (points[i].ptPos.x + points[i+1].ptPos.x) / 2;
-		point.ptPos.y = (points[i].ptPos.y + points[i+1].ptPos.y) / 2;
-		point.ptPos.z = (points[i].ptPos.z + points[i+1].ptPos.z) / 2;
+		point.ptPos.x = (points[i].ptPos.x + points[i+1].ptPos.x) * 0.5f;
+		point.ptPos.y = (points[i].ptPos.y + points[i+1].ptPos.y) * 0.5f;
+		point.ptPos.z = (points[i].ptPos.z + points[i+1].ptPos.z) * 0.5f;
 		newPoints.push_back( points[i] );
 		newPoints.push_back( point );
 	}
 	newPoints.push_back( points.back() );
 	for ( int i = 1; i < points.size() - 1; ++i )
 	{
-		newPoints[i*2].ptPos.x = (4.0f * points[i].ptPos.x + points[i-1].ptPos.x + points[i+1].ptPos.x) / 6.0f;
-		newPoints[i*2].ptPos.y = (4.0f * points[i].ptPos.y + points[i-1].ptPos.y + points[i+1].ptPos.y) / 6.0f;
-		newPoints[i*2].ptPos.z = (4.0f * points[i].ptPos.z + points[i-1].ptPos.z + points[i+1].ptPos.z) / 6.0f;
+		newPoints[i*2].ptPos.x = (4.0f * points[i].ptPos.x + points[i+1].ptPos.x + points[i-1].ptPos.x) * 0.16666667f;
+		newPoints[i*2].ptPos.y = (4.0f * points[i].ptPos.y + points[i+1].ptPos.y + points[i-1].ptPos.y) * 0.16666667f;
+		newPoints[i*2].ptPos.z = (4.0f * points[i].ptPos.z + points[i+1].ptPos.z + points[i-1].ptPos.z) * 0.16666667f;
 	}
 	points = newPoints;
 	float fMax = 0;
