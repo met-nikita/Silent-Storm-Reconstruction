@@ -151,6 +151,8 @@ void CAckIcon::Set( CAckEvent *_pEvent )
 // content in the retail game.db.)
 void CAckIcon::PlayAck()
 {
+	if ( NGlobal::GetVar( "ui_charresponses" ).GetFloat() == 0 )
+		return;
 	NWorld::CAckEvent *pAckEvent = pEvent->GetAckEvent();
 	if ( !IsValid( pAckEvent->pAckInfo ) || !IsValid( pAckEvent->pUnit ) )
 		return;
@@ -2016,7 +2018,7 @@ CAckEvent* CMissionUI::PlayAckEvent( const STime &sTime, NWorld::CAckEvent *pEve
 	// 3D portrait turns to the camera to deliver the line, temporarily swapping in a non-selected (or
 	// enemy) speaker's head. Retail gates this on bShowAcks ("ui_charresponses", default on); with the
 	// face path off there is no ACK_WAIT handshake, so retail arms the event DIRECTLY here
-	// (CAckEvent::Set @0x1d0cf0: bReady=true, TTL = now + 3000ms) -- the voice/subtitle still play.
+	// (CAckEvent::Set @0x1d0cf0: bReady=true, TTL = now + 3000ms) -- subtitles retain their TTL even with voice and portrait responses disabled.
 	if ( NGlobal::GetVar( "ui_charresponses" ).GetFloat() != 0 )
 		pUnitPanel->PlayAckEvent( sTime, pAckEvent );
 	else
