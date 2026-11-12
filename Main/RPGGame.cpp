@@ -687,6 +687,25 @@ bool PrepareAttackRay( NAI::IAIMap *pAIMap, CCoverInfo *pCover, SAttackRayInfo *
 	return true;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+void PrepareRocketAttackRay( NAI::IAIMap *pAIMap, CCoverInfo *pCover, SAttackRayInfo *pInfo, bool bHit )
+{
+	// Retail AttackPointRanged 0x6b63c4 / 0x6b64b2: select once, retain the
+	// separate rocket roll, and build the cached hit trail (including collateral rolls).
+	CCoverInfo::SRay selected;
+	selected.nGrid = selected.nX = selected.nY = 0;
+	CRay ray( pCover->src, CVec3( 0, 0, 1 ) );
+	bool bMissed;
+	float fHit = ( ( bHit && !pCover->hitRays.empty() ) || pCover->looseRays.empty() ) ? 2.f : 0.f;
+	RealPeekRay( pCover, &ray, fHit, &bMissed, false, &selected );
+	pInfo->vOrigin = ray.ptOrigin;
+	pInfo->vDir = ray.ptDir;
+	pInfo->bTargetIsHit = bHit;
+	pInfo->trailPoints.clear();
+	if ( bHit )
+		GetHitIntersections( pAIMap, &pInfo->trailPoints,
+			pCover->grids[selected.nGrid].resGrid[selected.nY][selected.nX], *pInfo );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 float GetHitCover( const NWorld::CUnit *pAttacker, CCoverInfo *pCover )
 {
 	ASSERT(pCover);

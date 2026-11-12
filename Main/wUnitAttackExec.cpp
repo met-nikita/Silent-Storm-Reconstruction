@@ -2320,11 +2320,11 @@ void CExecLaunchRocket::LaunchRocket( )
 		NRPG::CheckTileToHit( pUS, ptAnimTarget, nExtraAP, NAI::THL_LOWER, pCover,
 			pUS->GetUnitRPG()->IsFirstTurn(), &nToHit, 0 );
 		bool bHit = random.Get( 1, 100 ) <= nToHit;
-		r.ptOrigin = vOrigin;
-		r.ptDir = CVec3( 0, 0, 1 ); // finite retail fallback when no ray can be selected
-		NRPG::PeekRayForRocket( pCover, &r, bHit );
-		rayInfo = NRPG::SAttackRayInfo( attack.front(), vOrigin, r.ptDir, pUS, pUS->GetPosition(),
+		rayInfo = NRPG::SAttackRayInfo( attack.front(), vOrigin, CVec3( 0, 0, 1 ), pUS, pUS->GetPosition(),
 			0, nExtraAP, bHit, pUS->GetMinClearDistance(), 30.f, 0 );
+		rayInfo.pIgnore = const_cast<CObjectBase*>( pUS->GetAttackIgnore() );
+		NRPG::PrepareRocketAttackRay( pUS->GetWorld()->GetAIMap(), pCover, &rayInfo, bHit );
+		r = rayInfo.GetRay();
 	}
 	//
 	CVec3 speed = r.ptDir * fSpeed;

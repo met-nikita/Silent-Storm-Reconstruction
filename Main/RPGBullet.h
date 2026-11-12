@@ -114,6 +114,7 @@ void CalcCoverIntervals( NAI::CFastRenderer::SResult *pList, const SAttackRayInf
 void GetHitIntersections( NAI::IAIMap *pAIMap, vector<STrailPoint> *pTrail,
 	NAI::CFastRenderer::SResult *pList, const SAttackRayInfo &rayInfo );
 bool PrepareAttackRay( NAI::IAIMap *pAIMap, CCoverInfo *pCover, SAttackRayInfo *pInfo, float fHit );
+void PrepareRocketAttackRay( NAI::IAIMap *pAIMap, CCoverInfo *pCover, SAttackRayInfo *pInfo, bool bHit );
 // Retail incidental-hit roll, independent of the original target's hit/miss.
 int GetBulletToHit( const SAttackRayInfo &rayInfo, CObjectBase *pTarget, NAI::EHitLocation hl );
 bool CheckBulletToHit( const SAttackRayInfo &rayInfo, CObjectBase *pTarget, NAI::EHitLocation hl );
