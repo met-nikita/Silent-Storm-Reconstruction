@@ -3116,12 +3116,14 @@ bool CExecDisarmTrap::TimeLabelReached()
 				// retail fires OnMineDiffusion( object, result ) in BOTH branches: 1 = detonated (clear failed),
 				// 2 = disarmed. Retail's mine path uses "pb" (bool) which the dev marshaller can't deliver -- use
 				// "pi" like the retail trap path so the script's OnMineDiffusion(object,result) gets the result.
-				NScript::luaCallFunction( "OnMineDiffusion", "pi", pTarget.GetBarePtr(), 1 );
+				NScript::luaCallFunction( "OnMineDiffusion", "pi", pTarget.GetBarePtr(), 0 );
 			}
 			else
 			{
+				// Award the trap DC before DisarmMine clears the trap. Mines do not award this medal.
+				pRPG->GetRPGUnit()->AddMedalPoints( pUS->GetWorld()->GetGlobalGame(), NRPG::MPC_DISARM_TRAP, (float)pTarget->GetMineDC() );
 				AddItemToUnit( pUS, pTarget->DisarmMine() );
-				NScript::luaCallFunction( "OnMineDiffusion", "pi", pTarget.GetBarePtr(), 2 );
+				NScript::luaCallFunction( "OnMineDiffusion", "pi", pTarget.GetBarePtr(), 1 );
 			}
 		}
 	}
@@ -3272,13 +3274,13 @@ bool CExecDisarmMine::TimeLabelReached()
 			if ( !pRPG->CanClear( pTarget->GetMineDC(), pTool->GetSkillModifForMineCleaning() ) )
 			{
 				pTarget->GoBoom( pUS );
-				// OnMineDiffusion( object, 1=detonated ); see CExecDisarmTrap above for the "pi"-vs-"pb" note.
-				NScript::luaCallFunction( "OnMineDiffusion", "pi", pTarget.GetBarePtr(), 1 );
+				// Keep numeric results: retail's unsupported "pb" format produces nil here.
+				NScript::luaCallFunction( "OnMineDiffusion", "pi", pTarget.GetBarePtr(), 0 );
 			}
 			else
 			{
 				AddItemToUnit( pUS, pTarget->DisarmMine() );
-				NScript::luaCallFunction( "OnMineDiffusion", "pi", pTarget.GetBarePtr(), 2 );  // 2 = disarmed
+				NScript::luaCallFunction( "OnMineDiffusion", "pi", pTarget.GetBarePtr(), 1 );
 			}
 		}
 	}
