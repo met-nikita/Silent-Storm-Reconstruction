@@ -2192,6 +2192,8 @@ float CUnitMission::HealCritical( const SHealCriticalInfo &info )
 		if ( c.eCritical == info.eCritical && c.eCl == info.eCl &&
 			( (*i)->CanBeSuspended() || c.eCritical == NDb::C_BLEEDING ) )
 		{
+			csRPG << "\tCured: \t";
+			DumpCritical( *i );
 			fHealed += c.nDC;
 			i = criticals.erase( i );
 		}
