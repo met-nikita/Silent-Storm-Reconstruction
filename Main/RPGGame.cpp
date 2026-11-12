@@ -9,7 +9,7 @@
 #include "wInterface.h"
 #include "RPGUnitMission.h"
 #include "RPGItemInfo.h"
-#include "RPGInventory.h"
+#include "RPGItem.h"
 #include "RPGToHit.h"
 #include "..\DBFormat\DataRPG.h"
 #include "..\DBFormat\DataMap.h"   // NDb::EDiplomacyState / DS_ALLY -- friendly-fire ally check in cover penetration
