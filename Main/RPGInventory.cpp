@@ -150,8 +150,8 @@ struct SItemsSort
 	{
 		const CTPoint<int> &sSize1 = sI1.pItem->GetSize();
 		const CTPoint<int> &sSize2 = sI2.pItem->GetSize();
-		int nW1 = Max( sSize1.x, sSize1.y ) + sSize1.x * sSize1.y;
-		int nW2 = Max( sSize2.x, sSize2.y ) + sSize2.x * sSize2.y;
+		int nW1 = Max( sSize1.x, sSize1.y ) + 2 * sSize1.x * sSize1.y;
+		int nW2 = Max( sSize2.x, sSize2.y ) + 2 * sSize2.x * sSize2.y;
 
 		return nW1 > nW2; 
 	}
@@ -160,7 +160,8 @@ struct SItemsSort
 void CInventory::ArrangeItems()
 {
 	vector<SBackPackItem> tempItems( items );
-	sort( tempItems.begin(), tempItems.end(), SItemsSort() );
+	// Retail 0x69de80/0x69e2c0: area counts twice; equal keys use strided merge order.
+	NRetail::Sort( tempItems.begin(), tempItems.end(), SItemsSort() );
 
 	for ( int nTemp = 0; nTemp < tempItems.size(); nTemp++ )
 	{
