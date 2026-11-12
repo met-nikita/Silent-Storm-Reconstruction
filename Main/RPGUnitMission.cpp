@@ -22,6 +22,7 @@
 #include "RPGDiplomacy.h"
 #include "rpgCheatConstants.h"
 #include "rpgPerkConstants.h"
+#include "rpgPerk.h"
 #include "..\DBFormat\DataRpgConstants.h"
 #include "..\DBFormat\DataMisc.h"   // NDb::CRPGAP (GetActionAP RPGAP-table costs) + CRPGPicklock (AC_PICK_LOCK nAPToUse)
 
@@ -321,6 +322,7 @@ public:
 	virtual bool IsHero() const;
 	virtual bool IsHiding() const { return bHiding; }
 	virtual void SetHiding( bool _bHiding );
+	virtual void TakePerk( int nPerkID );
 	virtual bool HasPerk( int nPerkID, 
 		float *pParam1 = 0, float *pParam2 = 0, float *pParam3 = 0 ) const;
 	virtual int GetGrenadeTrapDC( NDb::CRPGGrenade *pGrenade );
@@ -401,6 +403,23 @@ const wstring& CUnitMission::GetName() const
 void CUnitMission::InitAsCorpse( bool bDead )
 {
 	bUnconscious = !bDead;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// Apply adaptation when it is acquired while already wearing a suit.
+// Retail v1.1 0x6c3040 clears every PK modifier here, including bonuses.
+// Preserve bonuses and the shell's own VP adjustment; only negate penalties.
+void CUnitMission::TakePerk( int nPerkID )
+{
+	pRPGUnit->GetPerksTree()->TakePerk( nPerkID );
+	if ( nPerkID != 0x1d || !HasPerk( 0x1d ) )
+		return;
+	for ( vector<CObj<CSkillModifier> >::iterator i = pkModifiers.begin(); i != pkModifiers.end(); )
+	{
+		if ( IsValid( *i ) && (*i)->fAdd < 0 && (*i)->pSkill != &pRPGUnit->Skills( NDb::ST_VP ) )
+			i = pkModifiers.erase( i );
+		else
+			++i;
+	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CUnitMission::HasPerk( int nPerkID, 

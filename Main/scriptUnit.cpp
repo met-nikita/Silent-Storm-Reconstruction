@@ -458,7 +458,7 @@ END_SCRIPT_COMMAND
 BEGIN_SCRIPT_COMMAND( UnitTakePerk, "un" )
 	CDynamicCast<NWorld::CUnitServer> pUS(luaParams[0].p);
 	if (pUS)
-		pUS->GetUnitRPG()->GetRPGUnit()->GetPerksTree()->TakePerk( luaParams[ 1 ].n );
+		pUS->GetUnitRPG()->TakePerk( luaParams[ 1 ].n );
 	return 0;
 END_SCRIPT_COMMAND
 ////////////////////////////////////////////////////////////////////////////////////////////////////

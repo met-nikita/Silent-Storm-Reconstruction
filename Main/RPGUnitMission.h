@@ -165,6 +165,7 @@ public:
 	virtual float HealCritical( const SHealCriticalInfo &info ) = 0;
 	virtual void AddBleedingStopper( int nAmount ) = 0;
 	virtual void AddPostponedModifier( CDynamicSkill *pSkill, const SSkillModifyInfo &info, int nTurns ) = 0;
+	virtual void TakePerk( int nPerkID ) = 0;
 	virtual bool HasPerk( int nPerkID, 
 		float *pParam1 = 0, float *pParam2 = 0, float *pParam3 = 0 ) const = 0;
 	virtual int GetGrenadeTrapDC( NDb::CRPGGrenade *pGrenade ) = 0;
