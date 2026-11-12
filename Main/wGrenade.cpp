@@ -136,7 +136,7 @@ void CGrenadeServer::InitGrenade( const CVec3 &vFrom, const CVec3 &vSpeed, STime
 		tExplode = tThrow + (STime)int( (float(pRPGGrenade->nMaxDelay) - fTDelay) * 1000 );
 		bTimeDelayGrenade = ( pRPGGrenade->nMaxDelay != 0 );
 	}
-	tErase = tExplode + (STime)( 10 * 1000 ); //  10-
+	tErase = tThrow + (STime)( 15 * 1000 ); // Retail lifetime is independent of the fuse.
 	pAction = pWorld->GetActiveCounter();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
