@@ -717,6 +717,8 @@ static EUnitCommandResult CanMoveInventoryItem( CUnitServer *pUS, CCmdMoveInvent
 		}
 	case SItem::STORAGE:
 		{
+			if ( !IsValid( sTarget.pPlayer ) )
+				return UCR_INVALID_COMMAND;
 			break;
 		}
 	case SItem::UNIT_ANYPLACE:
