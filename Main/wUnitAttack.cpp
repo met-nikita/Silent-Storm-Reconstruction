@@ -966,6 +966,16 @@ CCommandExecute* CreateActionExecutor( CUnitServer *pUS, CCmd *pCmd, EUnitComman
 													CDynamicCast<CCmdMoveInventoryItem> pMoveItem(pCmd);
 													if (pMoveItem)
 													{
+														// A cursor clip dropped onto an equipped weapon is a reload, including non-UI commands.
+														const SItem &source = pMoveItem->GetSource();
+														const SItem &target = pMoveItem->GetTarget();
+														CDynamicCast<NRPG::IClipItem> pClip( source.pItem );
+														if ( IsValid( pClip ) && source.eType == SItem::HAND && target.eType == SItem::SLOT )
+														{
+															CDynamicCast<NRPG::IWeaponItemInfo> pWeapon( pUS->GetUnitRPG()->GetInventory()->Get( (NDb::ESlot)target.nSlot ) );
+															if ( IsValid( pWeapon ) )
+																return pUS->CreateExecutor( new CCmdLoadWeapon( pWeapon, source ), pError );
+														}
 														if (pMoveItem->GetSource().eType == SItem::GROUND)
 															return CreateActionQueue(pUS, pMoveItem.GetPtr(), new CExecMoveInventoryItem(pUS, pMoveItem), ITEM_NO_MATTER, pError, true);
 														else if ((pMoveItem->GetSource().eType == SItem::STORAGE) || (pMoveItem->GetTarget().eType == SItem::STORAGE))
