@@ -400,7 +400,18 @@ void CVoxelExpl::ApplyWaveDamage()
 									FillAttackModifiers( &att, pTracker->sMineModifiers );
 								pAtt->ProcessAttack( pWorld, o.nUserID, &att, di.rDir.ptDir, o.pArmor );
 								if ( ( !IsValid( pThrower ) || pUS->GetPlayer() != pThrower->GetPlayer() ) && ( !IsValid(pUS) || pUS->GetUnitRPG()->IsDead() ) )
-									++nEnemyUnitsKilled;
+								{
+									// Retail Steam 0x7567a3: only witnessed kills count for the ack.
+									bool bSeen = true;
+									if ( IsValid( pThrower ) )
+									{
+										list< CPtr<CUnit> > visible;
+										pThrower->GetPlayer()->GetVisible( &visible );
+										bSeen = find( visible.begin(), visible.end(), static_cast<CUnit*>(pUS.GetPtr()) ) != visible.end();
+									}
+									if ( bSeen )
+										++nEnemyUnitsKilled;
+								}
 							}
 						}
 						// retail @0x355ba0: on the FIRST ring (nCurrentWave == 0, retail 0-based) the blast pushes
