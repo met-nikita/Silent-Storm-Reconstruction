@@ -585,7 +585,17 @@ static EUnitCommandResult CanMoveInventoryItem( CUnitServer *pUS, CCmdMoveInvent
 			CDynamicCast<CUnitServer> pUSSource( sSource.pUnit );
 			ASSERT( IsValid( pUSSource ) );
 			ASSERT( !pUSSource->IsDead() );
-			pItem = sSource.pItem;
+			const vector<NRPG::SBackPackItem> &items = pUSSource->GetUnitRPG()->GetInventory()->GetItems();
+			for ( int i = 0; i < items.size(); ++i )
+			{
+				if ( items[i].pItem == sSource.pItem )
+				{
+					pItem = sSource.pItem;
+					break;
+				}
+			}
+			if ( !IsValid( pItem ) )
+				return UCR_INVALID_COMMAND;
 			break;
 		}
 	case SItem::GROUND:
