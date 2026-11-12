@@ -3764,11 +3764,9 @@ void CExecMoveInventoryItem::AnimationFinished()
 	}
 	nStage = 2;
 	NDb::EItemSubType subType = pInventory->Get(slot)->GetDBItem()->subType;
-	// retail @0x3a1b70: activate the newly-active item HIDDEN unless its DB record marks it bPlaceInHand
-	// (IsActiveItemToShow). Clear the undraw flag first so a shown item actually renders (retail zeroes the
-	// target unit's bUndrawWeapon immediately before ActivateItem).
+	// Equipping clears scripted holstering; the animation label controls visibility.
 	bool bHide = !NWorld::IsActiveItemToShow( pInventory );
-	pUSTarget->SetUndrawItem( false );
+	pUSTarget->SetWalkWithoutWeapon( false );
 	if ( subType == NDb::SUBTYPE_HEAVY || subType == NDb::SUBTYPE_MINE_DETECTOR )
 		pUSTarget->animator.ActivateItem( pUSTarget->GetPosition(), true, true, NDb::BELT_M1, pRPG->GetWeaponType(), bHide );
 	else
