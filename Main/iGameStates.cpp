@@ -2,6 +2,7 @@
 #include "Gfx.h"
 #include "wInterface.h"
 #include "aiJob.h"
+#include "aiPath.h"
 #include "wMisc.h"			// NWorld::GetDMeshUnit/GetDMeshPos -- heard-noise-marker attack target
 #include "GView.h"
 #include "Sound.h"
@@ -2254,6 +2255,17 @@ bool CStatePose::Initialize( IMission *pMission )
 		// retail @0x1db700 anchors the re-path on GetSetPosePosition (CUnit vtbl+0x48), NOT GetPosition:
 		// a moving unit re-paths from the tile it is stepping INTO, not backwards to the one it left.
 		NAI::SUnitPosition uPos = (*iTemp)->GetUnit()->GetSetPosePosition();
+		// Sentinels CStatePose::Initialize (0x4b8821..0x4b890b): a realtime
+		// stance change keeps the moving unit's destination. Rebuild the route
+		// for the new pose through the ordinary path/AP/interrupt handling.
+		if ( pMission->IsRealTime() && (*iTemp)->GetUnit()->IsMoving() )
+		{
+			CObj<NAI::CPath> pPath( (*iTemp)->GetUnit()->GetCurrentPath() );
+			// The final travel command has no preview path. Keep its next-step
+			// anchor: the tracker's fallback is still the tile we are leaving.
+			if ( IsValid( pPath ) && !pPath->points.empty() )
+				uPos.pos.p = pPath->points.back();
+		}
 		uPos.SetPose( ePose );
 		pMission->Command( (*iTemp)->GetUnit(), new NWorld::CCmdWishPose( ePose ) );
 		pMission->Command( (*iTemp)->GetUnit(), new NWorld::CCmdPath( uPos.pos, NAI::PF_USE_POSEDIR ) );

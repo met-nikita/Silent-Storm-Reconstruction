@@ -447,6 +447,19 @@ void CUnitServer::Do( CCommand *_pCmd )
 					}
 					/// else OutputDebugString(" CCmdPath, pExec is valid and is not a MoveExec\n");
 				}
+				// Sentinels 0x7c994b..0x7c99c2 applies the movement preference
+				// without cancelling the mover. The following UI path order can
+				// then rebuild toward the same destination in the new stance.
+				CDynamicCast<CCmdWishPose> pPose( p->GetCmd() );
+				CDynamicCast<IExecMove> pMove( pExec );
+				if ( pPose && pMove && GetWorld()->IsRealTime() && !IsValid( pAutoRunCmd ) )
+				{
+					EUnitCommandResult eResult = UCR_OK;
+					CObj<CCommandExecute> pPoseExec = pState->CreateExecutor( pPose, &eResult );
+					if ( IsValid( pPoseExec ) )
+						pPoseExec->Run();
+					return;
+				}
 				pExec->Cancel();
 				pAutoRunCmd = p->GetCmd();
 			}
