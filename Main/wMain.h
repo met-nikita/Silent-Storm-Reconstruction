@@ -61,6 +61,7 @@ namespace NDb
 	class CAISound;
 	struct SAISound;
 	class CDBAckSequence;
+	class CUIHint;
 	class CScript;
 	class CDBCamera;
 	class CRPGArmor;
@@ -606,6 +607,7 @@ public:
 	void AddUICommand( CUICmd* pCmd );
 	void ScriptWantTurnBased( bool bWant );   // retail @0x361c00 -- the WantTurnBased("b") script binding
 	void DelayGameStart( int bDelay );        // retail IWorld vtbl+0x1d8 -- script start control (c_StartGameEx(0)/c_DelayGameStartEx(1))
+	void AddUIHint( NDb::CUIHint *pHint );
 	void AddNextUIHint( bool bSilent );        // retail @0x368140 IWorld vtbl+0x118 -- advance the sequential-hint cursor (lua AddHints)
 	ETimeOfDay GetTimeOfDay();                // retail @0x361bb0 -- read the TOD sentinel from createFlags
 	void SetTimeOfDay( ETimeOfDay tod );      // retail @0x362b90 -- rewrite the TOD sentinel + re-light every object

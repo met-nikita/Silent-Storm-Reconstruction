@@ -2491,6 +2491,19 @@ void CWorld::ScriptWantTurnBased( bool bWant )
 	WantTurnBased( pls.back() );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// Retail Steam 0x7688a0: item-specific hints are shown once without advancing the book sequence.
+void CWorld::AddUIHint( NDb::CUIHint *pHint )
+{
+	NRPG::CGlobalGame *pGlobalGame = GetGlobalGame();
+	if ( !IsValid( pHint ) || !IsValid( pGlobalGame ) )
+		return;
+	for ( int i = 0; i < pGlobalGame->hintsSet.size(); ++i )
+		if ( pGlobalGame->hintsSet[i].GetPtr() == pHint )
+			return;
+	pGlobalGame->hintsSet.push_back( pHint );
+	AddUICommand( new CUICmdShowHint( pHint ) );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 // LUA convergence (hint machinery): retail NWorld::CWorld::AddNextUIHint @0x368140 (IWorld vtbl+0x118).
 // Walk the CUIHint table and pick the not-yet-shown hint with the smallest nSequenceID strictly greater
 // than the global game's cursor (nHintSequenceID); advance the cursor onto it and remember it in hintsSet.

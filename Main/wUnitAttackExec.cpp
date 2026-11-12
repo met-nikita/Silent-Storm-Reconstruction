@@ -942,6 +942,7 @@ static void MoveInventoryItem( CUnitServer *pUS, CCmdMoveInventoryItem *pMoveIte
 			}
 
 			pInventory->Equip( (NDb::ESlot)sTarget.nSlot, pItem );
+			pUS->GetWorld()->AddUIHint( pItem->GetDBItem()->pHint );
 			clueSlot = (NDb::ESlot)sTarget.nSlot;
 			break;
 		}
@@ -992,6 +993,7 @@ static void MoveInventoryItem( CUnitServer *pUS, CCmdMoveInventoryItem *pMoveIte
 			}
 
 			pInventory->Place( sTargetPosition, pItem );
+			pUS->GetWorld()->AddUIHint( pItem->GetDBItem()->pHint );
 			break;
 		}
 	case SItem::GROUND:
@@ -1021,6 +1023,7 @@ static void MoveInventoryItem( CUnitServer *pUS, CCmdMoveInventoryItem *pMoveIte
 				{
 					bComplete = true;
 					pInventory->Equip( eSlot, pItem );
+					pUS->GetWorld()->AddUIHint( pItem->GetDBItem()->pHint );
 					clueSlot = eSlot;
 					break;
 				}
@@ -1033,6 +1036,7 @@ static void MoveInventoryItem( CUnitServer *pUS, CCmdMoveInventoryItem *pMoveIte
 				{
 					bComplete = true;
 					pInventory->Place( sTargetPosition, pItem );
+					pUS->GetWorld()->AddUIHint( pItem->GetDBItem()->pHint );
 				}
 			}
 
