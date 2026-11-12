@@ -41,7 +41,7 @@ protected:
 public:
 	ZEND int operator&( CStructureSaver &f ) { f.Add(2,&pUS); return 0; }
 	CUnitState( CUnitServer *_pUS = 0 ): pUS(_pUS) {}
-	virtual CCommandExecute* CreateExecutor( CCmd *pCmd, EUnitCommandResult *pResult ) = 0;
+	virtual CCommandExecute* CreateExecutor( CCmd *pCmd, EUnitCommandResult *pResult );
 	virtual void ProcessCritical( NDb::ECritical eCA );
 	virtual bool IsCriticalsFailCommand( CCmd *pCmd, EUnitCommandResult *pResult );
 	virtual void OnActionFinish() {}
