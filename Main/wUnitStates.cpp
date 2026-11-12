@@ -756,7 +756,9 @@ CCommandExecute* CUnitStateHealer::CreateExecutor( CCmd *pCmd, EUnitCommandResul
 	if ( !IsCriticalsFailCommand( pCmd, pResult ) )
 	{
 		CDynamicCast<CCmdCancel> pCancel(pCmd);
-		if (pCancel)
+		// Retail Steam 0x7ca58e..0x7ca5ab permits spending a perk point during treatment.
+		CDynamicCast<CCmdTakePerk> pTakePerk(pCmd);
+		if (pCancel || pTakePerk)
 			return NWorld::CreateExecutor( pUS, pCmd, pResult );
 	}
 	//
