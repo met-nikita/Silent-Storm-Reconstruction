@@ -115,6 +115,13 @@ static CVec3 GetNormalized( const CVec3 &_v )
 		Float2Int( _v.z / F_DISCR_STEP ) * F_DISCR_STEP );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// Steam 0x77ec80: the tracker quantizes all three coordinates to quarter meters.
+bool CMine::IsTriggeredBy( const CVec3 &pt ) const
+{
+	CVec3 delta = GetNormalized( pt ) - GetNormalized( vPlace );
+	return fabs( delta.x ) <= 0.2501f && fabs( delta.y ) <= 0.2501f && fabs( delta.z ) <= 0.2501f;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 void CMineTracker::AddMine( CMine *p, const CVec3 &_vPlace )
 {
 	CVec3 vPlace( GetNormalized( _vPlace ) );

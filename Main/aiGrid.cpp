@@ -2094,10 +2094,15 @@ void CPathNetwork::LockSelected( const list<CObjectBase*> &selected )
 				CDynamicCast<NWorld::CMine> pMine(pLocker);
 				if (pMine)
 				{
-					// Retail 0x446e20: append every mine, across all nearby layers.
+					// Steam 0x44c7e6: the sphere finds candidates; only cells that
+					// actually touch this mine become temporary path locks.
 					SSphere area( pMine->GetPlace(), 0.5f );
+					vector<SPathPlace> nearMine;
 					for ( unsigned int n = 0; n < layers.size(); ++n )
-						layers[n]->AddNearPoints( area, &mineTempLocks, false );
+						layers[n]->AddNearPoints( area, &nearMine, false );
+					for ( vector<SPathPlace>::const_iterator p = nearMine.begin(); p != nearMine.end(); ++p )
+						if ( pMine->IsTriggeredBy( GetCP( *p ) ) )
+							mineTempLocks.push_back( *p );
 				}
 				else
 				{

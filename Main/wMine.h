@@ -62,6 +62,7 @@ public:
 	virtual bool IsHiddenObject() const { return true; }
 	//
 	const CVec3& GetPlace() const { return vPlace; }
+	bool IsTriggeredBy( const CVec3 &pt ) const;
 	void GoBoom( CUnitServer *pWho = 0 );
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
