@@ -462,6 +462,9 @@ public:
 			Finished();
 			return;
 		}
+		// Keep a holstered item hidden until the activation animation draws it.
+		if ( !bActive )
+			pUS->SetUndrawItem( true, false );
 		if ( !pUS->animator.CanActivateItem() ) // on ladder, for example
 		{
 			NRPG::IUnitMission *pRPG = pUS->GetUnitRPG();
