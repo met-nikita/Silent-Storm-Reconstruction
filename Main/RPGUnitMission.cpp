@@ -83,6 +83,7 @@ class CUnitMission: public CUnitMissionForMedals, public IUnitMission
 	// GetMeleeToHit / bLogActive (all private) -- befriend it (no visibility change to the class).
 	friend int GetToHit( const NWorld::CUnit*, NAI::EPose, int, const CVec3&, const NAI::SPosition&, NAI::EHitLocation, int, const NWorld::CUnit*, const vector<int>&, float, bool, const CVec3&, bool, int, bool );
 	friend int GetTileToHit( const NWorld::CUnit*, NAI::EPose, int, const CVec3&, CVec3, NAI::ETileHitLocation, int, float, bool, const CVec3&, int );
+	friend int GetTileToHit( const NWorld::CUnit*, NAI::EPose, int, const CVec3&, CVec3, NAI::ETileHitLocation, int, float, bool, const CVec3&, int, bool );
 	friend int GetGrenadeToHit( const NWorld::CUnit*, NAI::EPose, int, const CVec3&, bool, CVec3, const CVec3& );
 	friend int GetRLauncherToHit( const NWorld::CUnit*, NAI::EPose, int, const CVec3&, CVec3, NAI::ETileHitLocation, int, bool, const CVec3& );
 	friend EToHitType GetToHitType( const NWorld::CUnit* );
@@ -1592,12 +1593,20 @@ int GetTileToHit( const NWorld::CUnit *pAttacker, NAI::EPose curPose, int nDista
 	const CVec3 &ptIllumination, int nBullet )   // retail @0x2b4df0 param (see GetToHit)
 {
 	CDynamicCast<NWorld::CUnitServer> pUS( const_cast<NWorld::CUnit*>( pAttacker ) );
+	return GetTileToHit( pAttacker, curPose, nDistance, ptAttacker, ptTilePos, eHitLocation,
+		nExtraAP, fHitCover, bFirstRound, ptIllumination, nBullet, pUS->GetWorld()->GetGame()->IsNight() );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+int GetTileToHit( const NWorld::CUnit *pAttacker, NAI::EPose curPose, int nDistance, const CVec3 &ptAttacker,
+	CVec3 ptTilePos, NAI::ETileHitLocation eHitLocation, int nExtraAP, float fHitCover, bool bFirstRound,
+	const CVec3 &ptIllumination, int nBullet, bool bNight )   // retail @0x2b4df0 param (see GetToHit)
+{
+	CDynamicCast<NWorld::CUnitServer> pUS( const_cast<NWorld::CUnit*>( pAttacker ) );
 	// retail RPGUnitGetTileToHit @0x2b4df0: same script-forced to-hit head gate as the unit-target
 	// dispatcher (@0x2b4ae0) -- absolute replacement, -1 = off.
 	if ( pUS && pUS->GetScriptToHit() >= 0 )
 		return pUS->GetScriptToHit();
 	CUnitMission *pMission = CDynamicCast<CUnitMission>( pUS->GetUnitRPG() );
-	const bool bNight = pUS->GetWorld()->GetGame()->IsNight();
 	CPtr<IToHitCalcer> pToHitCalcer;
 	switch ( pMission->GetToHitWeaponType() )
 	{

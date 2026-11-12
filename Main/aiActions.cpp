@@ -17,6 +17,7 @@
 #include "RPGItemSet.h"       // full NRPG::CGrenadeItem / CWeaponItem defs (the IGrenadeItem/IWeaponItem
                               // bases must be VISIBLE here, else the item->interface upcast silently fails)
 #include "rpgUnitMission.h"
+#include "RPGGame.h"
 #include "rpgUnitInfo.h"
 #include "RPGUnit.h"          // NRPG::CUnit::Skills (suit HP via ST_VP), CDynamicSkill
 #include "Grid.h"
@@ -158,13 +159,13 @@ static bool IsGoodGroup( NWorld::CUnitServer *pUS, const SUnitPosition &pos, CAI
 	if ( !IsValid( pItem ) )
 		return false;
 	*pTarget = group.ptCenter;
-	if ( NWorld::CanUnitLaunchRocket( pUS, pos, *pTarget, 0, pItem ) != NWorld::UCR_OK )
+	if ( !NRPG::CanShootRocketSafely( pUS, pos, *pTarget, pItem ) )
 	{
 		*pTarget = group.ptCenter + CVec3( 0, 0, 0.6f );
 		CVec3 ptDir = pos.GetCP() - *pTarget;
 		Normalize( &ptDir );
 		*pTarget += ptDir * 1.7f;
-		if ( NWorld::CanUnitLaunchRocket( pUS, pos, *pTarget, 0, pItem ) != NWorld::UCR_OK )
+		if ( !NRPG::CanShootRocketSafely( pUS, pos, *pTarget, pItem ) )
 			return false;
 	}
 	return true;

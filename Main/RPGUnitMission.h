@@ -248,6 +248,9 @@ int GetToHit( const NWorld::CUnit *pAttacker, NAI::EPose curPose, int nDistance,
 int GetTileToHit( const NWorld::CUnit *pAttacker, NAI::EPose curPose, int nDistance, const CVec3 &ptAttacker,
 	CVec3 ptTilePos, NAI::ETileHitLocation eHitLocation, int nExtraAP, float fHitCover, bool bFirstRound,
 	const CVec3 &ptIllumination = CVec3(1,1,1), int nBullet = 0 );
+int GetTileToHit( const NWorld::CUnit *pAttacker, NAI::EPose curPose, int nDistance, const CVec3 &ptAttacker,
+	CVec3 ptTilePos, NAI::ETileHitLocation eHitLocation, int nExtraAP, float fHitCover, bool bFirstRound,
+	const CVec3 &ptIllumination, int nBullet, bool bNight );
 int GetGrenadeToHit( const NWorld::CUnit *pAttacker, NAI::EPose curPose, int nDistance, const CVec3 &ptAttacker,
 	bool bFirstRound, CVec3 ptTilePos, const CVec3 &ptIllumination = CVec3(1,1,1) );
 int GetRLauncherToHit( const NWorld::CUnit *pAttacker, NAI::EPose curPose, int nDistance, const CVec3 &ptAttacker,

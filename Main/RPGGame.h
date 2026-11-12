@@ -21,6 +21,7 @@ namespace NAI
 namespace NWorld
 {
 	class CUnit;
+	class CUnitServer;
 }
 namespace NBuilding
 {
@@ -182,6 +183,9 @@ CObjectBase* CreateBuilding( NBuilding::CBuildingGrid *pGrid );
 NDb::CRPGArmor* GetTerrainArmor();
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CanShoot( CCoverInfo *pCover );
+class IWeaponItem;
+bool CanShootRocketSafely( NWorld::CUnitServer *pUS, const NAI::SUnitPosition &from,
+	const CVec3 &ptTarget, IWeaponItem *pWeapon );
 bool PeekRayForRocket( CCoverInfo *pCover, CRay *pRes, bool bHit );
 bool PeekRay( CCoverInfo *pCover, CRay *pRes, float fHit, bool *bIsMiss, bool bStickTo_pRes = false );
 // retail @0x2b5220/@0x2b53d0: the check fns carry the burst bullet index (default 0 -- one-shot
