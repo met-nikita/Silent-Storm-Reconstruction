@@ -628,7 +628,7 @@ void CDumbUnitServer::KillUnit( const CVec3 &ptDir )
 			if ( !pAckPers )
 				pAckPers = pRPG->GetRPGPers();
 			if ( pAckPers )
-				pWorld->MakeSound( position.GetCenter(), NDb::GetSound( pAckPers->pSoundDeath ) );
+				pWorld->MakeSound( position.GetEyePosition(), NDb::GetSound( pAckPers->pSoundDeath ) );
 			BlowUp();          // UNCONDITIONAL -- no CanBlowUp gate on this path
 			OnLifeLost();
 			return;
