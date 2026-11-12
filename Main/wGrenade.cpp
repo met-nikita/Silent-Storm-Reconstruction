@@ -1,5 +1,6 @@
 #include "StdAfx.h"
 #include "wGrenade.h"
+#include "wExplosionPerks.h"
 #include "wInterfaceVisitors.h"
 #include "Sync.h"
 #include "wDynObject.h"
@@ -166,12 +167,15 @@ bool CGrenadeServer::Segment()
 	bool bIsTimeToExplode = bTimeDelayGrenade && IsTimeToExplode( pWorld->GetTime()->GetValue() );
 	if ( bIsTimeToExplode || bCollisionExplode )
 	{
+		SPerkMineModifiers mods;
+		if ( IsValid( pUnitServer ) )
+			mods.Fill( pUnitServer->GetRPG()->GetRPGUnit() );
 		// retail Segment @0x75c5e0 explosion dispatch: a live regular record -> world vtbl+0x124
 		// (regular blast); else the engineer record + thrower's ENG skill -> vtbl+0x120.
 		if ( IsValid( pRPGGrenade ) )
-			pWorld->AddGrenadeExplosion( GetPosition(), pRPGGrenade, pUnitServer );
+			pWorld->AddGrenadeExplosion( GetPosition(), pRPGGrenade, pUnitServer, 0, &mods );
 		else
-			pWorld->AddGrenadeExplosion( GetPosition(), pRPGEngGrenade, nThrowerEngSkill, pUnitServer );
+			pWorld->AddGrenadeExplosion( GetPosition(), pRPGEngGrenade, nThrowerEngSkill, pUnitServer, 0, &mods );
 		return true; // = erase
 	}
 	return false;
