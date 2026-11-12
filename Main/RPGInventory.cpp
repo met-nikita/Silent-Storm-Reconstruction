@@ -4,6 +4,7 @@
 #include "RPGUnit.h"
 #include "..\Misc\2DArray.h"
 #include "..\Misc\StrProc.h"
+#include "..\Misc\RetailSort.h"
 #include "..\DBFormat\DataFormat.h"
 #include "..\DBFormat\DataRPG.h"
 ////////////////////////////////////////////////////////////////////////////////////////////////////

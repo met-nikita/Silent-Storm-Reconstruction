@@ -313,7 +313,8 @@ void CBuildingGrid::GetUpdatedParts( vector<SPart> *pParts )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 inline SPart CBuildingGrid::Point2Part( const SPoint3 &pt )
 {
-	const int z = pt.z - 1;
+	// Retail Steam 0x4c375f: negative cellar nodes skip the boundary decrement.
+	const int z = pt.z < 0 ? pt.z : pt.z - 1;
 	return SPart( z < 0 ? z/4 - 1 : z/4, pt.x / 2, pt.y / 2 );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
