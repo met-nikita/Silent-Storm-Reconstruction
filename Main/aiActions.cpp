@@ -651,17 +651,19 @@ bool CAILootAction::ComparePlaces( const SPlaceWithAP &p1, const SPlaceWithAP &p
 // CAIWearPKAction - climb into the best reachable free panzerklein. Reconstructed from the matched-
 // release decode (oracle: decomp/src/s2_aipkaction.h: GetInfoInner @0x0048d8b0, Do @0x0048dd10).
 // Scans every unit server for candidate suits: empty suits with a live hull (IsEmptyPK + IsAddedToVisitor
-// + HP != 0) are preferred; occupied suits whose pilot cannot fight come after. With the unit's wish-pose
+// + skill 0 != 0) are preferred; occupied suits whose pilot cannot fight come after. With the unit's wish-pose
 // temporarily forced to RUN (reachability judged as if running), the first candidate with positive HP the
 // unit can reach + take (CanDo(CCmdTakeCorpse) == UCR_OK) wins. Hook resolution: the suit-server wish-pose
 // scratch (+0x28) is CDumbUnitServer::Get/SetWishPose, the run byte (+0x24) is Set/IsStrafing, the
-// candidate HP is its RPG unit's ST_VP, the corpse mounted is the suit cast to NWorld::CUnit.
+// final candidate health uses total VP; the corpse mounted is the suit cast to NWorld::CUnit.
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-static int WearPK_SuitHP( NWorld::CUnitServer *pS )
+static int WearPK_EmptySuitSkill( NWorld::CUnitServer *pS )
 {
 	NRPG::IUnitMissionInfo *pRPG = pS->GetRPG();
 	NRPG::CUnit *pUnit = IsValid( pRPG ) ? pRPG->GetRPGUnit() : 0;
-	return IsValid( pUnit ) ? (int)pUnit->Skills( NDb::ST_VP ) : 0;
+	// Retail 0x48dc57..0x48dc82 reads skill cell 0 through operator int,
+	// including freeze-to-max/clamping. The later GetTotalVP check is separate.
+	return IsValid( pUnit ) ? (int)pUnit->Skills( NDb::ST_MELEE ) : 0;
 }
 void CAIWearPKAction::GetInfoInner( const SPlaceWithAP &place, SInfo *pInfo ) const   // @0x0048d8b0
 {
@@ -689,7 +691,7 @@ void CAIWearPKAction::GetInfoInner( const SPlaceWithAP &place, SInfo *pInfo ) co
 		if ( !IsValid( pS ) )
 			continue;
 		bool bEmpty = pS->IsEmptyPK();
-		if ( bEmpty && pS->IsAddedToVisitor() && WearPK_SuitHP( pS ) != 0 )
+		if ( bEmpty && pS->IsAddedToVisitor() && WearPK_EmptySuitSkill( pS ) != 0 )
 		{
 			cands.insert( cands.begin(), pS );
 			continue;
