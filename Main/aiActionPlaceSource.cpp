@@ -15,6 +15,7 @@
 #include "wMainMoves.h"        // NWorld::GetMoveActionType (path-AP calcer)
 #include "wMainPath.h"         // NWorld::FindPath / NWorld::PrepareAllPaths decls
 #include "wUnitAttack.h"       // NWorld::GetMeleeAttackPlaces (the enemy melee ring)
+#include "RPGUnit.h"
 #include "RPGGame.h"           // NRPG::GetShootDirection (face the candidate place at the enemy) @0x8e5e0
 #include "RPGCover.h"          // NRPG::GetObjectsThatMayBeDamaged (live shot-raster query)
 #include "RPGItemSet.h"        // CWeaponItem::CreateNewAttackPortion
@@ -368,7 +369,8 @@ void CAIAttackPlaceSource::Prepare()                                    // @0x00
 	ClearPlaces();
 	IAIUnit *pU     = GetUnit();
 	IAIUnit *pEnemy = GetEnemy();
-	if ( !IsValid( pU ) || !IsValid( pU->GetUnitServer() ) )
+	if ( !IsValid( pU ) || !IsValid( pU->GetUnitServer() ) ||
+		!IsValid( pEnemy ) || !IsValid( pEnemy->GetUnitServer() ) || !IsValid( GetAIState() ) )
 		return;
 	CPtr<NWorld::CUnitServer> pUS    = pU->GetUnitServer();
 	CPtr<NWorld::CWorld>      pWorld = pUS->GetWorld();
@@ -384,6 +386,8 @@ void CAIAttackPlaceSource::Prepare()                                    // @0x00
 	if ( !bCheckDangerousForAllies || !IsPosDangerousForAllies( pU->GetUnitPosition(), pFireArm ) )
 		AddAllPoses( curPlace, 0, nMaxAP, true );
 	//
+	NAI::EPose oldWish = pUS->GetWishPose();
+	pUS->SetWishPose( pUS->IsWearingPK() ? NAI::WALK : NAI::RUN );
 	// (2) shooting places along the approach to the enemy: find a path and AddAllPoses at each place
 	// within nMaxAP. Mirrors the dev twin CAIFindGoodPlacesJob::PreparePlaces.
 	if ( IsValid( pEnemy ) && IsValid( pEnemy->GetUnitServer() ) )
@@ -391,22 +395,23 @@ void CAIAttackPlaceSource::Prepare()                                    // @0x00
 		vector<SPathPlace> dest;
 		dest.push_back( pEnemy->GetUnitServer()->GetPosition().pos.p );
 		CPtr<NAI::CPath> pPath = NWorld::FindPath( pNet, pUS, curPlace, dest, pUS,
-			false, NAI::PF_DEFAULT, false, true, true );   // release uses PF_USE_DIR
+			false, NAI::PF_DEFAULT, false, true, true );   // retail PF_DEFAULT
 		if ( IsValid( pPath ) )
 		{
 			CPathAPCalcerLocal calcer( pWorld, pRPG, pU->GetUnitPosition(), false );
+			SPathPlace last = curPlace;
 			for ( vector<SPathPlace>::const_iterator i = pPath->points.begin(); i != pPath->points.end(); ++i )
 			{
 				calcer.AddPoint( *i );
 				if ( calcer.GetResult() > nMaxAP )
 					break;
-				// @0x0048f900: skip the unit's own tile (already added by (1)) and special/climbing-pose
+				// @0x48fe2d: skip consecutive repetitions of the same tile and special/climbing-pose
 				// tiles (nPose==3). The old `& 0xc000` mask never matched (GetPose() is a 2-bit field).
 				if ( (*i).GetPose() != 3 &&
-					!( (*i).GetX() == curPlace.GetX() && (*i).GetY() == curPlace.GetY() &&
-					   (*i).GetLayer() == curPlace.GetLayer() ) &&
+					( ( (*i).GetData() ^ last.GetData() ) & 0x1feffff ) != 0 &&
 					( pArea == 0 || pArea->IsInArea( *i ) ) )    // area gate (pArea==0 -> no gate)
 				{
+					last = *i;
 					SUnitPosition candidate = GetUnitPos( *i, pNet );
 					if ( bCheckDangerousForAllies && IsPosDangerousForAllies( candidate, pFireArm ) )
 						continue;
@@ -420,11 +425,8 @@ void CAIAttackPlaceSource::Prepare()                                    // @0x00
 	// (3) @0x0048f900 — the FLANKING wave. The release floods the reachable set within only min(nMaxAP,8)
 	// wave-AP (NOT the full nMaxAP) and keeps a place only when its direction from the unit is within
 	// +-10 degrees of PERPENDICULAR to the unit->enemy axis (|cos| <= sin(10deg) = 0.1737, the load-bearing
-	// constant @0x4b42b0): it offers FLANKING arcs, it does not blanket every reachable tile. Two release
-	// The friendly-fire pre-filter is applied below. CanHitFromPlace (weapon range + sight-FOV engage
-	// probe) remains redundant here because the shoot action's GetInfoInner performs the authoritative
-	// LOS/range/to-hit scoring for every candidate. pArea==0 means the ordinary attack source has no
-	// guard-area restriction, matching its retail (unit,14,true) factory overload.
+	// constant @0x4b42b0): it offers flanking arcs rather than every reachable tile.
+	// Flanking positions must also pass the observer's actual sight range/FOV and visibility test.
 	if ( IsValid( pEnemy ) && IsValid( pEnemy->GetUnitServer() ) )
 	{
 		const int   nBudget = nMaxAP > 7 ? 8 : nMaxAP;                       // @0x0048f900 wave budget cap (8 AP)
@@ -435,27 +437,33 @@ void CAIAttackPlaceSource::Prepare()                                    // @0x00
 		list<SPathPlace>      reach;
 		// Retail @0x48fd5a: flank wave skips suicide checks and transient unit locks.
 		NWorld::PrepareAllPaths( pNet, &movesTable, &reach, pUS, curPlace, nBudget, pUS, false, true );
+		SPathPlace last = curPlace;
 		for ( list<SPathPlace>::const_iterator i = reach.begin(); i != reach.end(); ++i )
 		{
 			if ( (*i).GetPose() == 3 )                                       // skip special/climbing-pose tiles
 				continue;
-			if ( (*i).GetX() == curPlace.GetX() && (*i).GetY() == curPlace.GetY() &&
-				(*i).GetLayer() == curPlace.GetLayer() )                     // own tile already added by (1)
+			if ( ( ( (*i).GetData() ^ last.GetData() ) & 0x1feffff ) == 0 )
 				continue;
 			if ( !( pArea == 0 || pArea->IsInArea( *i ) ) )                  // area gate (pArea==0 -> no gate)
 				continue;
-			CVec2 dirUP = GetUnitPos( *i, pNet ).GetCPNoHeight() - unitCP;
+			last = *i;
+			SUnitPosition candidate = GetUnitPos( *i, pNet );
+			candidate.pos.p.SetDirection( NRPG::GetShootDirection( pNet, *i, pEnemy->GetUnitPosition().GetCP() ) );
+			CVec2 dirUP = candidate.GetCPNoHeight() - unitCP;
 			Normalize( &dirUP );
 			const float fDot    = dirUP * dirUE;                            // cos(angle to the unit->enemy axis)
 			const float fAbsDot = fDot < 0.0f ? -fDot : fDot;
 			if ( fAbsDot > 0.1737f )                                         // keep only ~perpendicular (flanking)
 				continue;
-			SUnitPosition candidate = GetUnitPos( *i, pNet );
 			if ( bCheckDangerousForAllies && IsPosDangerousForAllies( candidate, pFireArm ) )
 				continue;
-			AddAllPoses( *i, movesTable.GetCost( *i ), nMaxAP, true );
+			if ( !pWorld->GetGame()->CheckPositionVisibility( candidate, pEnemy->GetUnitPosition().pos,
+				pWorld->GetGame()->GetUnitSightDistance( pU->GetRPGUnit() ), pU->GetRPGUnit()->GetSightFOV() ) )
+				continue;
+			AddAllPoses( candidate.pos.p, movesTable.GetCost( *i ), nMaxAP, true );
 		}
 	}
+	pUS->SetWishPose( oldWish );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CAICurrentPlaceSource - just the unit's current place (all poses).
