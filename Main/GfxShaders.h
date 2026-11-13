@@ -85,7 +85,8 @@ externA5 SVShader vsCLTestPrevFrame;
 externA5 SVShader vsCLPointDiffuse;
 externA5 SVShader vsCLPointBump;
 externA5 SVShader vsCLPointDiffuseShadowed;
-externA5 SVShader *vsAllShaders[82];
+externA5 SVShader vsFullPPSpecularDir14;
+externA5 SVShader *vsAllShaders[83];
 
 externA5 SPShader psDiffuse;
 externA5 SPShader psTFactor;
@@ -173,5 +174,6 @@ externA5 SPShader psCLPointDiffuseShadowed;
 externA5 SPShader psCLPointDepthCheckRGB;
 externA5 SPShader psCLPointDiffuseShadowedRGB;
 externA5 SPShader psCLPointDiffuseShadowedRGBA;
-externA5 SPShader *psAllShaders[85];
+externA5 SPShader psFullPPSpecularDir14;
+externA5 SPShader *psAllShaders[86];
 #endif

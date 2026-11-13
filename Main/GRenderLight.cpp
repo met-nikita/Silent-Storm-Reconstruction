@@ -586,6 +586,54 @@ void CDirectionalLight::RenderAmbientLightmaps( CTransformStack *pTS, NGfx::CRen
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// Retail AddSinglePassDirSpecOps: PS 1.4 calculates the highlight and samples
+// the projected sun shadow in one pass. Lower shader tiers retain the N.H pass.
+static bool AddSinglePassDirSpecOps( SOpGenContext &op, const SMaterialInfo &info, SPPSpecularInfo *pSpec )
+{
+	if ( !bDrawSpecular )
+		return false;
+	if ( NGfx::GetHardwareLevel() > NGfx::HL_GFORCE3 )
+	{
+		if ( info.specular.type == SMaterialInfo::T_TEXTURE )
+		{
+			pSpec->pSpecular = info.specular.pTex;
+			pSpec->vSpecularColor = CVec3(1,1,1);
+		}
+		else if ( info.specular.type == SMaterialInfo::T_COLOR )
+		{
+			pSpec->pSpecular = GetWhiteTexture();
+			pSpec->vSpecularColor = info.specular.color;
+		}
+		else
+			return false;
+		if ( !pSpec->pSpecular )
+			return true;
+		pSpec->pBump = info.pBump ? info.pBump : GetUniformBump();
+		pSpec->fBumpMult = info.pBump ? 1.0f : info.fSpecPower;
+		op.AddOperation( RO_PP_SPECULAR_FULL_DIR_14, 7, DPM_EQUAL, 0, pSpec );
+		return true;
+	}
+	bool bCalcNH = false;
+	if ( info.specular.type == SMaterialInfo::T_TEXTURE )
+	{
+		bCalcNH = true;
+		op.AddOperation( RO_PP_SPECULAR_FULL_TEXTURE_DIR, 7, DPM_EQUAL, 0, N_GF3_SPECULAR_REG, info.specular.pTex );
+	}
+	else if ( info.specular.type == SMaterialInfo::T_COLOR )
+	{
+		bCalcNH = true;
+		op.AddOperation( RO_PP_SPECULAR_FULL_COLOR_DIR, 7, DPM_EQUAL, 0, N_GF3_SPECULAR_REG, &info.specular.color );
+	}
+	if ( bCalcNH )
+	{
+		if ( info.pBump )
+			op.AddOperation( RO_NHCALC_BUMP, 3, DPM_EQUAL, N_GF3_SPECULAR_REG, info.pBump );
+		else
+			op.AddOperation( RO_NHCALC, 3, DPM_EQUAL, N_GF3_SPECULAR_REG, info.fSpecPower );
+	}
+	return bCalcNH;
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 void CDirectionalLight::RenderInSinglePass( CTransformStack *pTS, CTransformStack *pClipTS, NGfx::CRenderContext *pRC, ERenderPath renderPath, 
 	IRender *pRender, CSceneFragments &scene, const SParticleLMRenderTargetInfo &particleLM, const SLightInfo &lightInfo )
 {
@@ -598,6 +646,8 @@ void CDirectionalLight::RenderInSinglePass( CTransformStack *pTS, CTransformStac
 	if ( bBlurSun )
 		NGfx::BlurLight( pRC, N_GF3_TEMP_REG, 1, fBlurStrength );
 
+	// One stable record per fragment; commands retain these pointers until Execute.
+	vector<SPPSpecularInfo> specularInfo( fragments.size() );
 	CRenderCmdList lightOps;
 	for ( int i = 1; i < fragments.size(); ++i )
 	{
@@ -626,30 +676,8 @@ void CDirectionalLight::RenderInSinglePass( CTransformStack *pTS, CTransformStac
 				{
 				case SMaterialInfo::NORMAL:
 					{
-						// add gloss ops
-						bool bCalcNH = false;
-						if ( bDrawSpecular )
-						{
-							if ( info.specular.type == SMaterialInfo::T_TEXTURE )
-							{
-								bCalcNH = true;
-							op.AddOperation( RO_PP_SPECULAR_FULL_TEXTURE_DIR, 7, DPM_EQUAL, 0, N_GF3_SPECULAR_REG, info.specular.pTex );
-							}
-							else if ( info.specular.type == SMaterialInfo::T_COLOR )
-							{
-								bCalcNH = true;
-							op.AddOperation( RO_PP_SPECULAR_FULL_COLOR_DIR, 7, DPM_EQUAL, 0, N_GF3_SPECULAR_REG, &info.specular.color );
-							}
-							if ( bCalcNH )
-							{
-								if ( info.pBump )
-								op.AddOperation( RO_NHCALC_BUMP, 3, DPM_EQUAL, N_GF3_SPECULAR_REG, info.pBump );
-								else
-								op.AddOperation( RO_NHCALC, 3, DPM_EQUAL, N_GF3_SPECULAR_REG, info.fSpecPower );
-							}
-						}
-						// diffuse
-						int nAddFlag = bCalcNH ? ABM_ADD : 0;
+						const bool bSpecular = AddSinglePassDirSpecOps( op, info, &specularInfo[i] );
+						int nAddFlag = bSpecular ? ABM_ADD : 0;
 						if ( info.pBump )
 							op.AddOperation( RO_DIFFUSE_FULL_LIT_BUMP_TEXTURE_PP, 10, nAddFlag|DPM_EQUAL, 0, info.diffuse.pTex, info.pBump, pLightmap );
 						else
@@ -680,30 +708,8 @@ void CDirectionalLight::RenderInSinglePass( CTransformStack *pTS, CTransformStac
 				{
 				case SMaterialInfo::NORMAL:
 					{
-						// add gloss ops
-						bool bCalcNH = false;
-						if ( bDrawSpecular )
-						{
-							if ( info.specular.type == SMaterialInfo::T_TEXTURE )
-							{
-								bCalcNH = true;
-							op.AddOperation( RO_PP_SPECULAR_FULL_TEXTURE_DIR, 7, DPM_EQUAL, 0, N_GF3_SPECULAR_REG, info.specular.pTex );
-							}
-							else if ( info.specular.type == SMaterialInfo::T_COLOR )
-							{
-								bCalcNH = true;
-							op.AddOperation( RO_PP_SPECULAR_FULL_COLOR_DIR, 7, DPM_EQUAL, 0, N_GF3_SPECULAR_REG, &info.specular.color );
-							}
-							if ( bCalcNH )
-							{
-								if ( info.pBump )
-								op.AddOperation( RO_NHCALC_BUMP, 3, DPM_EQUAL, N_GF3_SPECULAR_REG, info.pBump );
-								else
-								op.AddOperation( RO_NHCALC, 3, DPM_EQUAL, N_GF3_SPECULAR_REG, info.fSpecPower );
-							}
-						}
-						// diffuse
-						int nAddFlag = bCalcNH ? ABM_ADD : 0;
+						const bool bSpecular = AddSinglePassDirSpecOps( op, info, &specularInfo[i] );
+						int nAddFlag = bSpecular ? ABM_ADD : 0;
 						if ( info.pBump )
 							op.AddOperation( RO_DIFFUSE_DYNLM_LIT_BUMP_TEXTURE_PP, 10, nAddFlag|DPM_EQUAL, 0, pLM, info.diffuse.pTex, info.pBump );
 						else

@@ -633,6 +633,24 @@ static void ExecOps( NGfx::CRenderContext *pRC, const vector<CRenderCmdList::SOp
 			pRC->SetTexture( 3, NGfx::GetRegisterTexture(1), true );
 			triListType = TLT_GEOM;
 			break;
+		case RO_PP_SPECULAR_FULL_DIR_14:
+			{
+				// Retail ExecOps: bump, normalization cube, response, gloss, sun shadow.
+				const SPPSpecularInfo &spec = *op.p1.pPPSpec;
+				pRC->SetPixelShader( psFullPPSpecularDir14 );
+				pRC->SetVertexShader( vsFullPPSpecularDir14 );
+				pRC->SetTexture( 0, spec.pBump );
+				pRC->SetTexture( 1, GetNormalizeTexture() );
+				pRC->SetTexture( 2, GetSpecularResponse(), true );
+				pRC->SetTexture( 3, spec.pSpecular );
+				pRC->SetTexture( 4, NGfx::GetRegisterTexture(1), true );
+				pRC->SetPSConst( 0, CVec4(0.5f,0.5f,0.5f,0.5f) );
+				pRC->SetPSConst( 1, CVec4(1,1,1,0.5f) );
+				pRC->SetPSConst( 2, CVec4(0,0,1,0) );
+				pRC->SetPSConst( 3, CVec4( MulPerComp( lightInfo.vGlossColor, spec.vSpecularColor ), spec.fBumpMult ) );
+				triListType = TLT_GEOM;
+			}
+			break;
 		case RO_PP_SPECULAR_FULL_TEXTURE_DIR:
 			pRC->SetPixelShader( psFullPerPixelTexSpecular );
 			pRC->SetVertexShader( vsFullPPTexSpecular );

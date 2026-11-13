@@ -313,7 +313,8 @@ enum ERenderOperation
 	RO_EXPLOSION_DECAL,
 	RO_REGISTER,
 	RO_CL_COPY_LAST,
-	RO_CL_TEST_PREV_FRAME
+	RO_CL_TEST_PREV_FRAME,
+	RO_PP_SPECULAR_FULL_DIR_14
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 const int N_DYNAMIC_AMBIENT_INFO_COMPONENTS = 6;
@@ -566,6 +567,12 @@ struct SIgnoredSphereFilter
 	bool operator()( SRenderFragmentInfo *pF, const SSelectFragments &selector ) const;
 };*/
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+struct SPPSpecularInfo
+{
+	NGfx::CTexture *pBump, *pSpecular;
+	CVec3 vSpecularColor;
+	float fBumpMult;
+};
 class CRenderCmdList
 {
 public:
@@ -580,6 +587,7 @@ public:
 		const SPerspDirectionalDepthInfo *pPDirDepth;
 		const SDynamicAmbientInfo *pDynamicAmbientInfo;
 		const SSkyDepth3Info *pSkyDepth3;
+		const SPPSpecularInfo *pPPSpec;
 		float f;
 		DWORD bits; // Retail sorts operation parameters as unsigned raw words.
 
@@ -593,6 +601,7 @@ public:
 		UParameter( const SPerspDirectionalDepthInfo *_pDirDepth ): pPDirDepth(_pDirDepth) {}
 		UParameter( const SDynamicAmbientInfo *_p ): pDynamicAmbientInfo(_p) {}
 		UParameter( const SSkyDepth3Info *_p ): pSkyDepth3(_p) {}
+		UParameter( const SPPSpecularInfo *_p ): pPPSpec(_p) {}
 		UParameter( float _f ): f(_f) {}
 	};
 	struct SOperation

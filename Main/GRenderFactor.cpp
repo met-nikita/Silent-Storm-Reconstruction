@@ -42,6 +42,13 @@ NGfx::CTexture* GetBlackTexture()
 		InitSolidTexture( &pBlackTexture, NGfx::SPixel8888( 0, 0, 0, 0 ), 1 );
 	return pBlackTexture;
 }
+static CObj<NGfx::CTexture> pWhiteTexture;
+NGfx::CTexture* GetWhiteTexture()
+{
+	if ( !IsValid( pWhiteTexture ) )
+		InitSolidTexture( &pWhiteTexture, NGfx::SPixel8888( 255, 255, 255, 255 ), 1 );
+	return pWhiteTexture;
+}
 static CObj<NGfx::CTexture> pDefaultLightmap;
 // retail @0x14f750: 1x1 solid 0xFF000000, the CL stand-in for scenes with lighting-options bit 2
 NGfx::CTexture* GetDefaultLightmap()
