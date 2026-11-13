@@ -697,8 +697,8 @@ int CUnitMission::GetActionAP( NAI::EPose curPose, EAction action, IInventoryIte
 			}
 			return Min( 8, Max( 1, nAP ) );
 		}
-		case AC_SHOOT:   return pRPGUnit->GetWeaponAP();
-		case AC_PREPARE_AND_SHOOT:	return GetActionAP( curPose, AC_PREPARE ) + GetActionAP( curPose, AC_SHOOT );
+		case AC_SHOOT:   return pRPGUnit->GetWeaponAP( pItem ? CDynamicCast<CWeaponItem>( pItem ).GetPtr() : 0 );
+		case AC_PREPARE_AND_SHOOT:	return GetActionAP( curPose, AC_PREPARE, pItem ) + GetActionAP( curPose, AC_SHOOT, pItem );
 		case AC_EXPLODE: return 2;
 		case AC_THROW_GRENADE:
 		{
@@ -743,7 +743,7 @@ int CUnitMission::GetActionAP( NAI::EPose curPose, EAction action, IInventoryIte
 		case AC_THROW_KNIFE:
 		case AC_MELEE:
 			{
-				CMeleeWeaponItem *pMelee = pRPGUnit->GetMeleeWeaponItem();
+				CMeleeWeaponItem *pMelee = pItem ? CDynamicCast<CMeleeWeaponItem>( pItem ).GetPtr() : pRPGUnit->GetMeleeWeaponItem();
 				if ( !pMelee )
 					return 0;
 				NDb::CRPGMeleeWeapon *pW = pMelee->GetDBMeleeWeapon();
