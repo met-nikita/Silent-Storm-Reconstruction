@@ -403,18 +403,38 @@ static EUnitCommandResult GetActionValidPlaces( CUnitServer *pUS, CCmdTakeCorpse
 
 	CDynamicCast<CUnitServer> pDeadUnit( pCmd->pCorpse );
 	NAI::IPathNetwork *pNet = pUS->GetWorld()->GetPathNetwork();
+	NAI::IAIMap *pMap = pUS->GetWorld()->GetAIMap();
 	CVec3 ptTarget(0,0,0);
-	pUS->GetWorld()->GetAIMap()->GetUnitHLPos( &ptTarget, pUS->GetWorld()->GetAIMap()->GetHull(pDeadUnit), -1 );
-	SSphere s;
-	s.ptCenter = ptTarget - CVec3(0,0,0.5f);
-	s.fRadius = 1; // CRAP need more grounded number then this
-	if ( pDeadUnit->IsEmptyPK() )
-		s.fRadius = 1.5f;
+	pMap->GetUnitHLPos( &ptTarget, pMap->GetHull( pDeadUnit ), -1 );
+	const bool bEmptyPK = pDeadUnit->IsEmptyPK();
+	// Retail 0x79d320: only ordinary bodies lower the search center.
+	SSphere s( bEmptyPK ? ptTarget : ptTarget - CVec3(0,0,0.5f), bEmptyPK ? 1.5f : 1.0f );
 	vector<NAI::SPathPlace> res;
 	pNet->GetNearPlaces( s, &res );
+	NAI::CCollider collider;
+	bool bTargetBlocked = false;
+	if ( bEmptyPK )
+	{
+		SBound bound;
+		bound.SphereInit( s.ptCenter, s.fRadius + 1.0f );
+		pMap->PrepareCollider( &collider, bound, 0.5f, TS_PASS_BLOCKER );
+		// An embedded center cannot be approached with a clear sweep; retail
+		// permits nearby candidates in that case instead of rejecting them all.
+		bTargetBlocked = collider.DoesIntersect( ptTarget, 0.31f );
+	}
 	for ( int k = 0; k < res.size(); ++k )
+	{
+		if ( bEmptyPK && !bTargetBlocked )
+		{
+			NAI::SPosition candidate;
+			candidate.p = res[k];
+			candidate.SetNetwork( pNet );
+			SSphere approach( candidate.GetCP() + CVec3(0,0,0.5f), 0.31f );
+			if ( collider.CollideBool( approach, ptTarget - approach.ptCenter, &NCollider::skipAnalyzer ) )
+				continue;
+		}
 		GetDirectedPoints( pNet, res[k], ptTarget, pRes, PM_STAND );
-
+	}
 	return UCR_OK;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
