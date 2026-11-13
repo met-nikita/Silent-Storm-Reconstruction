@@ -63,17 +63,14 @@ void CAINormalReaction::Update()
 		// SQUAD ALARM (release @0x47f241): an outnumbered-but-supported scared unit may break off and RUN to a nearby
 		// ally to raise the garrison (2+ active side-units && 40% roll) instead of merely retreating. It drops its own
 		// enemy (CreateAIEnemyDiedEvent -> RemoveEnemy) so it disengages and runs the alarm route; the route's
-		// CTaskCommandAlarm then alerts every ally within 5 m on arrival. The Update-top guard lets the route finish.
+		// CTaskCommandAlarm then alerts every ally within 5 m on arrival. The contact stays dropped until a new perception event.
 		if ( CountActiveAllies( u ) > 1 && random.Get( 100 ) < 40 )   // release @0x47f254: raw Get()%100 < 0x28 (40%)
 		{
-			if ( IAILogic *pAlarm = CreateAIAlarmLogic( u, pEnemy ) )
-			{
-				SetLogic( pAlarm );
-				CObj<IAIEvent> e = CreateAIEnemyDiedEvent( pEnemy );
-				if ( IsValid( e ) )
-						us->Notify( e );   // preserve nested event locks while dropping this contact
-				return;
-			}
+			SetLogic( CreateAIAlarmLogic( u, pEnemy ) );
+			CObj<IAIEvent> e = CreateAIEnemyDiedEvent( pEnemy );
+			if ( IsValid( e ) )
+				us->Notify( e );   // preserve nested event locks while dropping this contact
+			return;
 		}
 		SPathPlace fearPos;
 		// v1.2 0x47f2c9..0x47f30e: known + suspected enemies, minimum five
