@@ -146,6 +146,8 @@ const NDb::CPanzerklein *CUnitStateNormal::GetPK() const // returns 0 if no PK p
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CCommandExecute* CUnitStateNormal::CreateExecutor( CCmd *pCmd, EUnitCommandResult *pResult )
 {
+	// Retail v1.1 0x7c82e7 / v1.2 0x7c8c87: retain ownership before critical checks.
+	CObj<CCmd> pHold = pCmd;
 	*pResult = UCR_UNAVAILABLE;
 
 	if ( IsCriticalsFailCommand( pCmd, pResult ) )
