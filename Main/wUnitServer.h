@@ -250,6 +250,9 @@ public:
 	virtual NRPG::IUnitMissionInfo* GetRPG() const;
 	virtual const NAI::SUnitPosition& GetPosition() const { return GetUnitPosition(); }
 	virtual NAI::SUnitPosition GetSetPosePosition() const { return GetUnitSetPosePosition(); }   // retail @0x3c6a00
+	// Sentinels 0x7c5f00: a matching preference is not enough if the current
+	// pose differs (for example, while a stance transition is still pending).
+	virtual bool NeedChangePose( NAI::EPose pose ) const { return pose != GetWishPose() || pose != GetPosition().GetPose(); }
 	virtual void GetRealPosition( CVec3 *pRes ) { GetRealUnitPosition( pRes ); }
 	virtual void AddVisitableChildren( vector<IVisObj*> *pRes ) { AddMiscObjects( pRes ); }
 	virtual bool GetCurrentCommandName( string *pName ) const;

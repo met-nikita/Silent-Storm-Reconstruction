@@ -2252,6 +2252,10 @@ bool CStatePose::Initialize( IMission *pMission )
 	pMission->GetSelectedUnits( &unitsSet );
 	for ( vector< CPtr<NGame::IUnitTracker> >::iterator iTemp = unitsSet.begin(); iTemp != unitsSet.end(); iTemp++ )
 	{
+		// Sentinels 0x4b87e8..0x4b87ff skips both commands when the requested
+		// and current poses already match, in realtime and turn-based play alike.
+		if ( !(*iTemp)->GetUnit()->NeedChangePose( ePose ) )
+			continue;
 		// retail @0x1db700 anchors the re-path on GetSetPosePosition (CUnit vtbl+0x48), NOT GetPosition:
 		// a moving unit re-paths from the tile it is stepping INTO, not backwards to the one it left.
 		NAI::SUnitPosition uPos = (*iTemp)->GetUnit()->GetSetPosePosition();

@@ -391,6 +391,7 @@ public:
 	virtual bool IsUnitVisible( const CUnit *pUnit ) const = 0;
 	virtual bool IsUnitAudible( const CUnit *pUnit ) const = 0;
 	virtual bool CanTalk() const = 0;
+	virtual bool NeedChangePose( NAI::EPose pose ) const = 0;
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CAckEvent
