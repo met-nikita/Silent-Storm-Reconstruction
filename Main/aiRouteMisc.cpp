@@ -151,7 +151,7 @@ bool GetCheckPosition( IAIUnit *pUnit, CUnitArea *pArea, const SPosition &pos, S
 	// keeping our own moves table to read each place's accumulated wave cost.
 	vector<SPathPlace> places;
 	CMultiMovesTable table;
-	GetNearestPlaces( pUS, pUnit->GetUnitPosition().pos.p, pUnit->GetAP(), RUN, &places, &table );
+	GetNearestPlaces( pUS, pUnit->GetUnitPosition().pos.p, pUS->GetAP(), RUN, &places, &table );
 	bool bFound = false;
 	int nBest = 0;   // the binary inits 0x100000, dead before first use (the !bFound term guards it)
 	for ( vector<SPathPlace>::iterator it = places.begin(); it != places.end(); ++it )

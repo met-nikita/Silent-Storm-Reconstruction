@@ -145,13 +145,9 @@ void CAIGuardReaction::Update()
 		}
 		else if ( IsValid( pArea ) )
 		{
-			// (i) all quiet: if the unit has left its post, walk back to it (gated on a real path with AP > 0).
-			// The release gates this on CPathNetwork::GetPassability(initialPos) != AIP_YES (path-net vtbl+0x3c,
-			// the mover AddRef'd around the call); the dev IPathNetwork exposes no per-position EPassable
-			// accessor, so the verified "1 == still on post" semantic is reproduced as "not already on the post
-			// place" (masked SamePlace). The path + GetPathAP gates below still guard the actual move.
+			// Return to a usable post; a destroyed or blocked post must not trigger a partial approach.
 			IPathNetwork *pNet = pUS->GetWorld()->GetPathNetwork();
-			if ( pNet != 0 && !SamePlace( pU->GetUnitPosition().pos.p, initialPos.pos.p ) )
+			if ( pNet != 0 && pNet->GetPassability( initialPos.pos.p ) != AIP_NOT_PASSABLE )
 			{
 				NWorld::CUnit *pComp = static_cast<NWorld::CUnit*>( pUS );
 				vector<SPathPlace> targets;

@@ -97,10 +97,14 @@ bool CUnitArea::Prepare()                                                    // 
 	// (same idiom CAINearEnemyPlaceSource::Prepare uses); restore after the flood.
 	NAI::EPose nOldWish = pUS->GetWishPose();
 	pUS->SetWishPose( (NAI::EPose)wishPose );
+	if ( wishPose == CRAWL )
+		pUS->SetStrafe( false );
 	CMultiMovesTable movesTable;
 	list<SPathPlace>  reach;
-	NWorld::PrepareAllPaths( pNet, &movesTable, &reach, pUS, place, nAPRadius, pUS, true );
+	NWorld::PrepareAllPaths( pNet, &movesTable, &reach, pUS, place, nAPRadius, pUS, false, true );
 	pUS->SetWishPose( nOldWish );
+	if ( nOldWish == CRAWL )
+		pUS->SetStrafe( false );
 	// @0x74880 -- clear, then keep every reachable place whose pose is neither CM_INACTIVE(3) nor
 	// CM_LAY(0); key on the normalized GetHash so direction/moving bits do not fragment the set
 	// (release: `places[GetHash(*i)] = 1`).
@@ -599,23 +603,27 @@ void CAIToPlacePlaceSource::Prepare()                                   // @0x00
 	NAI::EPose nOldWish = pUS->GetWishPose();
 	pUS->SetWishPose( IsValid( pUS->GetWearingDBPK() ) ? NAI::WALK : NAI::RUN );
 	CPtr<NAI::CPath> pPath = NWorld::FindPath( pNet, pUS, selfPlace, dest, pUS,
-		false, NAI::PF_DEFAULT, false, true, true );   // release uses PF_USE_DIR
+		false, NAI::PF_DEFAULT, false, true, true );
 	if ( !IsValid( pPath ) )
 		return;   // ORIGINAL BUG (@0x0048f0e0): wish pose intentionally NOT restored on this early return
+	SPathPlace lastPlace = selfPlace;
 	CPathAPCalcerLocal calcer( pWorld, pRPG, pU->GetUnitPosition(), false );
 	for ( vector<SPathPlace>::const_iterator i = pPath->points.begin(); i != pPath->points.end(); ++i )
 	{
 		calcer.AddPoint( *i );
 		if ( calcer.GetResult() > nMaxAP )
 			break;
-		// @0x0048f0e0 -- skip the unit's OWN tile (already offered above; release masks pose/dir/moving via
-		// IsSamePlace mask 0x1feffff) and CM_INACTIVE tiles (release: nPose != 3). The prior
-		// `GetPose() & 0xc000` was a no-op: GetPose() is the 2-bit nPose, so the skip never fired.
-		if ( ( ( (*i).GetData() ^ selfPlace.GetData() ) & 0x01feffff ) != 0 &&
+		// Keep one candidate per consecutive tile, even when the path turns or changes pose.
+		if ( ( ( (*i).GetData() ^ lastPlace.GetData() ) & 0x01feffff ) != 0 &&
 			(*i).GetPose() != NAI::CM_INACTIVE )
+		{
+			lastPlace = *i;
 			AddAllPoses( *i, calcer.GetResult(), nMaxAP, true );
+		}
 	}
-	pUS->SetWishPose( nOldWish );   // restored only here on success (the early returns above leave it clobbered)
+	pUS->SetWishPose( nOldWish );
+	if ( nOldWish == CRAWL )
+		pUS->SetStrafe( false );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CAIOnePlacePlaceSource - exactly the one held place (defence holds a spot).
