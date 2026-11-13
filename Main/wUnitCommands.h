@@ -441,6 +441,12 @@ struct SItem
 	SItem( CUnit *_pUnit, EPlacement _eType, const CTPoint<int> &_sPosition, NRPG::IInventoryItem* _pItem = 0 ): pUnit( _pUnit ), eType( _eType ), sPosition( _sPosition ), pItem( _pItem ) {}
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// Retail weapon-switch cleanup; no command payload (save ID 0x23074b40).
+class CCmdDropItemFromHand: public CCmd
+{
+	OBJECT_BASIC_METHODS(CCmdDropItemFromHand);
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
 class CCmdArrangeInventory: public CCmd
 {
 	OBJECT_BASIC_METHODS(CCmdArrangeInventory);

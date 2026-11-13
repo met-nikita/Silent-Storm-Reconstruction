@@ -11,6 +11,7 @@
 #include "wDebris.h"        // NWorld::CDFrozenItem (CAILogPickUpItem's retail item ref)
 
 #include "RPGUnitMission.h"
+#include "RPGUnit.h"
 #include "RPGItemInfo.h"
 #include "RPGItem.h"
 #include "RPGItemSet.h"
@@ -279,45 +280,41 @@ void CAILogChangeWeapon::GetItemPosition( NRPG::IInventoryItem *pItem, CTPoint<i
 void CAILogChangeWeapon::GetCommands( list< CPtr<NWorld::CCommand> > *Commands )
 {
 	NWorld::CUnitServer *pUnitServer = pAIUnit->GetUnitServer();
-	NRPG::IInventory *pInventory = pUnitServer->GetUnitRPG()->GetInventory();
-	// put the weapon away into the BackPack
+	CPtr<NRPG::IInventoryItem> pDefault = pUnitServer->GetUnitRPG()->GetRPGUnit()->pDefaultWeapon;
+	CPtr<NRPG::IInventoryItem> pOldItem, pNewItem;
 	if ( IsValid( pOldWeapon ) )
-	{
-		CPtr<NRPG::IInventoryItem> pOldItem = pOldWeapon->GetInventoryItem();
-		ASSERT( IsValid( pOldItem ) );
-		if ( IsValid( pOldItem ) )
-		{
-			NWorld::SItem From( pUnitServer, NWorld::SItem::SLOT, NDb::SLOT_1, pOldItem );
-			NWorld::SItem To( pUnitServer, NWorld::SItem::BACKPACK, CTPoint<int>( -1, -1 ), pOldItem );
-			Commands->push_back( new NWorld::CCmdSetCommand( pUnitServer,
-				new NWorld::CCmdMoveInventoryItem( From, To ) ) );
-		}
-	}
-	// move the new weapon into the Slot
+		pOldItem = pOldWeapon->GetInventoryItem();
 	if ( IsValid( pNewWeapon ) )
+		pNewItem = pNewWeapon->GetInventoryItem();
+	// Retail v1.1 0x45f010: the innate bare-hands weapon is not an inventory transfer.
+	if ( pOldItem == pDefault )
+		pOldItem = 0;
+	if ( pNewItem == pDefault )
+		pNewItem = 0;
+
+	// Equip first: this frees the new weapon's backpack space and puts the displaced
+	// slot item in HAND. Stowing first can fail in a full backpack.
+	// Keep the consumed-grenade guard: its AI wrapper can outlive its cleared DB link.
+	if ( IsValid( pNewItem ) && IsValid( pNewItem->GetDBItem() ) )
 	{
-		CPtr<NRPG::IInventoryItem> pNewItem = pNewWeapon->GetInventoryItem();
-		// retail CAILogChangeWeapon::GetWorldCommands @0x5f010 gates on alive(newItem) -- the UNDERLYING NWorld item,
-		// NOT the AI weapon wrapper. The wrapper (pNewWeapon) can stay valid while its item is stale/freed (e.g. a
-		// just-thrown grenade the wrapper still references after TearOffItem). The prior IsValid(pNewWeapon) here was a
-		// copy/paste from the old-weapon block above (which correctly checks pOldItem); it equipped that DB-less item
-		// into SLOT_1, crashing CExecMoveInventoryItem::AnimationFinished (wUnitAttackExec.cpp:2688) on its null
-		// GetDBItem()->subType. Guard the ITEM -> skip the draw when it isn't alive, exactly as retail does.
-		// In this reconstruction a consumed item's wrapper can outlive the DB link cleared by
-		// DestroyContents, whereas retail's liveness probe rejects that same state. Do not enqueue
-		// the draw unless both halves of the inventory-item invariant are intact.
-		if ( IsValid( pNewItem ) && IsValid( pNewItem->GetDBItem() ) )
-		{
-			Commands->push_back( new NWorld::CCmdSetCommand( pUnitServer,
-				new NWorld::CCmdArrangeInventory() ) );
-			NWorld::SItem From( pUnitServer, NWorld::SItem::BACKPACK, CTPoint<int>( -1, -1 ), pNewItem );
-			NWorld::SItem To( pUnitServer, NWorld::SItem::SLOT, NDb::SLOT_1, pNewItem );
-			Commands->push_back( new NWorld::CCmdSetCommand( pUnitServer,
-				new NWorld::CCmdMoveInventoryItem( From, To ) ) );
-			Commands->push_back( new NWorld::CCmdSetCommand( pUnitServer,
-				new NWorld::CCmdSetActiveItem( NDb::SLOT_1 ) ) );
-		}
+		NWorld::SItem From( pUnitServer, NWorld::SItem::BACKPACK, CTPoint<int>( -1, -1 ), pNewItem );
+		NWorld::SItem To( pUnitServer, NWorld::SItem::SLOT, NDb::SLOT_1, pNewItem );
+		Commands->push_back( new NWorld::CCmdSetCommand( pUnitServer,
+			new NWorld::CCmdMoveInventoryItem( From, To ) ) );
 	}
+	if ( IsValid( pOldItem ) )
+	{
+		NWorld::SItem From( pUnitServer, NWorld::SItem::HAND );
+		NWorld::SItem To( pUnitServer, NWorld::SItem::BACKPACK, CTPoint<int>( -1, -1 ), pOldItem );
+		Commands->push_back( new NWorld::CCmdSetCommand( pUnitServer,
+			new NWorld::CCmdMoveInventoryItem( From, To ) ) );
+		Commands->push_back( new NWorld::CCmdSetCommand( pUnitServer,
+			new NWorld::CCmdDropItemFromHand() ) );
+	}
+	Commands->push_back( new NWorld::CCmdSetCommand( pUnitServer,
+		new NWorld::CCmdSetActiveItem( NDb::SLOT_1 ) ) );
+	Commands->push_back( new NWorld::CCmdSetCommand( pUnitServer,
+		new NWorld::CCmdArrangeInventory() ) );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CAILogPickUpItem

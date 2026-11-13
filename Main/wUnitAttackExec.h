@@ -699,6 +699,18 @@ public:
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CExecArrangeInventory
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+class CExecDropItemFromHand: public CCommandExecute
+{
+	OBJECT_BASIC_METHODS(CExecDropItemFromHand);
+	ZDATA_(CCommandExecute)
+	ZEND int operator&( CStructureSaver &f ) { f.Add(1,(CCommandExecute*)this); return 0; }
+public:
+	CExecDropItemFromHand() {}
+	CExecDropItemFromHand( CUnitServer *pUS ): CCommandExecute(pUS) {}
+	EUnitCommandResult CanDoIt( const NAI::SUnitPosition &from, bool bIgnoreTarget = false ) const;
+	virtual void Run();
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
 class CExecArrangeInventory: public CCommandExecute
 {
 	OBJECT_BASIC_METHODS(CExecArrangeInventory);

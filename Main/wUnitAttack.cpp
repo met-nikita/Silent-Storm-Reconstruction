@@ -640,6 +640,9 @@ static CCommandExecute* CreateActionQueueOrReload( CUnitServer *pUS, TCommand *p
 CCommandExecute* CreateActionExecutor( CUnitServer *pUS, CCmd *pCmd, EUnitCommandResult *pError )
 {
 	*pError = UCR_OK;
+	// Retail v1.2 0x79efd3: construct directly, without an action/animation queue.
+	if ( CDynamicCast<CCmdDropItemFromHand>( pCmd ) )
+		return new CExecDropItemFromHand( pUS );
 	CDynamicCast<CCmdReload> pReload( pCmd );
 	if ( pReload )
 	{

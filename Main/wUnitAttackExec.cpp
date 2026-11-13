@@ -3670,6 +3670,33 @@ void CExecCreateAndActivateInventoryItem::Run()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CExecMoveItem
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// Retail v1.1 0x7a77b0/0x7abad0/0x7abba0: resolve the live unit hand at execution.
+// Unlike an ordinary inventory move, an empty hand succeeds and no AP or animation is used.
+static CCmdMoveInventoryItem* GetDropCmd( CUnitServer *pUS )
+{
+	return new CCmdMoveInventoryItem( SItem( pUS, SItem::HAND ), SItem( pUS, SItem::GROUND ) );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+EUnitCommandResult CExecDropItemFromHand::CanDoIt( const NAI::SUnitPosition &from, bool bIgnoreTarget ) const
+{
+	if ( !IsValid( pUS ) )
+		return UCR_GENERAL_FAILURE;
+	if ( !IsValid( pUS->GetHandItem().pItem ) )
+		return UCR_OK;
+	CObj<CCmdMoveInventoryItem> pCmd = GetDropCmd( pUS );
+	return CanMoveInventoryItem( pUS, pCmd );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+void CExecDropItemFromHand::Run()
+{
+	if ( IsValid( pUS->GetHandItem().pItem ) )
+	{
+		CObj<CCmdMoveInventoryItem> pCmd = GetDropCmd( pUS );
+		MoveInventoryItem( pUS, pCmd );
+	}
+	Finished();
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 CExecMoveInventoryItem::CExecMoveInventoryItem( CUnitServer *_pUS, CCmdMoveInventoryItem *_p ):
 	CCommandExecute(_pUS), pCmd(_p)
 {
@@ -4053,6 +4080,7 @@ REGISTER_SAVELOAD_CLASS( 0x00422110, CExecCorpse )
 REGISTER_SAVELOAD_CLASS( 0x00622140, CExecHeal )
 REGISTER_SAVELOAD_CLASS( 0x53042170, CExecSnipeAim )
 REGISTER_SAVELOAD_CLASS( 0x10662170, CExecThrowKnife )
+REGISTER_SAVELOAD_CLASS( 0x23074b41, CExecDropItemFromHand )
 REGISTER_SAVELOAD_CLASS( 0x01122132, CExecMoveInventoryItem )
 REGISTER_SAVELOAD_CLASS( 0x50372121, CExecCollectSnipeAP )
 REGISTER_SAVELOAD_CLASS( 0x50372000, CExecLaunchRocket )
