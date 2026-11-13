@@ -26,7 +26,7 @@ namespace NAI
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CAICombatLogic::CAICombatLogic( IAIUnit *pUnit, IAIChoosePlaceJob *_pChoosePlace ):
 	CAILogic( pUnit ), CAIJob( 0 ), pChoosePlace( _pChoosePlace ), prepareState( PS_FINISHED ), nUnitLastAP( 0 ),
-	regOnNewTurn( this, &CAICombatLogic::OnNewTurn )   // subscribe OnNewTurn to the new-player-turn event
+	regOnPassControl( this, &CAICombatLogic::OnPassControl )
 {
 	pLog = CreateAILog();
 }
@@ -234,13 +234,8 @@ bool CAICombatLogic::IsEndOfTurn()
 		return false;
 	return true;
 }
-// @0x00432820 -- the CEventOnNewPlayerTurn handler (registered via regOnNewTurn; retail's CEventOnPassControl
-// handler). On each new player turn: StopThinking(); and when control is OUR player's, forget the AP snapshot so
-// the fresh turn re-thinks. Fires ALONGSIDE CAIAfterCombatLogic's own OnNewTurn on the single event -- disjoint
-// state (base here: prepareState/nUnitLastAP via StopThinking; derived: bAPUpdated). Replaces the fabricated
-// no-arg override (retail's slot-12 PauseInner() is empty; the dropped prepareState=PS_FINISHED is subsumed by
-// StopThinking()).
-void CAICombatLogic::OnNewTurn( const NWorld::CEventOnNewPlayerTurn &event )
+// Retail 0x4331b0: both full turns and interrupts invalidate the current plan.
+void CAICombatLogic::OnPassControl( const NWorld::CEventOnPassControl &event )
 {
 	StopThinking();
 	NWorld::CUnitServer *pUS = GetUnitServer();
