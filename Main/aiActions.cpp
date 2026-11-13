@@ -460,8 +460,8 @@ void CAIHealAction::GetInfoInner( const SPlaceWithAP &place, SInfo *pInfo ) cons
 	pInfo->pFirstAid = pUnit->GetAIInventory()->GetBestFirstAid();
 	if ( !IsValid( pInfo->pFirstAid ) )
 		return;
-	// only heal when badly hurt: currentHP <= 30% of max (release @0x00451ae0).
-	if ( (float)pUnit->GetHP() > pUnit->GetMaxHP() * 0.3f )
+	// Retail 0x45204b: include bandaged VP from the live mission, not the AI snapshot.
+	if ( (float)pUnit->GetUnitMission()->GetTotalVP() > pUnit->GetMaxHP() * 0.3f )
 		return;
 	// not while the current enemy is close (release: bail if the enemy is within ~4 units).
 	CPtr<IAIUnit> pEnemy = GetEnemy();
