@@ -74,7 +74,6 @@ void CAIJobManager::Add( IAIJob *pAIJob )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CAIJobManager::RemoveDependences( IAIJob *pAIJob )
 {
-	ASSERT( IsValid( pAIJob ) );
 	Dependences.erase( pAIJob );
 	//
 	for ( DependencesHash::iterator i = Dependences.begin(); i != Dependences.end(); ++i )
@@ -111,11 +110,12 @@ void CAIJobManager::Refresh()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CAIJobManager::RemoveDelayed( IAIJob *pAIJob )
 {
-	ASSERT( IsValid( pAIJob ) );
+	if ( find( jobsToRemove.begin(), jobsToRemove.end(), pAIJob ) != jobsToRemove.end() )
+		return;
 	if ( find( jobs.begin(), jobs.end(), pAIJob ) != jobs.end() )
 	{
 		jobsToRemove.push_back( pAIJob );
-		if ( pAIJob->IsHighestPriority() )
+		if ( IsValid( pAIJob ) && pAIJob->IsHighestPriority() )
 		{
 			--nHighestPriJobs;
 			ASSERT( nHighestPriJobs >= 0 );
@@ -123,7 +123,7 @@ void CAIJobManager::RemoveDelayed( IAIJob *pAIJob )
 	}
 	//
 	for ( vector< CPtr<IAIJob> >::iterator i = jobs.begin(); i != jobs.end(); ++i )
-		if ( (*i)->GetParentJob() == pAIJob )
+		if ( pAIJob && IsValid( *i ) && (*i)->GetParentJob() == pAIJob )
 			RemoveDelayed( *i );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -143,7 +143,7 @@ bool CAIJobManager::CanSkip()
 	for ( int k = 0; k < jobs.size(); ++k )
 	{
 		CPtr<IAIJob> &pAIJob = jobs[k];
-		if ( !pAIJob->IsIdleJob() && !IsWaiting( pAIJob ) )
+		if ( !IsValid( pAIJob ) || ( !pAIJob->IsIdleJob() && !IsWaiting( pAIJob ) ) )
 			return false;
 	}
 	//
@@ -195,10 +195,14 @@ void CAIJobManager::Segment()
 		tTmpTime = tTime;
 		//
 		CPtr<IAIJob> pAIJob = jobs[nCurrentJob];
-		if ( !pAIJob->IsJobFinished() && !pAIJob->IsIdleJob() && !IsWaiting( pAIJob ) )
+		if ( !IsValid( pAIJob ) )
+			RemoveDelayed( pAIJob );
+		else if ( find( jobsToRemove.begin(), jobsToRemove.end(), pAIJob ) == jobsToRemove.end() )
 		{
-			pAIJob->DoJob();
-			if ( pAIJob->IsJobFinished() )
+			if ( !pAIJob->IsJobFinished() && !pAIJob->IsIdleJob() && !IsWaiting( pAIJob ) )
+				pAIJob->DoJob();
+			// Completion can happen through another job, including while this job is idle.
+			if ( IsValid( pAIJob ) && !IsWaiting( pAIJob ) && pAIJob->IsJobFinished() )
 			{
 				pAIJob->OnJobFinished();
 				RemoveDelayed( pAIJob );
@@ -212,7 +216,7 @@ void CAIJobManager::Segment()
 	//
 	tTmpTime = tTime;
 	fOverrunTime += NHPTimer::GetTimePassed( &tTmpTime ) - fTime;
-	fOverrunTime = Min( fOverrunTime, F_AI_MAX_OVERRUN_TIME );
+	fOverrunTime = Max( Min( fOverrunTime, F_AI_MAX_OVERRUN_TIME ), -0.01f );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 IAIJobManager *CreateAIJobManager()
