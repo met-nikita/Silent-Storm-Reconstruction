@@ -225,7 +225,7 @@ public:
 	virtual bool IsDead() const;
 	virtual NDb::EWeaponType GetWeaponType() const;
 	virtual NDb::CAnimWeaponType* GetDBAnimWeapon() const;
-	virtual int  GetActionAP( NAI::EPose pose, EAction action ) const;
+	virtual int  GetActionAP( NAI::EPose pose, EAction action, IInventoryItem *pItem = 0 ) const;
 	virtual int GetAP() const;
 	virtual bool CanSpendAP( int nAP ) const;
 	virtual void SpendAP( int nAP );
@@ -665,7 +665,7 @@ static int GetBaseActionAP( int nRecordID )
 	return pAP ? pAP->nAP : 0;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-int CUnitMission::GetActionAP( NAI::EPose curPose, EAction action ) const
+int CUnitMission::GetActionAP( NAI::EPose curPose, EAction action, IInventoryItem *pItem ) const
 {
 	// ORIGINAL RETAIL BUG FIXED: paid costs have a 1-AP floor AFTER skill and
 	// perk reductions, so UI/AI planning and execution agree. Explicitly free
@@ -680,7 +680,8 @@ int CUnitMission::GetActionAP( NAI::EPose curPose, EAction action ) const
 			// Retail v1.2 0x6c0f81..0x6c1010: base preparation depends on the
 			// weapon type. Its original zero-parameter perk bug is corrected below.
 			int nAP = 0;
-			CWeaponItem *pWeapon = pRPGUnit->GetWeaponItem();
+			// The AI evaluates inventory candidates before equipping them.
+			CWeaponItem *pWeapon = pItem ? CDynamicCast<CWeaponItem>( pItem ).GetPtr() : pRPGUnit->GetWeaponItem();
 			if ( IsValid( pWeapon ) )
 				nAP = pWeapon->GetDBWeapon()->pWeaponType->nPrepareCost;
 			if ( nAP <= 0 )

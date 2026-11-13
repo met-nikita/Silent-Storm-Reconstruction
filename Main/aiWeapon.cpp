@@ -191,10 +191,10 @@ int CAIFireArmsWeapon::GetMinAPToShoot( int nUnitAP ) const
 	//
 	nRes = GetShotAP();
 	NAI::EPose pose = pOwner->GetUnitPosition().GetPose();
-	nRes += pOwner->GetUnitMission()->GetActionAP( pose, NRPG::AC_PREPARE );
+	nRes += pOwner->GetUnitMission()->GetActionAP( pose, NRPG::AC_PREPARE, GetInventoryItem() );
 	//
 	if ( pWeaponItem->GetShootMode() == NDb::SM_Careful )
-		nRes = max( nUnitAP, GetShotAP() );
+		nRes = max( nUnitAP, nRes );
 	//
 	return nRes;
 }
@@ -330,23 +330,25 @@ void CAIFireArmsWeapon::GetShotParameters( const NAI::SUnitPosition &pos, IAIUni
 		nAmmoInClip = GetNextClip()->GetAmmoCount();
 		*bNeedReload = true;
 	}
-	*nAmmo = min( nAmmoInClip, GetAmmoCountPerShot( nAvailableAP - *nAP ) );
+	int nAmmoToShoot = min( nAmmoInClip, GetAmmoCountPerShot( nAvailableAP - *nAP ) );
 	//
 	int nBulletDamage = GetMeanDamage();
 	int nExtraAP = 0;
 	if ( pWeaponItem->GetShootMode() == NDb::SM_Careful )
 		nExtraAP = nAvailableAP - GetShotAP()- *nAP;
 	//
-	for ( int n = 0; n < *nAmmo; ++n )
+	for ( int n = 0; n < nAmmoToShoot; ++n )
 	{
-		if ( n == 0 )
-			*nAP += GetMinAPToShoot( nAvailableAP - *nAP );
-		else
-			*nAP += GetBurstAP();
+		int nCost = n == 0 ? GetMinAPToShoot( nAvailableAP - *nAP ) : GetBurstAP();
+		// Retail 0x4b663c: a burst may end early when only part of it is affordable.
+		if ( nAvailableAP < *nAP + nCost )
+			break;
+		*nAP += nCost;
+		++*nAmmo;
 		//
 		CPtr<NRPG::CAIUnitToHitCalcer> pToHit = new NRPG::CAIUnitToHitCalcer( pOwner, 
 			pos, pTarget, nHitCover, NAI::HL_ANY, n, GetItem(), nExtraAP );
-		*nDamage += pToHit->GetToHit() / 100.f * nBulletDamage;
+		*nDamage += float( pToHit->GetToHit() ) * nBulletDamage * 0.01f;
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -361,7 +363,7 @@ int CAIFireArmsWeapon::GetDamage( const NAI::SUnitPosition &pos, IAIUnit *pTarge
 	//
 	int nExtraAP = 0;
 	if ( eShootMode == NDb::SM_Careful )
-		nExtraAP = max( 0, nAP - GetShotAP() );
+		nExtraAP = max( 0, nAP - GetMinAPToShoot( 0 ) );
 	//
 	// ‼️ RETAIL AFFORDABILITY GATE (disasm-proven @0xb5fd0, 2026-07-10): the out to-hit is ZEROED at entry
 	// and accumulated (max) ONLY inside the per-bullet loop, which is bounded by GetAmmoCountPerAP(nAP) --
@@ -378,7 +380,7 @@ int CAIFireArmsWeapon::GetDamage( const NAI::SUnitPosition &pos, IAIUnit *pTarge
 			pos, pTarget, nHitCover, NAI::HL_ANY, n % GetAmmoCountPerShot( nAP ), GetItem(), nExtraAP );
 		const int nToHit = pToHit->GetToHit();
 		*nMaxToHit = max( *nMaxToHit, nToHit );
-		nRes += nToHit / 100.f * nDamage;
+		nRes += float( nToHit ) * nDamage * 0.01f;
 	}
 	pWeaponItem->SetShootMode( eTmpShootMode );
 	return nRes;
