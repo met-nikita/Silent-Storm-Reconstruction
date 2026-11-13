@@ -691,7 +691,7 @@ void CAIWearPKAction::GetInfoInner( const SPlaceWithAP &place, SInfo *pInfo ) co
 		bool bEmpty = pS->IsEmptyPK();
 		if ( bEmpty && pS->IsAddedToVisitor() && WearPK_SuitHP( pS ) != 0 )
 		{
-			cands.push_back( pS );
+			cands.insert( cands.begin(), pS );
 			continue;
 		}
 		if ( !bEmpty && IsValid( pS->GetWearingDBPK() ) && !pS->CanFight() )
@@ -707,7 +707,7 @@ void CAIWearPKAction::GetInfoInner( const SPlaceWithAP &place, SInfo *pInfo ) co
 	for ( int i = 0; i < (int)cands.size(); ++i )
 	{
 		CObj<NWorld::CCmd> cmd = new NWorld::CCmdTakeCorpse( (NWorld::CUnit*)cands[i] );
-		if ( WearPK_SuitHP( cands[i] ) > 0 && pUS->CanDo( cmd.GetPtr() ) == NWorld::UCR_OK )
+		if ( cands[i]->GetUnitRPG()->GetTotalVP() > 0 && pUS->CanDo( cmd.GetPtr() ) == NWorld::UCR_OK )
 		{
 			pInfo->bCanDo = true;
 			pInfo->pPK = cands[i];
@@ -756,7 +756,8 @@ void CAITerrorPKAction::GetInfoInner( const SPlaceWithAP &place, SInfo *pInfo ) 
 	NWorld::CUnitServer *pPK = pUS->GetWearingPK();
 	if ( !IsValid( pPK ) )
 		return;
-	if ( !IsValid( pUS->GetWearingDBPK() ) )           // the binary re-checks the worn record here
+	// Retail 0x4aa8d1: only suits with a self-destruct charge can use this action.
+	if ( !IsValid( pUS->GetWearingDBPK()->pSelfExplosion ) )
 		return;
 	// the rampage is a DESPERATION move: only once the suit is hurt to <= 25% of its max HP.
 	NRPG::IUnitMissionInfo *pRPG = pPK->GetRPG();
