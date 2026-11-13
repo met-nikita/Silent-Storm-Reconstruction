@@ -414,7 +414,7 @@ CAIDefenceLogic::CAIDefenceLogic( IAIUnit *pUnit, const SPathPlace &_attackPlace
 	CAICombatLogic( pUnit, CreateAIChoosePlaceForAttackJob( 0, nArg ) ), attackPlace( _attackPlace )
 {
 	IAIUnit *u = GetUnit();
-	currentPlaceSource = AddPlaceSource( CreateOnePlacePlaceSource( u, attackPlace, false ) );
+	currentPlaceSource = AddPlaceSource( CreateOnePlacePlaceSource( u, attackPlace, true ) );
 	pShoot        = AddAction( new CAIShootAction( u ),        currentPlaceSource );
 	pThrowGrenade = AddAction( new CAIThrowGrenadeAction( u ), currentPlaceSource );
 	pLaunchRocket = AddAction( new CAILaunchRocketAction( u ), currentPlaceSource );

@@ -15,6 +15,7 @@
 #include "wMain.h"             // NWorld::CWorld::GetPathNetwork / GetGame
 #include "wMainPath.h"         // NWorld::FindPath
 #include "aiPath.h"            // NAI::CPath, NAI::PF_DEFAULT
+#include "RPGUnitMission.h"
 #include "RPGGame.h"           // NRPG::IGame::CheckPositionVisibility (the retail 4-arg overload)
 #include "RPGUnit.h"           // NRPG::CUnit::GetSightFOV (@0x2ba6c0) for the retail sight cone
 //
@@ -249,23 +250,22 @@ CAIDefenceReaction::CAIDefenceReaction( IAIUnit *pUnit, CAIReaction *pPrevReacti
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// the pop-out's poor-AP arm: strafe to cover, then clamp the AP pool to what remains after getting there
-// (never below 0). The AP-pool restore is the release's IUnitMission AP setter -> dev IAIUnit::SetAP.
+// Retail spends surplus live AP now, leaving only the cost of returning to cover.
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CAIDefenceReaction::StrafeToCover( IAIUnit *pU, int nAP )
 {
 	int nCost = GetAPForMove( pU, pU->GetUnitPosition().pos.p, coveredPos.pos.p, CROUCH );
 	SetLogic( CreateAIStrafeToPositionLogic( pU, coveredPos.pos, CROUCH, CROUCH ) );
 	int nLeft = nAP - nCost;
-	pU->SetAP( nLeft < 0 ? 0 : nLeft, pU->GetMaxAP() );
+	pU->GetUnitMission()->SpendAP( nLeft < 0 ? 0 : nLeft );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // @0x3b160. The plan no longer works and there is a previous reaction -> reinstall it. Otherwise run the
 // cover dance on the AP budget:
-//   at the cover  -> (low AP: keep the pool) strafe to the attack spot;
+//   at the cover  -> (low AP: end the turn) strafe to the attack spot;
 //   at the attack -> with fresh AP above the pop-out price install the defence logic, else duck back;
 //   en route rich -> strafe to the attack spot (> 2x the price);
-//   en route poor -> strafe to cover, clamping the pool to what remains.
+//   en route poor -> strafe to cover, reserving only the travel cost.
 //
 // The release brackets the dance with DisableShootMode/EnableShootMode on SM_Careful/SM_LongBurst
 // (IAIUnit vtbl 0x7c/0x80, now ported on CAIUnit): disabled while the dance runs, re-enabled on the
@@ -291,7 +291,7 @@ void CAIDefenceReaction::Update()
 	// suppress the slow/expensive modes while the cover dance runs
 	pU->DisableShootMode( NDb::SM_Careful );
 	pU->DisableShootMode( NDb::SM_LongBurst );
-	int nAP = pU->GetAP();
+	int nAP = pU->GetUnitServer()->GetAP();
 	SUnitPosition own = pU->GetUnitPosition();
 	bool bAtCover = GetAPForMove( pU, own.pos.p, coveredPos.pos.p, own.GetPose() ) == 0;
 	own = pU->GetUnitPosition();
@@ -299,7 +299,7 @@ void CAIDefenceReaction::Update()
 	if ( bAtCover )
 	{
 		if ( nAP < 2 * nAPForTakeCover )
-			pU->SetAP( nAP, pU->GetMaxAP() );
+			pU->GetUnitMission()->SpendAP( nAP );
 		IAILogic *pStrafe = CreateAIStrafeToPositionLogic( pU, attackPos.pos, CROUCH, CROUCH );
 		SetLogic( pStrafe );
 	}

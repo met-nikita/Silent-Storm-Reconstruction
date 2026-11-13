@@ -647,7 +647,7 @@ void CAIOnePlacePlaceSource::Prepare()                                  // @0x00
 	if ( !bCrouch )
 		AddAllPoses( place, nMoveAP, 0xffff, true );                 // stand: both poses at the spot
 	else
-		AddPlace( place, GetUnit()->GetMaxAP() - nMoveAP );          // crouch: the single held place
+		AddPlace( place, GetUnit()->GetUnitServer()->GetAP() - nMoveAP );          // crouch: the single held place
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // operator& for the subclasses (parent chunk + own members)
