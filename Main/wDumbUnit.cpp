@@ -13,6 +13,7 @@
 #include "..\misc\RandomGen.h"
 #include "GAnimation.h"
 #include "InventoryUnit.h"
+#include "LSHead.h"
 #include "wMisc.h"
 #include "wObject.h"
 #include "wAckBase.h"
@@ -482,9 +483,15 @@ void CDumbUnitServer::DropItems( bool bDropHands, bool bDropCap, bool bDropBackP
 	// drop the uniform cap
 	if ( bDropCap )
 	{
+		// Retail 0x750a10: drop the same cap variant used by the living model.
 		NDb::CRPGUniform *pDBUniform = pInventoryInfo->GetUniform();
-		SRand rnd;
-		if ( pDBUniform && pDBUniform->pCapModel )
+		NDb::CPanzerklein *pPK = GetWearingDBPK();
+		if ( IsValid( pPK ) )
+			pDBUniform = pPK->pPers->pUniform;
+		NRPG::CUnit *pRPGUnit = pRPG->GetRPGUnit();
+		bool bHair = pRPGUnit && IsValid( pRPGUnit->pHeadInfo ) && IsValid( pRPGUnit->pHeadInfo->GetHair() );
+		SRand rnd( pRPG->GetBindPlacesSeed() );
+		if ( pDBUniform && pDBUniform->pCapModel && !bHair )
 		{
 			GetBonePos( &item.ptCenter, &item.q, GetBoneName( UIT_CAP, 0, IsWearingPK() ) );
 			item.pModel = pDBUniform->pCapModel->CreateModel(&rnd);
