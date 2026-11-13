@@ -3,6 +3,7 @@
 #include "..\DBFormat\DataRPG.h"
 #include "aiPosition.h"
 #include "aiMap.h"
+#include "aiGrid.h"
 #include "aiMisc.h"
 #include "aiUnit.h"
 #include "aiState.h"
@@ -843,16 +844,16 @@ void CAILeavePKAction::Do( CAILog *pLog ) const   // @0x0048d820
 		*pLog << new CAILogLeavePK( GetUnit() );
 }
 //
-// BeginSnipe prefers a crouched place, then more AP (@0x004a4120); the others prefer more AP.
+// BeginSnipe prefers crouching; existing sniping actions keep the current tile and pose.
 bool CAIBeginSnipeAction::ComparePlaces( const SPlaceWithAP &p1, const SPlaceWithAP &p2 ) const
 {
 	if ( p1.place.GetPose() == CROUCH && p2.place.GetPose() != CROUCH )
 		return true;
 	return p2.nUnitAP < p1.nUnitAP;
 }
-bool CAICollectSnipeAPAction::ComparePlaces( const SPlaceWithAP &p1, const SPlaceWithAP &p2 ) const { return p2.nUnitAP < p1.nUnitAP; }
-bool CAISnipeShotAction::ComparePlaces( const SPlaceWithAP &p1, const SPlaceWithAP &p2 ) const { return p2.nUnitAP < p1.nUnitAP; }
-bool CAICancelSnipeAction::ComparePlaces( const SPlaceWithAP &p1, const SPlaceWithAP &p2 ) const { return p2.nUnitAP < p1.nUnitAP; }
+bool CAICollectSnipeAPAction::ComparePlaces( const SPlaceWithAP &p1, const SPlaceWithAP &p2 ) const { return IsSamePlace( GetUnit()->GetPosition().p, p1.place.pos.p, 0xc1feffff ); }
+bool CAISnipeShotAction::ComparePlaces( const SPlaceWithAP &p1, const SPlaceWithAP &p2 ) const { return IsSamePlace( GetUnit()->GetPosition().p, p1.place.pos.p, 0xc1feffff ); }
+bool CAICancelSnipeAction::ComparePlaces( const SPlaceWithAP &p1, const SPlaceWithAP &p2 ) const { return IsSamePlace( GetUnit()->GetPosition().p, p1.place.pos.p, 0xc1feffff ); }
 bool CAIDockWithHGAction::ComparePlaces( const SPlaceWithAP &p1, const SPlaceWithAP &p2 ) const { return p2.nUnitAP < p1.nUnitAP; }
 bool CAIUndockFromHGAction::ComparePlaces( const SPlaceWithAP &p1, const SPlaceWithAP &p2 ) const { return p2.nUnitAP < p1.nUnitAP; }
 bool CAIShootFromHGAction::ComparePlaces( const SPlaceWithAP &p1, const SPlaceWithAP &p2 ) const { return p2.nUnitAP < p1.nUnitAP; }
