@@ -547,6 +547,11 @@ static void Apply( const EDepthMode &depth )
 			ApplyRenderState( D3DRS_ZWRITEENABLE, FALSE );
 			ApplyRenderState( D3DRS_ZFUNC, D3DCMP_ALWAYS );
 			break;
+		case DEPTH_ALWAYS_TESTONLY:
+			ApplyRenderState( D3DRS_ZENABLE, TRUE );
+			ApplyRenderState( D3DRS_ZWRITEENABLE, FALSE );
+			ApplyRenderState( D3DRS_ZFUNC, D3DCMP_ALWAYS );
+			break;
 		case DEPTH_NORMAL:
 			ApplyRenderState( D3DRS_ZENABLE, TRUE );
 			ApplyRenderState( D3DRS_ZWRITEENABLE, TRUE );

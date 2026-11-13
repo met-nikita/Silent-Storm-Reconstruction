@@ -1700,7 +1700,9 @@ void CGScene::DrawSelection( CTransformStack *pTS, NGfx::CRenderContext *pRC, co
 		rc.SetCulling( NGfx::CULL_CW );
 		rc.SetAlphaCombine( NGfx::COMBINE_ZERO_ONE );
 		rc.SetColorWrite( NGfx::COLORWRITE_NONE );
-		rc.SetDepth( NGfx::DEPTH_NONE );
+		// Keep depth testing active for reliable stencil writes. ALWAYS preserves
+		// the full silhouette mask without changing the scene depth buffer.
+		rc.SetDepth( NGfx::DEPTH_ALWAYS_TESTONLY );
 		// Retail v1.2 0x56107a: selection has its own stencil marker. Lighting
 		// passes can leave nonzero values, so zero is not a reliable background test.
 		rc.SetStencil( NGfx::STENCIL_WRITE, N_SELECTION_STENCIL );
