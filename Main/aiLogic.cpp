@@ -47,9 +47,19 @@ bool CAILogic::IsFinished()
 }
 bool CAILogic::HasCommands() const                   { return !commands.empty(); }
 void CAILogic::ClearCommands()                       { commands.clear(); }
-void CAILogic::Pause()                               { ++nPause; }
-void CAILogic::Resume()                              { if ( nPause > 0 ) --nPause; }
-bool CAILogic::IsActive() const                      { return nPause == 0; }
+void CAILogic::Pause()
+{
+	if ( IsActive() )
+		PauseInner();
+	--nPause;
+}
+void CAILogic::Resume()
+{
+	nPause = Min( nPause + 1, 0 );
+	if ( IsActive() )
+		ResumeInner();
+}
+bool CAILogic::IsActive() const                      { return nPause >= 0; }
 bool CAILogic::IsNeedToThink()                       { return false; }
 void CAILogic::Think()                               {}
 bool CAILogic::IsThinking()                          { return false; }
@@ -99,16 +109,19 @@ void CAILogic::DoCommand( NWorld::CCommand *pCmd )
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // True if the unit is in a state where it can accept the next command this segment. @0x00462550
-bool CAILogic::CanGetCommand() const
+bool CAILogic::CanGetCommand()
 {
-	if ( !IsValid( pUnit ) || nPause > 0 )
+	CPtr<NWorld::CWorld> pWorld = CDynamicCast<NWorld::CWorld>( GetWorld() );
+	if ( !IsValid( pWorld ) || IsFinished() || !IsActive() )
 		return false;
-	NWorld::CUnitServer *pUS = pUnit->GetUnitServer();
-	if ( !IsValid( pUS ) )
+	if ( pWorld->IsTurnBased() && IsEndOfTurn() )
 		return false;
-	// not while the unit is still performing an action / animating
-	return !pUS->IsPerformingAction();
+	NWorld::CUnitServer *pUS = GetUnitServer();
+	return IsValid( pUS ) && pUS->CanFight() && pWorld->IsUnitActive( pUS ) &&
+		!pUS->IsPerformingAction() &&
+		!( pWorld->IsTurnBased() && pUS->HasCommand() && !pUS->HasEnoughAP() );
 }
+
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // Pop the next world command (the commander consumes NWorld::CCommand - CCmdSetCommand wrappers the
 // AI log records emit; the unit-level NWorld::CCmd is the wrapped payload). @0x00462c70
@@ -218,6 +231,9 @@ bool CAILogic::IsEndOfTurn()
 int CAILogic::operator&( CStructureSaver &f )         // @0x00418350 / 0x00433820
 {
 	f.Add( 2, &nPause );
+	// Older dev saves used the opposite sign; normalize them to the retail wire convention.
+	if ( f.IsReading() && nPause > 0 )
+		nPause = -nPause;
 	f.Add( 3, &pUnit );
 	f.Add( 4, &commands );
 	f.Add( 5, &bFinished );

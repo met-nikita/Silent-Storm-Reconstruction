@@ -261,11 +261,10 @@ bool CAIRouteLogic::IsEndOfTurn()
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // @0x98d10 (PauseInner): pausing rewinds to the nearest preceding Goto step and marks the logic to
-// continue it on resume (so an interrupted route re-walks the leg). Chains the base pause (nPause++).
+// continue it on resume (so an interrupted route re-walks the leg). Runs only on the active-to-paused transition.
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-void CAIRouteLogic::Pause()
+void CAIRouteLogic::PauseInner()
 {
-	CAILogic::Pause();
 	int j = nCurrentCommand;
 	while ( j >= 0 && j < (int)routeCommands.size() )
 	{

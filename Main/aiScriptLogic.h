@@ -49,7 +49,7 @@ public:
 	CAIScriptLogic();
 	CAIScriptLogic( IAIUnit *pUnit );
 	//
-	// the two NGlobal event handlers (NOT the base no-arg OnNewTurn()/OnSegment() vtable slots -- declaring
+	// the two NGlobal event handlers (NOT the base no-arg PauseInner()/ResumeInner() vtable slots -- declaring
 	// these const& overloads hides the inherited no-arg names so &CAIScriptLogic::OnNewTurn is unambiguous,
 	// matching CAIAfterCombatLogic; the base no-op virtuals still fill the vtable slots).
 	void OnNewTurn( const NWorld::CEventOnNewPlayerTurn &event );   // @0xa30e0: bEndOfTurn = false

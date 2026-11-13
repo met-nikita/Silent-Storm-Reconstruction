@@ -123,8 +123,8 @@ public:
 	virtual void StopThinking();
 	virtual bool IsFinished();
 	virtual bool IsEndOfTurn();
-	// CAICombatLogic does NOT override the no-arg virtual slot-12 OnNewTurn() (retail's slot-12 is empty) -- it
-	// inherits CAILogic::OnNewTurn(){}. The per-turn reset is the EVENT handler below, fired via regOnNewTurn.
+	// CAICombatLogic does NOT override the no-arg virtual slot-12 PauseInner() (retail's slot-12 is empty) -- it
+	// inherits CAILogic::PauseInner(){}. The per-turn reset is the EVENT handler below, fired via regOnNewTurn.
 	void OnNewTurn( const NWorld::CEventOnNewPlayerTurn &event );   // @0x00432820 (retail CEventOnPassControl handler)
 	//
 	virtual void MakeDecision() = 0;            // per-logic action/rule set
@@ -278,9 +278,9 @@ public:
 	// ctor is the save/load registry's create path (ConstructAfterCombatLogic @0x14050 also registers).
 	CAIAfterCombatLogic(): regOnNewTurn( this, &CAIAfterCombatLogic::OnNewTurn ), bAPUpdated( false ), bLoot( false ) {}
 	CAIAfterCombatLogic( IAIUnit *pUnit, bool bLoot );
-	// the event handler @0x14000 (NOT the base virtual OnNewTurn() -- the release does not override that one;
+	// the event handler @0x14000 (NOT the base virtual PauseInner() -- the release does not override that one;
 	// declaring only this overload hides the inherited no-arg name so &CAIAfterCombatLogic::OnNewTurn is
-	// unambiguous, while the inherited CAICombatLogic::OnNewTurn() still fills vtable slot 12).
+	// unambiguous, while the inherited CAICombatLogic::PauseInner() still fills vtable slot 12).
 	void OnNewTurn( const NWorld::CEventOnNewPlayerTurn &event );
 	virtual void MakeDecision();                // @0x00414440
 	virtual bool CanSkip() const;

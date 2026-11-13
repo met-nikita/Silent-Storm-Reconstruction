@@ -45,7 +45,7 @@ public:
 	// CAILogic overrides
 	virtual void GenerateCommand();   // @0x9a170 -- advance the route + queue the next wrapped command
 	virtual bool IsEndOfTurn();       // @0x98c50
-	virtual void Pause();             // @0x98d10 (PauseInner) -- rewind to the last Goto so resume re-walks it
+	virtual void PauseInner();             // @0x98d10 (PauseInner) -- rewind to the last Goto so resume re-walks it
 private:
 	bool IsCommandInRange() const { return nCurrentCommand > -1 && nCurrentCommand < (int)routeCommands.size(); }
 	bool IsCurrentCommandFinished();  // @0x98f80

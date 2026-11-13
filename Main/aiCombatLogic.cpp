@@ -238,7 +238,7 @@ bool CAICombatLogic::IsEndOfTurn()
 // handler). On each new player turn: StopThinking(); and when control is OUR player's, forget the AP snapshot so
 // the fresh turn re-thinks. Fires ALONGSIDE CAIAfterCombatLogic's own OnNewTurn on the single event -- disjoint
 // state (base here: prepareState/nUnitLastAP via StopThinking; derived: bAPUpdated). Replaces the fabricated
-// no-arg override (retail's slot-12 OnNewTurn() is empty; the dropped prepareState=PS_FINISHED is subsumed by
+// no-arg override (retail's slot-12 PauseInner() is empty; the dropped prepareState=PS_FINISHED is subsumed by
 // StopThinking()).
 void CAICombatLogic::OnNewTurn( const NWorld::CEventOnNewPlayerTurn &event )
 {

@@ -57,8 +57,8 @@ public:
 	virtual bool IsActive() const = 0;                        // slot9
 	virtual bool GetPointOfInterest( CVec3 *pOut ) const = 0;  // slot10
 	virtual void GenerateCommand() = 0;                        // slot11
-	virtual void OnNewTurn() = 0;                              // slot12
-	virtual void OnSegment() = 0;                              // slot13
+	virtual void PauseInner() = 0;                              // slot12
+	virtual void ResumeInner() = 0;                              // slot13
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CAILogic - base command-driven logic. Members authoritative (decompile).
@@ -90,14 +90,14 @@ public:
 	virtual bool IsActive() const;
 	virtual bool GetPointOfInterest( CVec3 *pOut ) const;
 	virtual void GenerateCommand();          // base: no-op
-	virtual void OnNewTurn() {}              // base: no-op
-	virtual void OnSegment() {}              // base: no-op
+	virtual void PauseInner() {}              // base: no-op
+	virtual void ResumeInner() {}              // base: no-op
 	//
 	void Finish();
 	bool HasCommands() const;
 	void ClearCommands();
 	void DoCommand( NWorld::CCommand *pCmd );
-	bool CanGetCommand() const;
+	bool CanGetCommand();
 	void CheckCycling();
 	//
 	IAIUnit*             GetUnit() const;
