@@ -463,9 +463,13 @@ bool GetRoundUpPlaces( NWorld::CUnitServer *pServer, const SUnitPosition &enemyP
 				continue;
 			if ( pServer->GetDiplomacyState( pOther ) != NDb::DS_ALLY )
 				continue;
-			// ELIDED control-point vector (+0x14c posComp CP[0] has no dev accessor) -> the unit centre
-			// approximates CP[0] (sub-metre; only feeds the 4m friend-avoidance IsNear below).
-			points.push_back( pOther->GetPosition().GetCenter() );
+			// Retail 0x4a18cf: US+0xf0 is animator.pCarrier. Carried bodies
+			// are not ground obstacles; grounded bodies use their animated hip.
+			if ( IsValid( pOther->animator.GetCorpseCarrier() ) )
+				continue;
+			CVec3 ptBody;
+			pOther->GetRealUnitPosition( &ptBody );
+			points.push_back( ptBody );
 		}
 	}
 	if ( fDist < 8.0f )
