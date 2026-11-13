@@ -215,7 +215,7 @@ bool IsInUnitDir( NWorld::CUnitServer *pUS, const SPathPlace &place )
 	CPtr<IPathNetwork> pNet = pUS->GetWorld()->GetPathNetwork();
 	if ( !IsValid( pNet ) )
 		return false;
-	if ( !pNet->IsValidDestination( place ) )                            // release vtbl+0xb0 point-validity probe
+	if ( !pNet->IsValidPoint( place ) )                            // release vtbl+0xb0 point-validity probe
 		return false;
 	const SUnitPosition &uPos = pUS->GetPosition();
 	const int   nDir   = (int)pNet->GetClosestDir( uPos.pos.p, place );  // EDirection 0..7 (src=unit, dst=place)
@@ -253,7 +253,7 @@ bool CAIActionPlaceSource::AddAllPoses( const SPathPlace &p, int nMoveAP, int nM
 	CPtr<NWorld::CUnitServer> pUS  = pUnit->GetUnitServer();
 	CPtr<IPathNetwork>        pNet = pUS->GetWorld()->GetPathNetwork();
 	CPtr<NRPG::IUnitMission>  pRPG = pUS->GetUnitRPG();
-	if ( !IsValid( pNet ) || !IsValid( pRPG ) )
+	if ( !IsValid( pNet ) || !IsValid( pRPG ) || !pNet->IsValidPoint( p ) )
 		return false;
 	//
 	// @0x0048e5e0 - bArg (bFaceEnemy, passed true at every call site) orients each added place toward the

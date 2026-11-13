@@ -110,11 +110,11 @@ bool CanUseDefenceReactionInner( IAIUnit *pUnit, const SUnitPosition &cover, con
 	if ( pNet == 0 )
 		return false;
 	// retail @0x3a4f0 probes the path net's REAL point validity on both places (net vtbl+0xb0 ==
-	// IsValidDestination, two calls in the decomp) -- not just the 0xc0000000 sentinel-bit test. The
-	// sentinel check stays as the cheap pre-filter (IsValidDestination on a sentinel is UB-ish).
+	// IsValidPoint, two calls in the decomp) -- not just the 0xc0000000 sentinel-bit test. The
+	// sentinel check stays as the cheap pre-filter.
 	if ( !IsValidPlace( cover.pos.p ) || !IsValidPlace( attack.pos.p ) )
 		return false;
-	if ( !pNet->IsValidDestination( cover.pos.p ) || !pNet->IsValidDestination( attack.pos.p ) )
+	if ( !pNet->IsValidPoint( cover.pos.p ) || !pNet->IsValidPoint( attack.pos.p ) )
 		return false;
 	// the unit must carry a SHORT arm -- pistol or SMG. Release CanUseDefenceReactionInner @0x3a4f0 gate
 	// @0x43a677: weapon->GetModel()->pAnimWeaponType[+0x6c]->type[+0x38] in {WT_PISTOL=1, WT_SUB_MACHINE_GUN=3}

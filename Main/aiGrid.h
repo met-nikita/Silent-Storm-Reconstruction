@@ -522,6 +522,7 @@ public:
 	virtual void ClearDynamicLocks( CObjectBase *pUnit );
 	virtual void RestoreDynamicLocks( CObjectBase *pUnit );
 	virtual void ChangeDynamicLocks( CObjectBase *pUnit, const vector<SPathPlace> &points );
+	virtual bool IsValidPoint( const SPathPlace &p ) const;
 	virtual bool IsValidDestination( const SPathPlace &p );
 	virtual bool IsPassable( const SPathPlace &p );
 	virtual EPassable GetPassability( const SPathPlace &p );   // @0x42e30 granular sibling; IsPassable == (GetPassability==AIP_YES)

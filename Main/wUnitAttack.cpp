@@ -161,7 +161,7 @@ void GetHumanReachPlaces( CUnitServer *pUS, const CVec3 &ptTarget, vector<NAI::S
 	NAI::SUnitPosition from( pUS->GetPosition() );
 	for ( int k = 0; k < res.size(); ++k )
 	{
-		if ( !pNet->IsNativePassable( res[k] ) )
+		if ( pNet->GetPassability( res[k] ) == NAI::AIP_NOT_PASSABLE )
 			continue;
 		from.pos.p = res[k];
 		if ( IsWithinHumanReach( from.GetCP(), ptTarget, fPlaneDist ) )
@@ -270,7 +270,7 @@ static EUnitCommandResult GetActionValidPlaces( CUnitServer *pUS, CCmdHeal *pCmd
 		if ( dx == 0 || dy == 0 )
 		{
 			place.SetXY( target.GetX() - 2 * dx, target.GetY() - 2 * dy );
-			if ( pNet->IsNativePassable( place ) )
+			if ( pNet->IsValidPoint( place ) )
 				pRes->push_back( place );
 		}
 		else
@@ -279,7 +279,7 @@ static EUnitCommandResult GetActionValidPlaces( CUnitServer *pUS, CCmdHeal *pCmd
 			for ( int i = 0; i < 4; ++i )
 			{
 				place.SetXY( target.GetX() + offsets[i][0], target.GetY() + offsets[i][1] );
-				if ( pNet->IsNativePassable( place ) )
+				if ( pNet->IsValidPoint( place ) )
 					GetDirectedPoints( pNet, place, pTarget->GetPosition().GetCP(), pRes, PM_STAND );
 			}
 		}
@@ -330,7 +330,7 @@ static void GetMinePlaces( const CVec3 &ptTarget, NAI::IPathNetwork *pNet, vecto
 	from.SetNetwork( pNet );
 	for ( int k = 0; k < res.size(); ++k )
 	{
-		if ( !pNet->IsNativePassable( res[k] ) )
+		if ( pNet->GetPassability( res[k] ) == NAI::AIP_NOT_PASSABLE )
 			continue;
 		from.p = res[k];
 		CVec3 vFrom = from.GetCP();

@@ -855,7 +855,7 @@ void CNodesLayer::AddNearPoints( const SSphere &s, vector<SPathPlace> *pRes, boo
 						bool bBetter = ( t2.nPassable & t1.nPassable ) == t1.nPassable;
 						if ( t2.nPassable == t1.nPassable )
 							bBetter = pL->nLayer < nLayer;
-						if ( t2.IsLinkedSame( t1 ) && bBetter )
+						if ( t2.nHeight == t1.nHeight && t2.nDisplacement == t1.nDisplacement && bBetter )
 						{
 							bAdd = false;
 							break;
@@ -2148,6 +2148,15 @@ CObjectBase* CPathNetwork::GetWhoLocksThisPlace( const SPathPlace &p ) const
 	// nobody does? this function must be used only when we know truly that this place is locked, 
 	// because it's expencive
 	return 0; 
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// Retail 0x43ed70: bounds only; callers may evaluate a currently locked tile.
+bool CPathNetwork::IsValidPoint( const SPathPlace &p ) const
+{
+	if ( p.GetLayer() >= layers.size() )
+		return false;
+	const CNodesLayer *pLayer = layers[p.GetLayer()];
+	return pLayer && p.GetX() < pLayer->tiles.GetXSize() && p.GetY() < pLayer->tiles.GetYSize();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 bool CPathNetwork::IsValidDestination( const SPathPlace &p )
