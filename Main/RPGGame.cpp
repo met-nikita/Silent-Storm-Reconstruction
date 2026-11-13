@@ -638,10 +638,12 @@ static bool RealPeekRay( CCoverInfo *pCover, CRay *pRes, float fHit, bool *bIsMi
 			float fK = i->fDeviation;
 			if ( bStickTo_pRes )
 			{
-				fK = pRes->ptDir * i->ptDir;
-				fK *= fK * fK;
+				// Retail 0x6b3fee: preserve z+y+x evaluation and float scaling.
+				float fDot = ( i->ptDir.z * pRes->ptDir.z + i->ptDir.y * pRes->ptDir.y )
+					+ pRes->ptDir.x * i->ptDir.x;
+				fK = ( fDot * fDot ) * fDot;
 				if ( fK < fMaxAngle )
-					fK /= 1000;
+					fK *= 0.001f;
 			}
 			// RealPeekRay @0x2b3f00: on a rolled hit, only PENETRATING rays are eligible. Zero the weight of any
 			// obstacle-blocked (non-penetrating) ray so the roulette can never pick it as the fired trajectory
@@ -677,10 +679,12 @@ static bool RealPeekRay( CCoverInfo *pCover, CRay *pRes, float fHit, bool *bIsMi
 			float fK = sqr( fHit - fabs( float(n) * fStep - fHit ) * i->fDeviation );
 			if ( bStickTo_pRes )
 			{
-				fK = pRes->ptDir * i->ptDir;
-				fK *= fK * fK;
+				// Retail 0x6b4176: preserve z+y+x evaluation and float scaling.
+				float fDot = ( i->ptDir.z * pRes->ptDir.z + i->ptDir.y * pRes->ptDir.y )
+					+ pRes->ptDir.x * i->ptDir.x;
+				fK = ( fDot * fDot ) * fDot;
 				if ( fK < fMaxAngle )
-					fK /= 1000;
+					fK *= 0.001f;
 			}
 			roulette.AddSector(fK);
 		}
