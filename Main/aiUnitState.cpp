@@ -11,7 +11,7 @@
 #include "RPGUnit.h"
 #include "..\DBFormat\DataRPG.h"  // NDb::EShootMode -- BEFORE aiInventory.h (its NDB:: fwd-decl typo)
 #include "..\DBFormat\DataMap.h"  // NDb::DS_ENEMY
-#include "aiInventory.h"   // CAIInventory::GetBestFireArms (the FindMostDangerousEnemy to-hit metric)
+#include "aiInventory.h"   // CAIInventory::GetBestFireArms (enemy threat quality)
 //
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // SAIUnitState - per-unit threat tracker. See aiUnitState.h for the fidelity/scope notes (event-driven
@@ -251,9 +251,8 @@ void SAIUnitState::Update()   // @0x004b1030
 // in-flight attack plan mid-approach -> the AI ran its shoot approach over and over and never fired):
 //  phase 1: the NEAREST CLUSTER -- every valid, fightable enemy whose distance is within +-1.5 units
 //           (@0xb0b10 const 0x3fc00000) of the closest one; a decisively closer enemy resets the cluster.
-//  phase 2: within the cluster, the enemy the unit's own weapons hit BEST (CAIInventory::GetBestFireArms
-//           max to-hit; the first candidate always beats the empty pick). Stable across an approach: the
-//           winner only changes when the cluster membership or the to-hit ordering genuinely changes.
+//  phase 2: rank the enemy's best firearm against this unit, using the enemy's maximum AP and
+//           weapon quality (retail v1.2 0x4b11b0..0x4b123f), not our chance to hit the enemy.
 void SAIUnitState::FindMostDangerousEnemy()
 {
 	vector< CPtr<IAIUnit> > cluster;
@@ -263,7 +262,7 @@ void SAIUnitState::FindMostDangerousEnemy()
 		CVec3 me = pUnit->GetPosition().GetCP();
 		for ( vector< CPtr<IAIUnit> >::iterator i = enemies.data.units.begin(); i != enemies.data.units.end(); ++i )
 		{
-			if ( !IsFightable( *i ) )
+			if ( !IsFightable( *i ) || pUnit->GetDiplomacyState( *i ) != NDb::DS_ENEMY )
 				continue;
 			float d = fabs( (*i)->GetPosition().GetCP() - me );
 			if ( fabs( d - fBest ) >= 1.5f )
@@ -280,18 +279,18 @@ void SAIUnitState::FindMostDangerousEnemy()
 		}
 	}
 	CPtr<IAIUnit> pBest = 0;
-	int nBestHit = 0;
+	int nBestQuality = -1;
 	for ( int k = 0; k < (int)cluster.size(); ++k )
 	{
 		IAIUnit *e = cluster[k].GetPtr();
-		int nToHit = 0, nHitCover = 0, nQuality = 0;
+		int nToHit = 0, nHitCover = 0, nQuality = -0xFFFF;
 		NDb::EShootMode eMode = (NDb::EShootMode)0;
-		CAIInventory *pInv = IsValid( pUnit ) ? pUnit->GetAIInventory() : 0;
+		CAIInventory *pInv = e->GetAIInventory();
 		if ( IsValid( pInv ) && IsValid( e->GetUnitServer() ) )
-			pInv->GetBestFireArms( pUnit->GetUnitPosition(), e, pUnit->GetAP(), &nHitCover, &nQuality, &eMode, &nToHit );
-		if ( nToHit > nBestHit || !IsValid( pBest ) )
+			pInv->GetBestFireArms( e->GetUnitPosition(), pUnit, e->GetMaxAP(), &nHitCover, &nQuality, &eMode, &nToHit );
+		if ( nQuality > nBestQuality || !IsValid( pBest ) )
 		{
-			nBestHit = nToHit;
+			nBestQuality = nQuality;
 			pBest = e;
 		}
 	}
