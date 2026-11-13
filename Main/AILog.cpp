@@ -40,11 +40,22 @@ void CAILogPosition::Commit()
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CAILogPosition::GetCommands( list< CPtr<NWorld::CCommand> > *Commands )
-{ 
-	NWorld::CCmd *pCmd = new NWorld::CCmdWishPose( pose );
-	Commands->push_back( new NWorld::CCmdSetCommand( pAIUnit->GetUnitServer(), pCmd ) );
-	pCmd = new NWorld::CCmdPath( pTargetPosition, NAI::PF_USE_POSE );
-	Commands->push_back( new NWorld::CCmdSetCommand( pAIUnit->GetUnitServer(), pCmd ) );
+{
+	NWorld::CUnitServer *pUS = pAIUnit->GetUnitServer();
+	const bool bPK = pUS->IsWearingPK();
+	NWorld::CCmd *pCmd = new NWorld::CCmdWishPose( bPK && pose >= NAI::WALK ? NAI::WALK : pose );
+	Commands->push_back( new NWorld::CCmdSetCommand( pUS, pCmd ) );
+	if ( bPK )
+	{
+		// Retail 0x45ea80 aligns the suit at its live position before moving.
+		SUnitPosition current = pUS->GetPosition();
+		current.SetPose( pose );
+		Commands->push_back( new NWorld::CCmdSetCommand( pUS,
+			new NWorld::CCmdPath( current.pos, NAI::PF_USE_POSEDIR ) ) );
+	}
+	NWorld::CCmdPath *pPath = new NWorld::CCmdPath( pTargetPosition, NAI::PF_USE_POSEDIR );
+	pPath->bCanFindNotExact = true;
+	Commands->push_back( new NWorld::CCmdSetCommand( pUS, pPath ) );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CAILogShot
@@ -501,6 +512,8 @@ void CAILogChangeShootMode::Commit()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CAILogChangeShootMode::GetCommands( list< CPtr<NWorld::CCommand> > *Commands )
 {
+	if ( !IsValid( pWeaponItem ) || !pWeaponItem->IsShootModeSupported( eNewShootMode ) )
+		return;
 	Commands->push_back( new NWorld::CCmdSetCommand( pAIUnit->GetUnitServer(),
 		new NWorld::CCmdShootMode( eNewShootMode ) ) );
 }
