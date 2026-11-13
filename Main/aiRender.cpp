@@ -255,7 +255,16 @@ void CFastRenderer::RealTraceEntity( const SConvexHull &e )
 			i3 = edges[ t.i2 & 0x7fff ].wFinish;
 		//
 		if ( bPerspective )
-			Raster( projected[i1], projected[i3], projected[i2] );
+		{
+			const SProjectedPoint &v1 = projected[i1], &v2 = projected[i3], &v3 = projected[i2];
+			// Retail v1.2 0x4935ef: signed float-bit depth test; wholly distant
+			// triangles bypass clipping, while near/crossing triangles keep all guard planes.
+			if ( GetBits( &v1.src.z ) >= 0x3f800000 && GetBits( &v2.src.z ) >= 0x3f800000 &&
+				GetBits( &v3.src.z ) >= 0x3f800000 )
+				RasterNoClip( v1.res, v2.res, v3.res );
+			else
+				Raster( v1, v2, v3 );
+		}
 		else
 		{
 			if ( bUseInvertOrder )
