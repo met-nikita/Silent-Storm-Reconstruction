@@ -1,6 +1,7 @@
 #include "StdAfx.h"
 //
 #include "aiUnit.h"
+#include "aiMap.h"
 #include "aiState.h"
 #include "aiUnitState.h"      // SAIUnitState::pEnemy
 #include "aiActionBase.h"      // SPlaceWithAP, CAIAction (new substrate base - phase 3)
@@ -186,13 +187,11 @@ bool CAIActionPlaceSource::IsPassable( IPathNetwork *pNet, const SPathPlace &p )
 	if ( !IsValid( pNet ) )
 		return false;
 	EPassable e = pNet->GetPassability( p );
-	if ( e == AIP_NOT_PASSABLE || e == AIP_CANNOT_LAY )
+	if ( e == AIP_NOT_PASSABLE )
 		return false;
-	// AIP_LOCKED/AIP_DOOR fall through to the ownership test: only a FOREIGN lock rejects.
-	CObjectBase *pLocker = pNet->GetWhoLocksThisPlace( p );
-	if ( pLocker != 0 && pLocker != (CObjectBase *)pUnit->GetUnitServer() )
-		return false;
-	return true;
+	// Retail 0x48e2c0: only a locked tile needs an ownership check.
+	// CANNOT_LAY and DOOR remain candidates for a standing/crouching unit.
+	return e != AIP_LOCKED || pNet->GetWhoLocksThisPlace( p ) == (CObjectBase *)pUnit->GetUnitServer();
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // IsInUnitDir @0x0048e120 - is `place` in the direction the unit at `pUS` is facing? Free helper that the
@@ -310,8 +309,9 @@ bool CAIActionPlaceSource::IsPosDangerousForAllies( const SUnitPosition &pos, CA
 	IAIUnit *pU = GetUnit();
 	IAIUnit *pEnemy = GetEnemy();
 	SAIState *pState = GetAIState();
-	if ( !IsValid( pU ) || !IsValid( pU->GetUnitServer() ) || !IsValid( pState ) ||
-		 !IsValid( pEnemy ) || !IsValid( pEnemy->GetUnitServer() ) || !pEnemy->GetUnitServer()->CanFight() )
+	if ( !IsValid( pEnemy ) || !IsValid( pEnemy->GetUnitServer() ) )
+		return false;
+	if ( !IsValid( pU ) || !IsValid( pU->GetUnitServer() ) || !IsValid( pState ) )
 		return true;
 	if ( !IsValid( pWeapon ) || !IsValid( pWeapon->GetItem() ) )
 		return false;
@@ -544,12 +544,14 @@ void CAINearEnemyPlaceSource::Prepare()                                 // @0x00
 	// restored only on the success path -- the empty-targets / no-path early returns leave it clobbered.
 	NAI::EPose nOldWish = pUS->GetWishPose();
 	pUS->SetWishPose( IsValid( pUS->GetWearingDBPK() ) ? NAI::WALK : NAI::RUN );   // release IsUnitBusy == IsInPK
-	// the enemy's melee ring (places adjacent to the enemy to melee it from). The release read it from the
-	// AIMap GetMeleeAttackPlaces(world, enemy); the in-tree generator is attacker-centred, so it is called
-	// centred on the enemy -- the only deviation is the melee-reach x2, which keys off the enemy's PK status
-	// rather than this unit's (negligible: it differs only when the enemy itself wears a panzerklein).
+	// Retail 0x48f0d2: reach belongs to the attacker, centred on the
+	// target's body collider point (not its path-grid centre).
+	CVec3 ptTarget;
+	IAIMap *pMap = pWorld->GetAIMap();
+	if ( !IsValid( pMap ) || !pMap->GetUnitHLPos( &ptTarget, pMap->GetHull( pEnemyUS ), HL_BODY ) )
+		return;
 	vector<SPathPlace> targets;
-	NWorld::GetMeleeAttackPlaces( pEnemyUS, pEnemyUS->GetPosition().GetCP(), &targets );
+	NWorld::GetMeleeAttackPlaces( pUS, ptTarget, &targets );
 	if ( targets.empty() )
 		return;
 	// path to the ring, ignoring the enemy as an obstacle (else it blocks its own ring).
@@ -561,10 +563,7 @@ void CAINearEnemyPlaceSource::Prepare()                                 // @0x00
 		false, NAI::PF_DEFAULT, false, true, true );
 	if ( !IsValid( pPath ) || pPath->points.empty() )
 		return;
-	CPathAPCalcerLocal calcer( pWorld, pRPG, pU->GetUnitPosition(), false );
-	for ( vector<SPathPlace>::const_iterator i = pPath->points.begin(); i != pPath->points.end(); ++i )
-		calcer.AddPoint( *i );
-	AddPlace( pPath->points.back(), pU->GetAP() - calcer.GetResult() );
+	AddPlace( pPath->points.back(), pU->GetAP() - GetPathAP( pUS, pPath ) );
 	pUS->SetWishPose( nOldWish );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
