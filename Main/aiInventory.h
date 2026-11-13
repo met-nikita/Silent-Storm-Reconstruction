@@ -79,7 +79,7 @@ public:
 	bool IsCurrentItem( IAIInventoryItem *pItem ) const;   // @0x55620
 	//
 	CAIFireArmsWeapon* GetBestFireArms( const NAI::SUnitPosition &pos, IAIUnit *pTarget,
-		int nAP, int *pBestWeaponHitCover, int *pQuality,	NDb::EShootMode *shootMode, int *nMaxToHit ) const;  // @0x560e0
+		int nAP, float *pBestWeaponHitCover, int *pQuality,	NDb::EShootMode *shootMode, int *nMaxToHit ) const;  // @0x560e0
 	CAIGrenadeWeapon* GetBestGrenade( CVec3 ptTarget ) const;      // @0x567b0 (ptTarget unused in retail too)
 	CAIFireArmsWeapon* GetBestRocketLaunchers() const;             // @0x567c0 = GetBestWeaponSimple<CAIRocketLauncherWeapon>
 	CAIMeleeWeapon* GetBestMeleeWeapon() const;                    // @0x563b0 (avg-damage scoring @0x55960)

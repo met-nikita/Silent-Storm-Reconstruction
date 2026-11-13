@@ -369,7 +369,7 @@ CAIFireArmsWeaponBase* CAIInventory::GetSuitableWeapon( CAIFireArmsWeaponClip *p
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // @0x560e0: the to-hit/damage scoring over GetItems<CAIFireArmsWeapon> (rocket launchers excluded).
 CAIFireArmsWeapon* CAIInventory::GetBestFireArms( const NAI::SUnitPosition &pos, IAIUnit *pTarget,
-	int nAP, int *pBestWeaponHitCover, int *pQuality,	NDb::EShootMode *eShootMode, int *nMaxToHit ) const
+	int nAP, float *pBestWeaponHitCover, int *pQuality,	NDb::EShootMode *eShootMode, int *nMaxToHit ) const
 {
 	CAIFireArmsWeapon *pBestWeapon = 0;
 	int nShootMode = 0;
@@ -385,7 +385,7 @@ CAIFireArmsWeapon* CAIInventory::GetBestFireArms( const NAI::SUnitPosition &pos,
 		// its RPG weapon. Skip invalid items before cover/mode queries read cleared DB data.
 		if ( !IsValid( pWeaponItem ) )
 			continue;
-		int nHitCover = pOwner->GetCoverForFixedUnit( pos, pTarget->GetUnitServer(), pWeaponItem, NAI::HL_ANY );
+		float fHitCover = pOwner->GetCoverForFixedUnit( pos, pTarget->GetUnitServer(), pWeaponItem, NAI::HL_ANY );
 		//
 		for ( int nShootMode = ( int )NDb::SM_Snap; nShootMode != ( int )NDb::SM_Snipe; ++nShootMode )
 		{
@@ -397,17 +397,16 @@ CAIFireArmsWeapon* CAIInventory::GetBestFireArms( const NAI::SUnitPosition &pos,
 			if ( pOwner->IsShootModeDisabled( ( NDb::EShootMode )nShootMode ) )
 				continue;
 			int nTmpMaxToHit;
-			int nTmpQuality = (*i)->GetDamage( pos, pTarget, nHitCover, NAI::WALK, nAP, ( NDb::EShootMode )nShootMode, &nTmpMaxToHit );
+			int nTmpQuality = (*i)->GetDamage( pos, pTarget, (int)fHitCover, NAI::WALK, nAP, ( NDb::EShootMode )nShootMode, &nTmpMaxToHit );
 			if ( nTmpQuality > *pQuality )
 			{
-				// retail @0x560e0: the out nMaxToHit is updated ONLY in the quality-winner branch (the
-				// reported to-hit belongs to the CHOSEN weapon/mode); dev's unconditional max() inflated
-				// nToHit with losing modes' values, pushing extra places over the ComparePlaces bar.
+				// Retail 0x456550: retain the maximum to-hit among successive quality winners.
+				// Losing modes do not contribute.
 				pBestWeapon = i->GetPtr();
 				*pQuality = nTmpQuality;
 				*eShootMode = (NDb::EShootMode)nShootMode;
-				*pBestWeaponHitCover = nHitCover;
-				*nMaxToHit = nTmpMaxToHit;
+				*pBestWeaponHitCover = fHitCover;
+				*nMaxToHit = max( *nMaxToHit, nTmpMaxToHit );
 			}
 		}
 	}

@@ -313,7 +313,7 @@ int CAIFireArmsWeapon::GetAmmoCountPerAP( int _nAP ) const
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CAIFireArmsWeapon::GetShotParameters( const NAI::SUnitPosition &pos, IAIUnit *pTarget, 
-	int nHitCover, int nAvailableAP, int *nAP, int *nAmmo, int *nDamage, bool *bNeedReload ) const
+	float nHitCover, int nAvailableAP, int *nAP, int *nAmmo, int *nDamage, bool *bNeedReload ) const
 {
 	*nAP = 0;
 	*nAmmo = 0;

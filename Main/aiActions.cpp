@@ -51,11 +51,10 @@ void CAIShootAction::GetInfoInner( const SPlaceWithAP &place, SInfo *pInfo ) con
 	if ( !IsValid( GetUnit() ) || !IsValid( GetEnemy() ) )
 		return;
 	//
-	// GetBestFireArms reports cover (int) + a quality/expected-damage estimate (int) used only to decide
-	// bKillTargetCertainly; the release SInfo keeps neither raw value (cover is stored as the float fCover).
-	int nCover = 0, nQuality = 0;
+	float fCover = 0;
+	int nQuality = 0;
 	pInfo->pWeapon =
-		GetUnit()->GetAIInventory()->GetBestFireArms( place.place, GetEnemy(), place.nUnitAP, &nCover, &nQuality, &pInfo->shootMode, &pInfo->nToHit );
+		GetUnit()->GetAIInventory()->GetBestFireArms( place.place, GetEnemy(), place.nUnitAP, &fCover, &nQuality, &pInfo->shootMode, &pInfo->nToHit );
 	// @0x41bf30 -- retail gates bCanDo on IsNeedReload(weapon)==false AND nToHit>0. IsNeedReload @0x4b5bd0
 	// == (current clip present && not destroyed && ammo>0); an empty clip is NOT shootable here even with a
 	// spare in inventory -- CAIReloadAction reloads first -- so the dev "empty-but-has-next-clip still bCanDo"
@@ -66,12 +65,11 @@ void CAIShootAction::GetInfoInner( const SPlaceWithAP &place, SInfo *pInfo ) con
 	if ( IsValid( pInfo->pWeapon ) && !bNeedReload && pInfo->nToHit > 0 )
 	{
 		pInfo->bCanDo = true;
-		pInfo->fCover = (float)nCover;
-		// ORACLE @0x41bf30: release aims the head when nToHit>50 && a unit aim-metric>5.0f -- the metric is
-		// enemy->vtbl[0]( weapon item +0xc, 1 ) fed to unit->vtbl[0x30]( &place, enemyVal ). Those two IAIUnit
-		// vtable slots are not named in-tree (and the a5dll vtable is reordered), so the aimed-head path stays
-		// DEFERRED and the unit fires center-mass. See FLAGGED-NEXT.
-		pInfo->hitLocation = HL_ANY;
+		pInfo->fCover = fCover;
+		// Retail 0x41c710: prefer a head shot only with sufficient accuracy and head exposure.
+		pInfo->hitLocation = pInfo->nToHit > 50 &&
+			GetUnit()->GetCoverForFixedUnit( place.place, GetEnemy()->GetUnitServer(), pInfo->pWeapon->GetItem(), HL_HEAD ) > 5.0f
+			? HL_HEAD : HL_ANY;
 		pInfo->nAPToSpend = place.nUnitAP;        // the shot budget Do() spends down (release reads this field)
 		pInfo->bKillTargetCertainly = GetEnemy()->GetHP() * 2.5f < nQuality;
 	}
@@ -104,7 +102,7 @@ void CAIShootAction::Do( CAILog *pLog ) const
 		int nAP = info.nAPToSpend;
 		bool bNeedReload;
 		int nAmmo, nShotHP, nShotAP;
-		info.pWeapon->GetShotParameters( pUnit->GetUnitPosition(), pEnemy, (int)info.fCover, nAP, &nShotAP, &nAmmo, &nShotHP, &bNeedReload );
+		info.pWeapon->GetShotParameters( pUnit->GetUnitPosition(), pEnemy, info.fCover, nAP, &nShotAP, &nAmmo, &nShotHP, &bNeedReload );
 		// @0x41cb10 -- retail guards the burst on !bNeedReload too: stop the moment GetShotParameters reports the
 		// clip ran dry mid-burst (a reload is owed); the ungated loop could log a shot the engine would not.
 		while ( !bNeedReload && nAmmo > 0 && nShotAP <= nAP )
@@ -113,7 +111,7 @@ void CAIShootAction::Do( CAILog *pLog ) const
 			*pLog << new CAILogSpendAP( pUnit, nShotAP );
 			*pLog << new CAILogSpendAmmo( info.pWeapon->GetCurrentClip(), nAmmo );
 			nAP -= nShotAP;
-			info.pWeapon->GetShotParameters( pUnit->GetUnitPosition(), pEnemy, (int)info.fCover, nAP, &nShotAP, &nAmmo, &nShotHP, &bNeedReload );
+			info.pWeapon->GetShotParameters( pUnit->GetUnitPosition(), pEnemy, info.fCover, nAP, &nShotAP, &nAmmo, &nShotHP, &bNeedReload );
 		}
 	}
 }

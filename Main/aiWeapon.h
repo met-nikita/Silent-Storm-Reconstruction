@@ -117,7 +117,7 @@ public:
 	//
 	bool IsSameWeapon( CAIFireArmsWeapon *pAIWeapon ) const;
 	void GetShotParameters( const NAI::SUnitPosition &pos, IAIUnit *pTarget,
-		int nHitCover, int nAvailableAP, int *nAP, int *nAmmo, int *nDamage, bool *bNeedReload ) const;
+		float nHitCover, int nAvailableAP, int *nAP, int *nAmmo, int *nDamage, bool *bNeedReload ) const;
 	int GetDamage( const NAI::SUnitPosition &pos, IAIUnit *pTarget,
 		int nHitCover, NAI::EPose ePose, int nAP, NDb::EShootMode eShootMode, int *nMaxToHit ) const;
 };

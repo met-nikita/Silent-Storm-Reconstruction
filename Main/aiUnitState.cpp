@@ -283,7 +283,8 @@ void SAIUnitState::FindMostDangerousEnemy()
 	for ( int k = 0; k < (int)cluster.size(); ++k )
 	{
 		IAIUnit *e = cluster[k].GetPtr();
-		int nToHit = 0, nHitCover = 0, nQuality = -0xFFFF;
+		int nToHit = 0, nQuality = -0xFFFF;
+		float nHitCover = 0;
 		NDb::EShootMode eMode = (NDb::EShootMode)0;
 		CAIInventory *pInv = e->GetAIInventory();
 		if ( IsValid( pInv ) && IsValid( e->GetUnitServer() ) )

@@ -177,7 +177,8 @@ IAIUnit* SAIState::GetDangerousAttackableEnemy( IAIUnit *pAIUnit )
 	CPtr<IAIUnit> pGoodEnemy;
 	for ( list< CPtr< IAIUnit > >::iterator i = goodEnemies.begin(); i != goodEnemies.end(); ++i )
 	{
-		int nD = 0, nMaxToHit, nHitCover;
+		int nD = 0, nMaxToHit;
+		float nHitCover;
 		NDb::EShootMode eTmpShootMode;
 		CPtr<CAIFireArmsWeapon> pTmpWeapon =
 			(*i)->GetAIInventory()->GetBestFireArms( (*i)->GetUnitPosition(), pAIUnit, (*i)->GetAP(), &nHitCover, &nD, &eTmpShootMode, &nMaxToHit );
