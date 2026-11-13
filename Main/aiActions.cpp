@@ -84,7 +84,7 @@ void CAIShootAction::Do( CAILog *pLog ) const
 	SInfo info;
 	CPtr<IAIUnit> pUnit = GetUnit();
 	CPtr<IAIUnit> pEnemy = GetEnemy();
-	GetInfoInner( GetCurrentPlace(), &info );
+	GetInfo( GetCurrentPlace(), &info );
 	ASSERT( info.bCanDo );
 	if ( info.bCanDo && IsValid( pUnit ) && IsValid( pEnemy ) && IsValid( info.pWeapon ) && info.nToHit > 0 )
 	{
@@ -136,8 +136,8 @@ bool CAIShootAction::ComparePlaces( const SPlaceWithAP &p1, const SPlaceWithAP &
 		nThreshold = 5;   // in a panzerklein -> relax the accuracy bar (release vtbl+0x20)
 	//
 	SInfo info1, info2;
-	GetInfoInner( p1, &info1 );
-	GetInfoInner( p2, &info2 );
+	GetInfo( p1, &info1 );
+	GetInfo( p2, &info2 );
 	if ( info1.nToHit < nThreshold || info2.nToHit < nThreshold )
 		return info1.nToHit > info2.nToHit;   // not both good -> rank by accuracy
 	return p1.nUnitAP > p2.nUnitAP;            // both good -> prefer the place needing the least movement
@@ -284,7 +284,7 @@ void CAIThrowGrenadeAction::Do( CAILog *pLog ) const
 		return;
 	//
 	SInfo info;
-	GetInfoInner( GetCurrentPlace(), &info );
+	GetInfo( GetCurrentPlace(), &info );
 	ASSERT( info.bCanDo );
 	if ( info.bCanDo )
 	{
@@ -360,7 +360,7 @@ void CAILaunchRocketAction::Do( CAILog *pLog ) const
 	if ( !IsValid( pLog ) || !IsValid( pUnit ) )
 		return;
 	SInfo info;
-	GetInfoInner( GetCurrentPlace(), &info );
+	GetInfo( GetCurrentPlace(), &info );
 	if ( !info.bCanDo || !IsValid( info.pWeapon ) )   // GetInfoInner now leaves bCanDo=false for an empty launcher
 		return;
 	if ( !pUnit->GetAIInventory()->IsCurrentItem( info.pWeapon ) )
@@ -416,7 +416,7 @@ void CAIReloadAction::Do( CAILog *pLog ) const   // @0x0041d2a0
 	if ( !IsValid( pLog ) )
 		return;
 	SInfo info;
-	GetInfoInner( GetCurrentPlace(), &info );
+	GetInfo( GetCurrentPlace(), &info );
 	if ( !info.bCanDo || !IsValid( info.pWeapon ) )
 		return;
 	CPtr<IAIUnit> pUnit = GetUnit();
@@ -468,7 +468,7 @@ void CAIHealAction::Do( CAILog *pLog ) const   // @0x00451c90
 	if ( !IsValid( pLog ) )
 		return;
 	SInfo info;
-	GetInfoInner( GetCurrentPlace(), &info );
+	GetInfo( GetCurrentPlace(), &info );
 	if ( !info.bCanDo || !IsValid( info.pFirstAid ) )
 		return;
 	CPtr<IAIUnit> pUnit = GetUnit();
@@ -515,7 +515,7 @@ void CAIMeleeAction::Do( CAILog *pLog ) const   // @0x0041d5b0
 	if ( !IsValid( pLog ) )
 		return;
 	SInfo info;
-	GetInfoInner( GetCurrentPlace(), &info );
+	GetInfo( GetCurrentPlace(), &info );
 	if ( !info.bCanDo || !IsValid( info.pWeapon ) )
 		return;
 	CPtr<IAIUnit> pUnit = GetUnit();
@@ -568,7 +568,7 @@ void CAIThrowKnifeAction::Do( CAILog *pLog ) const   // @0x0041d420
 	if ( !IsValid( pLog ) )
 		return;
 	SInfo info;
-	GetInfoInner( GetCurrentPlace(), &info );
+	GetInfo( GetCurrentPlace(), &info );
 	if ( !info.bCanDo || !IsValid( info.pWeapon ) )
 		return;
 	CPtr<IAIUnit> pUnit = GetUnit();
@@ -706,7 +706,7 @@ void CAIWearPKAction::Do( CAILog *pLog ) const   // @0x0048dd10
 	if ( !IsValid( pLog ) )
 		return;
 	SInfo info;
-	GetInfoInner( GetCurrentPlace(), &info );
+	GetInfo( GetCurrentPlace(), &info );
 	NWorld::CUnitServer *pPK = info.pPK.GetPtr();
 	if ( !info.bCanDo || !IsValid( pPK ) )
 		return;
@@ -785,7 +785,7 @@ void CAITerrorPKAction::Do( CAILog *pLog ) const   // @0x004aa770
 	if ( !IsValid( pLog ) )
 		return;
 	SInfo info;
-	GetInfoInner( GetCurrentPlace(), &info );
+	GetInfo( GetCurrentPlace(), &info );
 	if ( info.bCanDo )
 		*pLog << new CAILogPosition( GetUnit(), GetUnit()->GetPosition(), info.place.pos, NAI::WALK );
 }
@@ -822,7 +822,7 @@ void CAILeavePKAction::Do( CAILog *pLog ) const   // @0x0048d820
 	if ( !IsValid( pLog ) )
 		return;
 	SInfo info;
-	GetInfoInner( GetCurrentPlace(), &info );
+	GetInfo( GetCurrentPlace(), &info );
 	if ( info.bCanDo )
 		*pLog << new CAILogLeavePK( GetUnit() );
 }

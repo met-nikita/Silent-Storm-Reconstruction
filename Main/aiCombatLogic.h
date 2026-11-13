@@ -76,10 +76,7 @@ protected:
 			pChoosePlace->AddAction( pAction, pSrc );
 		return pAction;
 	}
-	// Fetch the action's info at the place the chooser picked for it. @0x004166d0 (release uses the
-	// SActionInfo memo cache; here we compute via GetInfoInner at the chosen place).
-	// The SActionInfo cache memoizes exactly this GetInfoInner result, so the direct call is shape-faithful
-	// (release routes through SActionInfo<TAction>::GetInfo, whose `info` member is private to the action).
+	// Reuse the chooser's cached evaluation until the next planning reset.
 	// aiAttackLogic CAICombatLogic::GetInfo<TAction> instantiations (VA = RVA + 0x400000):
 	//   @0x004260c0 <CAIShootAction>       @0x004261a0 <CAIThrowGrenadeAction>  @0x00426280 <CAILaunchRocketAction>
 	//   @0x00426360 <CAIThrowKnifeAction>  @0x00426440 <CAIMeleeAction>         @0x00423e20 <CAICollectSnipeAPAction>
@@ -88,10 +85,13 @@ protected:
 	//   @0x00426520 <CAIBeginSnipeAction>  @0x004266a0 <CAITerrorPKAction>      @0x00426760 <CAIWearPKAction>
 	template<class TAction> void GetInfo( TAction *pAction, typename TAction::SInfo *pInfo )
 	{
+		if ( pInfo == 0 )
+			return;
+		*pInfo = typename TAction::SInfo();
 		SPlaceWithAP place;
 		if ( IsValid( pChoosePlace ) && IsValid( pAction ) &&
 			 pChoosePlace->GetPlaceForAction( pAction, &place ) )
-			pAction->GetInfoInner( place, pInfo );
+			pAction->GetInfo( place, pInfo );
 	}
 	//
 	void DoAction( CAIAction *pAction );        // log move-to-place (pos+AP) then pAction->Do(pLog)

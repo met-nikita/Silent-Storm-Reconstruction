@@ -72,12 +72,13 @@ public:
 		int operator&( CStructureSaver &f ) { f.Add( 2, &bCanDo ); f.Add( 3, &bKillTargetCertainly ); f.Add( 4, &nToHit ); f.Add( 5, &fCover ); f.Add( 6, &shootMode ); f.Add( 7, &hitLocation ); f.Add( 8, &pWeapon ); f.Add( 9, &nAPToSpend ); return 0; }
 	};
 private:
-	SActionInfo<CAIShootAction, SInfo> info;
+	mutable SActionInfo<CAIShootAction, SInfo> info;
 	ZEND int operator&( CStructureSaver &f ) { f.Add( 2, (CAIAction*)this ); f.Add( 3, &info ); return 0; }
 public:
 	CAIShootAction() {}
 	CAIShootAction( IAIUnit *_pUnit ): CAIAction( _pUnit ), info( this ) {}
 	//
+	void GetInfo( const SPlaceWithAP &place, SInfo *pInfo ) const { info.GetInfo( place, pInfo ); }
 	void GetInfoInner( const SPlaceWithAP &place, SInfo *pInfo ) const;
 	virtual void Do( CAILog *pLog ) const;
 	virtual bool ComparePlaces( const SPlaceWithAP &p1, const SPlaceWithAP &p2 ) const;
@@ -109,12 +110,13 @@ public:
 		int operator&( CStructureSaver &f ) { f.Add( 2, &bCanDo ); f.Add( 3, &bBadGroupHealth ); f.Add( 4, &nTargetSize ); f.Add( 5, &ptTarget ); f.Add( 6, &pGrenade ); f.Add( 7, &nAPToSpend ); return 0; }
 	};
 private:
-	SActionInfo<CAIThrowGrenadeAction, SInfo> info;
+	mutable SActionInfo<CAIThrowGrenadeAction, SInfo> info;
 	ZEND int operator&( CStructureSaver &f ) { f.Add( 2, (CAIAction*)this ); f.Add( 3, &info ); return 0; }
 public:
 	CAIThrowGrenadeAction() {}
 	CAIThrowGrenadeAction( IAIUnit *_pUnit ): CAIAction( _pUnit ), info( this ) {}
 	//
+	void GetInfo( const SPlaceWithAP &place, SInfo *pInfo ) const { info.GetInfo( place, pInfo ); }
 	void GetInfoInner( const SPlaceWithAP &place, SInfo *pInfo ) const;
 	virtual void Do( CAILog *pLog ) const;
 	virtual bool ComparePlaces( const SPlaceWithAP &p1, const SPlaceWithAP &p2 ) const;
@@ -151,12 +153,13 @@ public:
 		int operator&( CStructureSaver &f ) { f.Add( 2, &bCanDo ); f.Add( 3, &bBadGroupHealth ); f.Add( 4, &nTargetSize ); f.Add( 5, &ptTarget ); f.Add( 6, &pWeapon ); return 0; }
 	};
 private:
-	SActionInfo<CAILaunchRocketAction, SInfo> info;
+	mutable SActionInfo<CAILaunchRocketAction, SInfo> info;
 	ZEND int operator&( CStructureSaver &f ) { f.Add( 2, (CAIAction*)this ); f.Add( 3, &info ); return 0; }
 public:
 	CAILaunchRocketAction() {}
 	CAILaunchRocketAction( IAIUnit *_pUnit ): CAIAction( _pUnit ), info( this ) {}
 	//
+	void GetInfo( const SPlaceWithAP &place, SInfo *pInfo ) const { info.GetInfo( place, pInfo ); }
 	void GetInfoInner( const SPlaceWithAP &place, SInfo *pInfo ) const;
 	virtual void Do( CAILog *pLog ) const;
 	virtual bool ComparePlaces( const SPlaceWithAP &p1, const SPlaceWithAP &p2 ) const;
@@ -171,11 +174,12 @@ public:
 #define AI_ACTION_DECL( Cls ) \
 	OBJECT_BASIC_METHODS( Cls ); \
 	ZDATA ZPARENT( CAIAction ); \
-	SActionInfo<Cls, SInfo> info; \
+	mutable SActionInfo<Cls, SInfo> info; \
 	ZEND int operator&( CStructureSaver &f ) { f.Add( 2, (CAIAction*)this ); f.Add( 3, &info ); return 0; } \
 	public: \
 	Cls() {} \
 	Cls( IAIUnit *_pUnit ): CAIAction( _pUnit ), info( this ) {} \
+	void GetInfo( const SPlaceWithAP &place, SInfo *pInfo ) const { info.GetInfo( place, pInfo ); } \
 	void GetInfoInner( const SPlaceWithAP &place, SInfo *pInfo ) const; \
 	virtual void Do( CAILog *pLog ) const; \
 	virtual bool ComparePlaces( const SPlaceWithAP &p1, const SPlaceWithAP &p2 ) const; \
@@ -266,11 +270,12 @@ private:
 	OBJECT_BASIC_METHODS( CAILootAction );
 	ZDATA ZPARENT( CAIAction );
 	EPose wishPose;
-	SActionInfo<CAILootAction, SInfo> info;
+	mutable SActionInfo<CAILootAction, SInfo> info;
 	ZEND int operator&( CStructureSaver &f ) { f.Add( 2, (CAIAction*)this ); f.Add( 3, &wishPose ); f.Add( 4, &info ); return 0; }
 	public:
 	CAILootAction(): wishPose( RUN ) {}
 	CAILootAction( IAIUnit *_pUnit, EPose pose ): CAIAction( _pUnit ), wishPose( pose ), info( this ) {}
+	void GetInfo( const SPlaceWithAP &place, SInfo *pInfo ) const { info.GetInfo( place, pInfo ); }
 	void GetInfoInner( const SPlaceWithAP &place, SInfo *pInfo ) const;
 	virtual void Do( CAILog *pLog ) const;
 	virtual bool ComparePlaces( const SPlaceWithAP &p1, const SPlaceWithAP &p2 ) const;
@@ -290,11 +295,12 @@ private:
 	private: \
 	OBJECT_BASIC_METHODS( Cls ); \
 	ZDATA ZPARENT( CAIAction ); \
-	SActionInfo<Cls, SInfo> info; \
+	mutable SActionInfo<Cls, SInfo> info; \
 	ZEND int operator&( CStructureSaver &f ) { f.Add( 2, (CAIAction*)this ); f.Add( 3, &info ); return 0; } \
 	public: \
 	Cls() {} \
 	Cls( IAIUnit *_pUnit ): CAIAction( _pUnit ), info( this ) {} \
+	void GetInfo( const SPlaceWithAP &place, SInfo *pInfo ) const { info.GetInfo( place, pInfo ); } \
 	void GetInfoInner( const SPlaceWithAP &place, SInfo *pInfo ) const; \
 	virtual void Do( CAILog *pLog ) const; \
 	virtual bool ComparePlaces( const SPlaceWithAP &p1, const SPlaceWithAP &p2 ) const; \
@@ -322,11 +328,12 @@ public:
 private:
 	OBJECT_BASIC_METHODS( CAIBeginSnipeAction );
 	ZDATA ZPARENT( CAIAction );
-	SActionInfo<CAIBeginSnipeAction, SInfo> info;
+	mutable SActionInfo<CAIBeginSnipeAction, SInfo> info;
 	ZEND int operator&( CStructureSaver &f ) { f.Add( 2, (CAIAction*)this ); f.Add( 3, &info ); return 0; }
 public:
 	CAIBeginSnipeAction() {}
 	CAIBeginSnipeAction( IAIUnit *_pUnit ): CAIAction( _pUnit ), info( this ) {}
+	void GetInfo( const SPlaceWithAP &place, SInfo *pInfo ) const { info.GetInfo( place, pInfo ); }
 	void GetInfoInner( const SPlaceWithAP &place, SInfo *pInfo ) const;
 	virtual void Do( CAILog *pLog ) const;
 	virtual bool ComparePlaces( const SPlaceWithAP &p1, const SPlaceWithAP &p2 ) const;
@@ -344,11 +351,12 @@ public:
 private:
 	OBJECT_BASIC_METHODS( CAICollectSnipeAPAction );
 	ZDATA ZPARENT( CAIAction );
-	SActionInfo<CAICollectSnipeAPAction, SInfo> info;
+	mutable SActionInfo<CAICollectSnipeAPAction, SInfo> info;
 	ZEND int operator&( CStructureSaver &f ) { f.Add( 2, (CAIAction*)this ); f.Add( 3, &info ); return 0; }
 public:
 	CAICollectSnipeAPAction() {}
 	CAICollectSnipeAPAction( IAIUnit *_pUnit ): CAIAction( _pUnit ), info( this ) {}
+	void GetInfo( const SPlaceWithAP &place, SInfo *pInfo ) const { info.GetInfo( place, pInfo ); }
 	void GetInfoInner( const SPlaceWithAP &place, SInfo *pInfo ) const;
 	virtual void Do( CAILog *pLog ) const;
 	virtual bool ComparePlaces( const SPlaceWithAP &p1, const SPlaceWithAP &p2 ) const;
@@ -368,11 +376,12 @@ public:
 private:
 	OBJECT_BASIC_METHODS( CAIDockWithHGAction );
 	ZDATA ZPARENT( CAIAction );
-	SActionInfo<CAIDockWithHGAction, SInfo> info;
+	mutable SActionInfo<CAIDockWithHGAction, SInfo> info;
 	ZEND int operator&( CStructureSaver &f ) { f.Add( 2, (CAIAction*)this ); f.Add( 3, &info ); return 0; }
 public:
 	CAIDockWithHGAction() {}
 	CAIDockWithHGAction( IAIUnit *_pUnit ): CAIAction( _pUnit ), info( this ) {}
+	void GetInfo( const SPlaceWithAP &place, SInfo *pInfo ) const { info.GetInfo( place, pInfo ); }
 	void GetInfoInner( const SPlaceWithAP &place, SInfo *pInfo ) const;
 	virtual void Do( CAILog *pLog ) const;
 	virtual bool ComparePlaces( const SPlaceWithAP &p1, const SPlaceWithAP &p2 ) const;
@@ -389,11 +398,12 @@ public:
 private:
 	OBJECT_BASIC_METHODS( CAIUndockFromHGAction );
 	ZDATA ZPARENT( CAIAction );
-	SActionInfo<CAIUndockFromHGAction, SInfo> info;
+	mutable SActionInfo<CAIUndockFromHGAction, SInfo> info;
 	ZEND int operator&( CStructureSaver &f ) { f.Add( 2, (CAIAction*)this ); f.Add( 3, &info ); return 0; }
 public:
 	CAIUndockFromHGAction() {}
 	CAIUndockFromHGAction( IAIUnit *_pUnit ): CAIAction( _pUnit ), info( this ) {}
+	void GetInfo( const SPlaceWithAP &place, SInfo *pInfo ) const { info.GetInfo( place, pInfo ); }
 	void GetInfoInner( const SPlaceWithAP &place, SInfo *pInfo ) const;
 	virtual void Do( CAILog *pLog ) const;
 	virtual bool ComparePlaces( const SPlaceWithAP &p1, const SPlaceWithAP &p2 ) const;
@@ -409,11 +419,12 @@ public:
 private:
 	OBJECT_BASIC_METHODS( CAIShootFromHGAction );
 	ZDATA ZPARENT( CAIAction );
-	SActionInfo<CAIShootFromHGAction, SInfo> info;
+	mutable SActionInfo<CAIShootFromHGAction, SInfo> info;
 	ZEND int operator&( CStructureSaver &f ) { f.Add( 2, (CAIAction*)this ); f.Add( 3, &info ); return 0; }
 public:
 	CAIShootFromHGAction() {}
 	CAIShootFromHGAction( IAIUnit *_pUnit ): CAIAction( _pUnit ), info( this ) {}
+	void GetInfo( const SPlaceWithAP &place, SInfo *pInfo ) const { info.GetInfo( place, pInfo ); }
 	void GetInfoInner( const SPlaceWithAP &place, SInfo *pInfo ) const;
 	virtual void Do( CAILog *pLog ) const;
 	virtual bool ComparePlaces( const SPlaceWithAP &p1, const SPlaceWithAP &p2 ) const;
@@ -435,11 +446,12 @@ public:
 private:
 	OBJECT_BASIC_METHODS( CAITerrorPKAction );
 	ZDATA ZPARENT( CAIAction );
-	SActionInfo<CAITerrorPKAction, SInfo> info;
+	mutable SActionInfo<CAITerrorPKAction, SInfo> info;
 	ZEND int operator&( CStructureSaver &f ) { f.Add( 2, (CAIAction*)this ); f.Add( 3, &info ); return 0; }
 public:
 	CAITerrorPKAction() {}
 	CAITerrorPKAction( IAIUnit *_pUnit ): CAIAction( _pUnit ), info( this ) {}
+	void GetInfo( const SPlaceWithAP &place, SInfo *pInfo ) const { info.GetInfo( place, pInfo ); }
 	void GetInfoInner( const SPlaceWithAP &place, SInfo *pInfo ) const;
 	virtual void Do( CAILog *pLog ) const;
 	virtual bool ComparePlaces( const SPlaceWithAP &p1, const SPlaceWithAP &p2 ) const;
@@ -458,11 +470,12 @@ public:
 private:
 	OBJECT_BASIC_METHODS( CAIWearPKAction );
 	ZDATA ZPARENT( CAIAction );
-	SActionInfo<CAIWearPKAction, SInfo> info;
+	mutable SActionInfo<CAIWearPKAction, SInfo> info;
 	ZEND int operator&( CStructureSaver &f ) { f.Add( 2, (CAIAction*)this ); f.Add( 3, &info ); return 0; }
 public:
 	CAIWearPKAction() {}
 	CAIWearPKAction( IAIUnit *_pUnit ): CAIAction( _pUnit ), info( this ) {}
+	void GetInfo( const SPlaceWithAP &place, SInfo *pInfo ) const { info.GetInfo( place, pInfo ); }
 	void GetInfoInner( const SPlaceWithAP &place, SInfo *pInfo ) const;
 	virtual void Do( CAILog *pLog ) const;
 	virtual bool ComparePlaces( const SPlaceWithAP &p1, const SPlaceWithAP &p2 ) const;

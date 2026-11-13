@@ -155,7 +155,7 @@ void CAIBeginSnipeAction::Do( CAILog *pLog ) const                       // @0x4
 	if ( !IsValid( pLog ) )
 		return;
 	SInfo info;
-	GetInfoInner( GetCurrentPlace(), &info );
+	GetInfo( GetCurrentPlace(), &info );
 	if ( !info.bCanDo )
 		return;
 	IAIUnit *pU = GetUnit();
@@ -206,7 +206,7 @@ void CAICollectSnipeAPAction::Do( CAILog *pLog ) const                   // @0x4
 	if ( !IsValid( pLog ) )
 		return;
 	SInfo info;
-	GetInfoInner( GetCurrentPlace(), &info );
+	GetInfo( GetCurrentPlace(), &info );
 	if ( info.bCanDo )
 		*pLog << new CAILogCollectSnipeAP( GetUnit(), info.nAP );
 }
@@ -229,7 +229,7 @@ void CAISnipeShotAction::Do( CAILog *pLog ) const                        // @0x4
 	if ( !IsValid( pLog ) )
 		return;
 	SInfo info;
-	GetInfoInner( GetCurrentPlace(), &info );
+	GetInfo( GetCurrentPlace(), &info );
 	if ( !info.bCanDo )
 		return;
 	IAIUnit *pU = GetUnit();
@@ -261,7 +261,7 @@ void CAICancelSnipeAction::Do( CAILog *pLog ) const                      // @0x4
 	if ( !IsValid( pLog ) )
 		return;
 	SInfo info;
-	GetInfoInner( GetCurrentPlace(), &info );
+	GetInfo( GetCurrentPlace(), &info );
 	if ( info.bCanDo )
 		*pLog << new CAILogCancelAction( GetUnit() );
 }

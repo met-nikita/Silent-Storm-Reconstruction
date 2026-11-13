@@ -188,7 +188,7 @@ void CAIDockWithHGAction::Do( CAILog *pLog ) const                       // @0x5
 	if ( !IsValid( pLog ) )
 		return;
 	SInfo info;
-	GetInfoInner( GetCurrentPlace(), &info );
+	GetInfo( GetCurrentPlace(), &info );
 	if ( info.bCanDo && IsValid( info.pGun ) )
 		*pLog << new CAILogUseCannon( GetUnit(), info.pGun.GetPtr() );
 }
@@ -268,7 +268,7 @@ void CAIShootFromHGAction::Do( CAILog *pLog ) const                      // @0x5
 	if ( !IsValid( pLog ) )
 		return;
 	SInfo info;
-	GetInfoInner( GetCurrentPlace(), &info );
+	GetInfo( GetCurrentPlace(), &info );
 	if ( !info.bCanDo )
 		return;
 	IAIUnit *pU = GetUnit();

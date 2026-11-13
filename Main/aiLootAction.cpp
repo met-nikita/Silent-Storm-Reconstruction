@@ -112,7 +112,7 @@ void CAILootAction::Do( CAILog *pLog ) const                            // @0x63
 	if ( !IsValid( pLog ) )
 		return;
 	SInfo info;
-	GetInfoInner( GetCurrentPlace(), &info );
+	GetInfo( GetCurrentPlace(), &info );
 	if ( !info.bCanDo || !IsValid( info.pItem ) )
 		return;
 	IAIUnit *pU = GetUnit();
