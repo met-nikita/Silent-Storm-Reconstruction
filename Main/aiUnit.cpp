@@ -216,6 +216,7 @@ public:
 	virtual int GetHideProbability() { return nHideProbability; }   // @0xaef00 (CAIUnit+0x100)
 	virtual void SetHideProbability( int n ) { nHideProbability = n; }   // @0xaef10 (the lua UnitSetHideProbability setter deferred)
 	virtual int GetNonFreezeCounter() { return nNonFreezeCounter; }   // @0xaef20
+	virtual void AddNonFreezeCounter( int n ) { nNonFreezeCounter += n; }
 	virtual void ClearNonFreezeCounter() { nNonFreezeCounter = 0; }   // @0xaef30
 	virtual bool IsShootModeDisabled( NDb::EShootMode eMode ) const { return disabledShootModes.find( (int)eMode ) != disabledShootModes.end(); }   // @0xad590
 	virtual void DisableShootMode( NDb::EShootMode eMode ) { disabledShootModes[ (int)eMode ] = 1; }   // @0xad740
@@ -256,7 +257,7 @@ public:
 			return;
 		CancelCommand();
 		if ( pLogic.GetPtr() != 0 )
-			++nNonFreezeCounter;
+			nNonFreezeCounter += 200;
 		if ( IsValid( pLogic ) )
 			pLogic->StopThinking();
 		pLogic = 0;
@@ -285,7 +286,7 @@ public:
 		SetLogic( 0 );
 		pReaction = _pReaction;
 		state.Modified();
-		++nNonFreezeCounter;
+		nNonFreezeCounter += 200;
 	}
 	virtual SAIUnitState* GetAIUnitState() { return &state; }
 	// AI-convergence Stage 2 reaction pump (see aiUnit.h). GetReactionForUpdate @0xad260: only hand the
@@ -383,7 +384,7 @@ CAIUnit::CAIUnit( NWorld::CUnitServer *_pUnitServer, bool _bUnderAIControl ) :
 void CAIUnit::SetCurrentLogicInner( IAILogic *_pLogic )
 {
 	if ( pLogic.GetPtr() != _pLogic )
-		++nNonFreezeCounter;
+		nNonFreezeCounter += 200;
 	if ( IsValid( pLogic ) )
 		pLogic->StopThinking();
 	pLogic = _pLogic;

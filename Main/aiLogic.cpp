@@ -94,7 +94,11 @@ static bool GetCommandPointOfInterest( NWorld::IWorld *pWorld, NWorld::CCmd *pCm
 void CAILogic::DoCommand( NWorld::CCommand *pCmd )
 {
 	if ( !IsValid( pCmd ) )
+	{
+		if ( IsValid( pUnit ) )
+			pUnit->AddNonFreezeCounter( 25 );
 		return;
+	}
 	commands.push_back( pCmd );
 	if ( IsValid( pUnit ) )
 	{
