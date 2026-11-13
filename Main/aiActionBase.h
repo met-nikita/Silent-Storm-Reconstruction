@@ -61,6 +61,7 @@ public:
 	CAIAction() {}
 	CAIAction( IAIUnit *_pUnit ): pUnit( _pUnit ) {}
 	//
+	virtual bool CanPerformInPK() const { return false; }
 	virtual bool CanPerform();                                          // slot4: prerequisites hold (base: true)
 	virtual void Do( CAILog *pLog ) const = 0;                          // slot5: emit the log records
 	virtual bool ComparePlaces( const SPlaceWithAP &p1, const SPlaceWithAP &p2 ) const = 0; // slot6

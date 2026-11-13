@@ -1,6 +1,7 @@
 #include "StdAfx.h"
 //
 #include "aiUnit.h"
+#include "wUnitServer.h"
 #include "aiState.h"
 #include "aiUnitState.h"      // SAIUnitState::pEnemy
 //
@@ -41,15 +42,13 @@ SPlaceWithAP CAIAction::GetCurrentPlace() const
 	return p;
 }
 //
-// @0x13a80 - gate on a LIVE unit. The release rejects a null/dead pUnit
-// (pUnit != 0 && (alive-flag & 0x80) == 0, expressed in-tree as IsValid, the
-// same guard GetEnemy/GetCurrentPlace use). It ALSO defers to a per-action
-// "can-perform-while-busy" predicate (this vtbl+0x10) when the unit is busy
-// (IAIUnit::IsUnitBusy, unit vtbl+0x20); but as compiled NO concrete action
-// overrides that predicate and the base permits, so the busy branch never
-// blocks and the function reduces to "the acting unit is alive". The previous
-// `return true` skipped the unit-alive gate -> dead/invalid units were wrongly
-// judged able to act.
-bool CAIAction::CanPerform() { return IsValid( pUnit ); }   // slot4 base impl
+// Retail 0x414180: PK pilots may only consider actions supported by the suit.
+bool CAIAction::CanPerform()
+{
+	if ( !IsValid( pUnit ) || !IsValid( pUnit->GetUnitServer() ) )
+		return false;
+	return !pUnit->GetUnitServer()->IsWearingPK() || CanPerformInPK();
+}
+
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 }

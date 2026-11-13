@@ -45,6 +45,9 @@ struct SAIUnitGroup;
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CAIShootAction: public CAIAction
 {
+public:
+	virtual bool CanPerformInPK() const { return true; }
+private:
 	OBJECT_BASIC_METHODS( CAIShootAction );
 	ZDATA
 	ZPARENT( CAIAction );
@@ -123,6 +126,9 @@ public:
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 class CAILaunchRocketAction: public CAIAction
 {
+public:
+	virtual bool CanPerformInPK() const { return true; }
+private:
 	OBJECT_BASIC_METHODS( CAILaunchRocketAction );
 	ZDATA
 	ZPARENT( CAIAction );
@@ -180,6 +186,9 @@ public:
 class CAIReloadAction: public CAIAction
 {
 public:
+	virtual bool CanPerformInPK() const { return true; }
+private:
+public:
 	// retyped from the release-only CAIFireArmsWeaponBase to the concrete dev CAIFireArmsWeapon (the dev
 	// firearm IS the reload target; this lets CAILogReloadWeapon take it directly).
 	// retail @0x18be0: {2 bCanDo(1B), 3 pWeapon ref} = 9B (wire-audit SIZE 9v8 @3.3.2).
@@ -200,6 +209,9 @@ private:
 class CAIMeleeAction: public CAIAction
 {
 public:
+	virtual bool CanPerformInPK() const { return true; }
+private:
+public:
 	// retail @0x20d70: {2 bCanDo(1B), 3 pWeapon ref} = 9B (wire-audit SIZE 9v8 @3.3.2).
 	struct SInfo { bool bCanDo; CPtr<CAIMeleeWeapon> pWeapon; SInfo(): bCanDo( false ) {} int operator&( CStructureSaver &f ) { f.Add( 2, &bCanDo ); f.Add( 3, &pWeapon ); return 0; } };
 private:
@@ -218,6 +230,9 @@ private:
 class CAIMoveToEnemyAction: public CAIAction
 {
 public:
+	virtual bool CanPerformInPK() const { return true; }
+private:
+public:
 	// retail (folded 1-byte SInfo serializer, cf. @0x27b80 shape): {2 bCanDo(1B)} = 3B
 	// (wire-audit SIZE 3v1 @3.3.2 x26).
 	struct SInfo { bool bCanDo; SInfo(): bCanDo( false ) {} int operator&( CStructureSaver &f ) { f.Add( 2, &bCanDo ); return 0; } };
@@ -228,6 +243,9 @@ private:
 // loot/drop lists. GetInfoInner @0x00463210 reconstructed in aiLootAction.cpp.
 class CAILootAction: public CAIAction
 {
+public:
+	virtual bool CanPerformInPK() const { return true; }
+private:
 public:
 	struct SInfo
 	{
@@ -408,6 +426,9 @@ public:
 class CAITerrorPKAction: public CAIAction
 {
 public:
+	virtual bool CanPerformInPK() const { return true; }
+private:
+public:
 	// retail @0x291f0: {2 bCanDo(1B), 3 place (nested SUnitPosition operator& @0x91790)} = 22B in
 	// slot 4 (wire-audit SIZE 22v16 @3.3.2; byte-walked: 3 = {2 SPosition{1 place 4B, 2 pNet ref}, 4 bRun 1B}).
 	struct SInfo { bool bCanDo; SUnitPosition place; SInfo(): bCanDo( false ) {} int operator&( CStructureSaver &f ) { f.Add( 2, &bCanDo ); f.Add( 3, &place ); return 0; } };
@@ -429,6 +450,9 @@ public:
 class CAIWearPKAction: public CAIAction
 {
 public:
+	virtual bool CanPerformInPK() const { return true; }
+private:
+public:
 	// retail @0x2a770: {2 bCanDo(1B), 3 pPK ref} = 9B (wire-audit SIZE 9v8 @3.3.2).
 	struct SInfo { bool bCanDo; CPtr<NWorld::CUnitServer> pPK; SInfo(): bCanDo( false ) {} int operator&( CStructureSaver &f ) { f.Add( 2, &bCanDo ); f.Add( 3, &pPK ); return 0; } };
 private:
@@ -445,7 +469,10 @@ public:
 	virtual bool CanDo( const SPlaceWithAP &place ) { return info.CanDo( place ); }
 	virtual void ResetInfoHash() { info.ResetInfoHash(); }
 };
-class CAILeavePKAction:        public CAIAction { AI_ACTION_DECL_MIN( CAILeavePKAction ) };
+class CAILeavePKAction:        public CAIAction {
+public:
+	virtual bool CanPerformInPK() const { return true; }
+private: AI_ACTION_DECL_MIN( CAILeavePKAction ) };
 #undef AI_ACTION_DECL_MIN
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 }

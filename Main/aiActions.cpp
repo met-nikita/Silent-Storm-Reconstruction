@@ -398,7 +398,7 @@ void CAIReloadAction::GetInfoInner( const SPlaceWithAP &place, SInfo *pInfo ) co
 	if ( !IsValid( pRPGUnit ) )
 		return;
 	// can't reload from an inactive pose (release gates on the pose category bits)
-	if ( ( place.place.GetPose() & 0xc000 ) == 0xc000 )
+	if ( place.place.pos.p.GetPose() == CM_INACTIVE )
 		return;
 	CAIFireArmsWeapon *pWeapon = pUnit->GetAIInventory()->GetBestWeaponForReload();
 	pInfo->pWeapon = pWeapon;
