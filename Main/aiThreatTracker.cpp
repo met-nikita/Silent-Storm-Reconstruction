@@ -5,6 +5,7 @@
 #include "aiMisc.h"             // NAI::GetAIUnit
 #include "aiUnitState.h"        // NAI::SAIUnitState (IsKnownCorpse)
 #include "aiPosition.h"         // NAI::SUnitPosition (GetCP / GetEyePosition)
+#include "aiMap.h"
 #include "wUnitServer.h"        // NWorld::CUnitServer (CanFight/IsAIUnit/GetDiplomacyState/GetPlayer/GetPosition/IsUnitVisible)
 #include "wDumbUnit.h"          // NWorld::CDumbUnitServer (OnUnhide dyncast source)
 #include "wMain.h"              // NWorld::IPlayer / NWorld::CPlayer
@@ -159,7 +160,10 @@ void CAIEventTrackerImpl::OnBullet( const CEventOnBullet &e )
 	CUnitServer *pShooter = e.pShooter;
 	if ( pUS == pShooter )
 		return;
-	CVec3 d = pUS->GetPosition().GetCP() - e.ray.ptOrigin;
+	// Retail 0x4aaecf measures the bullet corridor from hit location 0.
+	CVec3 ptUnit;
+	pUS->GetWorld()->GetAIMap()->GetUnitHLPos( &ptUnit, pUS->GetWorld()->GetAIMap()->GetHull( pUS ), 0 );
+	CVec3 d = ptUnit - e.ray.ptOrigin;
 	float fT = d * e.ray.ptDir;                       // projection along the shot ray
 	if ( e.fDistance + 2.5f < fT )
 		return;
@@ -198,7 +202,8 @@ void CAIEventTrackerImpl::OnAttack( const CEventOnAttackAtUnit &e )
 		return;
 	if ( pUS->GetDiplomacyState( e.pTarget ) != NDb::DS_ENEMY )
 		return;
-	if ( !pUS->IsUnitVisible( pAttacker ) )            // dev vision seam (release world vtbl+0x10)
+	// Allies are present in the cached visible list even without line of sight.
+	if ( !pUS->GetWorld()->GetGame()->CheckVisibility( pUS, pAttacker, true ) )
 		return;
 	ThrowAIEvent( CreateAIPossibleEnemyEvent( GetAIUnit( e.pTarget ) ) );
 }

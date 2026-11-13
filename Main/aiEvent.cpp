@@ -42,15 +42,15 @@ void CAIEnemyEvent::Modify( SAIUnitState *pState )
 	pState->AddEnemy( pEnemy.GetPtr() );
 }
 
-// @0x3c020: in real-time mode a lost enemy downgrades to a suspect; in turn-based the begin-turn
-// refresh handles it (so skip).
+// Retail v1.2 0x43c770: outside turn-based mode (including sequences), a lost
+// enemy becomes a suspect. In turn-based mode the begin-turn refresh handles it.
 void CAILostEnemyEvent::Modify( SAIUnitState *pState )
 {
 	IAIUnit *p = pEnemy.GetPtr();
 	if ( !IsValid( p ) )
 		return;
 	NWorld::CUnitServer *pUS = p->GetUnitServer();
-	if ( pUS == 0 || !pUS->GetWorld()->IsRealTime() )
+	if ( pUS == 0 || pUS->GetWorld()->IsTurnBased() )
 		return;
 	pState->RemoveEnemy( p );
 	pState->AddPossibleEnemy( p );
