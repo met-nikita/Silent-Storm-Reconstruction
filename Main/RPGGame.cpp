@@ -1,5 +1,6 @@
 #include "StdAfx.h"
 #include "RPGGame.h"
+#include "..\Misc\RetailSort.h"
 #include "RPGBullet.h"
 #include "RPGCover.h"
 #include "aiMap.h"
@@ -665,7 +666,10 @@ static bool RealPeekRay( CCoverInfo *pCover, CRay *pRes, float fHit, bool *bIsMi
 			return false;
 
 		CRoulette roulette;
-		sort( pCover->looseRays.begin(), pCover->looseRays.end() ); // sort from worst to best
+		// Retail 0x6b6a60/0x6b6890: equal deviations take the second merge chain first.
+		// Ray order affects the rank-dependent miss weights and roulette selection.
+		NRetail::Sort( pCover->looseRays.begin(), pCover->looseRays.end(),
+			[]( const CCoverInfo::SRay &a, const CCoverInfo::SRay &b ) { return a.fDeviation < b.fDeviation; } );
 		float fStep = 1.f / float( pCover->looseRays.size() );
 		int n = 0;
 		for ( vector<CCoverInfo::SRay>::const_iterator i = pCover->looseRays.begin(); i != pCover->looseRays.end(); ++i, ++n )
