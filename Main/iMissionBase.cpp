@@ -586,7 +586,8 @@ void CMissionBase::RenderFrame( int nMode, bool bAdvanceTime, ICamera *pCamera, 
 		// ORIGINAL RETAIL BUG FIXED: v1.2 0x5a2613 passes raw GetTime(), which omits
 		// fast-forwarded enemy turns. Sentinels 0x497fb1 calls GetGameTime (0x49aca0)
 		// instead, keeping playback on the epoch used to stamp world sound events.
-		// The mixer must also consume the full delta (RWSound.cpp), not clamp it once.
+		// CRenderGame now supplies its accumulated render time to the mixers so a
+		// first-frame skip or restored clock skew cannot discard that elapsed time.
 		pRender->UpdateSound( bAdvanceTime, &ts, GetGameTime() );
 
 		const CTRect<float> &rScreen = pCamera->GetScreenRect();

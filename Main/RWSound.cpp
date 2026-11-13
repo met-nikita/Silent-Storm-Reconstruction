@@ -91,20 +91,13 @@ void CRenderSound::Add2DSound( STime tStart, NDb::CSound *pSound )
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CRenderSound::Update( bool bAdvanceTime, CTransformStack *pTS, STime currentTime )
 {
-	// ORIGINAL RETAIL BUG FIXED: v1.2 0x6d5d40 advances only once, losing all but
-	// 150ms of a skipped turn. Sentinels 0x821d40..0x821d89 consumes the elapsed
-	// GAME-clock delta in <=150ms steps before Sync, so old revealed/restored events
-	// seek past their end rather than replay. CMissionBase supplies GetGameTime().
-	// Reset/first-update still establishes a baseline; pause still freezes playback.
-	// Bound the increment before adding, avoiding overflow in Sentinels' t + 150.
-	STime t = timer.GetPrevTime();
-	if ( t == 0 )
-		t = currentTime;
-	do
-	{
-		t = t < currentTime ? t + Min( (STime)150, currentTime - t ) : currentTime;
-		timer.Advance( bAdvanceTime, t );
-	} while ( t < currentTime );
+	// The render clock has already consumed every simulated step, including a
+	// cutscene skipped before the mixer's first update. An independent counter
+	// would establish its baseline AFTER that skip and permanently lose the gap.
+	// Copy before Sync so restored/revealed events use their actual elapsed age.
+	// The caller's render clock handles pause, slow motion and focus resets.
+	(void)bAdvanceTime;
+	timer.SetCurrent( currentTime );
 	Sync();
 	pScene->Draw( pTS );
 }

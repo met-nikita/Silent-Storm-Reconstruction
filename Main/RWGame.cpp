@@ -1369,10 +1369,14 @@ void CRenderGame::ResetTiming()
 // retail @0x2cb1c0
 void CRenderGame::UpdateSound( bool bAdvanceTime, CTransformStack *pTS, STime currentTime )
 {
+	// Use the same accumulated simulation time as UpdateViewWorld/FastUpdate.
+	// This also replaces skewed mixer values restored from affected old saves.
+	(void)currentTime;
+	const STime sceneTime = timer.GetTime()->GetValue();
 	if ( IsValid( pSound ) )
-		pSound->Update( bAdvanceTime, pTS, currentTime );
+		pSound->Update( bAdvanceTime, pTS, sceneTime );
 	if ( IsValid( pUnitSounds ) )
-		pUnitSounds->Update( bAdvanceTime, pTS, currentTime );
+		pUnitSounds->Update( bAdvanceTime, pTS, sceneTime );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // retail @0x2cb9b0: drive the day's weather lighting + precipitation effect. Called from the
