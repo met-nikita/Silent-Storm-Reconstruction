@@ -594,8 +594,7 @@ bool GetRoundUpPlaces( NWorld::CUnitServer *pServer, const SUnitPosition &enemyP
 // NAI::RouteAddRoundUp @0xa2720 -- see aiRouteMisc.h. Reuses the CTaskCommand family (CreateRC* factories ->
 // new CTaskCommand*). Retail's pose steps are matched exactly: the nWish step before the stop-Goto is
 // CreateRCChangeWishPose (@0xa2720 is one of its four callers); the nPoseLow settle step and the final WALK
-// are CreateRCChangePose. The final Goto's "looked" flag is elided with the strafe arg (the Look command it
-// gates is still queued).
+// are CreateRCChangePose. After looking out of cover, keep facing the threat during the final approach.
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void RouteAddRoundUp( NWorld::CUnitServer *pServer, NWorld::CUnitServer *pEnemy, const SUnitPosition &enemyPos,
 	EPose nPose, vector< CPtr<CTaskCommand> > &cmds, bool bCheck )
@@ -624,13 +623,14 @@ void RouteAddRoundUp( NWorld::CUnitServer *pServer, NWorld::CUnitServer *pEnemy,
 		if ( !SamePlaceMasked( stop.p, pServer->GetPosition().pos.p ) )
 		{
 			cmds.push_back( new CTaskCommandChangeWishPose( (EPose)nWish ) );  // retail CreateRCChangeWishPose (@0xa2720)
-			cmds.push_back( new CTaskCommandGoto( stop ) );               // release strafing Goto (prefix elided)
+			cmds.push_back( new CTaskCommandGoto( stop ) );               // ordinary approach to the stop point
 		}
 		cmds.push_back( new CTaskCommandChangePose( (EPose)nPoseLow ) );
 		cmds.push_back( new CTaskCommandGoto( flank ) );
 		SPosition restore;
 		restore.p = SPathPlace( (int)0xfdffffff );
 		int nVisible = 0;
+		bool bLooked = false;
 		if ( IsValid( pEnemy ) &&
 			 GetRestoreAPPoint( pServer, pEnemy, flank, attack, &restore, &nVisible ) )
 		{
@@ -641,17 +641,17 @@ void RouteAddRoundUp( NWorld::CUnitServer *pServer, NWorld::CUnitServer *pEnemy,
 				cmds.push_back( new CTaskCommandGoto( restore ) );
 				cmds.push_back( new CTaskCommandWait( 1 ) );
 			}
-			// with NO worn PK, look toward the enemy from the restore spot (release: this also sets the final
-			// Goto's "looked" flag, which is elided with the strafe arg -- the Look command itself is faithful).
+			// Infantry faces the enemy before strafing from cover.
 			if ( !IsValid( pServer->GetWearingDBPK() ) )
 			{
 				IPathNetwork *pNet = pServer->GetWorld()->GetPathNetwork();
 				// byte-faithful: no &7 mask here (GetClosestDir already returns 0..7; unlike GetDirectedPos's sites).
 				cmds.push_back( new CTaskCommandChangeDirection(
 					(int)pNet->GetClosestDir( restore.p, enemyPos.pos.p ) ) );
+				bLooked = true;
 			}
 		}
-		cmds.push_back( new CTaskCommandGoto( attack ) );            // release Goto(attack, bLooked) -- flag elided
+		cmds.push_back( new CTaskCommandGoto( attack, bLooked ) );
 		cmds.push_back( new CTaskCommandLookToPosition( enemyPos.pos.p ) );
 	}
 	// the tail runs even when the plan failed: a short wait, a randomized look-around, settle at WALK.

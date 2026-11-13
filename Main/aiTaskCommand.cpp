@@ -190,7 +190,9 @@ void CTaskCommandGoto::Do()
 	if ( pUnitServer->GetPosition().GetPose() != NAI::RUN &&
 	     !IsValid( pUnitServer->GetWearingDBPK() ) )
 		DoCommand( new NWorld::CCmdStrafe( bStrafe ) );
-	DoCommand( new NWorld::CCmdPath( ptPosition ) );
+	NWorld::CCmdPath *pPath = new NWorld::CCmdPath( ptPosition );
+	pPath->bCanFindNotExact = true;
+	DoCommand( pPath );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CTaskCommandRoaming
