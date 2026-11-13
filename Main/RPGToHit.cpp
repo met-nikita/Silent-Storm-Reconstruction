@@ -797,8 +797,8 @@ CAIUnitToHitCalcer::CAIUnitToHitCalcer(	NAI::IAIUnit *pShooter, const NAI::SUnit
 	NAI::IAIUnit *pTarget, float fHitCover, NAI::EHitLocation _eHitLocation, int _nBullet, IInventoryItem *_pWeapon, int _nExtraAP ):
 		CUnitToHitCalcer( pShooter->GetUnitServer(),
 		shooterPos.GetPose(),
-		fabs( shooterPos.GetCP() - pTarget->GetPosition().GetCP() ) / FP_GRID_STEP,
-		shooterPos.GetEyePosition(),
+		fabs( shooterPos.GetCP() - pTarget->GetPosition().GetCP() ) * 1.6f,
+		pShooter->GetUnitServer()->GetAttackOrigin( shooterPos, false ),
 		pTarget->GetPosition(),
 		_nExtraAP, 0, fHitCover, false, pShooter->GetUnitServer()->GetWorld()->GetGame()->IsNight(), CVec3( 1, 1, 1 ),
 		_eHitLocation,

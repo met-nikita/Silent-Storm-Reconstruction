@@ -784,16 +784,17 @@ int CAIUnit::GetToHit( IAIUnit *pTarget, const NAI::SUnitPosition &pos, NAI::EHi
 	// Retail v1.2 0x4ad8e0 uses the supplied weapon, falling back to OUR inventory.
 	if ( !IsValid( pTarget ) )
 		return 0;
-	if ( !IsValid( pWeapon ) )
-		pWeapon = GetAIInventory()->GetCurrentFireArms();
-	if ( IsValid( pWeapon ) && IsValid( GetUnitServer() ) )
+	CAIFireArmsWeaponBase *pFirearm = pWeapon;
+	if ( !IsValid( pFirearm ) )
+		pFirearm = CDynamicCast<CAIFireArmsWeaponBase>( GetAIInventory()->GetCurrentItem() );
+	if ( IsValid( pFirearm ) && IsValid( pFirearm->GetItem() ) && IsValid( GetUnitServer() ) )
 	{
-		float fCover = GetCoverForFixedUnit( pos, pTarget->GetUnitServer(), pWeapon->GetItem(), hl );
+		float fCover = GetCoverForFixedUnit( pos, pTarget->GetUnitServer(), pFirearm->GetItem(), hl );
 		// A fully blocked AI ray set can produce NaN (zero penetrating rays).
 		// Do not let it bypass the calculator's <= 0 check and become a viable shot.
 		if ( !( fCover > 0 ) )
 			return 0;
-		CPtr<NRPG::CAIUnitToHitCalcer> pCalcer = new NRPG::CAIUnitToHitCalcer( this, pos, pTarget, fCover, hl, 0, pWeapon->GetItem(), 0 );
+		CPtr<NRPG::CAIUnitToHitCalcer> pCalcer = new NRPG::CAIUnitToHitCalcer( this, pos, pTarget, fCover, hl, 0, pFirearm->GetItem(), 0 );
 		return pCalcer->GetToHit();
 	}
 	return 0;

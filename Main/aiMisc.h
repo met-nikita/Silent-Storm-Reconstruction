@@ -36,14 +36,14 @@ int GetPathAP( NWorld::CUnitServer *pUS, CPath *pPath );
 // empty path is trivially free -> true, NOT false).
 bool IsNullAPPath( NWorld::CUnitServer *pUS, CPath *pPath );
 
-// NAI::HasPath @0x74360 -- is there a path from `from` to `to`, priced at wish-pose `nPose` (the pose
+// NAI::HasPath @0x74360 -- is there a path from `from` to `to`, searched with wish-pose `nPose` (the pose
 // is forced around NWorld::FindPath and restored after)? `bCanFindNotExactPath` passes through to
 // FindPath (accept a path that does not exactly reach the target).
 bool HasPath( IAIUnit *pUnit, const SPathPlace &from, const SPathPlace &to, EPose nPose,
 	bool bCanFindNotExactPath );
 
-// NAI::GetAPForMove @0x74520 -- the AP to move from `from` to `to` at wish-pose `nPose`, priced via
-// GetPathAP on the probe path; 0xffff on ANY failure (dead unit/server/net or no path).
+// NAI::GetAPForMove @0x74520 -- search with wish-pose `nPose`, restore the previous wish pose,
+// then price the returned path via GetPathAP; 0xffff on failure (dead unit/server/net or no path).
 int GetAPForMove( IAIUnit *pUnit, const SPathPlace &from, const SPathPlace &to, EPose nPose );
 
 // NAI::CanAIOperateThisUnit @0x74700 -- the unit is alive, AI-driven (release IAIUnit vtbl 0x1c
