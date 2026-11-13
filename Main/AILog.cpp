@@ -24,19 +24,14 @@ namespace NAI
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CAILogPosition
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-CAILogPosition::CAILogPosition( IAIUnit *_pAIUnit, SPosition _pSourcePosition, SPosition _pTargetPosition, NAI::EPose _pose ):
-	CAILogRecord(_pAIUnit), pSourcePosition(_pSourcePosition), pTargetPosition(_pTargetPosition), pose( _pose )
+CAILogPosition::CAILogPosition( IAIUnit *_pAIUnit, const SUnitPosition &_pos, NAI::EPose _pose ):
+	CAILogRecord( _pAIUnit ), pos( _pos ), pose( _pose )
 {
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-void CAILogPosition::RollBack() 
-{ 
-	pAIUnit->SetPosition( pSourcePosition ); 
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CAILogPosition::Commit()
 {
-	pAIUnit->SetPosition( pTargetPosition ); 
+	pAIUnit->SetPosition( pos );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CAILogPosition::GetCommands( list< CPtr<NWorld::CCommand> > *Commands )
@@ -53,7 +48,7 @@ void CAILogPosition::GetCommands( list< CPtr<NWorld::CCommand> > *Commands )
 		Commands->push_back( new NWorld::CCmdSetCommand( pUS,
 			new NWorld::CCmdPath( current.pos, NAI::PF_USE_POSEDIR ) ) );
 	}
-	NWorld::CCmdPath *pPath = new NWorld::CCmdPath( pTargetPosition, NAI::PF_USE_POSEDIR );
+	NWorld::CCmdPath *pPath = new NWorld::CCmdPath( pos.pos, NAI::PF_USE_POSEDIR );
 	pPath->bCanFindNotExact = true;
 	Commands->push_back( new NWorld::CCmdSetCommand( pUS, pPath ) );
 }
@@ -200,13 +195,8 @@ void CAILogReloadWeapon::GetCommands( list< CPtr<NWorld::CCommand> > *Commands )
 CAILogSpendAmmo::CAILogSpendAmmo(	CAIFireArmsWeaponClip *_pClip, int nSpendAmmo ):
 	CAILogRecord( 0 ), pClip( _pClip )
 {
-	nOldAmmo = pClip->GetAmmoCount();
+	const int nOldAmmo = pClip->GetAmmoCount();
 	nNewAmmo = max( 0, nOldAmmo - nSpendAmmo );
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-void CAILogSpendAmmo::RollBack()
-{
-	pClip->SetAmmoCount( nOldAmmo );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CAILogSpendAmmo::Commit()
@@ -220,13 +210,9 @@ void CAILogSpendAmmo::GetCommands( list< CPtr<NWorld::CCommand> > *Commands ) {}
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CAILogSpendAP::CAILogSpendAP(	IAIUnit *_pAIUnit, int nSpendAP ): CAILogRecord(_pAIUnit)
 {
+	int nOldAP;
 	pAIUnit->GetAP( &nOldAP, &nMaxAP );
 	nNewAP = max( 0, nOldAP - nSpendAP );
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-void CAILogSpendAP::RollBack()
-{
-	pAIUnit->SetAP( nOldAP, nMaxAP );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CAILogSpendAP::Commit()
@@ -240,13 +226,9 @@ void CAILogSpendAP::GetCommands( list< CPtr<NWorld::CCommand> > *Commands ) {}
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 CAILogSpendHP::CAILogSpendHP(	IAIUnit *_pAIUnit, int nSpendHP ): CAILogRecord(_pAIUnit)
 {
+	int nOldHP;
 	pAIUnit->GetHP( &nOldHP, &nMaxHP );
 	nNewHP = nOldHP - nSpendHP;
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-void CAILogSpendHP::RollBack()
-{
-	pAIUnit->SetHP( nOldHP, nMaxHP );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CAILogSpendHP::Commit()
@@ -496,13 +478,7 @@ CAILogChangeShootMode::CAILogChangeShootMode( IAIUnit *_pAIUnit, CAIFireArmsWeap
 	if ( IsValid( pWeaponItem ) )
 	{
 		eNewShootMode = _eShootMode;
-		eOldShootMode = pWeaponItem->GetShootMode();
 	}
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////
-void CAILogChangeShootMode::RollBack()
-{
-	pWeaponItem->SetShootMode( eOldShootMode );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 void CAILogChangeShootMode::Commit()

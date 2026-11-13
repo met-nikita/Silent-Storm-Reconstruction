@@ -69,7 +69,7 @@ void CAILogic::DoAction( CAIAction *pAction )
 	if ( GetPlaceForAction( pAction, &place )	)
 	{
 		CPtr<IAIUnit> pUnit = GetState()->GetCurrentAIUnit();		
-		GetLog()->Add( new CAILogPosition( pUnit, pUnit->GetPosition(), place.place.pos ), true );
+		GetLog()->Add( new CAILogPosition( pUnit, place.place ), true );
 		GetLog()->Add( new CAILogSpendAP( pUnit, Max( 0 , pUnit->GetAP() - place.nUnitAP ) ), true );
 	}
 	pAction->Do( GetLog() );
@@ -173,7 +173,7 @@ void CAILogicAttack::MoveToEnemy()
 		CPtr<IAIUnit> pEnemy = GetState()->GetCurrentAIEnemy();
 		if ( IsValid( pUnit ) && IsValid( pEnemy ) && pUnit->GetAIInventory()->HasAnyWeapon() )
 		{
-			GetLog()->Add( new CAILogPosition( pUnit, pUnit->GetPosition(), pEnemy->GetPosition(), NAI::CROUCH ) );
+			GetLog()->Add( new CAILogPosition( pUnit, pEnemy->GetUnitPosition(), NAI::CROUCH ) );
 		}
 	}
 }

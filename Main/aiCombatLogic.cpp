@@ -72,7 +72,7 @@ void CAICombatLogic::DoAction( CAIAction *pAction )
 		if ( !NAI::IsSamePlace( pUnit->GetPosition().p, place.place.pos.p, 0xc1feffff ) )
 		{
 			EPose wishPose = pUS->IsWearingPK() ? NAI::WALK : NAI::RUN;
-			*pLog << new CAILogPosition( pUnit, pUnit->GetPosition(), place.place.pos, wishPose );
+			*pLog << new CAILogPosition( pUnit, place.place, wishPose );
 		}
 	}
 	pAction->Do( pLog );

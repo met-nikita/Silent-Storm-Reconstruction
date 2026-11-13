@@ -57,6 +57,7 @@ public:
 	virtual SPosition GetPosition() = 0;
 	virtual SUnitPosition GetUnitPosition() = 0;
 	virtual NDb::EDiplomacyState GetDiplomacyState( IAIUnit *pUnit ) = 0;
+	virtual void SetPosition( const SUnitPosition &_position ) = 0;
 	virtual void SetPosition( SPosition _pPosition ) = 0;
 	virtual void SetPosition( SPathPlace _pPosition ) = 0;
 	virtual SPosition GetPrevPosition() = 0;

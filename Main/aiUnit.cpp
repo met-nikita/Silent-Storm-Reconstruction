@@ -160,6 +160,7 @@ public:
 			return pUnitServer->GetDiplomacyState( pUnit->GetUnitServer() );
 		return NDb::DS_NEUTRAL;
 	}
+	virtual void SetPosition( const SUnitPosition &_position ) { pos = _position; }
 	virtual void SetPosition( SPosition _ptPrevPosition );
 	virtual void SetPosition( SPathPlace _ptPrevPosition );
 	virtual SPosition GetPrevPosition();

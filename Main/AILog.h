@@ -67,20 +67,18 @@ public:
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CAILogPosition
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// Retail stores the complete destination and the independent requested travel stance.
 class CAILogPosition: public CAILogRecord
 {
 	OBJECT_BASIC_METHODS(CAILogPosition);
 	ZDATA
 	ZPARENT(CAILogRecord)
+	SUnitPosition pos;
 	NAI::EPose pose;
-	SPosition pSourcePosition;
-	SPosition pTargetPosition;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(2,(CAILogRecord*)this); f.Add(3,&pSourcePosition); f.Add(4,&pTargetPosition); return 0; }
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,(CAILogRecord*)this); f.Add(3,&pos); f.Add(4,&pose); return 0; }
 public:
-	CAILogPosition() {}
-	CAILogPosition(	IAIUnit *_pAIUnit, SPosition _pSourcePosition, SPosition _pTargetPosition, NAI::EPose _pose = NAI::RUN );
-	// IAILogRecord
-	virtual void RollBack();
+	CAILogPosition(): pos(), pose( NAI::RUN ) {}
+	CAILogPosition( IAIUnit *_pAIUnit, const SUnitPosition &_pos, NAI::EPose _pose = NAI::RUN );
 	virtual void Commit();
 	virtual void GetCommands( list< CPtr<NWorld::CCommand> > *Commands );
 };
@@ -301,13 +299,12 @@ class CAILogSpendAP: public CAILogRecord
 	OBJECT_BASIC_METHODS(CAILogSpendAP);
 	ZDATA
 	ZPARENT(CAILogRecord)
-	int nOldAP, nNewAP, nMaxAP;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(2,(CAILogRecord*)this); f.Add(3,&nOldAP); f.Add(4,&nNewAP); f.Add(5,&nMaxAP); return 0; }
+	int nNewAP, nMaxAP;
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,(CAILogRecord*)this); f.Add(3,&nNewAP); f.Add(4,&nMaxAP); return 0; }
 public:
-	CAILogSpendAP() {}
+	CAILogSpendAP(): nNewAP( 0 ), nMaxAP( 0 ) {}
 	CAILogSpendAP(	IAIUnit *_pAIUnit, int nSpendAP );
 	// IAILogRecord
-	virtual void RollBack();
 	virtual void Commit();
 	virtual void GetCommands( list< CPtr<NWorld::CCommand> > *Commands );
 };
@@ -319,13 +316,12 @@ class CAILogSpendHP: public CAILogRecord
 	OBJECT_BASIC_METHODS(CAILogSpendHP);
 	ZDATA
 	ZPARENT(CAILogRecord)
-	int nOldHP, nNewHP, nMaxHP;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(2,(CAILogRecord*)this); f.Add(3,&nOldHP); f.Add(4,&nNewHP); f.Add(5,&nMaxHP); return 0; }
+	int nNewHP, nMaxHP;
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,(CAILogRecord*)this); f.Add(3,&nNewHP); f.Add(4,&nMaxHP); return 0; }
 public:
-	CAILogSpendHP() {}
+	CAILogSpendHP(): nNewHP( 0 ), nMaxHP( 0 ) {}
 	CAILogSpendHP(	IAIUnit *_pAIUnit, int nSpendHP );
 	// IAILogRecord
-	virtual void RollBack();
 	virtual void Commit();
 	virtual void GetCommands( list< CPtr<NWorld::CCommand> > *Commands );
 };
@@ -337,14 +333,13 @@ class CAILogSpendAmmo: public CAILogRecord
 	OBJECT_BASIC_METHODS(CAILogSpendAmmo);
 	ZDATA
 	ZPARENT(CAILogRecord)
-	int nOldAmmo, nNewAmmo;
+	int nNewAmmo;
 	CPtr<CAIFireArmsWeaponClip> pClip;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(2,(CAILogRecord*)this); f.Add(3,&nOldAmmo); f.Add(4,&nNewAmmo); f.Add(5,&pClip); return 0; }
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,(CAILogRecord*)this); f.Add(3,&nNewAmmo); f.Add(4,&pClip); return 0; }
 public:
-	CAILogSpendAmmo() {}
+	CAILogSpendAmmo(): nNewAmmo( 0 ) {}
 	CAILogSpendAmmo( CAIFireArmsWeaponClip *_pClip, int nSpendAmmo );
 	// IAILogRecord
-	virtual void RollBack();
 	virtual void Commit();
 	virtual void GetCommands( list< CPtr<NWorld::CCommand> > *Commands );
 };
@@ -463,14 +458,12 @@ class CAILogChangeShootMode: public CAILogRecord
 	ZDATA
 	ZPARENT(CAILogRecord)
 	CPtr<NRPG::CWeaponItem> pWeaponItem;
-	NDb::EShootMode eOldShootMode;
 	NDb::EShootMode eNewShootMode;
-	ZEND int operator&( CStructureSaver &f ) { f.Add(2,(CAILogRecord*)this); f.Add(3,&pWeaponItem); f.Add(4,&eOldShootMode); f.Add(5,&eNewShootMode); return 0; }
+	ZEND int operator&( CStructureSaver &f ) { f.Add(2,(CAILogRecord*)this); f.Add(3,&pWeaponItem); f.Add(4,&eNewShootMode); return 0; }
 public:
-	CAILogChangeShootMode() {}
+	CAILogChangeShootMode(): eNewShootMode( (NDb::EShootMode)0 ) {}
 	CAILogChangeShootMode( IAIUnit *_pUnit, CAIFireArmsWeapon *pWeapon, NDb::EShootMode _eShootMode );
 	// IAILogRecord
-	virtual void RollBack();
 	virtual void Commit();
 	virtual void GetCommands( list< CPtr<NWorld::CCommand> > *Commands );
 };

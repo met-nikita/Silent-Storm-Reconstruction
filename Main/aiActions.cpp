@@ -729,7 +729,7 @@ void CAIWearPKAction::Do( CAILog *pLog ) const   // @0x0048dd10
 		return;
 	SPlaceWithAP fresh = GetCurrentPlace();
 	// normalise the pose to RUN at the current place, then mount the suit.
-	*pLog << new CAILogPosition( GetUnit(), GetUnit()->GetPosition(), fresh.place.pos, NAI::RUN );
+	*pLog << new CAILogPosition( GetUnit(), fresh.place, NAI::RUN );
 	*pLog << new CAILogWearPK( GetUnit(), pPK );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -805,7 +805,7 @@ void CAITerrorPKAction::Do( CAILog *pLog ) const   // @0x004aa770
 	SInfo info;
 	GetInfo( GetCurrentPlace(), &info );
 	if ( info.bCanDo )
-		*pLog << new CAILogPosition( GetUnit(), GetUnit()->GetPosition(), info.place.pos, NAI::WALK );
+		*pLog << new CAILogPosition( GetUnit(), info.place, NAI::WALK );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CAILeavePKAction - climb out of the worn panzerklein once it is broken. Reconstructed from the
