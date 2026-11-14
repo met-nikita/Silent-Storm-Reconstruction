@@ -832,6 +832,9 @@ EUnitCommandResult CExecHide::CanDoIt()
 		const vector< CMObj<CUnitServer> > &units = (*i)->GetPlayerUnits();
 		for ( vector< CMObj<CUnitServer> >::const_iterator u = units.begin(); u != units.end(); ++u )
 		{
+			// Retail Steam 0x7b4022..0x7b4035 skips null/deleted roster entries.
+			if ( !IsValid( *u ) )
+				continue;
 			if ( (*u)->GetDiplomacyState( pUS ) == NDb::DS_ENEMY && (*u)->IsUnitVisible( pUS ) )
 				return UCR_GENERAL_FAILURE;
 		}
