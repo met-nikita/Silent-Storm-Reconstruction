@@ -7,13 +7,15 @@
 // =====================================================================================
 // wCheckTooMuchCorpses -- the corpse-density failsafe ("Too much corpses (%d) detected,
 // possible fail, removing"). The visible map is bucketed into 4m cells; whenever a 3x3
-// cell neighbourhood holds more than 15 visitor-set corpse objects, the oldest REMOVABLE
-// ones are flagged out of the visitor set until the count is back at the cap of 15.
+// cell neighbourhood holds more than 15 removable bodies, the oldest ones are flagged
+// out of the visitor set until the count is back at the cap of 15.
+// ORIGINAL BUG FIX: retail counts living/protected units too, which can immediately
+// hide a newly killed enemy in a crowded room. Count the same bodies we can remove.
 //
 // Release free functions (compiland wCheckTooMuchCorpses.obj), reconstructed against the
 // real engine types (the decomp answer-key's SCorpseHooks/SRefreshHooks abstraction
 // is dropped -- every probe wires to a real call):
-//   * corpse predicate            -> CDumbUnitServer::IsAddedToVisitor()
+//   * visitor eligibility         -> CDumbUnitServer::IsAddedToVisitor()
 //   * "oldest"                     -> smallest CUnitServer::GetDeathTime()  (retail +0x228)
 //   * "mark for removal"           -> CDumbUnitServer::MarkNotAddedToVisitors()
 //                                     (retail bNotAddedToVisitors @+0x12c = 1); the
@@ -111,10 +113,9 @@ void TryRemoveCorpses( CArray2D< vector< CObj< CUnitServer > > > &buckets, int n
 	TryRemoveCorpses( gathered, n );
 }
 
-// NWorld::FillQuantities @0x347f20 -- bucket every visitor-set corpse into 4m cells
-// (cell = Float2Int((cp - ptMin) * 0.25 + 0.5)), counting all of them in `counts` and
-// collecting the REMOVABLE ones (!CanFight && !IsClueUnit && !IsEmptyPK && no live worn
-// PK -- the fourth gate is v1.2 @0x748340) in `buckets`.
+// NWorld::FillQuantities @0x347f20 -- bucket removable bodies into 4m cells.
+// Count and candidate list must use the same eligibility rule. Living units and
+// protected bodies contribute to neither; already hidden bodies are skipped too.
 // bResize sizes the grids on the first pass; the recount passes just clear them.
 void FillQuantities( int nXSize, int nYSize, const CVec3 &ptMin,
 					 const list< CObj< CUnitServer > > &units, bool bResize,
@@ -141,13 +142,12 @@ void FillQuantities( int nXSize, int nYSize, const CVec3 &ptMin,
 		CVec3 cp = pUS->GetPosition().GetCP();
 		int nX = Float2Int( ( cp.x - ptMin.x ) * 0.25f + 0.5f );
 		int nY = Float2Int( ( cp.y - ptMin.y ) * 0.25f + 0.5f );
-		counts[nY][nX] += 1;
-		// v1.2 @0x748340: fourth removability gate -- a corpse still wearing a LIVE
-		// Panzerklein is counted but never auto-removed (worn-PK record must be absent
-		// or dead: pPK==0 || (nObjData & 0x80000000), i.e. !IsValid).
 		if ( !pUS->CanFight() && !pUS->IsClueUnit() && !pUS->IsEmptyPK()
 			 && !IsValid( pUS->GetWearingDBPK() ) )
+		{
+			counts[nY][nX] += 1;
 			buckets[nY][nX].push_back( pUS );
+		}
 	}
 }
 
