@@ -1564,12 +1564,13 @@ void CWorld::CreateAIUnits( const SMapInfo &mapInfo, const ClueToSlot &personClu
 			pRPG->GetRPGUnit()->CalcDeathVP( pGlobalGame->pDifficulty->fClueDeathCoeff );
 
 		ASSERT( IsValid( pUnitServer ) );
-		// create routes
-		if ( IsValid( pUnitServer ) && !pUnitServer->IsEmptyPK() )
+		// Retail v1.1 CreateUnitAI 0x433b40: only AI-controlled map units
+		// receive routes and reactions; human/sequence units keep their own control.
+		if ( IsValid( pUnitServer ) && pUnitServer->IsAIUnit() && !pUnitServer->IsEmptyPK() )
 		{
 			// CAITaskCommander removal: the map-deploy route glue is now the free NAI::CreateUnitRoute
 			// @0x96d20, which resolves the AI commander + unit itself and installs a per-unit CAIRouteLogic
-			// (a routeless UL_DEFAULT unit gets nothing).
+			// (routeless units receive the default stand/return/wait route).
 			NAI::CreateUnitRoute( pUnitServer, i );
 			// AI-convergence Stage 2 (the reaction cliff fix): install the map-prescribed per-unit reaction
 			// (NAI::CreateUnitReaction @0x919d0 -- UL_EMPTY->guard, UL_DEFAULT/UL_ROAMING->normal, UL_FEAR->
