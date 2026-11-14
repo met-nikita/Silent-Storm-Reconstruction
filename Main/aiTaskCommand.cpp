@@ -13,6 +13,7 @@
 #include "aiCommander.h"
 #include "aiControl.h"
 #include "aiRoute.h"
+#include "aiRouteMisc.h"
 #include "aiMultiMoves.h"
 #include "aiPosition.h"
 
@@ -202,20 +203,18 @@ void CTaskCommandRoaming::Do()
 	ASSERT( IsValid( pUnitServer ) );
 	if ( IsValid( pUnitServer ) )
 	{
-		// get all possible places
-		NAI::CMultiMovesTable movesTable;
-		list<NAI::SPathPlace> places;
+		// Retail Steam 0x4996ed..0x4996f4: walkable candidates around the current
+		// position, not the serialized roaming origin p.
+		vector<NAI::SPathPlace> places;
 		CPtr<NWorld::CWorld> pWorld = pUnitServer->GetWorld();
-		NWorld::PrepareAllPaths( pWorld->GetPathNetwork(), &movesTable, &places, pUnitServer, p, nAPRadius, pUnitServer, true );
+		GetNearestPlaces( pUnitServer, pUnitServer->GetPosition().pos.p, nAPRadius, WALK, &places, 0 );
 		if ( !places.empty() )
 		{
 			// get random place for path command
 			int n = random.Get( 0, places.size() );
-			list<NAI::SPathPlace>::const_iterator i = places.begin();
-			for ( ; n > 0; --n, ++i );
 			// do path command
 			NAI::SPosition pos;
-			pos.p = *i;
+			pos.p = places[n];
 			pos.SetNetwork( pWorld->GetPathNetwork() );
 			pos.p.SetPose( NAI::CM_STAND );
 			DoCommand( new NWorld::CCmdPath( pos ) );
