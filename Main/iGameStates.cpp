@@ -299,6 +299,13 @@ bool CStateWait::Initialize( IMission *pMission )
 	return true;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+// Retail v1.1 0x5d5970 / v1.2 0x5d6390: release the temporary wait state when ready.
+void CStateWait::Step()
+{
+	if ( GetMission()->IsReady() )
+		GetMission()->ResetState();
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
 NUI::SCursorInfo CStateWait::GetCursorInfo() const
 {
 	return NUI::SCursorInfo( NDb::GetUICursor( N_CURSOR_BUSY ) );

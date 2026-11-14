@@ -1635,13 +1635,11 @@ void CSlot::GetItemInSlotPos( int nX, int nY, const SPoint &sItemSize, SPoint *p
 	pCoords->y = Min( nHeight - Min( nHeight, sItemSize.y ), Max( 0, Float2Int( ( float( sLocalSpaceCursor.y ) - float( sItemSize.y * sCellSize.y ) / 2 ) / sCellSize.y ) ) );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// retail NUI::CSlot::GetDragItem @0x1beb80: GetActivePlayer()->GetPlayer()->GetInHandItem(pInfo),
-// dispatched through IPlayer vtbl+0x30 (slot 12). Retail additionally gates on IMission vtbl+0x40
-// before touching the active player; that gate is absent here as it was before this change (a
-// pre-existing divergence, not part of the SItemInfo->SItem migration).
+// Retail v1.1 0x5beb80 / v1.2 0x5bf6a0: no drag target or placement preview
+// while an action (including weapon holstering) keeps the mission busy.
 bool CSlot::GetDragItem( NWorld::SItem *pInfo )
 {
-	return pMission->GetActivePlayer()->GetPlayer()->GetInHandItem( pInfo );
+	return pMission->IsReady() && pMission->GetActivePlayer()->GetPlayer()->GetInHandItem( pInfo );
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 NGame::IMission* CSlot::GetGame()
