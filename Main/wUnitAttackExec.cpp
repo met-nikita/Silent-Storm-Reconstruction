@@ -1346,6 +1346,7 @@ void CExecShoot::Start()
 	{
 		// aim-and-hold: raise/aim only (no AP, no scream). Latch bAttackCanceled so the first OnLabel ENDs
 		// immediately without arming a bullet. animator.Attack(.., bInstant=false, bNoShoot=true).
+		// ORIGINAL BUG FIX: ray selection must not spend ammunition for UnitShootPrepare.
 		SelectRay();
 		bShotInitiated = true;
 		pUS->animator.Attack( pUS->GetPosition(), rayInfo.GetRay(), false, true );
@@ -1596,7 +1597,7 @@ void CExecShoot::SelectPointRay()
 	// here (that moved to the OnBulletGo/Segment pipeline). cover+to-hit+peek inlined from the retail solver
 	// NRPG::AttackPointRanged (absent in-tree) using the dev helpers it wraps.
 	vector<NRPG::CAttackPortion> tmp;
-	CreateAttack( &tmp, 0, true, nBulletGone == 0 );   // retail @0x3a4720: adapt on the shot's first bullet only
+	CreateAttack( &tmp, 0, !bOnlyPrepareToShoot, nBulletGone == 0 );   // retail @0x3a4720: adapt on the shot's first bullet only
 	if ( !tmp.empty() )
 	{
 		attack = tmp[0];
@@ -1659,7 +1660,7 @@ void CExecShootObject::SelectRay()
 		return;
 	}
 	vector<NRPG::CAttackPortion> portions;
-	CreateAttack( &portions, 0, true, nBulletGone == 0 );
+	CreateAttack( &portions, 0, !bOnlyPrepareToShoot, nBulletGone == 0 );
 	if ( portions.empty() )
 		return;
 	attack = portions[0];
@@ -1745,7 +1746,7 @@ void CExecShootUnit::SelectRay() // false, when it is the last shot
 	// retail SelectRay builds a SINGLE `attack` portion into the member (was the vector Attack); NO CheckBurst
 	// here (moved to the OnBulletGo/Segment pipeline). cover+to-hit+peek inlined from NRPG::AttackObjectRanged.
 	vector<NRPG::CAttackPortion> tmp;
-	CreateAttack( &tmp, pTarget, true, nBulletGone == 0 );   // retail @0x3a49b0: adapt on the shot's first bullet only
+	CreateAttack( &tmp, pTarget, !bOnlyPrepareToShoot, nBulletGone == 0 );   // retail @0x3a49b0: adapt on the shot's first bullet only
 	if ( !tmp.empty() )
 	{
 		attack = tmp[0];
