@@ -392,7 +392,14 @@ void CAICommander::CheckForUpdates()
 		if ( IsValid( pReaction ) )
 		{
 			commandTracker.Clear( (*i)->GetUnitServer() );
-			(*i)->CancelCommand();
+			// A threat refresh can retain the current combat logic and target. Do
+			// not discard idle sniping (including AP banked last turn) before that
+			// decision. Replacing the logic still cancels through SetLogic; retained
+			// combat logic validates its target through CAICancelSnipeAction.
+			NWorld::CUnitServer *pUS = (*i)->GetUnitServer();
+			if ( !IsValid( pUS ) || !pUS->IsSniping() ||
+				pUS->HasCommand() || pUS->IsPerformingAction() )
+				(*i)->CancelCommand();
 			updateTracker.Add( pReaction );
 		}
 	}

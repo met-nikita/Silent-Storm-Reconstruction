@@ -237,7 +237,8 @@ void CAISnipeShotAction::Do( CAILog *pLog ) const                        // @0x4
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // CAICancelSnipeAction::GetInfoInner @0x4a4720: sniping, but the snipe conditions no longer hold (enemies
-// came too close), or the stored target can no longer be hit -> cancel.
+// came too close), the reaction chose another enemy, or the stored target can
+// no longer be hit -> cancel. Reaction refreshes preserve idle aiming until here.
 void CAICancelSnipeAction::GetInfoInner( const SPlaceWithAP &, SInfo *pInfo ) const
 {
 	pInfo->bCanDo = false;
@@ -247,7 +248,12 @@ void CAICancelSnipeAction::GetInfoInner( const SPlaceWithAP &, SInfo *pInfo ) co
 	NWorld::CUnitServer *pUS = pU->GetUnitServer();
 	if ( !IsValid( pUS ) )
 		return;
-	if ( pUS->IsSniping() && ( !CanSnipe( pU ) || !CanHitSnipeTarget( pU ) ) )
+	SAIUnitState *pState = pU->GetAIUnitState();
+	IAIUnit *pEnemy = pState ? pState->pEnemy.GetPtr() : 0;
+	NWorld::CUnitStateSniping *pSnipe = pUS->GetSnipingState();
+	if ( pUS->IsSniping() && ( !pSnipe || !IsValid( pEnemy ) ||
+		pSnipe->GetTarget() != pEnemy->GetUnitServer() ||
+		!CanSnipe( pU ) || !CanHitSnipeTarget( pU ) ) )
 		pInfo->bCanDo = true;
 }
 void CAICancelSnipeAction::Do( CAILog *pLog ) const                      // @0x4a4df0
