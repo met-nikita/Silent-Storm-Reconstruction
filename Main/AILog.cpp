@@ -288,7 +288,8 @@ void CAILogChangeWeapon::GetCommands( list< CPtr<NWorld::CCommand> > *Commands )
 	// Equip first: this frees the new weapon's backpack space and puts the displaced
 	// slot item in HAND. Stowing first can fail in a full backpack.
 	// Keep the consumed-grenade guard: its AI wrapper can outlive its cleared DB link.
-	if ( IsValid( pNewItem ) && IsValid( pNewItem->GetDBItem() ) )
+	const bool bEquipNewItem = IsValid( pNewItem ) && IsValid( pNewItem->GetDBItem() );
+	if ( bEquipNewItem )
 	{
 		NWorld::SItem From( pUnitServer, NWorld::SItem::BACKPACK, CTPoint<int>( -1, -1 ), pNewItem );
 		NWorld::SItem To( pUnitServer, NWorld::SItem::SLOT, NDb::SLOT_1, pNewItem );
@@ -297,7 +298,11 @@ void CAILogChangeWeapon::GetCommands( list< CPtr<NWorld::CCommand> > *Commands )
 	}
 	if ( IsValid( pOldItem ) )
 	{
-		NWorld::SItem From( pUnitServer, NWorld::SItem::HAND );
+		// ORIGINAL RETAIL BUG: bare hands do not displace the equipped weapon
+		// into HAND. Remove it from the equipment slot when no replacement is drawn.
+		NWorld::SItem From = bEquipNewItem
+			? NWorld::SItem( pUnitServer, NWorld::SItem::HAND )
+			: NWorld::SItem( pUnitServer, NWorld::SItem::SLOT, NDb::SLOT_1, pOldItem );
 		NWorld::SItem To( pUnitServer, NWorld::SItem::BACKPACK, CTPoint<int>( -1, -1 ), pOldItem );
 		Commands->push_back( new NWorld::CCmdSetCommand( pUnitServer,
 			new NWorld::CCmdMoveInventoryItem( From, To ) ) );
