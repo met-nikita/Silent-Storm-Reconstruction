@@ -160,7 +160,7 @@ public:
 	// nPoses - bit mask, 1-lay, 2-croach, 4-stand
 	virtual void GetVisibleFromArea( vector<SVisibilitySpot> *pRes, const NWorld::CUnit *pTarget, CVec3 &vNear, float fRadius, int nPoses = 7 ) = 0;
 	virtual float GetCoverForAIUnit( CVec3 ptFrom, NWorld::CUnit *pIgnore,
-		NWorld::CUnit *pTarget, const NRPG::CAttackPortion &AttackPortion, NAI::EHitLocation HitLocation ) = 0;
+		NWorld::CUnit *pTarget, const NRPG::CAttackPortion &AttackPortion, NAI::EHitLocation HitLocation, float fMinClearDistance ) = 0;
 
 	virtual CVec3 GetIllumination( const vector<CVec3> &unit ) = 0;
 	virtual IVisionTracker* GetVisionTracker() = 0;

@@ -25,6 +25,7 @@
 #include "rpgCheatConstants.h"
 
 #include "..\DBFormat\DataRPG.h"
+#include "..\DBFormat\DataAnimation.h"
 #include "..\DBFormat\DataMap.h"
 #include "..\DBFormat\DataDifficulty.h"   // NDb::CDBDifficulty::nHideProbability (ctor hide-prob seed)
 
@@ -679,8 +680,24 @@ float CAIUnit::GetCoverForFixedUnit( const NAI::SUnitPosition &pos,
 	{
 		// Retail v1.2 GetCover 0x4ae4d0 probes from the weapon origin, not the eyes.
 		CVec3 ptOrigin = GetUnitServer()->GetAttackOrigin( pos, false );
+		// Original retail bug: a fixed 1.0 clearance let the AI accept shots
+		// whose target blocks every ray at the weapon's actual minimum distance.
+		// Use the candidate weapon, which need not be the currently held item.
+		// Mounted weapons supply their own clearance; weaponless cover probes
+		// retain the generic clearance used for movement evaluation.
+		float fMinClearDistance = 1.f;
+		if ( IsValid( pWeaponItem ) )
+		{
+			if ( GetUnitServer()->animator.GetCannon() )
+				fMinClearDistance = GetUnitServer()->GetMinClearDistance();
+			else
+			{
+				NDb::CAnimWeaponType *pType = pWeaponItem->GetDBWeapon()->pAnimWeaponType;
+				fMinClearDistance = pType ? pType->fMinDistance : 0.f;
+			}
+		}
 		CPtr<NRPG::IGame> pGame = GetUnitServer()->GetWorld()->GetGame();
-		return pGame->GetCoverForAIUnit( ptOrigin, GetUnitServer(), pTarget, atts.front(), HitLocation );
+		return pGame->GetCoverForAIUnit( ptOrigin, GetUnitServer(), pTarget, atts.front(), HitLocation, fMinClearDistance );
 	}
 	return 0;
 }

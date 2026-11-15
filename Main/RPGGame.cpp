@@ -143,7 +143,7 @@ public:
 	virtual void GetVisibilityArea( vector<SVisibilitySpot> *pRes, const NWorld::CUnit *pObserver );
 	virtual void GetVisibleFromArea( vector<SVisibilitySpot> *pRes, const NWorld::CUnit *pTarget, CVec3 &vNear, float fRadius, int nPoses );
 	virtual float GetCoverForAIUnit( CVec3 ptFrom, NWorld::CUnit *pIgnore,
-		NWorld::CUnit *pTarget, const NRPG::CAttackPortion &AttackPortion, NAI::EHitLocation HitLocation );
+		NWorld::CUnit *pTarget, const NRPG::CAttackPortion &AttackPortion, NAI::EHitLocation HitLocation, float fMinClearDistance );
 
 	virtual CVec3 GetIllumination( const vector<CVec3> &unit ) { return CVec3(1,1,1); }
 	virtual IVisionTracker* GetVisionTracker() { return pVision; }
@@ -375,11 +375,11 @@ static void AddGridToCovers( CCoverInfo *pRes, const NAI::CFastRenderer &res, co
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 float CGame::GetCoverForAIUnit( CVec3 ptFrom, NWorld::CUnit *pIgnore,
-	NWorld::CUnit *pTarget, const NRPG::CAttackPortion &AttackPortion, NAI::EHitLocation HitLocation )
+	NWorld::CUnit *pTarget, const NRPG::CAttackPortion &AttackPortion, NAI::EHitLocation HitLocation, float fMinClearDistance )
 {
 	float fHitCover = 0;
 	CObj<NRPG::CCoverInfo> pCover = CalcCovers( ptFrom, 
-		AttackPortion, pIgnore, pTarget, HitLocation, 1.f, true, 0.f );
+		AttackPortion, pIgnore, pTarget, HitLocation, fMinClearDistance, true, 0.f );
 	//
 	int nPenetrateCount = 0;
 	for ( vector<NRPG::CCoverInfo::SRay>::const_iterator i = pCover->hitRays.begin(); i != pCover->hitRays.end(); ++i )
