@@ -4,6 +4,8 @@
 #pragma once
 #endif // _MSC_VER > 1000
 
+#include "..\Misc\RetailHashOrder.h"
+
 namespace NAI 
 {
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -24,6 +26,27 @@ public:
 		return (i->second).cost;
 	}
 	void MakeInfinity(void) { data.clear(); }
+};
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// Transient path-search workspace. Saved reachable-area tables keep their layout.
+// Equal-distance fallback destinations are resolved by retail's STLport order.
+class CPathSearchTable : public CPathPlaceTable
+{
+	NRetail::CIntHashOrder order;
+public:
+	SMove& operator[]( const SPathPlace &pt )
+	{
+		std::pair<CMovesHash::iterator, bool> entry = data.emplace( pt, SMove() );
+		if ( entry.second )
+			order.Insert( pt.GetData() );
+		return entry.first->second;
+	}
+	void MakeInfinity()
+	{
+		CPathPlaceTable::MakeInfinity();
+		order.Clear(); // Retail retains the grown bucket count between searches.
+	}
+	const std::vector<int>& GetSearchOrder() const { return order.GetKeys(); }
 };
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 }

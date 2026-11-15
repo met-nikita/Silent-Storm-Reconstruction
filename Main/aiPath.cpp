@@ -770,9 +770,9 @@ CPath* SPathFinder2::FindPath( CPathNetwork *pNet, const SPathPlace &src, const 
 		constraints.DoNotCheck();
 
 	// counting
-	static CPathPlaceTable table;
+	static CPathSearchTable table;
 	static CWaveCountCostsMajor<CMovesEnumerator, SPathPlace, WORD,
-		CLayerColorConstraints, CPathPlaceTable, 16>
+		CLayerColorConstraints, CPathSearchTable, 16>
 		counter( &table, &constraints, &enumerator, src );
 	counter.SetMap( &enumerator );
 	counter.SetPosition( src );
@@ -823,14 +823,14 @@ CPath* SPathFinder2::FindPath( CPathNetwork *pNet, const SPathPlace &src, const 
 		// a click on a floor the wave never reached (e.g. a -1 basement with a broken descent)
 		// silently produced a long path to the nearest current-floor cell instead of retail's
 		// UCR_PATH_NOT_FOUND -- masking the unreachability instead of reporting it.
-		CPathPlaceTable::CMovesHash::iterator thi;
 		vector<CVec3> dstCP;
 		for ( int i = 0; i < dst.size(); ++i )
 			dstCP.push_back( pNet->GetCP( dst[i] ) );
 		float fBest = 1000.0f;
-		for ( thi = table.data.begin(); thi != table.data.end(); ++thi )
+		const vector<int> &searchOrder = table.GetSearchOrder();
+		for ( int key = 0; key < searchOrder.size(); ++key )
 		{
-			SPathPlace p( thi->first );
+			SPathPlace p( searchOrder[key] );
 			CVec3 pCP( pNet->GetCP( p ) );
 			for ( int i = 0; i < dst.size(); ++i )
 			{
