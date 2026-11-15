@@ -31,21 +31,31 @@ bool NotSmooth( const vector<SPathPlace> &pts, int i )
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-// @0xa3b20: length of the straight run ENDING at i -- same layer as i, constant backward step,
-// no INACTIVE pose (nPose==3) on the run (an INACTIVE predecessor stops the scan).
+// Only walking steps may be redistributed by smoothing. Retail also accepts runs
+// of stationary pose/turn points; interleaving those with movement can put a pose
+// change on another tile. ConvertPath then emits only ChangePose for that edge,
+// leaving the main animation at the old tile while the logical/idle pose advances.
+static bool IsSmoothableStep( const SPathPlace &a, const SPathPlace &b )
+{
+	return a.nIntegral && b.nIntegral && !a.nFinal && !b.nFinal &&
+		a.nLayer == b.nLayer && a.nPose == b.nPose && a.nPose != CM_INACTIVE &&
+		( a.nX != b.nX || a.nY != b.nY );
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////
+// @0xa3b20: length of the straight run ENDING at i. Stop at stationary actions,
+// pose changes and navigation-layer boundaries as well as a changed step vector.
 int FindMaxPreSize( const vector<SPathPlace> &pts, int i )
 {
-	if ( pts[i - 1].nPose == 3 )
+	if ( !IsSmoothableStep( pts[i - 1], pts[i] ) )
 		return 0;
 	int nDX = (int)pts[i].nX - (int)pts[i - 1].nX;
 	int nDY = (int)pts[i].nY - (int)pts[i - 1].nY;
 	int j = i - 1;
 	while ( j > 0 )
 	{
-		if ( pts[j].nLayer != pts[i].nLayer ||
+		if ( !IsSmoothableStep( pts[j - 1], pts[j] ) ||
 		     (int)pts[j].nX - (int)pts[j - 1].nX != nDX ||
-		     (int)pts[j].nY - (int)pts[j - 1].nY != nDY ||
-		     pts[j - 1].nPose == 3 )
+		     (int)pts[j].nY - (int)pts[j - 1].nY != nDY )
 			break;
 		--j;
 	}
@@ -54,10 +64,10 @@ int FindMaxPreSize( const vector<SPathPlace> &pts, int i )
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // @0xa3be0: length of the straight run STARTING at i (forward steps), stopping one short of the
-// path's end; same INACTIVE rules.
+// path's end; the same action boundaries apply as for the backward scan.
 int FindMaxPostSize( const vector<SPathPlace> &pts, int i )
 {
-	if ( pts[i + 1].nPose == 3 )
+	if ( !IsSmoothableStep( pts[i], pts[i + 1] ) )
 		return 0;
 	int nDX = (int)pts[i + 1].nX - (int)pts[i].nX;
 	int nDY = (int)pts[i + 1].nY - (int)pts[i].nY;
@@ -65,10 +75,9 @@ int FindMaxPostSize( const vector<SPathPlace> &pts, int i )
 	int nLast = (int)pts.size() - 1;
 	while ( j < nLast )
 	{
-		if ( pts[j].nLayer != pts[i].nLayer ||
+		if ( !IsSmoothableStep( pts[j], pts[j + 1] ) ||
 		     (int)pts[j + 1].nX - (int)pts[j].nX != nDX ||
-		     (int)pts[j + 1].nY - (int)pts[j].nY != nDY ||
-		     pts[j + 1].nPose == 3 )
+		     (int)pts[j + 1].nY - (int)pts[j].nY != nDY )
 			break;
 		++j;
 	}
