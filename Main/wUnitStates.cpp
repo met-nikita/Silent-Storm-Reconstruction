@@ -295,7 +295,13 @@ CCommandExecute* CUnitStateSniping::CreateExecutor( CCmd *pCmd, EUnitCommandResu
 	else {
 		CDynamicCast<CCmdSnipeAttack> pSnipeAttack(pCmd);
 		if (pSnipeAttack)
-			return CUnitState::CreateExecutor( new CCmdShootObject(pTarget, 0, hitLocation), pResult);
+		{
+			// The base dispatcher checks critical bans before the executor factory
+			// retains the command. Keep this translated shot alive across that
+			// check: GetObjectID takes and releases a temporary reference.
+			CPtr<CCmdShootObject> pShoot = new CCmdShootObject( pTarget, 0, hitLocation );
+			return CUnitState::CreateExecutor( pShoot, pResult );
+		}
 		else {
 			CDynamicCast<CCmdShootObject> pShootObject(pCmd);
 			if (pShootObject)
