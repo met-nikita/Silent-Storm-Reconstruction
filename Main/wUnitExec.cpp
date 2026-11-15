@@ -699,6 +699,10 @@ public:
 	{
 		pUS->SetWishPose( pose );
 		pUS->SetRunning( pose == NAI::RUN );
+		// Retail v1.2 0x7b5820: run/crawl orders end strafing. Keep this
+		// in the executor; AI path probes also temporarily set the wish pose.
+		if ( pose == NAI::RUN || pose == NAI::CRAWL )
+			pUS->SetStrafe( false );
 		Finished();
 	}
 };
