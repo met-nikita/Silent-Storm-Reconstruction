@@ -961,7 +961,9 @@ CCommandExecute* CreateExecutor( CUnitServer *pUS, CCmd *pCmd, EUnitCommandResul
 			{
 				CCommandExecute* pRet = CreateMoveExecutor(pUS, pPath, NAI::PF_USE_DIR, ITEM_NO_MATTER, pError, false);
 				CDynamicCast<CExecQueue> pQueue(pRet);
-				if (pQueue)
+				// Retail charges a look only when the requested facing differs.
+				// Repeated no-op looks otherwise consume AP needed for later actions.
+				if ( pQueue && position.pos.p.GetDirection() != pCmdLook->ptDst.p.GetDirection() )
 					pQueue->AddFrontExecutor(new CExecSpendAPAndRegister(pUS, NRPG::AC_ROTATE));
 				return pRet;
 			}
