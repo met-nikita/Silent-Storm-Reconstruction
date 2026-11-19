@@ -169,8 +169,18 @@ bool CAIRouteLogic::IsStationaryIdleRoutine() const
 			CDynamicCast<CTaskCommandChangePose>( pCmd ) )
 			continue;
 		CDynamicCast<CTaskCommandRoaming> pRoam( pCmd );
-		if ( !IsValid( pRoam ) || pRoam->GetAPRadius() != 0 )
+		if ( !IsValid( pRoam ) )
 			return false;
+		if (pRoam->GetAPRadius() != 0)
+		{
+			const SPathPlace current = GetUnitServer()->GetPosition().pos.p;
+			if (current.GetPose() != CM_INACTIVE)
+				return false;
+			vector<SPathPlace> places;
+			GetNearestPlaces(GetUnitServer(), current, pRoam->GetAPRadius(), WALK, &places, 0);
+			if (!places.empty())
+				return false;
+		}
 	}
 	return true;
 }
